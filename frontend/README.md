@@ -1,7 +1,22 @@
-# Getting Started with Create React App
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+# GOOD STUFF
+```
+cd mood-tracker/backend
+uvicorn main:app --reload
+```
+^ host backend
 
+host frontend:
+`npm start` when in /frontend.
+
+
+
+
+
+
+
+
+////////// bvasic react shit
 ## Available Scripts
 
 In the project directory, you can run:
