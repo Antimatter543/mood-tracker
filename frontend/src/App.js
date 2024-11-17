@@ -1,17 +1,21 @@
-import React from 'react';
-import MoodSelector from './components/MoodSelector';
-import ActivityLogger from './components/ActivityLogger';
+import React, { useState } from 'react';
+import MoodTracker from './components/MoodTracker';
 import DataDisplay from './components/DataDisplay';
 
 function App() {
-    return (
-        <div className="App">
-            <h1>Mood Tracker</h1>
-            <MoodSelector />
-            <ActivityLogger />
-            <DataDisplay />
-        </div>
-    );
+  const [moods, setMoods] = useState([]);
+  const [activities, setActivities] = useState([]);
+
+  const handleNewData = () => {
+    // Implement fetchData logic here to update moods and activities
+  };
+
+  return (
+    <div className="App">
+      <MoodTracker onNewData={handleNewData} />
+      <DataDisplay moods={moods} activities={activities} />
+    </div>
+  );
 }
 
 export default App;
