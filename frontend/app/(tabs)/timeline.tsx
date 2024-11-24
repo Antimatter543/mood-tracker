@@ -1,9 +1,9 @@
 import { Text, View, StyleSheet } from "react-native";
 
-export default function AboutScreen() {
+export default function Timeline() {
     return (
         <View style={styles.container}>
-            <Text style={styles.text}>About MAHasddsa BALLS</Text>
+            <Text style={styles.text}>This is the place that will deal with timelines</Text>
         </View>
     );
 }

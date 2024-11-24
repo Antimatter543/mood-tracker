@@ -12,7 +12,7 @@ export const globalStyles = StyleSheet.create({
   contentContainer: {
     flex: 1,
     padding: 20,
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     alignItems: 'center',
   },
   card: {
@@ -20,7 +20,7 @@ export const globalStyles = StyleSheet.create({
     borderRadius: 15,
     padding: 20,
     margin: 10,
-    width: '90%',
+    width: '95%',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -46,6 +46,6 @@ export const globalStyles = StyleSheet.create({
 
 // You can also export commonly used values
 export const colors = {
-  background: ['rgb(49, 63, 80)', '#1a1d21', '#25292e', 'rgb(49, 63, 80)'],
-  text: '#fff',
+  background: ['rgb(49, 63, 80)', '#1a1d21', '#25292e', 'rgb(49, 63, 80)'] as const,
+  text: '#000',
 };
