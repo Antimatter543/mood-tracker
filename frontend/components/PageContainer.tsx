@@ -5,9 +5,10 @@ import { globalStyles, colors } from '../styles/global';
 
 type LayoutProps = {
     children: React.ReactNode;
+    contentStyle?: ViewProps['style']; // Add a prop for the content container's style
 } & ViewProps;
 
-export function Layout({ children, style, ...props }: LayoutProps) {
+export function Layout({ children, style, contentStyle, ...props }: LayoutProps) {
     return (
         <View style={[globalStyles.container, style]} {...props}>
             <LinearGradient
@@ -17,7 +18,7 @@ export function Layout({ children, style, ...props }: LayoutProps) {
                 end={{ x: 0.7, y: 1 }}
             >
 
-                <View style={globalStyles.contentContainer}>
+                <View style={[globalStyles.contentContainer, contentStyle]}>
 
                     {children}
 

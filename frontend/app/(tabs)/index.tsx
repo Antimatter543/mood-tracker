@@ -5,7 +5,9 @@ import { Layout } from '../../components/PageContainer';
 
 export default function Home() {
   return (
-    <Layout>
+    <Layout contentStyle={{
+        justifyContent: "flex-start", // Custom justification
+    }}>
           <View style={globalStyles.card}>
             <Text style={globalStyles.title}>Mood Trackersss</Text>
             {/* Your mood tracking content will go here */}
