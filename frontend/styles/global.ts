@@ -21,7 +21,7 @@ export const globalStyles = StyleSheet.create({
     padding: 20,
     margin: 10,
     width: '95%',
-    shadowColor: '#000',
+    shadowColor: 'pink', //black
     shadowOffset: {
       width: 0,
       height: 4,
@@ -47,5 +47,5 @@ export const globalStyles = StyleSheet.create({
 // You can also export commonly used values
 export const colors = {
   background: ['rgb(49, 63, 80)', '#1a1d21', '#25292e', 'rgb(49, 63, 80)'] as const,
-  text: '#000',
+  text: '#fff',
 };

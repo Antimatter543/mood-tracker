@@ -1,13 +1,14 @@
 import { Layout } from "@/components/PageContainer";
-import { Text, View, StyleSheet, Button, Platform } from "react-native";
-// import * as SQLite from 'expo-sqlite';
+import { Text, View, StyleSheet, Button } from "react-native";
+import * as SQLite from 'expo-sqlite';
 import { useState, useEffect } from 'react';
+import { EntriesView } from "@/components/EntriesView";
 
 export default function AboutScreen() {
     const [db, setDb] = useState<SQLite.SQLiteDatabase | null>(null);
     const [message, setMessage] = useState<string>('');
+    const [refreshKey, setRefreshKey] = useState(0); // Add this line
 
-    // Initialize database when component mounts
     useEffect(() => {
         initDatabase();
     }, []);
@@ -15,14 +16,25 @@ export default function AboutScreen() {
     const initDatabase = async () => {
         try {
             const database = await SQLite.openDatabaseAsync('myDatabase.db');
-            // Create table if it doesn't exist
-            await database.execAsync(`
-                CREATE TABLE IF NOT EXISTS items (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            `);
+            const tables = [
+                `CREATE TABLE IF NOT EXISTS activities (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL UNIQUE
+                );`,
+                `CREATE TABLE IF NOT EXISTS entries (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  mood REAL NOT NULL,
+                  activity_id INTEGER,
+                  notes TEXT,
+                  image_path TEXT,
+                  date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                  FOREIGN KEY (activity_id) REFERENCES activities (id)
+                );`
+            ];
+
+            for (const table of tables) {
+                await database.execAsync(table);
+            }
 
             setDb(database);
             setMessage('Database initialized successfully');
@@ -38,38 +50,43 @@ export default function AboutScreen() {
         }
 
         try {
-            // Insert a test item
-            const result = await db.runAsync(
-                'INSERT INTO items (title) VALUES (?)',
-                [`Test Item ${Date.now()}`]
+            const mood = 4.5;
+            const activityId = 1;
+            const notes = 'Feeling great!';
+            const imagePath = '/path/to/image.jpg';
+
+            await db.runAsync(
+                `INSERT INTO entries (mood, activity_id, notes, image_path) VALUES (?, ?, ?, ?);`,
+                [mood, activityId, notes, imagePath]
             );
 
-            // Fetch all items
-            const items = await db.getAllAsync('SELECT * FROM items');
-
+            const items = await db.getAllAsync('SELECT * FROM entries');
             setMessage(`Added new item. Total items: ${items.length}`);
+            setRefreshKey(prev => prev + 1); // Add this line to trigger refresh
         } catch (error) {
             setMessage(`Error performing database operation: ${error}`);
         }
     };
 
-    const handleClearData = async () => {
+    const handleClearEntries = async () => {
         if (!db) {
             setMessage('Database not initialized');
             return;
         }
 
         try {
-            await db.runAsync('DELETE FROM items');
+            await db.runAsync('DELETE FROM entries');
             setMessage('All items cleared from database');
+            setRefreshKey(prev => prev + 1); // Add this line to trigger refresh
         } catch (error) {
             setMessage(`Error clearing database: ${error}`);
         }
     };
 
     return (
-        <Layout>
-            
+        <Layout contentStyle={{
+            justifyContent: 'flex-start',
+        }}>
             <Text style={styles.text}>SQLite Database Demo</Text>
             <Text style={styles.message}>{message}</Text>
             <View style={styles.buttonContainer}>
@@ -77,13 +94,14 @@ export default function AboutScreen() {
                     title="Add Test Item"
                     onPress={handlePress}
                 />
-                {/* <View style={styles.buttonSpacing} /> */}
                 <Button
                     title="Clear All Data"
-                    onPress={handleClearData}
+                    onPress={handleClearEntries}
                     color="#ff4444"
                 />
             </View>
+
+            <EntriesView db={db} refreshTrigger={refreshKey} />
         </Layout>
     );
 }
@@ -103,7 +121,5 @@ const styles = StyleSheet.create({
         width: '100%',
         maxWidth: 300,
     },
-    buttonSpacing: {
-        height: 10,
-    }
 });
+
