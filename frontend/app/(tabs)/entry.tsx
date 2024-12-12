@@ -4,7 +4,7 @@ import * as SQLite from 'expo-sqlite';
 import { useState, useEffect } from 'react';
 import { EntriesView } from "@/components/EntriesView";
 
-export default function AboutScreen() {
+export default function Entries() {
     const [db, setDb] = useState<SQLite.SQLiteDatabase | null>(null);
     const [message, setMessage] = useState<string>('');
     const [refreshKey, setRefreshKey] = useState(0); // Add this line

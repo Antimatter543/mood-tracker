@@ -16,13 +16,14 @@ export default function Home() {
           <View style={globalStyles.card}>
             <Text style={globalStyles.title}>Mood Trackersss</Text>
             {/* Your mood tracking content will go here */}
+            <Text style={{color: colors.text}}> My name is Anti</Text>
           </View>
           
           <View style={globalStyles.card}>
             <Text style={globalStyles.title}>Mood Tracker</Text>
             {/* Your mood tracking content will go here */}
-            <Text>Hello</Text>
-            <Test />
+            <Text style={{color: colors.text}}>Hello</Text>
+            <DatabaseViewer />
           </View>
           </SQLiteProvider>
 
@@ -36,7 +37,7 @@ type Entry = {
     notes: string;
     date: string;
 };
-export function Test() {
+export function DatabaseViewer() {
     const db = useSQLiteContext();
     const [entries, setEntries] = useState<Entry[]>([]);
     useEffect(() => {

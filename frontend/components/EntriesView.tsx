@@ -28,7 +28,7 @@ export function EntriesView({
 
     const loadEntries = async () => {
         try {
-            const result = await db?.getAllAsync('SELECT * FROM entries ORDER BY date DESC');
+            const result = await db?.getAllAsync<Entry>('SELECT * FROM entries ORDER BY date DESC');
             setEntries(result || []);
         } catch (error) {
             console.error('Error loading entries:', error);
@@ -36,18 +36,22 @@ export function EntriesView({
     };
 
     return (
-        <ScrollView style={styles.container}>
-            {entries.map(entry => (
-                <View key={entry.id} style={globalStyles.card}>
-                    <Text style={styles.text}>ID: {entry.id}</Text>
-                    <Text style={styles.text}>Mood Value: {entry.mood}</Text>
-                    <Text style={styles.text}>Notes: {entry.notes || 'No notes'}</Text>
-                    <Text style={styles.text}>
-                        Date: {new Date(entry.date).toLocaleString()}
-                    </Text>
-                </View>
-            ))}
-        </ScrollView>
+        // <View style={{ flex: 1 }}>  
+        <View>
+            <Text style={styles.text}> This is the entries view: </Text>
+            <ScrollView style={styles.container}>
+                {entries.map(entry => (
+                    <View key={entry.id} style={globalStyles.card}>
+                        <Text style={styles.text}>ID: {entry.id}</Text>
+                        <Text style={styles.text}>Mood Value: {entry.mood}</Text>
+                        <Text style={styles.text}>Notes: {entry.notes || 'No notes'}</Text>
+                        <Text style={styles.text}>
+                            Date: {new Date(entry.date).toLocaleString()}
+                        </Text>
+                    </View>
+                ))}
+            </ScrollView>
+        </View>
     );
 }
 

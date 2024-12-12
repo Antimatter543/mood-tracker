@@ -1,4 +1,6 @@
 
+# TO RUN:
+YOU MUST CD INTO FRONTEND AND THEN `npx expo start`
 ## Backend
 
 1. Database Models:
@@ -7,3 +9,4 @@
    - crud.py handles all database-related logic (e.g., inserting and fetching data).
 3. FastAPI Routes:
    - main.py defines API endpoints and uses Pydantic models to validate user input.
+- 
