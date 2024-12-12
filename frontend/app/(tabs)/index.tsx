@@ -3,7 +3,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { globalStyles, colors } from '../../styles/global';
 import { Layout } from '../../components/PageContainer';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
-import { EntriesView } from '@/components/EntriesView';
 import { useEffect, useState } from 'react';
 
 export default function Home() {
@@ -11,10 +10,9 @@ export default function Home() {
     <Layout contentStyle={{
         justifyContent: "flex-start", // Custom justification
     }}>
-        <SQLiteProvider databaseName='myDatabase.db' >
 
           <View style={globalStyles.card}>
-            <Text style={globalStyles.title}>Mood Trackersss</Text>
+            <Text style={globalStyles.title}>Mood Trackers</Text>
             {/* Your mood tracking content will go here */}
             <Text style={{color: colors.text}}> My name is Anti</Text>
           </View>
@@ -25,7 +23,6 @@ export default function Home() {
             <Text style={{color: colors.text}}>Hello</Text>
             <DatabaseViewer />
           </View>
-          </SQLiteProvider>
 
     </Layout>
   );

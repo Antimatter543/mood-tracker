@@ -2,6 +2,7 @@
 import { View, ViewProps } from "react-native";
 import { LinearGradient } from 'expo-linear-gradient';
 import { globalStyles, colors } from '../styles/global';
+import { SQLiteProvider } from "expo-sqlite";
 
 type LayoutProps = {
     children: React.ReactNode;
@@ -19,9 +20,10 @@ export function Layout({ children, style, contentStyle, ...props }: LayoutProps)
             >
 
                 <View style={[globalStyles.contentContainer, contentStyle]}>
-
-                    {children}
-
+                    <SQLiteProvider databaseName='myDatabase.db' >  
+                        {/* /* Allow useSqlLiteContext for any children basically*/}
+                        {children}
+                    </SQLiteProvider>
                 </View>
                 
             </LinearGradient>
