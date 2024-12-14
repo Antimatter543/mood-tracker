@@ -2,7 +2,7 @@ import { Layout } from "@/components/PageContainer";
 import { Text, View, StyleSheet, Button, TextInput, ScrollView } from "react-native";
 import * as SQLite from 'expo-sqlite';
 import { useState, useEffect, useCallback } from 'react';
-import { globalStyles } from "@/styles/global";
+import { colors, globalStyles } from "@/styles/global";
 
 
 
@@ -118,18 +118,18 @@ function Entry() {
             {/* Your mood tracking content will go here */}
             <Text style={styles.text}>Hello</Text>
             {/* im gonna kill myself. styles.container made it in visible. */}
-            <ScrollView> 
-                {moodItems.map(entry => (
-                    <View key={entry.id} style={globalStyles.card}>
-                        <Text style={styles.text}>ID: {entry.id}</Text>
-                        <Text style={styles.text}>Mood Value: {entry.mood}</Text>
-                        {/* <Text style={styles.text}>Activity ID: {entry.activity_id}</Text> */}
+                <ScrollView> 
+                    {moodItems.map(entry => (
+                        <View key={entry.id} style={globalStyles.card}>
+                            <Text style={{color: colors.text}}>ID: {entry.id}</Text>
+                            <Text style={{color: colors.text}}>Mood Value: {entry.mood}</Text>
+                            {/* <Text style={{color: colors.text}}>Activity ID: {entry.activity_id}</Text> */}
 
-                        <Text style={styles.text}>Notes: {entry.notes || 'No notes'}</Text>
-                        <Text style={styles.text}> Date: {entry.date} </Text>
-                    </View>
-                ))}
-            </ScrollView>
+                            <Text style={{color: colors.text}}>Notes: {entry.notes || 'No notes'}</Text>
+                            <Text style={{color: colors.text}}> Date: {entry.date} </Text>
+                        </View>
+                    ))}
+                </ScrollView>
         </View>
     </View>
     );
