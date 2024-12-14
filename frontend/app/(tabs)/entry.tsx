@@ -27,6 +27,7 @@ export default function EntriesPage() {
 // Now we can actually do db and stuff
 function Entry() {
     const db = SQLite.useSQLiteContext();
+    console.log("db acquired ?", db);
     // These 2 states are for adding mood entries
     const [mood, setMood] = useState(5);
     const [note, setNote] = useState('GAMING');
@@ -40,31 +41,31 @@ function Entry() {
 
     // Back to refreshing for listing moods
     const refetchItems = useCallback(() => {
-        async function refetchItems() {
+        async function refetch() {
             // Ima be real I have NO IDEA what exclusivetransaction does as
             // opposed to db.getAllAsync. Wait it's wrapped. okay idfk lmao what the fuck
             await db.withExclusiveTransactionAsync(async () => {
                 setMoodItems(
                     await db.getAllAsync<MoodItem>(
-                        'SELECT * FROM entries'
+                        'SELECT * FROM entries ORDER BY date DESC'
                     )
                 )
             });
-            console.log("We just called refetch, the length of our mood entries table is ?", moodItems.length);
         }
-
-        refetchItems();
+        refetch();
     }, [db]);
 
     // Btw this and refetchitems arebasically yoinked from https://github.com/expo/examples/tree/master/with-sqlite
     useEffect(() => {
         refetchItems();
-        console.log("Wzczzcxe just called refetch, the length of our mood entries table is ?", moodItems.length);
       }, []);
 
-
+      // debugging useeffect to see mooditems length change
+    useEffect(() => {
+        console.log("Wzczzcxe just called refetch, the length of our mood entries table is ?", moodItems.length, moodItems);
+    }, [moodItems]);
     return (
-    <View> 
+    <View style={{justifyContent: "flex-start"}}> 
         <Text style={styles.text}>SQLite Database Demo</Text>
         <Text style={styles.message}>{message}</Text>
         <View style={styles.buttonContainer}>
@@ -85,7 +86,7 @@ function Entry() {
             />
         </View>
         {/* Above view is old, press button boom add data. Below will be textinput!! TODO create textinputs for mood and activities aswell.. but for now it's just note. */}
-        <View style={styles.flexRow}>
+        {/* <View style={styles.flexRow}>
             <TextInput style={styles.text}
             onChangeText={(note) => {setNote(note); console.log(note)}}
             onSubmitEditing={async () => {
@@ -98,17 +99,22 @@ function Entry() {
                 setMood(5);
             }}
             />
-        </View>
+        </View> */}
 
         {/* THE SCROLLING THINGYYY */}
-        <View>
-            <Text style={styles.text}> This is the entries vidfzew: </Text>
-            <ScrollView style={styles.container}>
+        <Text style={globalStyles.title}>Mood YOOPO</Text>
+
+        <View style={globalStyles.card}>
+            <Text style={globalStyles.title}>Mood Tracker</Text>
+            {/* Your mood tracking content will go here */}
+            <Text style={styles.text}>Hello</Text>
+            {/* im gonna kill myself. styles.container made it in visible. */}
+            <ScrollView> 
                 {moodItems.map(entry => (
                     <View key={entry.id} style={globalStyles.card}>
                         <Text style={styles.text}>ID: {entry.id}</Text>
                         <Text style={styles.text}>Mood Value: {entry.mood}</Text>
-                        <Text style={styles.text}>Activity ID: {entry.activity_id}</Text>
+                        {/* <Text style={styles.text}>Activity ID: {entry.activity_id}</Text> */}
 
                         <Text style={styles.text}>Notes: {entry.notes || 'No notes'}</Text>
                         <Text style={styles.text}> Date: {entry.date} </Text>
@@ -250,14 +256,13 @@ async function addMood(db: SQLite.SQLiteDatabase, mood: Number, activity_id: Num
 // };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        width: '100%',
+    entryCard: {
+        backgroundColor: '#fff',
+        marginVertical: 5,
     },
     text: {
         color: '#fff',
-        fontSize: 20,
-        marginBottom: 20,
+        marginVertical: 2,
     },
     message: {
         color: '#fff',
