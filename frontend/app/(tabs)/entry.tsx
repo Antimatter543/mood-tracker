@@ -84,6 +84,15 @@ function Entry() {
                 }}
                 color="#ff4444"
             />
+            <Button
+            title="Reset Database (for ID etc..."
+            onPress={async () => {
+                await resetDatabase(db, setMessage);
+                await refetchItems(); // Update the UI
+            }}
+            color="#ff4444"
+            />
+
         </View>
         {/* Above view is old, press button boom add data. Below will be textinput!! TODO create textinputs for mood and activities aswell.. but for now it's just note. */}
         {/* <View style={styles.flexRow}>
@@ -153,6 +162,22 @@ async function handlePress(db: SQLite.SQLiteDatabase, setMessage: React.Dispatch
     }
 };
 
+async function resetDatabase(db: SQLite.SQLiteDatabase, setMessage: React.Dispatch<React.SetStateAction<string>>): Promise<void> {
+    if (!db) {
+      setMessage('Database not initialized');
+      return;
+    }
+  
+    try {
+      await db.execAsync('DELETE FROM entries;');
+      await db.execAsync("DELETE FROM sqlite_sequence WHERE name='entries';");
+      setMessage('Database reset successfully');
+    } catch (error) {
+      setMessage(`Error resetting database: ${error}`);
+      console.error(error);
+    }
+  }
+  
 async function handleClearEntries(db: SQLite.SQLiteDatabase, setMessage: React.Dispatch<React.SetStateAction<string>>): Promise<void> {
     if (!db) {
         setMessage('Database not initialized');
@@ -177,83 +202,7 @@ async function addMood(db: SQLite.SQLiteDatabase, mood: Number, activity_id: Num
 
 //#endregion
 
-// const [db, setDb] = useState<SQLite.SQLiteDatabase | null>(null);
-// const [message, setMessage] = useState<string>('');
-// const [refreshKey, setRefreshKey] = useState(0); // Add this line
 
-// useEffect(() => {
-//     initDatabase();
-// }, []);
-
-// const initDatabase = async () => {
-//     try {
-//         const database = await SQLite.openDatabaseAsync('myDatabase.db');
-//         const tables = [
-//             `CREATE TABLE IF NOT EXISTS activities (
-//               id INTEGER PRIMARY KEY AUTOINCREMENT,
-//               name TEXT NOT NULL UNIQUE
-//             );`,
-//             `CREATE TABLE IF NOT EXISTS entries (
-//               id INTEGER PRIMARY KEY AUTOINCREMENT,
-//               mood REAL NOT NULL,
-//               activity_id INTEGER,
-//               notes TEXT,
-//               image_path TEXT,
-//               date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-//               FOREIGN KEY (activity_id) REFERENCES activities (id)
-//             );`
-//         ];
-
-//         for (const table of tables) {
-//             await database.execAsync(table);
-//         }
-
-//         setDb(database);
-//         setMessage('Database initialized successfully');
-//     } catch (error) {
-//         setMessage(`Error initializing database: ${error}`);
-//     }
-// };
-
-// const handlePress = async () => {
-//     if (!db) {
-//         setMessage('Database not initialized');
-//         return;
-//     }
-
-//     try {
-//         const mood = 4.5;
-//         const activityId = 1;
-//         const notes = 'Feeling great!';
-//         const imagePath = '/path/to/image.jpg';
-
-//         await db.runAsync(
-//             `INSERT INTO entries (mood, activity_id, notes, image_path) VALUES (?, ?, ?, ?);`,
-//             [mood, activityId, notes, imagePath]
-//         );
-
-//         const items = await db.getAllAsync('SELECT * FROM entries');
-//         setMessage(`Added new item. Total items: ${items.length}`);
-//         setRefreshKey(prev => prev + 1); // Add this line to trigger refresh
-//     } catch (error) {
-//         setMessage(`Error performing database operation: ${error}`);
-//     }
-// };
-
-// const handleClearEntries = async () => {
-//     if (!db) {
-//         setMessage('Database not initialized');
-//         return;
-//     }
-
-//     try {
-//         await db.runAsync('DELETE FROM entries');
-//         setMessage('All items cleared from database');
-//         setRefreshKey(prev => prev + 1); // Add this line to trigger refresh
-//     } catch (error) {
-//         setMessage(`Error clearing database: ${error}`);
-//     }
-// };
 
 const styles = StyleSheet.create({
     entryCard: {
