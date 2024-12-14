@@ -18,8 +18,21 @@ export default function EntriesPage() {
     return (
         <Layout contentStyle={{
             justifyContent: 'flex-start',
+            paddingTop: 0, // Remove top padding ('safe zone area, looks ugly when scrolling down)
+            paddingBottom: 0,
         }}>
+        <ScrollView
+                contentContainerStyle={{
+                    flexGrow: 1,
+                    justifyContent: 'flex-start',
+                    // margin: 500, // add small margin at bottom of scroll view 
+                }}
+                style={{ height: '100%' }} // Set the height to 100% of the screen
+                >
             <Entry />
+            <View style={{ height: 20 }} /> {/* Add some bottom padding, contingent on Scrollview style height for reasons known only to god */}
+
+        </ScrollView>
         </Layout>
     );
 }
