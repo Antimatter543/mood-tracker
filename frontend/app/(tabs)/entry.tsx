@@ -108,21 +108,24 @@ function Entry() {
 
         </View>
         {/* Above view is old, press button boom add data. Below will be textinput!! TODO create textinputs for mood and activities aswell.. but for now it's just note. */}
-        {/* <View style={styles.flexRow}>
-            <TextInput style={styles.text}
-            onChangeText={(note) => {setNote(note); console.log(note)}}
-            onSubmitEditing={async () => {
+        <View style={globalStyles.card}>
+        
+            <View style={styles.flexRow}>
+                <Text style={{color: colors.text}}> Hello </Text>
+                <TextInput style={{color: colors.text}}
+                onChangeText={(note) => {setNote(note); console.log(note)}}
+                onSubmitEditing={async () => {
 
-                // create dummy mood just bc rn
-                const activity_id = 1;
-                await addMood(db, mood, activity_id, note);
-                await refetchItems();
-                setNote('');
-                setMood(5);
-            }}
-            />
-        </View> */}
-
+                    // create dummy mood just bc rn
+                    const activity_id = 1;
+                    await addMood(db, mood, activity_id, note);
+                    await refetchItems();
+                    setNote('');
+                    setMood(5);
+                }}
+                />
+            </View>
+        </View>
         {/* THE SCROLLING THINGYYY */}
         <Text style={globalStyles.title}>Mood YOOPO</Text>
 
