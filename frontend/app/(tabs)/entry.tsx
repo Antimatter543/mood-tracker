@@ -21,18 +21,10 @@ export default function EntriesPage() {
             paddingTop: 0, // Remove top padding ('safe zone area, looks ugly when scrolling down)
             paddingBottom: 0,
         }}>
-        <ScrollView
-                contentContainerStyle={{
-                    flexGrow: 1,
-                    justifyContent: 'flex-start',
-                    // margin: 500, // add small margin at bottom of scroll view 
-                }}
-                style={{ height: '100%' }} // Set the height to 100% of the screen
-                >
+
             <Entry />
             <View style={{ height: 20 }} /> {/* Add some bottom padding, contingent on Scrollview style height for reasons known only to god */}
 
-        </ScrollView>
         </Layout>
     );
 }
@@ -42,7 +34,7 @@ function Entry() {
     const db = SQLite.useSQLiteContext();
     console.log("db acquired ?", db);
     // These 2 states are for adding mood entries
-    const [mood, setMood] = useState(5);
+    const [mood, setMood] = useState<string>('5.0');
     const [note, setNote] = useState('GAMING');
     
     // Button shit
@@ -77,8 +69,58 @@ function Entry() {
     useEffect(() => {
         console.log("Wzczzcxe just called refetch, the length of our mood entries table is ?", moodItems.length, moodItems);
     }, [moodItems]);
+
+
+    // handleSubmits 
+    const handleSubmit = async () => {
+        const moodValue = parseFloat(mood);
+        const activity_id = 1; // default activity for now
+        
+        const result = await addMood(db, moodValue, activity_id, note);
+        setMessage(result.message);
+        
+        if (result.success) {
+            setMood('5.0');
+            setNote('');
+            await refetchItems();
+        }
+    };
+
     return (
-    <View style={{justifyContent: "flex-start"}}> 
+    <View style={globalStyles.contentContainer}> 
+
+        <Text style={globalStyles.title}>Add New Mood Entry</Text>
+            
+        <View style={styles.inputContainer}>
+            <Text style={styles.label}>Mood Score (0-10):</Text>
+            <TextInput
+                style={styles.input}
+                value={mood}
+                onChangeText={setMood}
+                keyboardType="decimal-pad"
+                placeholder="Enter mood score (0-10)"
+                placeholderTextColor="#666"
+            />
+
+            <Text style={styles.label}>Notes:</Text>
+            <TextInput
+                style={[styles.input, styles.noteInput]}
+                value={note}
+                onChangeText={setNote}
+                placeholder="How are you feeling?"
+                placeholderTextColor="#666"
+                multiline
+                numberOfLines={3}
+            />
+
+            <Button
+                title="Add Entry"
+                onPress={handleSubmit}
+            />
+
+            <Text style={styles.message}>{message}</Text>
+        </View>
+
         <Text style={styles.text}>SQLite Database Demo</Text>
         <Text style={styles.message}>{message}</Text>
         <View style={styles.buttonContainer}>
@@ -108,7 +150,7 @@ function Entry() {
 
         </View>
         {/* Above view is old, press button boom add data. Below will be textinput!! TODO create textinputs for mood and activities aswell.. but for now it's just note. */}
-        <View style={globalStyles.card}>
+        {/* <View style={globalStyles.card}>
         
             <View style={styles.flexRow}>
                 <Text style={{color: colors.text}}> Hello </Text>
@@ -125,7 +167,7 @@ function Entry() {
                 }}
                 />
             </View>
-        </View>
+        </View> */}
         {/* THE SCROLLING THINGYYY */}
         <Text style={globalStyles.title}>Mood YOOPO</Text>
 
@@ -211,44 +253,69 @@ async function handleClearEntries(db: SQLite.SQLiteDatabase, setMessage: React.D
 
 //#region Database Operations
 
-async function addMood(db: SQLite.SQLiteDatabase, mood: Number, activity_id: Number, note: string): Promise<void> {
-    const date = new Date().toISOString();
+async function addMood(db: SQLite.SQLiteDatabase, mood: number, activity_id: number, notes: string): Promise<{ success: boolean; message: string }> {
+    try {
+        const date = new Date().toISOString();
+        
+        // Validate mood score
+        if (isNaN(mood) || mood < 0 || mood > 10) {
+            return {
+                success: false,
+                message: 'Please enter a valid mood score between 0 and 10'
+            };
+        }
 
-};
+        await db.runAsync(
+            `INSERT INTO entries (mood, activity_id, notes, date) VALUES (?, ?, ?, ?);`,
+            [mood, activity_id, notes, date]
+        );
 
+        return {
+            success: true,
+            message: 'Entry added successfully!'
+        };
+    } catch (error) {
+        console.error('Error adding mood:', error);
+        return {
+            success: false,
+            message: 'Error adding entry'
+        };
+    }
+}
 //#endregion
 
 
 
+
+// Update your styles
 const styles = StyleSheet.create({
-    entryCard: {
-        backgroundColor: '#fff',
-        marginVertical: 5,
-    },
-    text: {
-        color: '#fff',
-        marginVertical: 2,
-    },
-    message: {
-        color: '#fff',
+    // Keep your existing styles and add these new ones...
+    inputContainer: {
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        padding: 16,
+        borderRadius: 8,
         marginBottom: 20,
-        textAlign: 'center',
     },
-    buttonContainer: {
-        width: '100%',
-        maxWidth: 300,
-    },
-    flexRow: {
-    flexDirection: 'row',
+    label: {
+        color: colors.text,
+        fontSize: 16,
+        marginBottom: 8,
     },
     input: {
-    borderColor: '#4630eb',
-    borderRadius: 4,
-    borderWidth: 1,
-    flex: 1,
-    height: 48,
-    margin: 16,
-    padding: 8,
+        backgroundColor: '#fff',
+        borderRadius: 8,
+        padding: 12,
+        marginBottom: 16,
+        color: '#000',
+        fontSize: 16,
+    },
+    noteInput: {
+        minHeight: 100,
+        textAlignVertical: 'top',
+    },
+    message: {
+        color: colors.text,
+        textAlign: 'center',
+        marginTop: 8,
     },
 });
-

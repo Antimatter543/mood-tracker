@@ -1,5 +1,5 @@
 // components/Layout.tsx
-import { View, ViewProps } from "react-native";
+import { ScrollView, View, ViewProps } from "react-native";
 import { LinearGradient } from 'expo-linear-gradient';
 import { globalStyles, colors } from '../styles/global';
 import {SQLiteProvider, type SQLiteDatabase } from "expo-sqlite";
@@ -21,8 +21,16 @@ export function Layout({ children, style, contentStyle, ...props }: LayoutProps)
 
                 <View style={[globalStyles.contentContainer, contentStyle]}>
                     <SQLiteProvider databaseName='myDatabase.db' >  
-                        {/* /* Allow useSqlLiteContext for any children basically*/}
+                    <ScrollView
+                        contentContainerStyle={[
+                            { padding: 16, flexGrow: 1 }, // Ensure content can grow and scroll
+                            contentStyle,
+                        ]}
+                        showsVerticalScrollIndicator={false} // Optional: hide scroll indicator for aesthetics
+                        style={{ height: '100%' }} // Set the height to 100% of the screen
+                    >
                         {children}
+                    </ScrollView>
                     </SQLiteProvider>
                 </View>
                 
