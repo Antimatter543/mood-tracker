@@ -28,7 +28,12 @@ export default function RootLayout() {
             }}
             />
             <Tabs.Screen name="entry" options={{
-                title: 'Entry form thingy',
+                title: 'Entry',
+                tabBarIcon: ({ color, focused }) => (
+                    <Ionicons name={focused ? 'information-circle' : 'information-circle-outline'} color={color} size={24} />)
+            }} />
+            <Tabs.Screen name="entrycopy" options={{
+                title: 'entrycopy',
                 tabBarIcon: ({ color, focused }) => (
                     <Ionicons name={focused ? 'information-circle' : 'information-circle-outline'} color={color} size={24} />)
             }} />

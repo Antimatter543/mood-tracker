@@ -3,19 +3,18 @@ import { Text, View, StyleSheet, Button, TextInput, ScrollView } from "react-nat
 import * as SQLite from 'expo-sqlite';
 import { useState, useEffect, useCallback } from 'react';
 import { colors, globalStyles } from "@/styles/global";
-import ActivitySelector from "@/components/ActivitySelector";
 
 
 
-export type MoodItem = {
+type MoodItem = {
     id: number;
     mood: number;
-    activities?: number[]; // Arrary of activity ids
+    activity_id: number;
     notes: string;
     date: string;
 };
 
-export default function EntriesPage() {
+export default function EntriesPageCopy() {
     return (
         <Layout contentStyle={{
             justifyContent: 'flex-start',
@@ -24,6 +23,7 @@ export default function EntriesPage() {
         }}>
 
             <Entry />
+            <View style={{ height: 20 }} /> {/* Add some bottom padding, contingent on Scrollview style height for reasons known only to god */}
 
         </Layout>
     );
@@ -36,7 +36,6 @@ function Entry() {
     // These 2 states are for adding mood entries
     const [mood, setMood] = useState<string>('5.0');
     const [note, setNote] = useState('GAMING');
-    const [selectedActivities, setSelectedActivities] = useState<number[]>([]);
     
     // Button shit
     const [message, setMessage] = useState('balls');
@@ -73,34 +72,26 @@ function Entry() {
 
 
     // handleSubmits 
-    const handleActivitySelect = (activityId: number) => {
-        setSelectedActivities(prev => {
-            if (prev.includes(activityId)) {
-                return prev.filter(id => id !== activityId);
-            }
-            return [...prev, activityId];
-        });
-    };
-
     const handleSubmit = async () => {
         const moodValue = parseFloat(mood);
-        const result = await addMood(db, moodValue, selectedActivities, note);
+        const activity_id = 1; // default activity for now
+        
+        const result = await addMood(db, moodValue, activity_id, note);
         setMessage(result.message);
         
         if (result.success) {
             setMood('5.0');
-            setSelectedActivities([]);
             setNote('');
             await refetchItems();
         }
     };
 
     return (
-    <View> 
+    <View style={globalStyles.contentContainer}> 
 
-        <View style={styles.inputContainer}>
         <Text style={globalStyles.title}>Add New Mood Entry</Text>
             
+        <View style={styles.inputContainer}>
             <Text style={styles.label}>Mood Score (0-10):</Text>
             <TextInput
                 style={styles.input}
@@ -110,12 +101,6 @@ function Entry() {
                 placeholder="Enter mood score (0-10)"
                 placeholderTextColor="#666"
             />
-
-            <Text style={styles.label}>Activities:</Text>
-                <ActivitySelector
-                    onSelectActivity={handleActivitySelect}
-                    selectedActivities={selectedActivities}
-                />
 
             <Text style={styles.label}>Notes:</Text>
             <TextInput
@@ -183,7 +168,27 @@ function Entry() {
                 />
             </View>
         </View> */}
+        {/* THE SCROLLING THINGYYY */}
+        <Text style={globalStyles.title}>Mood YOOPO</Text>
 
+        <View style={globalStyles.card}>
+            <Text style={globalStyles.title}>Mood Tracker</Text>
+            {/* Your mood tracking content will go here */}
+            <Text style={styles.text}>Hello</Text>
+            {/* im gonna kill myself. styles.container made it in visible. */}
+                <ScrollView> 
+                    {moodItems.map(entry => (
+                        <View key={entry.id} style={globalStyles.card}>
+                            <Text style={{color: colors.text}}>ID: {entry.id}</Text>
+                            <Text style={{color: colors.text}}>Mood Value: {entry.mood}</Text>
+                            {/* <Text style={{color: colors.text}}>Activity ID: {entry.activity_id}</Text> */}
+
+                            <Text style={{color: colors.text}}>Notes: {entry.notes || 'No notes'}</Text>
+                            <Text style={{color: colors.text}}> Date: {entry.date} </Text>
+                        </View>
+                    ))}
+                </ScrollView>
+        </View>
     </View>
     );
 }
@@ -204,8 +209,8 @@ async function handlePress(db: SQLite.SQLiteDatabase, setMessage: React.Dispatch
         const imagePath = '/path/to/image.jpg';
 
         await db.runAsync(
-            `INSERT INTO entries (mood, notes, image_path) VALUES (?, ?, ?);`,
-            [mood, notes, imagePath]
+            `INSERT INTO entries (mood, notes) VALUES  ?, ?);`,
+            [mood, notes]
         );
 
         const items = await db.getAllAsync('SELECT * FROM entries');
@@ -248,7 +253,7 @@ async function handleClearEntries(db: SQLite.SQLiteDatabase, setMessage: React.D
 
 //#region Database Operations
 
-async function addMood(db: SQLite.SQLiteDatabase, mood: number, activityIds: number[], notes: string): Promise<{ success: boolean; message: string }> {
+async function addMood(db: SQLite.SQLiteDatabase, mood: number, activity_id: number, notes: string): Promise<{ success: boolean; message: string }> {
     try {
         const date = new Date().toISOString();
         
@@ -260,22 +265,10 @@ async function addMood(db: SQLite.SQLiteDatabase, mood: number, activityIds: num
             };
         }
 
-        const result = await db.runAsync(
-            `INSERT INTO entries (mood, notes, date) VALUES (?, ?, ?);`,
-            [mood, notes, date]
+        await db.runAsync(
+            `INSERT INTO entries (mood, activity_id, notes, date) VALUES (?, ?, ?, ?);`,
+            [mood, activity_id, notes, date]
         );
-
-        // SQLite API provides `lastInsertRowId`
-        const entryId = result.lastInsertRowId; // Use the result to get the inserted row's ID
-        console.log("New entry ID:", entryId);
-
-        // Then create all activity relationships
-        for (const activityId of activityIds) {
-            await db.runAsync(
-                `INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?);`,
-                [entryId, activityId]
-            );
-        }
 
         return {
             success: true,

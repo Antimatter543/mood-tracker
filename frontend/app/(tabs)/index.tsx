@@ -4,6 +4,8 @@ import { globalStyles, colors } from '../../styles/global';
 import { Layout } from '../../components/PageContainer';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
+import { MoodItem } from './entry';
+
 
 export default function Home() {
   return (
@@ -28,18 +30,12 @@ export default function Home() {
   );
 }
 
-type Entry = {
-    id: number;
-    mood: number;
-    notes: string;
-    date: string;
-};
 export function DatabaseViewer() {
     const db = useSQLiteContext();
-    const [entries, setEntries] = useState<Entry[]>([]);
+    const [entries, setEntries] = useState<MoodItem[]>([]);
     useEffect(() => {
         async function setup() {
-          const result = await db.getAllAsync<Entry>('SELECT * FROM entries');
+          const result = await db.getAllAsync<MoodItem>('SELECT * FROM entries');
           setEntries(result);
         }
         setup();
