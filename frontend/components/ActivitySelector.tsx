@@ -44,7 +44,7 @@ const IconMap: Record<string, LucideIcon> = {
   // Add more mappings as needed
 };
 
-export default function ActivitySelector({ onSelectActivity, selectedActivities }: ActivitySelectorProps) {
+export function ActivitySelector({ onSelectActivity, selectedActivities }: ActivitySelectorProps) {
   const [activityGroups, setActivityGroups] = useState<ActivityGroup[]>([]);
   const db = SQLite.useSQLiteContext();
 

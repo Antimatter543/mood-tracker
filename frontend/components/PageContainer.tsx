@@ -35,7 +35,7 @@ export function Layout({ children, style, contentStyle, ...props }: LayoutProps)
                 </View>
 
                 
-                <View style={{ height: 20 }} /> {/* Add some bottom padding, contingent on Scrollview style height for reasons known only to god */}
+                <View style={{ height: 20 }} /> 
                 
             </LinearGradient>
         </View>

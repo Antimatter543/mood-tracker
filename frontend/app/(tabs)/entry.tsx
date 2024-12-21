@@ -3,7 +3,7 @@ import { Text, View, StyleSheet, Button, TextInput, ScrollView } from "react-nat
 import * as SQLite from 'expo-sqlite';
 import { useState, useEffect, useCallback } from 'react';
 import { colors, globalStyles } from "@/styles/global";
-import ActivitySelector from "@/components/ActivitySelector";
+import { ActivitySelector } from "@/components/ActivitySelector";
 
 
 
