@@ -12,17 +12,12 @@ export default function Home() {
     <Layout contentStyle={{
         justifyContent: "flex-start", // Custom justification
     }}>
-
-          <View style={globalStyles.card}>
-            <Text style={globalStyles.title}>Mood Trackers</Text>
-            <Text style={{color: colors.text}}> My name is Anti</Text>
-          </View>
           
           <View style={globalStyles.card}>
             <Text style={globalStyles.title}>Mood Tracker</Text>
             <Text style={{color: colors.text}}>Hello</Text>
-            <DatabaseViewer />
           </View>
+          <DatabaseViewer />
 
     </Layout>
   );

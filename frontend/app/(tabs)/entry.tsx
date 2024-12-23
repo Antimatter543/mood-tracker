@@ -68,7 +68,7 @@ function Entry() {
 
       // debugging useeffect to see mooditems length change
     useEffect(() => {
-        console.log("Wzczzcxe just called refetch, the length of our mood entries table is ?", moodItems.length, moodItems);
+        console.log("Just called refetch, the length of our mood entries table is ?", moodItems.length, moodItems);
     }, [moodItems]);
 
 
@@ -95,9 +95,11 @@ function Entry() {
         }
     };
 
-    return (
-    <View> 
 
+
+
+    return (
+    <View style={{ flex: 1 }}> 
         <View style={styles.inputContainer}>
         <Text style={globalStyles.title}>Add New Mood Entry</Text>
             
@@ -302,6 +304,7 @@ const styles = StyleSheet.create({
         padding: 16,
         borderRadius: 8,
         marginBottom: 20,
+        flex: 1,
     },
     label: {
         color: colors.text,

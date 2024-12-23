@@ -41,8 +41,52 @@ export function Layout({ children, style, contentStyle, ...props }: LayoutProps)
         </View>
     );
 }
+
+
+async function seedActivities(db: SQLiteDatabase): Promise<{ success: boolean; message: string }> {
+    const activities = [
+        // Emotions/Mood Group
+        { name: 'Happy', group: 'Mood', icon_path: 'happy' },
+        { name: 'Tired', group: 'Mood', icon_path: 'tired' },
+        { name: 'Relaxed', group: 'Mood', icon_path: 'relaxed' },
+        { name: 'Energetic', group: 'Mood', icon_path: 'energetic' },
+        { name: 'Stressed', group: 'Mood', icon_path: 'stressed' },
+        { name: 'Anxious', group: 'Mood', icon_path: 'anxious' },
+        { name: 'Content', group: 'Mood', icon_path: 'content' },
+
+        // Activities Group
+        { name: 'Sleep', group: 'Activities', icon_path: 'sleeping' },
+        { name: 'Read', group: 'Activities', icon_path: 'reading' },
+        { name: 'Exercise', group: 'Activities', icon_path: 'exercise' },
+        { name: 'Listen to Music', group: 'Activities', icon_path: 'music' },
+        { name: 'Social Time', group: 'Activities', icon_path: 'social' },
+    ];
+
+    try {
+        for (const activity of activities) {
+            await db.runAsync(
+                `INSERT OR IGNORE INTO activities (name, "group", icon_path) 
+                 VALUES (?, ?, ?)`,
+                [activity.name, activity.group, activity.icon_path]
+            );
+        }
+
+        console.log("Successfully added activities")
+        return {
+            success: true,
+            message: 'Successfully seeded activities'
+        };
+    } catch (error) {
+        console.error('Error seeding activities:', error);
+        return {
+            success: false,
+            message: `Error seeding activities: ${error}`
+        };
+    }
+}
+
 async function migrateDbIfNeeded(db: SQLiteDatabase) {
-    const DATABASE_VERSION = 1;
+    const DATABASE_VERSION = 2;
 
     const result = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
     const currentDbVersion = result?.user_version ?? 0;
@@ -91,6 +135,9 @@ async function migrateDbIfNeeded(db: SQLiteDatabase) {
             CREATE INDEX IF NOT EXISTS idx_activities_group ON activities("group");
         `);
     }
+
+    await seedActivities(db);
+    console.log("WEEEE");
 
     await db.execAsync(`PRAGMA user_version = ${DATABASE_VERSION}`);
     console.log('Database migration complete.');

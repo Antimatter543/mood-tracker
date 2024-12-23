@@ -73,6 +73,7 @@ export function ActivitySelector({ onSelectActivity, selectedActivities }: Activ
       }));
 
       setActivityGroups(groups);
+      console.log("Did activities thing! We have activities", activityGroups.length, activities)
     } catch (error) {
       console.error('Error loading activities:', error);
     }
@@ -91,6 +92,14 @@ export function ActivitySelector({ onSelectActivity, selectedActivities }: Activ
     
     return <IconComponent {...iconProps} />;
   };
+
+  if (activityGroups.length === 0) {
+    return (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyStateText}>No activities found.</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container}>
@@ -131,6 +140,10 @@ export function ActivitySelector({ onSelectActivity, selectedActivities }: Activ
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    color: 'white',
+    marginBottom: 16,
+    height: 300,
+    // minHeight: 200, // Add this to ensure visibility
   },
   groupContainer: {
     marginBottom: 20,
@@ -182,5 +195,14 @@ const styles = StyleSheet.create({
   },
   selectedText: {
     color: 'pink',
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyStateText: {
+    color: colors.text,
+    fontSize: 16,
   },
 });
