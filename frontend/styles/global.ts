@@ -11,7 +11,7 @@ export const globalStyles = StyleSheet.create({
   },
   contentContainer: {
     flex: 1,
-    padding: 20,
+    padding: 5,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -20,7 +20,7 @@ export const globalStyles = StyleSheet.create({
     borderRadius: 15,
     padding: 20,
     margin: 10,
-    width: '95%',
+    width: '100%',
     shadowColor: 'pink', //black
     shadowOffset: {
       width: 0,

@@ -10,8 +10,12 @@ import { MoodItem } from './entry';
 export default function Home() {
   return (
     <Layout contentStyle={{
-        justifyContent: "flex-start", // Custom justification
-    }}>
+      justifyContent: 'flex-start',
+      paddingTop: 0, // Remove top padding ('safe zone area, looks ugly when scrolling down)
+      paddingBottom: 0,
+      borderColor: '#fff',
+      borderRadius: '30px',
+  }}>
           
           <View style={globalStyles.card}>
             <Text style={globalStyles.title}>Mood Tracker</Text>

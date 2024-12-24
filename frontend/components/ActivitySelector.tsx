@@ -142,7 +142,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: 'white',
     marginBottom: 16,
-    height: 300,
+    // height: '100%',
     // minHeight: 200, // Add this to ensure visibility
   },
   groupContainer: {
