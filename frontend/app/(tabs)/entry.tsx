@@ -33,7 +33,7 @@ export default function EntriesPage() {
 function Entry() {
     const db = SQLite.useSQLiteContext();
     // These 2 states are for adding mood entries
-    const [mood, setMood] = useState<string>('5.0');
+    const [mood, setMood] = useState<string>('');
     const [note, setNote] = useState('GAMING');
     const [selectedActivities, setSelectedActivities] = useState<number[]>([]);
     console.log("db acquired ?", db, "\nactivities:", selectedActivities);
