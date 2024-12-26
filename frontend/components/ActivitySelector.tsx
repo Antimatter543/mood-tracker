@@ -102,7 +102,7 @@ export function ActivitySelector({ onSelectActivity, selectedActivities }: Activ
   }
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {activityGroups.map((group) => (
         <View key={group.name} style={styles.groupContainer}>
           <Text style={styles.groupTitle}>{group.name}</Text>

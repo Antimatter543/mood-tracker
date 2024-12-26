@@ -1,5 +1,5 @@
 import { Layout } from "@/components/PageContainer";
-import { Text, View, StyleSheet, Button, TextInput, ScrollView } from "react-native";
+import { Text, View, StyleSheet, Button, TextInput } from "react-native";
 import * as SQLite from 'expo-sqlite';
 import { useState, useEffect, useCallback } from 'react';
 import { colors, globalStyles } from "@/styles/global";
@@ -32,11 +32,11 @@ export default function EntriesPage() {
 // Now we can actually do db and stuff
 function Entry() {
     const db = SQLite.useSQLiteContext();
-    console.log("db acquired ?", db);
     // These 2 states are for adding mood entries
     const [mood, setMood] = useState<string>('5.0');
     const [note, setNote] = useState('GAMING');
     const [selectedActivities, setSelectedActivities] = useState<number[]>([]);
+    console.log("db acquired ?", db, "\nactivities:", selectedActivities);
     
     // Button shit
     const [message, setMessage] = useState('balls');
@@ -138,9 +138,8 @@ function Entry() {
             <Text style={styles.message}>{message}</Text>
         </View>
 
-        <Text style={styles.text}>SQLite Database Demo</Text>
         <Text style={styles.message}>{message}</Text>
-        <View style={styles.buttonContainer}>
+        <View>
             <Button
                 title="Add Test Item"
                 onPress={async () => {

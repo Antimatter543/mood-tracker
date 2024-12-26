@@ -5,6 +5,7 @@ import { Layout } from '../../components/PageContainer';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import { MoodItem } from './entry';
+import { DatabaseViewer } from '@/components/DBViewer';
 
 
 export default function Home() {
@@ -27,28 +28,28 @@ export default function Home() {
   );
 }
 
-export function DatabaseViewer() {
-    const db = useSQLiteContext();
-    const [entries, setEntries] = useState<MoodItem[]>([]);
-    useEffect(() => {
-        async function setup() {
-          const result = await db.getAllAsync<MoodItem>('SELECT * FROM entries');
-          setEntries(result);
-        }
-        setup();
-      }, []);
-      return (
-        <ScrollView style={{paddingBottom: 100}}>
-            {entries.map(entry => (
-                <View key={entry.id} style={globalStyles.card}>
-                    <Text style={{color: colors.text}}>ID: {entry.id}</Text>
-                    <Text style={{color: colors.text}}>Mood Value: {entry.mood}</Text>
-                    <Text style={{color: colors.text}}>Notes: {entry.notes || 'No notes'}</Text>
-                    <Text style={{color: colors.text}}>
-                        Date: {new Date(entry.date).toLocaleString()}
-                    </Text>
-                </View>
-            ))}
-        </ScrollView>
-    );
-}
+// export function DatabaseViewer() {
+//     const db = useSQLiteContext();
+//     const [entries, setEntries] = useState<MoodItem[]>([]);
+//     useEffect(() => {
+//         async function setup() {
+//           const result = await db.getAllAsync<MoodItem>('SELECT * FROM entries');
+//           setEntries(result);
+//         }
+//         setup();
+//       }, []);
+//       return (
+//         <ScrollView style={{paddingBottom: 100, }} showsVerticalScrollIndicator={false}>
+//             {entries.map(entry => (
+//                 <View key={entry.id} style={globalStyles.card}>
+//                     <Text style={{color: colors.text}}>ID: {entry.id}</Text>
+//                     <Text style={{color: colors.text}}>Mood Value: {entry.mood}</Text>
+//                     <Text style={{color: colors.text}}>Notes: {entry.notes || 'No notes'}</Text>
+//                     <Text style={{color: colors.text}}>
+//                         Date: {new Date(entry.date).toLocaleString()}
+//                     </Text>
+//                 </View>
+//             ))}
+//         </ScrollView>
+//     );
+// }
