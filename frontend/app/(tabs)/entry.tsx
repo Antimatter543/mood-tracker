@@ -4,6 +4,7 @@ import * as SQLite from 'expo-sqlite';
 import { useState, useEffect, useCallback } from 'react';
 import { colors, globalStyles } from "@/styles/global";
 import { ActivitySelector } from "@/components/ActivitySelector";
+import { EntryModal } from "@/components/EntryModal";
 
 
 
@@ -15,20 +16,52 @@ export type MoodItem = {
     date: string;
 };
 
+function EntryContent() {
+    const [modalVisible, setModalVisible] = useState(false);
+    const db = SQLite.useSQLiteContext();
+    const [moodItems, setMoodItems] = useState<MoodItem[]>([]);
+
+    const refetchItems = useCallback(() => {
+        async function refetch() {
+            await db.withExclusiveTransactionAsync(async () => {
+                setMoodItems(
+                    await db.getAllAsync<MoodItem>(
+                        'SELECT * FROM entries ORDER BY date DESC'
+                    )
+                );
+            });
+        }
+        refetch();
+    }, [db]);
+
+    return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <Button
+                title="Add New Entry"
+                onPress={() => setModalVisible(true)}
+            />
+            
+            <EntryModal
+                visible={modalVisible}
+                onClose={() => setModalVisible(false)}
+                onEntryAdded={refetchItems}
+            />
+        </View>
+    );
+}
+
+
 export default function EntriesPage() {
     return (
         <Layout contentStyle={{
             justifyContent: 'flex-start',
-            paddingTop: 0, // Remove top padding ('safe zone area, looks ugly when scrolling down)
+            paddingTop: 0,
             paddingBottom: 0,
         }}>
-
-            <Entry />
-
+            <EntryContent />
         </Layout>
     );
 }
-
 // Now we can actually do db and stuff
 function Entry() {
     const db = SQLite.useSQLiteContext();
@@ -249,7 +282,7 @@ async function handleClearEntries(db: SQLite.SQLiteDatabase, setMessage: React.D
 
 //#region Database Operations
 
-async function addMood(db: SQLite.SQLiteDatabase, mood: number, activityIds: number[], notes: string): Promise<{ success: boolean; message: string }> {
+export async function addMood(db: SQLite.SQLiteDatabase, mood: number, activityIds: number[], notes: string): Promise<{ success: boolean; message: string }> {
     try {
         const date = new Date().toISOString();
         
