@@ -89,39 +89,6 @@ function Entry() {
     return (
     <View style={globalStyles.contentContainer}> 
 
-        <Text style={globalStyles.title}>Add New Mood Entry</Text>
-            
-        <View style={styles.inputContainer}>
-            <Text style={styles.label}>Mood Score (0-10):</Text>
-            <TextInput
-                style={styles.input}
-                value={mood}
-                onChangeText={setMood}
-                keyboardType="decimal-pad"
-                placeholder="Enter mood score (0-10)"
-                placeholderTextColor="#666"
-            />
-
-            <Text style={styles.label}>Notes:</Text>
-            <TextInput
-                style={[styles.input, styles.noteInput]}
-                value={note}
-                onChangeText={setNote}
-                placeholder="How are you feeling?"
-                placeholderTextColor="#666"
-                multiline
-                numberOfLines={3}
-            />
-
-            <Button
-                title="Add Entry"
-                onPress={handleSubmit}
-            />
-
-            <Text style={styles.message}>{message}</Text>
-        </View>
-
-        <Text style={styles.text}>SQLite Database Demo</Text>
         <Text style={styles.message}>{message}</Text>
         <View style={styles.buttonContainer}>
             <Button
@@ -149,7 +116,6 @@ function Entry() {
             />
 
         </View>
-        {/* Above view is old, press button boom add data. Below will be textinput!! TODO create textinputs for mood and activities aswell.. but for now it's just note. */}
         {/* <View style={globalStyles.card}>
         
             <View style={styles.flexRow}>

@@ -2,6 +2,7 @@ import { Tabs } from "expo-router";
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { Button } from "react-native";
 
 export default function RootLayout() {
     return (
@@ -18,6 +19,8 @@ export default function RootLayout() {
                   tabBarStyle: {
                   backgroundColor: '#25292e',
                   },
+                  headerRight: () => <Button onPress={() => console.log("Test button")} title="Update count" />, // Adds button to all tabs (we wanna like.. replace it with a settings/user page)
+
             }}>
 
             <Tabs.Screen name="index" options={{
