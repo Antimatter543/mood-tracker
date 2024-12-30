@@ -1,15 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 
-export default function MoodSelector() {
+type MoodSelectorProps = {
+    onValueChange: (value: number) => void;
+};
+
+export default function MoodSelector({ onValueChange }: MoodSelectorProps) {
     const initial = 50.0; // Start at 5.0
     const [selectedValue, setSelectedValue] = useState(initial);
     const scrollViewRef = useRef<ScrollView>(null);
     const values = Array.from({ length: 101 }, (_, i) => (i / 10).toFixed(1));
-    const itemWidth = 60; // Adjust if needed to match styles
+    const itemWidth = 60;
 
     useEffect(() => {
-        // Scroll to initial value (centered)
         const initialOffset = initial * itemWidth;
         setTimeout(() => {
             scrollViewRef.current?.scrollTo({
@@ -21,9 +24,10 @@ export default function MoodSelector() {
 
     const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
         const offsetX = event.nativeEvent.contentOffset.x;
-        const selectedIndex = Math.round(offsetX / itemWidth); // Correct calculation
+        const selectedIndex = Math.round(offsetX / itemWidth);
         const newValue = Math.max(0, Math.min(10, selectedIndex / 10));
         setSelectedValue(newValue);
+        onValueChange(newValue); // Notify the parent of the value change
     };
 
     return (
@@ -35,21 +39,21 @@ export default function MoodSelector() {
                 showsHorizontalScrollIndicator={false}
                 onScroll={handleScroll}
                 contentContainerStyle={styles.scrollContent}
-                snapToInterval={itemWidth} // Snap behavior for better UX
-                decelerationRate="fast" // Smooth snapping
+                snapToInterval={itemWidth}
+                decelerationRate="fast"
             >
                 {values.map((value) => {
                     const numericValue = parseFloat(value);
-                    const isMainNumber = Number.isInteger(numericValue); // Check if the value is an integer
-                    const displayValue = isMainNumber ? numericValue.toFixed(0) : value; // Format value
+                    const isMainNumber = Number.isInteger(numericValue);
+                    const displayValue = isMainNumber ? numericValue.toFixed(0) : value;
 
                     return (
                         <View key={value} style={styles.itemContainer}>
                             <Text
                                 style={[
                                     styles.number,
-                                    isMainNumber && styles.mainNumber, // Apply specific style to main numbers
-                                    numericValue === selectedValue && styles.selectedNumber, // Highlight selected number
+                                    isMainNumber && styles.mainNumber,
+                                    numericValue === selectedValue && styles.selectedNumber,
                                 ]}
                             >
                                 {displayValue}
@@ -72,7 +76,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     itemContainer: {
-        width: 60, // Match item width to snap behavior
+        width: 60,
         alignItems: 'center',
     },
     number: {
@@ -80,13 +84,13 @@ const styles = StyleSheet.create({
         fontSize: 16,
     },
     mainNumber: {
-        fontSize: 27, // Make main numbers larger
-        fontWeight: 'bold', // Make them bold
-        color: '#888', // Slightly lighter color
+        fontSize: 27,
+        fontWeight: 'bold',
+        color: '#888',
     },
     selectedNumber: {
         color: '#fff',
-        fontSize: 36, // Highlight selected number
+        fontSize: 36,
         fontWeight: 'bold',
     },
     selectedText: {

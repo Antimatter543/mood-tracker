@@ -2,10 +2,16 @@ import MoodSelector from "@/components/Test";
 import { Text, View, StyleSheet } from "react-native";
 
 export default function Timeline() {
+
+      // For moodselector scroller
+      const handleMoodChange = (value: number) => {
+        console.log("hi!!", value);
+    };
+
     return (
         <View style={styles.container}>
             <Text style={styles.text}>This is the place that will deal with timelines</Text>
-            <MoodSelector /> 
+            <MoodSelector onValueChange={handleMoodChange} /> 
         </View>
     );
 }

@@ -4,6 +4,7 @@ import * as SQLite from 'expo-sqlite';
 import { useState, useEffect, useCallback } from 'react';
 import { colors, globalStyles } from "@/styles/global";
 import { ActivitySelector } from "@/components/ActivitySelector";
+import MoodSelector from "@/components/Test";
 
 
 
@@ -33,7 +34,7 @@ export default function EntriesPage() {
 function Entry() {
     const db = SQLite.useSQLiteContext();
     // These 2 states are for adding mood entries
-    const [mood, setMood] = useState<string>('');
+    const [mood, setMood] = useState(5.0); // Initialize mood state
     const [note, setNote] = useState('GAMING');
     const [selectedActivities, setSelectedActivities] = useState<number[]>([]);
     console.log("db acquired ?", db, "\nactivities:", selectedActivities);
@@ -83,12 +84,11 @@ function Entry() {
     };
 
     const handleSubmit = async () => {
-        const moodValue = parseFloat(mood);
-        const result = await addMood(db, moodValue, selectedActivities, note);
+        const result = await addMood(db, mood, selectedActivities, note);
         setMessage(result.message);
         
         if (result.success) {
-            setMood('5.0');
+            setMood(5.0);
             setSelectedActivities([]);
             setNote('');
             await refetchItems();
@@ -96,7 +96,10 @@ function Entry() {
     };
 
 
-
+    // For moodselector scroller
+    const handleMoodChange = (value: number) => {
+        setMood(value); // Update the parent state with the selected value
+    };
 
     return (
     <View style={{ flex: 1 }}> 
@@ -104,14 +107,9 @@ function Entry() {
         <Text style={globalStyles.title}>Add New Mood Entry</Text>
             
             <Text style={styles.label}>Mood Score (0-10):</Text>
-            <TextInput
-                style={styles.input}
-                value={mood}
-                onChangeText={setMood}
-                keyboardType="decimal-pad"
-                placeholder="Enter mood score (0-10)"
-                placeholderTextColor="#666"
-            />
+            <MoodSelector onValueChange={handleMoodChange} />
+
+            <Text style={styles.label}>Selected Mood: {mood.toFixed(1)}</Text>
 
             <Text style={styles.label}>Activities:</Text>
                 <ActivitySelector
