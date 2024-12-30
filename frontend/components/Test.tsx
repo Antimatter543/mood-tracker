@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 
 export default function MoodSelector() {
-    const initial = 50.0; // we use this because length is like 100 look idk
+    const initial = 50.0; // Start at 5.0
     const [selectedValue, setSelectedValue] = useState(initial);
     const scrollViewRef = useRef<ScrollView>(null);
     const values = Array.from({ length: 101 }, (_, i) => (i / 10).toFixed(1));
@@ -34,23 +34,29 @@ export default function MoodSelector() {
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 onScroll={handleScroll}
-                // scrollEventThrottle={16}
                 contentContainerStyle={styles.scrollContent}
                 snapToInterval={itemWidth} // Snap behavior for better UX
                 decelerationRate="fast" // Smooth snapping
             >
-                {values.map((value) => (
-                    <View key={value} style={styles.itemContainer}>
-                        <Text
-                            style={[
-                                styles.number,
-                                parseFloat(value) === selectedValue && styles.selectedNumber,
-                            ]}
-                        >
-                            {value}
-                        </Text>
-                    </View>
-                ))}
+                {values.map((value) => {
+                    const numericValue = parseFloat(value);
+                    const isMainNumber = Number.isInteger(numericValue); // Check if the value is an integer
+                    const displayValue = isMainNumber ? numericValue.toFixed(0) : value; // Format value
+
+                    return (
+                        <View key={value} style={styles.itemContainer}>
+                            <Text
+                                style={[
+                                    styles.number,
+                                    isMainNumber && styles.mainNumber, // Apply specific style to main numbers
+                                    numericValue === selectedValue && styles.selectedNumber, // Highlight selected number
+                                ]}
+                            >
+                                {displayValue}
+                            </Text>
+                        </View>
+                    );
+                })}
             </ScrollView>
         </View>
     );
@@ -73,9 +79,14 @@ const styles = StyleSheet.create({
         color: '#666',
         fontSize: 16,
     },
+    mainNumber: {
+        fontSize: 27, // Make main numbers larger
+        fontWeight: 'bold', // Make them bold
+        color: '#888', // Slightly lighter color
+    },
     selectedNumber: {
         color: '#fff',
-        fontSize: 36,
+        fontSize: 36, // Highlight selected number
         fontWeight: 'bold',
     },
     selectedText: {
