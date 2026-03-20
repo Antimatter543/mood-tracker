@@ -90,6 +90,7 @@ export const interpolateData = (dataArray: (number | null)[]) => {
                 prevValue = dataArray[prevIndex];
                 prevIndex--;
             }
+            prevIndex++;
 
             let nextValue: number | null = null;
             let nextIndex = i + 1;
@@ -97,9 +98,10 @@ export const interpolateData = (dataArray: (number | null)[]) => {
                 nextValue = dataArray[nextIndex];
                 nextIndex++;
             }
+            nextIndex--;
 
             if (prevValue !== null && nextValue !== null) {
-                const gap = nextIndex - prevIndex - 1;
+                const gap = nextIndex - prevIndex;
                 const step = (nextValue - prevValue) / gap;
                 result[i] = prevValue + step * (i - prevIndex);
             }

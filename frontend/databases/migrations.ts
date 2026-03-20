@@ -34,10 +34,24 @@ export const migrations: Migration[] = [
         version: 2,
         up: async (db: SQLiteDatabase) => {
             await db.execAsync(`
-                -- Drop old icon_name and add new columns
-                ALTER TABLE activities DROP COLUMN icon_name;
-                ALTER TABLE activities ADD COLUMN icon_family TEXT DEFAULT 'Feather';
-                ALTER TABLE activities ADD COLUMN icon_name TEXT DEFAULT 'circle';
+                -- Recreate activities table without old icon_name, adding new columns
+                CREATE TABLE activities_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    group_id INTEGER NOT NULL,
+                    icon_family TEXT DEFAULT 'Feather',
+                    icon_name TEXT DEFAULT 'circle',
+                    position INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(name, group_id),
+                    FOREIGN KEY(group_id) REFERENCES activity_groups(id) ON DELETE CASCADE
+                );
+
+                INSERT INTO activities_new (id, name, group_id, position)
+                SELECT id, name, group_id, position FROM activities;
+
+                DROP TABLE activities;
+
+                ALTER TABLE activities_new RENAME TO activities;
             `);
 
             await updateV1ActivitiesToV2(db);

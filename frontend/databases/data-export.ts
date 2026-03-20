@@ -263,21 +263,20 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
             
             // Step 3: Import entries
             if (importData.data.entries && Array.isArray(importData.data.entries)) {
-              // First clear existing entries
-              await db.runAsync('DELETE FROM entry_activities');
-              await db.runAsync('DELETE FROM entries');
-              
               let maxEntryId = 0;
-              
+
               for (const entry of importData.data.entries) {
-                // Insert entry
+                // Upsert entry (merge, don't destroy)
                 const result = await db.runAsync(
-                  'INSERT INTO entries (id, mood, notes, date) VALUES (?, ?, ?, ?)',
+                  'INSERT OR REPLACE INTO entries (id, mood, notes, date) VALUES (?, ?, ?, ?)',
                   [entry.id, entry.mood, entry.notes, entry.date]
                 );
                 
                 maxEntryId = Math.max(maxEntryId, entry.id);
-                
+
+                // Clear only this entry's activity links before re-inserting
+                await db.runAsync('DELETE FROM entry_activities WHERE entry_id = ?', [entry.id]);
+
                 // Insert activity relationships if they exist
                 if (entry.activity_ids) {
                   const activityIds = entry.activity_ids.split(',');

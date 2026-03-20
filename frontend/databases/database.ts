@@ -2,6 +2,7 @@ import { SQLiteDatabase } from 'expo-sqlite';
 import { initialActivities, initialActivityGroups } from '../components/seedData';
 import { DatabaseResult, MoodEntry, Activity } from '../components/types';
 import { runMigrations } from '@/databases/migrations';
+import { SETTINGS_REGISTRY, SettingKey } from '@/databases/settings';
 
 
 
@@ -588,7 +589,7 @@ export async function getSetting(db: SQLiteDatabase, key: string): Promise<strin
         'SELECT value FROM user_settings WHERE key = ?',
         [key]
     );
-    return result?.value ?? 'right';
+    return result?.value ?? SETTINGS_REGISTRY[key as SettingKey]?.default?.toString() ?? '';
 }
 
 
