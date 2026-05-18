@@ -153,7 +153,7 @@ const WeeklyChartCard = memo(function WeeklyChartCard({ data }: { data: (number 
                     yAxisInterval={2}
                     xLabelsOffset={-10}
                     yAxisSuffix=""
-                    style={[styles.chart]}
+                    style={styles.chart}
                 />
             </View>
         </Card>

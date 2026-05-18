@@ -4,10 +4,11 @@ import { Modal, View, Text, TextInput, Pressable, StyleSheet, Alert } from 'reac
 import { useThemeColors } from '@/styles/global';
 import { SQLiteDatabase } from 'expo-sqlite';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import Feather from '@expo/vector-icons/Feather';
 import { updateActivity, deleteActivity } from "@/databases/database";
 import { Activity } from '../types';
 import { useDataContext } from '@/context/DataContext';
-import { ICON_FAMILIES, IconPicker } from '../IconPicker';
+import { ICON_FAMILIES, IconFamilyType, IconPicker } from '../IconPicker';
 
 type ActivityEditModalProps = {
     visible: boolean;
@@ -31,14 +32,16 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
     const { refetchEntries } = useDataContext();  // Get refetchEntries from context
 
     const [iconPickerVisible, setIconPickerVisible] = useState(false);
-    const [selectedIconFamily, setSelectedIconFamily] = useState(activity?.icon_family || 'Feather');
+    const [selectedIconFamily, setSelectedIconFamily] = useState<IconFamilyType>(
+        (activity?.icon_family as IconFamilyType) || 'Feather'
+    );
     const [selectedIconName, setSelectedIconName] = useState(activity?.icon_name || 'circle');
 
     // Update state when activity changes or modal becomes visible
     useEffect(() => {
         if (activity && visible) {
             setActivityName(activity.name);
-            setSelectedIconFamily(activity.icon_family);
+            setSelectedIconFamily(activity.icon_family as IconFamilyType);
             setSelectedIconName(activity.icon_name);
         }
     }, [activity, visible]);
@@ -271,7 +274,7 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
                         visible={iconPickerVisible}
                         onClose={() => setIconPickerVisible(false)}
                         onSelect={(family, name) => {
-                            setSelectedIconFamily(family);
+                            setSelectedIconFamily(family as IconFamilyType);
                             setSelectedIconName(name);
                         }}
                         currentFamily={selectedIconFamily}

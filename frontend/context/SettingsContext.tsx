@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { SQLiteDatabase, useSQLiteContext } from 'expo-sqlite';
 import { updateSetting as updateDbSetting, getSetting } from '@/databases/database';
-import { SETTINGS_REGISTRY, SettingsContextType, Settings } from '@/databases/settings'; // Import Settings from your file
+import { SETTINGS_REGISTRY, SettingsContextType, Settings, SettingKey } from '@/databases/settings'; // Import Settings from your file
 import { ActivityIndicator, View } from 'react-native';
 
 
@@ -49,27 +49,27 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     );
   }
 
-// Cringe errors idk
 async function loadSettings(db: SQLiteDatabase): Promise<Settings> {
-  const loadedSettings = { ...defaultSettings };
-  
+  const loadedSettings = { ...defaultSettings } as Record<SettingKey, unknown>;
+
   for (const [key, config] of Object.entries(SETTINGS_REGISTRY)) {
     const value = await getSetting(db, key);
-    
+    const settingKey = key as SettingKey;
+
     // Convert string value to appropriate type
     switch (typeof config.default) {
       case 'boolean':
-        loadedSettings[key] = value === 'true';
+        loadedSettings[settingKey] = value === 'true';
         break;
       case 'number':
-        loadedSettings[key] = parseFloat(value);
+        loadedSettings[settingKey] = parseFloat(value);
         break;
       default:
-        loadedSettings[key] = value;
+        loadedSettings[settingKey] = value;
     }
   }
-  
-  return loadedSettings;
+
+  return loadedSettings as unknown as Settings;
 }
 
 export const useSettings = () => useContext(SettingsContext);

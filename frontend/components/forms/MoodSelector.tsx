@@ -10,7 +10,7 @@ type MoodSelectorProps = {
 };
 
 // Define mood benchmarks with emojis
-const moodBenchmarks = {
+const moodBenchmarks: Record<number, { emoji: string; label: string }> = {
     2: { emoji: '💀', label: 'Terrible' },
     5: { emoji: '😐', label: 'Neutral' },
     7: { emoji: '🙂', label: 'Good' },

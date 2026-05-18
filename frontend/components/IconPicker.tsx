@@ -401,7 +401,9 @@ export const IconPicker: React.FC<IconPickerProps> = ({
     };
 
     const renderIcon = (iconInfo: IconInfo) => {
-        const IconComponent = ICON_FAMILIES[iconInfo.family].component;
+        const family = ICON_FAMILIES[iconInfo.family];
+        if (!family) return null;
+        const IconComponent: any = family.component;
         const isSelected = currentFamily === iconInfo.family && currentIcon === iconInfo.name;
 
         return (
@@ -417,7 +419,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({
                 }}
             >
                 <IconComponent.default
-                    name={iconInfo.name}
+                    name={iconInfo.name as any}
                     size={24}
                     color={isSelected ? '#fff' : colors.text}
                 />

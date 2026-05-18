@@ -513,7 +513,7 @@ export async function checkGroupHasEntries(
 
         return {
             exists: true,
-            hasEntries: entriesCount && entriesCount.count > 0
+            hasEntries: !!(entriesCount && entriesCount.count > 0)
         };
     } catch (error) {
         console.error('Error checking group entries:', error);

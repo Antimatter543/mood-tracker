@@ -269,7 +269,12 @@ const useStyles = (colors: any) => useMemo(() => StyleSheet.create({
 }), [colors]);
 
 
-export const renderActivityIcon = (activity, colors, size = 24, selectedColor = '#fff') => {
+export const renderActivityIcon = (
+    activity: Pick<Activity, 'icon_family' | 'icon_name'>,
+    colors: ReturnType<typeof useThemeColors>,
+    size: number = 24,
+    selectedColor: string = '#fff'
+) => {
     // Check if this is an emoji icon
     if (activity.icon_family === 'Emoji') {
         return (
@@ -282,20 +287,21 @@ export const renderActivityIcon = (activity, colors, size = 24, selectedColor = 
             </Text>
         );
     }
-    
+
     // For regular icon families
-    const IconComponent = ICON_FAMILIES[activity.icon_family]?.component;
-    
+    const family = ICON_FAMILIES[activity.icon_family as IconFamilyType];
+    const IconComponent = family?.component;
+
     if (!IconComponent) {
         // Fallback if no valid icon family
         return <Feather name="circle" size={size} color={selectedColor} />;
     }
 
     return (
-        <IconComponent.default 
-            name={activity.icon_name} 
-            size={size} 
-            color={selectedColor} 
+        <IconComponent.default
+            name={activity.icon_name as any}
+            size={size}
+            color={selectedColor}
         />
     );
 };
@@ -405,7 +411,7 @@ const AddActivityModal = ({ visible, onClose, onAdd, groupName }: AddActivityMod
                         visible={iconPickerVisible}
                         onClose={() => setIconPickerVisible(false)}
                         onSelect={(family, name) => {
-                            setSelectedIconFamily(family);
+                            setSelectedIconFamily(family as IconFamilyType);
                             setSelectedIconName(name);
                         }}
                         currentFamily={selectedIconFamily}
