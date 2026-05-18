@@ -17,7 +17,16 @@ jest.mock('@/components/seedData', () => ({
   initialActivityGroups: [],
 }));
 
-// Mock the database functions used by migrations
+// Mock the database functions used by migrations.
+// migrations.ts now imports these directly from the focused modules.
+jest.mock('@/databases/lifecycle', () => ({
+  createInitialSchema: jest.fn().mockResolvedValue(undefined),
+  seedActivitiesV1: jest.fn().mockResolvedValue({ success: true }),
+}));
+jest.mock('@/databases/user-settings', () => ({
+  initializeSettingsTable: jest.fn().mockResolvedValue(undefined),
+}));
+// Keep the legacy facade mock too, in case anything still resolves it.
 jest.mock('@/databases/database', () => ({
   createInitialSchema: jest.fn().mockResolvedValue(undefined),
   initializeSettingsTable: jest.fn().mockResolvedValue(undefined),
@@ -111,5 +120,38 @@ describe('Migration V2 SQL', () => {
       const sql = call[0] as string;
       expect(sql.toUpperCase()).not.toContain('DROP COLUMN');
     }
+  });
+
+  it('preserves entry data via copy-into-new-table pattern (no DROP TABLE entries)', async () => {
+    const db = createMockDatabase();
+    const v2 = migrations.find(m => m.version === 2)!;
+    await v2.up(db as any);
+
+    // V2 rebuilds the `activities` table but should NEVER drop `entries`.
+    const allSql = db.execAsync.mock.calls
+      .map((c: any[]) => (c[0] as string).toUpperCase())
+      .join(' ');
+    expect(allSql).not.toContain('DROP TABLE ENTRIES');
+    expect(allSql).not.toContain('DROP TABLE IF EXISTS ENTRIES');
+
+    // And it should explicitly preserve activity data via SELECT/INSERT.
+    expect(allSql).toContain('INSERT INTO ACTIVITIES_NEW');
+    expect(allSql).toContain('SELECT ID, NAME, GROUP_ID, POSITION FROM ACTIVITIES');
+  });
+});
+
+describe('Migration V3', () => {
+  it('adds show_mood_benchmarks setting with INSERT OR IGNORE', async () => {
+    const db = createMockDatabase();
+    const v3 = migrations.find(m => m.version === 3)!;
+    expect(v3).toBeDefined();
+
+    await v3.up(db as any);
+
+    const seedCall = db.runAsync.mock.calls.find((c: any[]) =>
+      typeof c[0] === 'string' && c[0].includes('show_mood_benchmarks')
+    );
+    expect(seedCall).toBeDefined();
+    expect((seedCall![0] as string).toUpperCase()).toContain('INSERT OR IGNORE');
   });
 });
