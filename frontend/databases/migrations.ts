@@ -1,5 +1,11 @@
 // migrations.ts
-import { createInitialSchema, initializeSettingsTable, seedActivitiesV1 } from '@/databases/database';
+//
+// Import directly from the focused modules rather than the database.ts
+// facade. The facade re-exports these same symbols, but importing through
+// it would create a load-order cycle (facade -> lifecycle -> migrations
+// -> facade).
+import { createInitialSchema, seedActivitiesV1 } from '@/databases/lifecycle';
+import { initializeSettingsTable } from '@/databases/user-settings';
 import { initialActivities } from '@/components/seedData';
 import { SQLiteDatabase } from 'expo-sqlite';
 
@@ -55,7 +61,6 @@ export const migrations: Migration[] = [
             `);
 
             await updateV1ActivitiesToV2(db);
-            console.log("V2 migrated");
         }
     },
     { 
@@ -76,26 +81,20 @@ export const migrations: Migration[] = [
 export async function runMigrations(db: SQLiteDatabase): Promise<void> {
     const result = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
     const currentVersion = result?.user_version ?? 0;
-    
-    console.log(`Current database version: ${currentVersion}`);
-    
+
     const pendingMigrations = migrations.filter(m => m.version > currentVersion);
-    
+
     if (pendingMigrations.length === 0) {
-        console.log('Database is up to date');
         return;
     }
-    
+
     try {
         await db.withTransactionAsync(async () => {
             for (const migration of pendingMigrations) {
-                console.log(`Running migration to version ${migration.version}...`);
                 await migration.up(db);
                 await db.runAsync(`PRAGMA user_version = ${migration.version}`);
             }
         });
-        
-        console.log('Migrations completed successfully');
     } catch (error) {
         console.error('Error running migrations:', error);
         throw error;
