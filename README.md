@@ -209,6 +209,16 @@ These are known bugs and areas for improvement. PRs welcome!
 - Themes are defined in `styles/global.ts` — add new themes by extending the `themeColors` map
 - Database changes always go through `databases/migrations.ts`, never edit `database.ts` schema directly
 
+## Upgrade Roadmap
+
+These are larger upgrades that require a maintainer with a device to test, so they're deferred until someone can validate end-to-end on hardware.
+
+- **Expo SDK 52 → latest** — currently pinned to SDK 52. A major-SDK bump (53/54+) brings React Native upgrades and breaking changes to several Expo modules. Use `npx expo upgrade` and verify the full app on Android + iOS before merging.
+- **`npm audit` advisories** — most are in build-time transitive deps (`tar`, `tmp`, `ws`, `undici`, `cacache`) reached through Expo's tooling, not in shipped code. Running `npm audit fix` is unsafe because it tries to downgrade Expo. These resolve naturally on the next SDK bump.
+- **CSV/PDF export** — JSON export exists; CSV/PDF for journaling or sharing has been requested.
+- **Media attachments** — the `entry_media` table exists in the schema but no UI yet.
+- **Reminders / push notifications** — requested.
+
 ## License
 
 [GPL-3.0](LICENSE)
