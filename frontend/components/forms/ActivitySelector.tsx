@@ -1,4 +1,4 @@
-import { colors, useThemeColors } from "@/styles/global";
+import { ThemeColors, useThemeColors } from "@/styles/global";
 import * as SQLite from "expo-sqlite";
 
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -69,7 +69,7 @@ type GroupActionMenuProps = {
     position: { x: number, y: number };
 };
 
-const useStyles = (colors: any) => useMemo(() => StyleSheet.create({
+const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
     // Keep the base container styles
     scrollContainer: {
         flex: 1,
@@ -270,10 +270,10 @@ const useStyles = (colors: any) => useMemo(() => StyleSheet.create({
 
 
 export const renderActivityIcon = (
-    activity: Pick<Activity, 'icon_family' | 'icon_name'>,
-    colors: ReturnType<typeof useThemeColors>,
-    size: number = 24,
-    selectedColor: string = '#fff'
+    activity: Activity,
+    colors: ThemeColors,
+    size = 24,
+    selectedColor = '#fff'
 ) => {
     // Check if this is an emoji icon
     if (activity.icon_family === 'Emoji') {
@@ -289,9 +289,8 @@ export const renderActivityIcon = (
     }
 
     // For regular icon families
-    const family = ICON_FAMILIES[activity.icon_family as IconFamilyType];
-    const IconComponent = family?.component;
-
+    const IconComponent = ICON_FAMILIES[activity.icon_family as IconFamilyType]?.component;
+    
     if (!IconComponent) {
         // Fallback if no valid icon family
         return <Feather name="circle" size={size} color={selectedColor} />;

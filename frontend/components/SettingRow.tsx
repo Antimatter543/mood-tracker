@@ -20,10 +20,13 @@ function SettingRow({ config, value, onValueChange }: SettingRowProps) {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      paddingVertical: 12,
+      // Tighter vertical rhythm with a minHeight that guarantees a 44pt
+      // touch target per Apple's HIG / Material guidelines.
+      paddingVertical: 10,
       paddingHorizontal: 16,
+      minHeight: 56,
       backgroundColor: colors.overlays.tag,
-      borderRadius: 8,
+      borderRadius: 10,
       marginBottom: 8,
     },
     textContainer: {
@@ -33,21 +36,25 @@ function SettingRow({ config, value, onValueChange }: SettingRowProps) {
     label: {
       color: colors.text,
       fontSize: 16,
+      fontWeight: '500',
+      lineHeight: 20,
     },
     description: {
       color: colors.textSecondary,
-      fontSize: 12,
+      fontSize: 13,
+      lineHeight: 18,
       marginTop: 2,
     },
     selectButton: {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.secondaryBackground,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: 6,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 8,
       borderWidth: 1,
       borderColor: colors.border,
+      minHeight: 36,
     },
     selectText: {
       color: colors.text,

@@ -49,27 +49,32 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     );
   }
 
+// Load all settings from the DB, falling back to registry defaults. The
+// `as any` cast at the assignment site is necessary because Settings is a
+// strict union per key — TS can't narrow `value` through the switch back to
+// the specific field's type, but `loadedSettings` typed as Settings preserves
+// the public API.
 async function loadSettings(db: SQLiteDatabase): Promise<Settings> {
-  const loadedSettings = { ...defaultSettings } as Record<SettingKey, unknown>;
+  const loadedSettings: Settings = { ...defaultSettings };
 
   for (const [key, config] of Object.entries(SETTINGS_REGISTRY)) {
     const value = await getSetting(db, key);
-    const settingKey = key as SettingKey;
+    const k = key as SettingKey;
 
     // Convert string value to appropriate type
     switch (typeof config.default) {
       case 'boolean':
-        loadedSettings[settingKey] = value === 'true';
+        (loadedSettings as any)[k] = value === 'true';
         break;
       case 'number':
-        loadedSettings[settingKey] = parseFloat(value);
+        (loadedSettings as any)[k] = parseFloat(value);
         break;
       default:
-        loadedSettings[settingKey] = value;
+        (loadedSettings as any)[k] = value;
     }
   }
 
-  return loadedSettings as unknown as Settings;
+  return loadedSettings;
 }
 
 export const useSettings = () => useContext(SettingsContext);

@@ -1,127 +1,121 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
 import { useThemeColors } from '@/styles/global';
+import { useMoodScale, MoodPrecision } from './hooks/useMoodScale';
 
 type MoodSelectorProps = {
     onValueChange: (value: number) => void;
     initialValue?: number;
-    precision?: 'low' | 'high';
+    precision?: MoodPrecision;
     showBenchmarks?: boolean;
 };
 
-// Define mood benchmarks with emojis
-const moodBenchmarks: Record<number, { emoji: string; label: string }> = {
+// Mood benchmarks — partial mapping (only special anchor values get a face).
+// Typed as `Partial<Record<number, ...>>` so an integer index returns
+// `undefined` cleanly rather than triggering a TS implicit-any.
+const moodBenchmarks: Partial<Record<number, { emoji: string; label: string }>> = {
     2: { emoji: '💀', label: 'Terrible' },
     5: { emoji: '😐', label: 'Neutral' },
     7: { emoji: '🙂', label: 'Good' },
     9: { emoji: '😄', label: 'Terrific!' },
 };
 
-export default function MoodSelector({ 
-    onValueChange, 
+export default function MoodSelector({
+    onValueChange,
     initialValue = 5.0,
     precision = 'high',
-    showBenchmarks = true 
+    showBenchmarks = true,
 }: MoodSelectorProps) {
     const colors = useThemeColors();
-    const [selectedValue, setSelectedValue] = useState(initialValue);
+    const { itemWidth, values, snap, format, valueFromOffset, offsetFromValue } =
+        useMoodScale({ precision });
+    const [selectedValue, setSelectedValue] = useState(() => snap(initialValue));
     const scrollViewRef = useRef<ScrollView>(null);
-    
-    const scale = precision === 'high' ? 2 : 1;
-    const length = (10 * scale) + 1;
-    const values = Array.from({ length }, (_, i) => (i / scale).toFixed(precision === 'high' ? 1 : 0));
-    
-    const itemWidth = 60;
     const hasInitialized = useRef(false);
 
-    const styles = useMemo(() => StyleSheet.create({
-        container: {
-            height: 160, // Increased height to accommodate emojis
-            width: '100%',
-            backgroundColor: colors.background,
-            alignItems: 'center', // Center the content horizontally
-        },
-        scrollContent: {
-            paddingHorizontal: 160,
-            alignItems: 'center', // Center items in the ScrollView
-        },
-        itemContainer: {
-            width: itemWidth,
-            height: 100, // Fixed height for the item container
-            alignItems: 'center',
-        },
-        numberContainer: {
-            position: 'absolute',
-            bottom: 0,
-            width: '100%',
-            alignItems: 'center',
-            height: 60, // Fixed height for number section
-            justifyContent: 'center',
-        },
-        benchmarkContainer: {
-            position: 'absolute',
-            top: 0,
-            width: '100%',
-            alignItems: 'center',
-            opacity: 0.6,
-            paddingTop: 10,
-        },
-        number: {
-            color: colors.textSecondary,
-            fontSize: 16,
-        },
-        mainNumber: {
-            fontSize: 27,
-            fontWeight: 'bold',
-            color: colors.textSecondary,
-        },
-        selectedNumber: {
-            color: colors.text,
-            fontSize: 36,
-            fontWeight: 'bold',
-        },
-        selectedText: {
-            color: colors.text,
-            fontSize: 25,
-            textAlign: 'center',
-            marginVertical: 10,
-        },
-        emoji: {
-            fontSize: 20,
-            marginBottom: 2,
-        },
-        benchmarkLabel: {
-            color: colors.textSecondary,
-            fontSize: 10,
-            textAlign: 'center',
-        },
-    }), [colors]);
+    const styles = useMemo(
+        () =>
+            StyleSheet.create({
+                container: {
+                    height: 160,
+                    width: '100%',
+                    backgroundColor: colors.background,
+                    alignItems: 'center',
+                },
+                scrollContent: {
+                    paddingHorizontal: 160,
+                    alignItems: 'center',
+                },
+                itemContainer: {
+                    width: itemWidth,
+                    height: 100,
+                    alignItems: 'center',
+                },
+                numberContainer: {
+                    position: 'absolute',
+                    bottom: 0,
+                    width: '100%',
+                    alignItems: 'center',
+                    height: 60,
+                    justifyContent: 'center',
+                },
+                benchmarkContainer: {
+                    position: 'absolute',
+                    top: 0,
+                    width: '100%',
+                    alignItems: 'center',
+                    opacity: 0.6,
+                    paddingTop: 10,
+                },
+                number: {
+                    color: colors.textSecondary,
+                    fontSize: 16,
+                },
+                mainNumber: {
+                    fontSize: 27,
+                    fontWeight: 'bold',
+                    color: colors.textSecondary,
+                },
+                selectedNumber: {
+                    color: colors.text,
+                    fontSize: 36,
+                    fontWeight: 'bold',
+                },
+                selectedText: {
+                    color: colors.text,
+                    fontSize: 25,
+                    textAlign: 'center',
+                    marginVertical: 10,
+                },
+                emoji: {
+                    fontSize: 20,
+                    marginBottom: 2,
+                },
+                benchmarkLabel: {
+                    color: colors.textSecondary,
+                    fontSize: 10,
+                    textAlign: 'center',
+                },
+            }),
+        [colors, itemWidth]
+    );
 
     useEffect(() => {
         if (!hasInitialized.current) {
-            const initialOffset = initialValue * scale * itemWidth;
+            const initialOffset = offsetFromValue(initialValue);
             setTimeout(() => {
-                scrollViewRef.current?.scrollTo({
-                    x: initialOffset,
-                    animated: false,
-                });
+                scrollViewRef.current?.scrollTo({ x: initialOffset, animated: false });
                 hasInitialized.current = true;
             }, 100);
         }
-    }, [initialValue, scale, itemWidth]);
+    }, [initialValue, offsetFromValue]);
 
     const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
         const offsetX = event.nativeEvent.contentOffset.x;
-        const selectedIndex = Math.round(offsetX / itemWidth);
-        const newValue = Math.max(0, Math.min(10, selectedIndex / scale));
-        
-        const roundedValue = precision === 'high' 
-            ? Math.round(newValue * 2) / 2
-            : Math.round(newValue);
-            
-        if (roundedValue !== selectedValue) {
-            setSelectedValue(roundedValue);
-            onValueChange(roundedValue);
+        const newValue = valueFromOffset(offsetX);
+        if (newValue !== selectedValue) {
+            setSelectedValue(newValue);
+            onValueChange(newValue);
         }
     };
 
@@ -129,7 +123,6 @@ export default function MoodSelector({
         if (!showBenchmarks) return null;
         const benchmark = moodBenchmarks[value];
         if (!benchmark) return null;
-
         return (
             <View style={styles.benchmarkContainer}>
                 <Text style={styles.emoji}>{benchmark.emoji}</Text>
@@ -140,9 +133,7 @@ export default function MoodSelector({
 
     return (
         <View style={styles.container}>
-            <Text style={styles.selectedText}>
-                Selected: {precision === 'high' ? selectedValue.toFixed(1) : selectedValue.toFixed(0)}
-            </Text>
+            <Text style={styles.selectedText}>Selected: {format(selectedValue)}</Text>
             <ScrollView
                 ref={scrollViewRef}
                 horizontal
@@ -152,14 +143,17 @@ export default function MoodSelector({
                 contentContainerStyle={styles.scrollContent}
                 snapToInterval={itemWidth}
                 decelerationRate="fast"
-                style={{ width: '100%' }} // Make sure ScrollView takes full width
+                style={{ width: '100%' }}
             >
                 {values.map((value) => {
                     const numericValue = parseFloat(value);
                     const isMainNumber = Number.isInteger(numericValue);
-                    const displayValue = precision === 'high' ? 
-                        (isMainNumber ? numericValue.toFixed(0) : value) : 
-                        numericValue.toFixed(0);
+                    const displayValue =
+                        precision === 'high'
+                            ? isMainNumber
+                                ? numericValue.toFixed(0)
+                                : value
+                            : numericValue.toFixed(0);
 
                     return (
                         <View key={value} style={styles.itemContainer}>
@@ -182,3 +176,4 @@ export default function MoodSelector({
         </View>
     );
 }
+

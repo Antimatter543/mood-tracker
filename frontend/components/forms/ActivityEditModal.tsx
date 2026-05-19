@@ -25,7 +25,6 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
     onUpdate,
     db
 }) => {
-    console.log("YOOOOO WE ARE IN ACTIVITYEDITMODAL", activity);
     const colors = useThemeColors();
     const [activityName, setActivityName] = useState(activity?.name || '');
     const [error, setError] = useState('');
