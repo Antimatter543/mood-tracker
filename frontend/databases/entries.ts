@@ -1,0 +1,154 @@
+import { SQLiteDatabase } from 'expo-sqlite';
+import { Activity, DatabaseResult, MoodEntry } from '@/components/types';
+import { getDefaultEntryDate } from '@/databases/dateHelpers';
+
+/**
+ * CRUD for mood entries.
+ *
+ * Storage contract: `entries.date` is stored as a UTC ISO-8601 string (see
+ * `dateHelpers.ts`). Callers that want to query by user-local day must use
+ * `startOfLocalDay` / `endOfLocalDay` to compute the UTC range — do NOT
+ * use SQLite's `date('now')` or `date(entries.date)`, which assume UTC.
+ */
+
+/**
+ * Filter `activityIds` down to those that actually exist in the database.
+ *
+ * Defensively re-validates that every input is an integer before splicing
+ * it into the IN-clause. Callers' types already promise `number[]`, but
+ * `filter(Number.isInteger)` makes the SQL-injection-safety argument
+ * self-evident even if some upstream cast slips a string through.
+ */
+export async function filterValidActivityIds(
+  db: SQLiteDatabase,
+  activityIds: number[]
+): Promise<number[]> {
+  if (!activityIds.length) return [];
+
+  // Defensive: even though the caller's type is `number[]`, JS doesn't
+  // enforce that at runtime. Drop anything that isn't a real integer so
+  // the IN-list below can't get SQL-injected.
+  const safeIds = activityIds.filter((n) => Number.isInteger(n));
+  if (!safeIds.length) return [];
+
+  try {
+    const idList = safeIds.join(',');
+    const existingActivities = await db.getAllAsync<{ id: number }>(
+      `SELECT id FROM activities WHERE id IN (${idList})`
+    );
+    return existingActivities.map((activity) => activity.id);
+  } catch (error) {
+    console.error('Error filtering activity IDs:', error);
+    return [];
+  }
+}
+
+/**
+ * Insert a mood entry plus its activity links in a single transaction.
+ *
+ * Validation rules:
+ * - mood must be a number in [0, 10] (NaN rejected)
+ * - activityIds are filtered against the activities table *inside* the
+ *   same transaction, so a concurrent delete can't let a stale ID slip
+ *   through (the previous implementation did this outside the txn).
+ * - If some activities became invalid mid-call, we still succeed and just
+ *   warn — losing the link is preferable to losing the entry.
+ */
+export async function addMoodEntry(
+  db: SQLiteDatabase,
+  mood: number,
+  activityIds: number[],
+  notes: string,
+  date?: string
+): Promise<DatabaseResult> {
+  try {
+    if (isNaN(mood) || mood < 0 || mood > 10) {
+      return {
+        success: false,
+        message: 'Please enter a valid mood score between 0 and 10',
+      };
+    }
+
+    const entryDate = date || getDefaultEntryDate();
+
+    await db.withTransactionAsync(async () => {
+      // Filter inside the transaction so concurrent activity deletes can't
+      // produce dangling FK references.
+      const validActivityIds = await filterValidActivityIds(db, activityIds);
+
+      if (validActivityIds.length !== activityIds.length) {
+        console.warn(
+          `Some activities (${activityIds.length - validActivityIds.length}) were skipped because they no longer exist.`
+        );
+      }
+
+      const result = await db.runAsync(
+        `INSERT INTO entries (mood, notes, date) VALUES (?, ?, ?);`,
+        [mood, notes, entryDate]
+      );
+
+      const entryId = result.lastInsertRowId;
+
+      for (const activityId of validActivityIds) {
+        await db.runAsync(
+          `INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?);`,
+          [entryId, activityId]
+        );
+      }
+    });
+
+    return {
+      success: true,
+      message: 'Entry added successfully!',
+    };
+  } catch (error) {
+    console.error('Error adding mood:', error);
+    return {
+      success: false,
+      message: 'Error adding entry',
+    };
+  }
+}
+
+/**
+ * Fetch every mood entry with its activity list, newest first.
+ *
+ * Returns an empty array on DB error rather than throwing — callers
+ * generally render lists and an empty list is a reasonable failure mode.
+ */
+export async function getMoodEntries(db: SQLiteDatabase): Promise<MoodEntry[]> {
+  try {
+    let entriesWithActivities: MoodEntry[] = [];
+
+    await db.withTransactionAsync(async () => {
+      const rawEntries = await db.getAllAsync<Omit<MoodEntry, 'activities'>>(
+        'SELECT * FROM entries ORDER BY date DESC'
+      );
+
+      entriesWithActivities = await Promise.all(
+        rawEntries.map(async (entry) => {
+          const activities = await db.getAllAsync<Activity>(
+            `
+              SELECT a.id, a.name, a.group_id, a.icon_name
+              FROM activities a
+              JOIN entry_activities ea ON ea.activity_id = a.id
+              WHERE ea.entry_id = ?
+              ORDER BY a.group_id, a.name
+            `,
+            [entry.id]
+          );
+
+          return {
+            ...entry,
+            activities,
+          };
+        })
+      );
+    });
+
+    return entriesWithActivities;
+  } catch (error) {
+    console.error('Error fetching mood entries:', error);
+    return [];
+  }
+}
