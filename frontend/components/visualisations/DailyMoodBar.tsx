@@ -7,6 +7,7 @@ import { useDataContext } from '@/context/DataContext';
 import { Card } from '@/components/Card';
 import { CHART_PADDING, SCREEN_WIDTH, useChartConfig } from './chartUtils';
 import InfoBubble from '../InfoBubble';
+import { buildDailyBarData, type DailyMoodRow } from './transforms/dailyBar';
 
 // const screenWidth = Dimensions.get('window').width;
 // const chartWidth = screenWidth - 48; // Adjust for padding
@@ -23,13 +24,6 @@ const DailyMoodChart = () => {
       datasets: { data: number[]; withDots: boolean; }[];
       counts: number[];
   } | null>(null);
-
-  // Define the type for our database query result
-  interface DailyMoodResult {
-      day_of_week: number;
-      avg_mood: number;
-      entry_count: number;
-  }
 
   const styles = useMemo(() => StyleSheet.create({
     loadingText: {
@@ -73,35 +67,26 @@ const DailyMoodChart = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Get average mood by day of week
-        const results = await db.getAllAsync<DailyMoodResult>(`
-          SELECT 
+        // SQLite's strftime('%w') returns 0=Sun..6=Sat.
+        // Note: strftime treats the stored datetime as UTC. For per-day-of-week
+        // aggregates this is a small leak (an entry made at 11pm Sun local can
+        // count as Mon under UTC) — fix lives with the entries-table layer,
+        // not here. Flagged in the brief; tracked separately.
+        const rows = await db.getAllAsync<DailyMoodRow>(`
+          SELECT
             CAST(strftime('%w', date) AS INTEGER) as day_of_week,
             ROUND(AVG(mood), 1) as avg_mood,
             COUNT(*) as entry_count
-          FROM entries 
-          GROUP BY day_of_week 
+          FROM entries
+          GROUP BY day_of_week
           ORDER BY day_of_week
         `);
 
-        // Create array for all days of week (0-6)
-        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        const moodData = new Array(7).fill(0);
-        const counts = new Array(7).fill(0);
-
-        // Fill in the data we have
-        results.forEach(row => {
-          moodData[row.day_of_week] = row.avg_mood;
-          counts[row.day_of_week] = row.entry_count;
-        });
-
+        const built = buildDailyBarData(rows);
         setChartData({
-          labels: dayNames,
-          datasets: [{
-            data: moodData,
-            withDots: true,
-          }],
-          counts: counts // Store counts for display
+          labels: built.labels,
+          datasets: [{ data: built.data, withDots: true }],
+          counts: built.counts,
         });
       } catch (error) {
         console.error('Error fetching daily mood data:', error);

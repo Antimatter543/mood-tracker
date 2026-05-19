@@ -6,6 +6,7 @@ import { useThemeColors } from '@/styles/global';
 import { useDataContext } from '@/context/DataContext';
 import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
+import { buildHeatmapGrid, type HeatmapInput } from './transforms/heatmap';
 
 const screenWidth = Dimensions.get('window').width;
 const PADDING = 24;
@@ -151,100 +152,29 @@ const CustomHeatmap: React.FC = () => {
         ));
     };
 
-    // Generate the calendar grid data
+    // Pure grid layout from the transform; the component is purely a pixel
+    // positioner on top.
     const generateCalendarData = useMemo(() => {
-        if (moodData.length === 0) return { cells: [], monthLabels: [], totalWeeks: 0 };
-        
-        // Create a map for quick mood lookups
-        const moodByDate = new Map<string, number | null>();
-        moodData.forEach(day => {
-            moodByDate.set(day.date, day.mood);
-        });
-        
-        // Find earliest and latest dates in our data
-        const earliestDate = new Date(moodData[0].date);
-        const latestDate = new Date(moodData[moodData.length - 1].date);
-        
-        // Find the first Monday before or on our earliest date to start the grid
-        const startDate = new Date(earliestDate);
-        const startDay = startDate.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-        
-        // If not Monday (1), adjust back to previous Monday
-        if (startDay !== 1) {
-            startDate.setDate(startDate.getDate() - (startDay === 0 ? 6 : startDay - 1));
+        const grid = buildHeatmapGrid(moodData as HeatmapInput[]);
+        if (grid.cells.length === 0) {
+            return { cells: [], monthLabels: [], totalWeeks: 0 };
         }
-        
-        // Calculate how many weeks we need
-        const totalDays = Math.ceil((latestDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-        const totalWeeks = Math.ceil(totalDays / 7);
-        
-        // Generate cells for the calendar
-        const cells: Array<{
-            date: string,
-            dayOfMonth: number,
-            mood: number | null,
-            x: number,
-            y: number,
-            inRange: boolean
-        }> = [];
-        
-        // Track months for labels
-        const monthLabels: Array<{
-            month: string,
-            x: number,
-            weekIndex: number
-        }> = [];
-        const seenMonths = new Set<string>();
-        
-        // Fill in the calendar grid
-        for (let week = 0; week < totalWeeks; week++) {
-            let firstDayOfWeekInMonth = null;
-            
-            for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
-                // Create date for this cell
-                const cellDate = new Date(startDate);
-                cellDate.setDate(startDate.getDate() + (week * 7) + dayOfWeek);
-                
-                // Check if this date is within our data range
-                const dateStr = cellDate.toISOString().split('T')[0];
-                const inRange = cellDate >= earliestDate && cellDate <= latestDate;
-                
-                // Track first Monday of each month for label placement
-                if (dayOfWeek === 0) { // Monday
-                    const monthKey = `${cellDate.getFullYear()}-${cellDate.getMonth()}`;
-                    if (!seenMonths.has(monthKey)) {
-                        firstDayOfWeekInMonth = cellDate.getDate();
-                    }
-                }
-                
-                // Add month label if it's the first Monday of a new month
-                if (dayOfWeek === 0 && firstDayOfWeekInMonth !== null) {
-                    const month = cellDate.toLocaleDateString('en-US', { month: 'short' });
-                    const monthKey = `${cellDate.getFullYear()}-${cellDate.getMonth()}`;
-                    
-                    if (!seenMonths.has(monthKey)) {
-                        seenMonths.add(monthKey);
-                        monthLabels.push({
-                            month,
-                            x: LEFT_PADDING + (week * (SQUARE_SIZE + GAP_SIZE)),
-                            weekIndex: week
-                        });
-                    }
-                }
-                
-                // Add cell to our grid
-                cells.push({
-                    date: dateStr,
-                    dayOfMonth: cellDate.getDate(),
-                    mood: moodByDate.get(dateStr) || null,
-                    x: LEFT_PADDING + (week * (SQUARE_SIZE + GAP_SIZE)),
-                    y: TOP_PADDING + (dayOfWeek * (SQUARE_SIZE + GAP_SIZE)),
-                    inRange: true // Show all cells, not just the data range
-                });
-            }
-        }
-        
-        return { cells, monthLabels, totalWeeks };
+        return {
+            cells: grid.cells.map((c) => ({
+                date: c.date,
+                dayOfMonth: c.dayOfMonth,
+                mood: c.mood,
+                x: LEFT_PADDING + c.weekIndex * (SQUARE_SIZE + GAP_SIZE),
+                y: TOP_PADDING + c.dayIndex * (SQUARE_SIZE + GAP_SIZE),
+                inRange: true,
+            })),
+            monthLabels: grid.monthLabels.map((m) => ({
+                month: m.month,
+                x: LEFT_PADDING + m.weekIndex * (SQUARE_SIZE + GAP_SIZE),
+                weekIndex: m.weekIndex,
+            })),
+            totalWeeks: grid.totalWeeks,
+        };
     }, [moodData]);
 
     const renderMonthLabels = () => {

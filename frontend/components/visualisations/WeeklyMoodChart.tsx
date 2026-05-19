@@ -1,19 +1,60 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { Text, StyleSheet } from "react-native";
 import { LineChart } from "react-native-chart-kit";
 import { useThemeColors } from "@/styles/global";
 import { useSQLiteContext } from "expo-sqlite";
-import { CHART_PADDING, formatDayLabel, SCREEN_WIDTH, useChartConfig } from "./chartUtils";
+import { CHART_PADDING, SCREEN_WIDTH, useChartConfig } from "./chartUtils";
 import { useDataContext } from "@/context/DataContext";
-import { interpolateData } from "./chartUtils";
 import InfoBubble from "../InfoBubble";
 import { Card } from "../Card";
 import { useTimeframe } from "@/context/TimeframeContext";
+import {
+    buildWeeklyMoodChartData,
+    formatLabel,
+    type MoodAvgRow,
+    type Timeframe,
+} from "./transforms/weeklyMood";
+import {
+    startOfLocalDay,
+    endOfLocalDay,
+    addDays,
+    localDateString,
+} from "./transforms/dateHelpers";
 
-type MoodDataPoint = {
-    avgMood: number | null;
-    date: string;
+/**
+ * Returns the local-time window (start, end) covering the timeframe relative
+ * to the user's local "now". Replaces the UTC-anchored SQL `date('now')`.
+ */
+const computeWindow = (timeframe: Timeframe): { start: string; end: string } => {
+    const today = localDateString(new Date());
+    const end = endOfLocalDay(today);
+
+    switch (timeframe) {
+        case 'week':
+            return { start: startOfLocalDay(addDays(today, -7)), end };
+        case 'month':
+            return { start: startOfLocalDay(addDays(today, -30)), end };
+        case '3months':
+            return { start: startOfLocalDay(addDays(today, -90)), end };
+        case 'year':
+            return { start: startOfLocalDay(addDays(today, -365)), end };
+        case 'alltime':
+            // Effectively unbounded — pick a far-past anchor.
+            return { start: '1970-01-01 00:00:00', end };
+        default:
+            return { start: startOfLocalDay(addDays(today, -7)), end };
+    }
 };
+
+const QUERY = `
+    SELECT
+        date(date) as date,
+        ROUND(AVG(mood), 1) as avgMood
+    FROM entries
+    WHERE date BETWEEN ? AND ?
+    GROUP BY date(date)
+    ORDER BY date
+`;
 
 export function BasicLineChart() {
     const colors = useThemeColors();
@@ -22,8 +63,8 @@ export function BasicLineChart() {
 
     const db = useSQLiteContext();
     const { refreshCount } = useDataContext();
-    const { timeframe, timeframeCondition, timeframeDescription } = useTimeframe();
-    
+    const { timeframe, timeframeDescription } = useTimeframe();
+
     const [chartData, setChartData] = useState<{
         labels: string[];
         datasets: { data: number[]; withDots: boolean; }[];
@@ -31,177 +72,12 @@ export function BasicLineChart() {
     const [nullIndices, setNullIndices] = useState<number[]>([]);
     const [loading, setLoading] = useState(true);
 
-    // Determine the grouping and limits based on timeframe
-    const getDataQuery = () => {
-        switch(timeframe) {
-            case 'week':
-                return `
-                    WITH RECURSIVE dates(date) AS (
-                        SELECT date('now', '-7 days')
-                        UNION ALL
-                        SELECT date(date, '+1 day')
-                        FROM dates
-                        WHERE date < date('now')
-                    )
-                    SELECT 
-                        dates.date,
-                        ROUND(AVG(entries.mood), 1) as avgMood
-                    FROM dates 
-                    LEFT JOIN entries ON date(entries.date) = dates.date
-                    GROUP BY dates.date
-                    ORDER BY dates.date
-                `;
-            case 'month':
-                return `
-                    WITH 
-                    month_dates AS (
-                        SELECT 
-                            date('now', '-30 days') as start_date,
-                            date('now') as end_date
-                    ),
-                    weeks AS (
-                        SELECT 0 as week_num, date(start_date) as week_start FROM month_dates
-                        UNION ALL
-                        SELECT 1 as week_num, date(start_date, '+7 days') as week_start FROM month_dates
-                        UNION ALL
-                        SELECT 2 as week_num, date(start_date, '+14 days') as week_start FROM month_dates
-                        UNION ALL
-                        SELECT 3 as week_num, date(start_date, '+21 days') as week_start FROM month_dates
-                    )
-                    SELECT 
-                        weeks.week_start as date,
-                        ROUND(AVG(entries.mood), 1) as avgMood
-                    FROM weeks 
-                    LEFT JOIN entries ON 
-                        date(entries.date) >= date(weeks.week_start) AND 
-                        date(entries.date) < date(weeks.week_start, '+7 days') AND
-                        date(entries.date) <= (SELECT end_date FROM month_dates)
-                    GROUP BY weeks.week_num
-                    ORDER BY weeks.week_start
-                `;
-            case '3months':
-                return `
-                    WITH RECURSIVE dates(date) AS (
-                        SELECT date('now', '-90 days')
-                        UNION ALL
-                        SELECT date(date, '+5 days')
-                        FROM dates
-                        WHERE date < date('now')
-                    )
-                    SELECT 
-                        dates.date,
-                        ROUND(AVG(e.mood), 1) as avgMood
-                    FROM dates 
-                    LEFT JOIN entries e ON 
-                        date(e.date) >= date(dates.date) AND 
-                        date(e.date) < date(dates.date, '+5 days')
-                    GROUP BY dates.date
-                    ORDER BY dates.date
-                `;
-            case 'year':
-                return `
-                    WITH RECURSIVE months(date) AS (
-                        SELECT date('now', 'start of month', '-11 months')
-                        UNION ALL
-                        SELECT date(date, '+1 month')
-                        FROM months
-                        WHERE date < date('now', 'start of month')
-                    )
-                    SELECT 
-                        strftime('%Y-%m-%d', months.date) as date,
-                        ROUND(AVG(entries.mood), 1) as avgMood
-                    FROM months 
-                    LEFT JOIN entries ON strftime('%Y-%m', entries.date) = strftime('%Y-%m', months.date)
-                    GROUP BY strftime('%Y-%m', months.date)
-                    ORDER BY date
-                `;
-            case 'alltime':
-                return `
-                    WITH min_max_dates AS (
-                        SELECT 
-                            MIN(date(date)) as min_date,
-                            MAX(date(date)) as max_date
-                        FROM entries
-                    ),
-                    months AS (
-                        SELECT 
-                            date(min_date, 'start of month') as start_date
-                        FROM min_max_dates
-                        UNION ALL
-                        SELECT 
-                            date(start_date, '+1 month')
-                        FROM months, min_max_dates
-                        WHERE start_date < date(max_date, 'start of month')
-                    )
-                    SELECT 
-                        strftime('%Y-%m-%d', months.start_date) as date,
-                        ROUND(AVG(entries.mood), 1) as avgMood
-                    FROM months 
-                    LEFT JOIN entries ON strftime('%Y-%m', entries.date) = strftime('%Y-%m', months.start_date)
-                    GROUP BY strftime('%Y-%m', months.start_date)
-                    ORDER BY date
-                    LIMIT 24  -- Limit to 2 years max for all time view
-                `;
-            default:
-                return `
-                    WITH RECURSIVE dates(date) AS (
-                        SELECT date('now', '-7 days')
-                        UNION ALL
-                        SELECT date(date, '+1 day')
-                        FROM dates
-                        WHERE date < date('now')
-                    )
-                    SELECT 
-                        dates.date,
-                        ROUND(AVG(entries.mood), 1) as avgMood
-                    FROM dates 
-                    LEFT JOIN entries ON date(entries.date) = dates.date
-                    GROUP BY dates.date
-                    ORDER BY dates.date
-                `;
-        }
-    };
-
-    // Format labels based on timeframe
-    const formatDateLabel = (dateStr: string, index: number, totalPoints: number) => {
-        const date = new Date(dateStr);
-        
-        switch(timeframe) {
-            case 'week':
-                return formatDayLabel(dateStr); // Short day name (e.g., "Mon")
-                
-            case 'month':
-                // For month view, show week labels (Week 1-4)
-                const weekNum = index + 1;
-                return `Week ${weekNum}`;
-                
-            case '3months':
-                // For 3-month view, show month names at the start of each month
-                const day = date.getDate();
-                const isFirstOfMonth = day <= 5 && date.getDate() === 1;
-                
-                if (isFirstOfMonth) {
-                    return date.toLocaleDateString(undefined, { month: 'short' });
-                } else if (index === 0 || index === totalPoints - 1) {
-                    // Show something at the start and end for context
-                    return `${date.getMonth() + 1}/${date.getDate()}`;
-                }
-                
-                // Show date occasionally throughout
-                if (index % 3 === 0) {
-                    return `${date.getMonth() + 1}/${date.getDate()}`;
-                }
-                return '';
-                
-            case 'year':
-            case 'alltime':
-                // For longer periods, just show month names
-                return date.toLocaleDateString(undefined, { month: 'short' });
-                
-            default:
-                return formatDayLabel(dateStr);
-        }
-    };
+    // Stable label formatter — captures only `timeframe`, so it's safe in deps.
+    const formatDateLabel = useCallback(
+        (dateStr: string, index: number, totalPoints: number) =>
+            formatLabel(dateStr, index, totalPoints, timeframe as Timeframe),
+        [timeframe],
+    );
 
     // Dynamic chart title based on timeframe
     const getChartTitle = () => {
@@ -248,38 +124,31 @@ export function BasicLineChart() {
         const fetchData = async () => {
             setLoading(true);
             try {
-                const query = getDataQuery();
-                const results = await db.getAllAsync<MoodDataPoint>(query);
-                
-                if (results.length === 0) {
+                const { start, end } = computeWindow(timeframe as Timeframe);
+                const rows = await db.getAllAsync<MoodAvgRow>(QUERY, [start, end]);
+
+                const built = buildWeeklyMoodChartData(rows, timeframe as Timeframe);
+                if (built.isEmpty) {
                     setChartData(null);
                     setLoading(false);
                     return;
                 }
-                
-                const moodValues = results.map(row => row.avgMood);
-                const labels = results.map((row, index) => 
-                    formatDateLabel(row.date, index, results.length)
-                );
-                
-                const { data: interpolatedData, nullIndices: nulls } = interpolateData(moodValues);
 
-                setNullIndices(nulls);
+                // Apply timeframe-aware label override (formatLabel inside the
+                // transform handles week/month/3months/year/alltime). The
+                // transform calls the inline formatter with no closure leak.
+                const labels = rows.map((r, i) =>
+                    formatDateLabel(r.date, i, rows.length),
+                );
+
+                setNullIndices(built.nullIndices);
                 setChartData({
                     labels,
-                    datasets: [{
-                        data: interpolatedData,
-                        withDots: true // Always show dots for all timeframes
-                    },
-                    {
-                        data: [10],
-                        withDots: false
-                    },
-                    {
-                        data: [0],
-                        withDots: false
-                    },
-                ]
+                    datasets: [
+                        { data: built.data, withDots: true },
+                        { data: [10], withDots: false },
+                        { data: [0], withDots: false },
+                    ],
                 });
             } catch (error) {
                 console.error('Error fetching mood data:', error);
@@ -289,7 +158,7 @@ export function BasicLineChart() {
         };
 
         fetchData();
-    }, [db, refreshCount, timeframe]);
+    }, [db, refreshCount, timeframe, formatDateLabel]);
 
     // Get timeframe description for the chart
     const getTimerangeDescription = () => {
@@ -329,7 +198,7 @@ export function BasicLineChart() {
 
     return (
         <Card>
-            <InfoBubble 
+            <InfoBubble
                 text={`Shows your average mood over the ${getTimerangeDescription()}. The green line tracks your mood changes, helping you spot trends and patterns.`}
                 position="top-right"
             />
@@ -343,16 +212,16 @@ export function BasicLineChart() {
                 yAxisInterval={2}
                 segments={5}
                 withVerticalLines={false}
-                withDots={true} // Always show dots
-                getDotColor={(dataPoint, index) => {
+                withDots={true}
+                getDotColor={(_dataPoint, index) => {
                     if (nullIndices.includes(index)) {
                         return '#e74c3c';  // Soft red for missing data
                     }
-                    return colors.accent;  // Use theme accent color for recorded moods
+                    return colors.accent;
                 }}
                 chartConfig={{
                     ...chartConfig,
-                    strokeWidth: 2, // Consistent line thickness for all timeframes
+                    strokeWidth: 2,
                 }}
                 bezier
                 fromZero

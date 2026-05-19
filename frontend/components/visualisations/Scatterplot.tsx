@@ -6,9 +6,9 @@ import { useThemeColors } from '@/styles/global';
 import { useDataContext } from '@/context/DataContext';
 import InfoBubble from '../InfoBubble';
 import { MoodEntry } from '../types';
+import { bucketMoodHistogram, NUM_BUCKETS } from './transforms/scatter';
 
 const PLOT_HEIGHT = 200;
-const NUM_BUCKETS = 10;
 
 const MoodHistogram = () => {
     const colors = useThemeColors();
@@ -121,29 +121,20 @@ const MoodHistogram = () => {
         const fetchMoodData = async () => {
             try {
                 const entries = await db.getAllAsync<MoodEntry>(`
-                    SELECT mood FROM entries 
+                    SELECT mood FROM entries
                     WHERE date >= date('now', '-30 days')
                     ORDER BY mood
                 `);
-    
-                const newBuckets = Array(NUM_BUCKETS).fill(0);
-    
-                entries.forEach(entry => {
-                    // Fix the bucketing logic to properly handle decimal values
-                    // For a mood scale of 0-10 with 11 buckets (0, 1, 2, ..., 10)
-                    // We want 7.5 to go into bucket 7, not 8
-                    const bucketIndex = Math.min(Math.floor(entry.mood), NUM_BUCKETS - 1);
-                    newBuckets[bucketIndex]++;
-                });
-    
-                const max = Math.max(...newBuckets);
+
+                const newBuckets = bucketMoodHistogram(entries);
+                const max = newBuckets.length > 0 ? Math.max(...newBuckets) : 0;
                 setBuckets(newBuckets);
                 setMaxFrequency(max);
             } catch (error) {
                 console.error('Error fetching mood data:', error);
             }
         };
-    
+
         fetchMoodData();
     }, [db, refreshCount]);
 

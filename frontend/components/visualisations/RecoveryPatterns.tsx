@@ -4,30 +4,13 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { Card } from '@/components/Card';
 import { useThemeColors } from '@/styles/global';
 import { useDataContext } from '@/context/DataContext';
-import _ from 'lodash';
 import InfoBubble from '../InfoBubble';
+import {
+  analyseRecoveryPatterns,
+  type MoodActivityRow,
+  type RecoveryEpisode,
+} from './transforms/recoveryPatterns';
 
-// Define what constitutes a "recovery episode"
-const RECOVERY_THRESHOLD = 6.0; // Mood above this is considered "recovered"
-const DIP_THRESHOLD = 4.0; // Mood below this triggers a recovery episode
-const MIN_RECOVERY_DAYS = 2; // Minimum days of good mood to count as recovered
-
-type Activity = {
-  id: number;
-  name: string;
-  count: number;
-  avgImprovement: number;
-};
-
-type RecoveryEpisode = {
-  startDate: string;
-  endDate: string | null;
-  startMood: number;
-  currentMood: number;
-  activities: Activity[];
-  durationDays: number;
-  recovered: boolean;
-};
 const RecoveryAnalysis = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
@@ -95,16 +78,16 @@ const RecoveryAnalysis = () => {
     }), [colors]);
 
   useEffect(() => {
-    const analyzeRecoveryPatterns = async () => {
+    const run = async () => {
       try {
-        // Get mood entries with activities for the last 30 days
-        const entries = await db.getAllAsync<{
-          date: string;
-          mood: number;
-          activity_names: string;
-        }>(`
+        // Last 30 days of entries with activity names. Note: the date filter
+        // here is still UTC-anchored; the windowing issue is being tackled
+        // chart-by-chart and this surface will move to parameterised dates
+        // in a follow-up. For now the analysis works on whatever the DB
+        // returns; the transform is window-agnostic.
+        const entries = await db.getAllAsync<MoodActivityRow>(`
           WITH MoodActivities AS (
-            SELECT 
+            SELECT
               e.date,
               e.mood,
               GROUP_CONCAT(a.name) as activity_names
@@ -118,75 +101,17 @@ const RecoveryAnalysis = () => {
           SELECT * FROM MoodActivities
         `);
 
-        // Process entries to find recovery episodes
-        let episodes: RecoveryEpisode[] = [];
-        let currentEp: RecoveryEpisode | null = null;
-        
-        for (let i = 0; i < entries.length; i++) {
-          const entry = entries[i];
-          const mood = entry.mood;
-          
-          if (!currentEp && mood <= DIP_THRESHOLD) {
-            // Start new episode
-            currentEp = {
-              startDate: entry.date,
-              endDate: null,
-              startMood: mood,
-              currentMood: mood,
-              activities: [],
-              durationDays: 0,
-              recovered: false
-            };
-          } else if (currentEp) {
-            currentEp.durationDays++;
-            currentEp.currentMood = mood;
-            
-            // Check if recovered
-            if (mood >= RECOVERY_THRESHOLD) {
-              let sustainedRecovery = true;
-              // Check next MIN_RECOVERY_DAYS days maintain good mood
-              for (let j = 1; j < MIN_RECOVERY_DAYS && i + j < entries.length; j++) {
-                if (entries[i + j].mood < RECOVERY_THRESHOLD) {
-                  sustainedRecovery = false;
-                  break;
-                }
-              }
-              
-              if (sustainedRecovery) {
-                currentEp.recovered = true;
-                currentEp.endDate = entry.date;
-                episodes.push(currentEp);
-                currentEp = null;
-              }
-            }
-          }
-        }
-
-        // Calculate statistics
-        const completedEpisodes = episodes.filter(ep => ep.endDate);
-        const recoveredEpisodes = completedEpisodes.filter(ep => ep.recovered);
-        
-        setSuccessRate(
-          completedEpisodes.length > 0 
-            ? (recoveredEpisodes.length / completedEpisodes.length) * 100 
-            : 0
-        );
-        
-        setAvgDuration(
-          completedEpisodes.length > 0
-            ? _.meanBy(completedEpisodes, 'durationDays')
-            : 0
-        );
-
-        setHistoricalEpisodes(episodes.filter(ep => ep.endDate));
-        setCurrentEpisode(currentEp);
-        
+        const result = analyseRecoveryPatterns(entries);
+        setSuccessRate(result.successRate);
+        setAvgDuration(result.avgDuration);
+        setHistoricalEpisodes(result.historicalEpisodes);
+        setCurrentEpisode(result.currentEpisode);
       } catch (error) {
         console.error('Error analyzing recovery patterns:', error);
       }
     };
 
-    analyzeRecoveryPatterns();
+    run();
   }, [db, refreshCount]);
 
   return (
