@@ -1,4 +1,4 @@
-import { colors, useThemeColors } from "@/styles/global";
+import { ThemeColors, useThemeColors } from "@/styles/global";
 import * as SQLite from "expo-sqlite";
 
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -69,7 +69,7 @@ type GroupActionMenuProps = {
     position: { x: number, y: number };
 };
 
-const useStyles = (colors: any) => useMemo(() => StyleSheet.create({
+const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
     // Keep the base container styles
     scrollContainer: {
         flex: 1,
@@ -269,7 +269,12 @@ const useStyles = (colors: any) => useMemo(() => StyleSheet.create({
 }), [colors]);
 
 
-export const renderActivityIcon = (activity, colors, size = 24, selectedColor = '#fff') => {
+export const renderActivityIcon = (
+    activity: Activity,
+    colors: ThemeColors,
+    size = 24,
+    selectedColor = '#fff'
+) => {
     // Check if this is an emoji icon
     if (activity.icon_family === 'Emoji') {
         return (
@@ -282,9 +287,9 @@ export const renderActivityIcon = (activity, colors, size = 24, selectedColor = 
             </Text>
         );
     }
-    
+
     // For regular icon families
-    const IconComponent = ICON_FAMILIES[activity.icon_family]?.component;
+    const IconComponent = ICON_FAMILIES[activity.icon_family as IconFamilyType]?.component;
     
     if (!IconComponent) {
         // Fallback if no valid icon family
@@ -292,10 +297,10 @@ export const renderActivityIcon = (activity, colors, size = 24, selectedColor = 
     }
 
     return (
-        <IconComponent.default 
-            name={activity.icon_name} 
-            size={size} 
-            color={selectedColor} 
+        <IconComponent.default
+            name={activity.icon_name as any}
+            size={size}
+            color={selectedColor}
         />
     );
 };
@@ -405,7 +410,7 @@ const AddActivityModal = ({ visible, onClose, onAdd, groupName }: AddActivityMod
                         visible={iconPickerVisible}
                         onClose={() => setIconPickerVisible(false)}
                         onSelect={(family, name) => {
-                            setSelectedIconFamily(family);
+                            setSelectedIconFamily(family as IconFamilyType);
                             setSelectedIconName(name);
                         }}
                         currentFamily={selectedIconFamily}

@@ -401,8 +401,12 @@ export const IconPicker: React.FC<IconPickerProps> = ({
     };
 
     const renderIcon = (iconInfo: IconInfo) => {
-        const IconComponent = ICON_FAMILIES[iconInfo.family].component;
+        const IconComponent = ICON_FAMILIES[iconInfo.family]?.component;
         const isSelected = currentFamily === iconInfo.family && currentIcon === iconInfo.name;
+
+        if (!IconComponent) {
+            return null;
+        }
 
         return (
             <Pressable
@@ -416,8 +420,11 @@ export const IconPicker: React.FC<IconPickerProps> = ({
                     onClose();
                 }}
             >
+                {/* Icon names are strongly typed per family but the picker
+                    iterates a heterogeneous list; cast to `any` is the
+                    pragmatic fix without rewriting the catalog. */}
                 <IconComponent.default
-                    name={iconInfo.name}
+                    name={iconInfo.name as any}
                     size={24}
                     color={isSelected ? '#fff' : colors.text}
                 />

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { SQLiteDatabase, useSQLiteContext } from 'expo-sqlite';
 import { updateSetting as updateDbSetting, getSetting } from '@/databases/database';
-import { SETTINGS_REGISTRY, SettingsContextType, Settings } from '@/databases/settings'; // Import Settings from your file
+import { SETTINGS_REGISTRY, SettingsContextType, Settings, SettingKey } from '@/databases/settings'; // Import Settings from your file
 import { ActivityIndicator, View } from 'react-native';
 
 
@@ -49,26 +49,31 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     );
   }
 
-// Cringe errors idk
+// Load all settings from the DB, falling back to registry defaults. The
+// `as any` cast at the assignment site is necessary because Settings is a
+// strict union per key — TS can't narrow `value` through the switch back to
+// the specific field's type, but `loadedSettings` typed as Settings preserves
+// the public API.
 async function loadSettings(db: SQLiteDatabase): Promise<Settings> {
-  const loadedSettings = { ...defaultSettings };
-  
+  const loadedSettings: Settings = { ...defaultSettings };
+
   for (const [key, config] of Object.entries(SETTINGS_REGISTRY)) {
     const value = await getSetting(db, key);
-    
+    const k = key as SettingKey;
+
     // Convert string value to appropriate type
     switch (typeof config.default) {
       case 'boolean':
-        loadedSettings[key] = value === 'true';
+        (loadedSettings as any)[k] = value === 'true';
         break;
       case 'number':
-        loadedSettings[key] = parseFloat(value);
+        (loadedSettings as any)[k] = parseFloat(value);
         break;
       default:
-        loadedSettings[key] = value;
+        (loadedSettings as any)[k] = value;
     }
   }
-  
+
   return loadedSettings;
 }
 
