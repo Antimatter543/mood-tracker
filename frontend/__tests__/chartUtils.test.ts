@@ -19,22 +19,40 @@ describe('interpolateData', () => {
     expect(nullIndices).toEqual([1, 2]);
   });
 
-  it('handles leading null (no prev to interpolate from): data[0] should be 0', () => {
+  it('carries leading null forward from the first known value (was 0; now matches first real point)', () => {
     const { data, nullIndices } = interpolateData([null, 2, 3]);
-    expect(data[0]).toBe(0);
+    expect(data[0]).toBe(2);
     expect(nullIndices).toEqual([0]);
   });
 
-  it('handles trailing null (no next to interpolate from): data[2] should be 0', () => {
+  it('carries trailing null backward from the last known value (was 0; now matches last real point)', () => {
     const { data, nullIndices } = interpolateData([1, 2, null]);
-    expect(data[2]).toBe(0);
+    expect(data[2]).toBe(2);
     expect(nullIndices).toEqual([2]);
   });
 
-  it('handles all nulls: [null,null,null] -> [0,0,0]', () => {
+  it('handles multiple leading nulls', () => {
+    const { data, nullIndices } = interpolateData([null, null, 5, 6]);
+    expect(data).toEqual([5, 5, 5, 6]);
+    expect(nullIndices).toEqual([0, 1]);
+  });
+
+  it('handles multiple trailing nulls', () => {
+    const { data, nullIndices } = interpolateData([5, 6, null, null]);
+    expect(data).toEqual([5, 6, 6, 6]);
+    expect(nullIndices).toEqual([2, 3]);
+  });
+
+  it('handles all nulls: [null,null,null] -> [0,0,0] and all indices flagged', () => {
     const { data, nullIndices } = interpolateData([null, null, null]);
     expect(data).toEqual([0, 0, 0]);
     expect(nullIndices).toEqual([0, 1, 2]);
+  });
+
+  it('handles single non-null point (no interpolation possible at edges)', () => {
+    const { data, nullIndices } = interpolateData([null, 4, null]);
+    expect(data).toEqual([4, 4, 4]);
+    expect(nullIndices).toEqual([0, 2]);
   });
 
   it('handles no nulls: [1,2,3] -> [1,2,3]', () => {

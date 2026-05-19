@@ -6,12 +6,13 @@ import { useThemeColors } from '@/styles/global';
 import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
 import { useTimeframe } from '@/context/TimeframeContext';
+import {
+    computeActivityImpact,
+    barWidthFraction,
+    type ActivityImpactRow,
+} from './transforms/activityImpact';
 
-interface ActivityImpact {
-    activity_name: string;
-    impact: number;
-    entry_count: number;
-}
+type ActivityImpact = ActivityImpactRow;
 
 const ActivityImpactChart = () => {
     const colors = useThemeColors();
@@ -191,28 +192,17 @@ const ActivityImpactChart = () => {
         fetchActivityImpact();
     }, [db, refreshCount, timeframeCondition]);
 
-    // Separate positive and negative impacts
-    const { positiveImpacts, negativeImpacts } = useMemo(() => {
-        const positive = impactData.filter(item => item.impact > 0).slice(0, 5);
-        const negative = impactData.filter(item => item.impact < 0).slice(0, 5);
-        return { positiveImpacts: positive, negativeImpacts: negative };
-    }, [impactData]);
-
-    // Display data combines the top 5 positive and top 5 negative
-    const displayData = useMemo(() => {
-        return [...positiveImpacts, ...negativeImpacts.reverse()];
-    }, [positiveImpacts, negativeImpacts]);
-
-    // Calculate the maximum absolute impact for scaling
-    const maxImpact = Math.max(
-        ...impactData.map(d => Math.abs(d.impact) || 0),
-        0.1 // Minimum to avoid division by zero
+    // Delegate display ordering + scaling to the transform.
+    // The transform also filters NaN/null impacts (which can arise when the
+    // SQL subquery `AVG(mood)` is NULL over a zero-entry window).
+    const breakdown = useMemo(
+        () => computeActivityImpact(impactData, 5),
+        [impactData],
     );
+    const { positive: positiveImpacts, displayOrder: displayData, maxAbsImpact } = breakdown;
 
-    // Get bar width as a percentage
-    const getBarWidth = (impact: number): number => {
-        return (Math.abs(impact) / maxImpact) * 0.65;
-    };
+    const getBarWidth = (impact: number): number =>
+        barWidthFraction(impact, maxAbsImpact);
 
     if (impactData.length === 0) {
         return (
@@ -248,7 +238,11 @@ const ActivityImpactChart = () => {
             </View>
 
             <View style={styles.chartContainer}>
-                {displayData.map((item) => (
+                {displayData.map((item) => {
+                    // transform filters null impacts out of displayOrder, but TS still
+                    // sees the input type as nullable — coerce once.
+                    const impact = item.impact ?? 0;
+                    return (
                     <View key={item.activity_name} style={styles.barContainer}>
                         <View style={styles.labelContainer}>
                             <Text style={styles.activityLabel}>{item.activity_name}</Text>
@@ -257,12 +251,12 @@ const ActivityImpactChart = () => {
 
                         <View style={styles.barWrapper}>
                             <View style={styles.barHalf}>
-                                {item.impact < 0 && (
+                                {impact < 0 && (
                                     <View
                                         style={[
                                             styles.bar,
                                             styles.negativeBar,
-                                            { width: `${getBarWidth(item.impact) * 100}%`, marginLeft: 'auto' }
+                                            { width: `${getBarWidth(impact) * 100}%`, marginLeft: 'auto' }
                                         ]}
                                     />
                                 )}
@@ -271,12 +265,12 @@ const ActivityImpactChart = () => {
                             <View style={styles.centerLine} />
 
                             <View style={styles.barHalf}>
-                                {item.impact > 0 && (
+                                {impact > 0 && (
                                     <View
                                         style={[
                                             styles.bar,
                                             styles.positiveBar,
-                                            { width: `${getBarWidth(item.impact) * 100}%` }
+                                            { width: `${getBarWidth(impact) * 100}%` }
                                         ]}
                                     />
                                 )}
@@ -285,12 +279,13 @@ const ActivityImpactChart = () => {
 
                         <Text style={[
                             styles.impactValue,
-                            item.impact >= 0 ? styles.positiveImpact : styles.negativeImpact
+                            impact >= 0 ? styles.positiveImpact : styles.negativeImpact
                         ]}>
-                            {item.impact >= 0 ? '+' : ''}{item.impact}
+                            {impact >= 0 ? '+' : ''}{impact}
                         </Text>
                     </View>
-                ))}
+                    );
+                })}
             </View>
 
             <View style={styles.footer}>
@@ -298,7 +293,7 @@ const ActivityImpactChart = () => {
                     <View style={styles.stat}>
                         <Text style={styles.statLabel}>Most Impactful</Text>
                         <Text style={styles.statValue}>
-                            {positiveImpacts[0]?.activity_name || '--'} ({positiveImpacts[0]?.impact >= 0 ? '+' : ''}{positiveImpacts[0]?.impact || '--'})
+                            {positiveImpacts[0]?.activity_name || '--'} ({(positiveImpacts[0]?.impact ?? 0) >= 0 ? '+' : ''}{positiveImpacts[0]?.impact ?? '--'})
                         </Text>
                     </View>
                     <View style={styles.stat}>
