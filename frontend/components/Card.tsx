@@ -10,6 +10,8 @@ type CardProps = {
    * cards inside scrollable lists where stacked shadows look noisy.
    */
   variant?: 'elevated' | 'flat';
+  /** When true, renders a 3px accent-colored bar at the top of the card. */
+  accentTop?: boolean;
 };
 
 const useThemedStyles = (colors: ThemeColors) => {
@@ -18,26 +20,33 @@ const useThemedStyles = (colors: ThemeColors) => {
       StyleSheet.create({
         container: {
           backgroundColor: colors.cardBackground,
-          borderRadius: 20,
+          borderRadius: 24,
           padding: 16,
           marginBottom: 16,
-          borderWidth: 1,
-          borderColor: colors.border,
+          overflow: 'hidden',
         },
         elevated: {
           // Theme-aware drop shadow: lighter on light themes, deeper on dark.
           shadowColor: colors.elevation.shadowColor,
-          shadowOffset: { width: 0, height: 2 },
+          shadowOffset: { width: 0, height: 4 },
           shadowOpacity: colors.elevation.shadowOpacity,
-          shadowRadius: colors.elevation.shadowRadius,
+          shadowRadius: 12,
           elevation: colors.elevation.elevation,
+        },
+        accentBar: {
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 3,
+          backgroundColor: colors.accent,
         },
       }),
     [colors]
   );
 };
 
-export const Card = ({ children, style, variant = 'elevated' }: CardProps) => {
+export const Card = ({ children, style, variant = 'elevated', accentTop = false }: CardProps) => {
   const colors = useThemeColors();
   const styles = useThemedStyles(colors);
 
@@ -45,6 +54,7 @@ export const Card = ({ children, style, variant = 'elevated' }: CardProps) => {
     <View
       style={[styles.container, variant === 'elevated' && styles.elevated, style]}
     >
+      {accentTop && <View style={styles.accentBar} />}
       <View>{children}</View>
     </View>
   );

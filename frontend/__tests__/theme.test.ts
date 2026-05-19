@@ -20,6 +20,7 @@ const REQUIRED_TOP_LEVEL: (keyof ThemeColors)[] = [
     'border',
     'accent',
     'accentDark',
+    'accentLight',
     'overlays',
     'elevation',
     'isDark',

@@ -21,6 +21,8 @@ export type ThemeColors = {
     border: string;
     accent: string;
     accentDark: string;
+    /** ~10% opacity tint of accent for card tinted backgrounds / pills. */
+    accentLight: string;
     overlays: {
         tag: string;
         tagBorder: string;
@@ -44,28 +46,29 @@ export type ThemeName = 'light' | 'dark' | 'cherry' | 'midnight' | 'forest';
 // use a slightly heavier black drop because their backgrounds absorb shadow.
 const lightElevation: ThemeColors['elevation'] = {
     shadowColor: '#000000',
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 2,
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 3,
 };
 
 const darkElevation: ThemeColors['elevation'] = {
     shadowColor: '#000000',
-    shadowOpacity: 0.32,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 6,
 };
 
 // Define themes
 const darkColors: ThemeColors = {
-    background: '#121212',
-    cardBackground: '#1E1E1E',
-    secondaryBackground: '#25292e',
+    background: '#141418',
+    cardBackground: '#1E1F24',
+    secondaryBackground: '#25272e',
     text: '#FFFFFF',
     textSecondary: 'rgba(211,212,213, 1)',
     border: 'rgba(255, 255, 255, 0.1)',
     accent: '#4CAF50',
     accentDark: '#3d8b40',
+    accentLight: 'rgba(76, 175, 80, 0.10)',
     overlays: {
         tag: 'rgba(255, 255, 255, 0.1)',
         tagBorder: 'rgba(255, 255, 255, 0.2)',
@@ -85,6 +88,7 @@ const lightColors: ThemeColors = {
     border: 'rgba(0, 0, 0, 0.1)',
     accent: '#4CAF50',
     accentDark: '#3d8b40',
+    accentLight: 'rgba(76, 175, 80, 0.08)',
     overlays: {
         tag: 'rgba(0, 0, 0, 0.05)',
         tagBorder: 'rgba(0, 0, 0, 0.1)',
@@ -95,36 +99,38 @@ const lightColors: ThemeColors = {
     isDark: false,
 };
 
-// Cherry blossom theme — light family
+// Cherry blossom theme — light family (rich, saturated)
 const cherryColors: ThemeColors = {
-    background: '#FFF0F5',
-    cardBackground: '#FFFFFF',
-    secondaryBackground: '#FFEBF3',
-    text: '#4A2932',
-    textSecondary: 'rgba(74, 41, 50, 0.7)',
-    border: 'rgba(219, 112, 147, 0.2)',
-    accent: '#DB7093',
-    accentDark: '#C25B7C',
+    background: '#FDE8F0',
+    cardBackground: '#FFF5F8',
+    secondaryBackground: '#FFE0EC',
+    text: '#3D1F28',
+    textSecondary: 'rgba(61, 31, 40, 0.7)',
+    border: 'rgba(199, 82, 124, 0.15)',
+    accent: '#C7527C',
+    accentDark: '#A83D64',
+    accentLight: 'rgba(199, 82, 124, 0.10)',
     overlays: {
-        tag: 'rgba(219, 112, 147, 0.1)',
-        tagBorder: 'rgba(219, 112, 147, 0.2)',
-        border: 'rgba(219, 112, 147, 0.2)',
-        textSecondary: 'rgba(74, 41, 50, 0.6)',
+        tag: 'rgba(199, 82, 124, 0.1)',
+        tagBorder: 'rgba(199, 82, 124, 0.2)',
+        border: 'rgba(199, 82, 124, 0.2)',
+        textSecondary: 'rgba(61, 31, 40, 0.6)',
     },
     elevation: lightElevation,
     isDark: false,
 };
 
-// Midnight Blue theme — dark family
+// Midnight Blue theme — dark family (deep navy)
 const midnightColors: ThemeColors = {
-    background: '#0F1C2E',
-    cardBackground: '#1A2B40',
-    secondaryBackground: '#253952',
+    background: '#0B1628',
+    cardBackground: '#152238',
+    secondaryBackground: '#1E304A',
     text: '#E0E7FF',
     textSecondary: 'rgba(224, 231, 255, 0.7)',
-    border: 'rgba(100, 149, 237, 0.3)',
+    border: 'rgba(100, 149, 237, 0.25)',
     accent: '#6495ED',
     accentDark: '#4169E1',
+    accentLight: 'rgba(100, 149, 237, 0.12)',
     overlays: {
         tag: 'rgba(100, 149, 237, 0.15)',
         tagBorder: 'rgba(100, 149, 237, 0.3)',
@@ -135,21 +141,22 @@ const midnightColors: ThemeColors = {
     isDark: true,
 };
 
-// Forest theme — light family
+// Forest theme — light family (earthy golden-green)
 const forestColors: ThemeColors = {
-    background: '#E8F5E9',
-    cardBackground: '#FFFFFF',
-    secondaryBackground: '#F1F8E9',
-    text: '#1B5E20',
-    textSecondary: 'rgba(27, 94, 32, 0.7)',
-    border: 'rgba(76, 175, 80, 0.2)',
-    accent: '#43A047',
-    accentDark: '#2E7D32',
+    background: '#ECF2E4',
+    cardBackground: '#FAFCF7',
+    secondaryBackground: '#F0F5E8',
+    text: '#2D4A1E',
+    textSecondary: 'rgba(45, 74, 30, 0.7)',
+    border: 'rgba(85, 145, 55, 0.2)',
+    accent: '#558B2F',
+    accentDark: '#3E7A1E',
+    accentLight: 'rgba(85, 139, 47, 0.10)',
     overlays: {
-        tag: 'rgba(76, 175, 80, 0.1)',
-        tagBorder: 'rgba(76, 175, 80, 0.2)',
-        border: 'rgba(76, 175, 80, 0.2)',
-        textSecondary: 'rgba(27, 94, 32, 0.6)',
+        tag: 'rgba(85, 139, 47, 0.1)',
+        tagBorder: 'rgba(85, 139, 47, 0.2)',
+        border: 'rgba(85, 139, 47, 0.2)',
+        textSecondary: 'rgba(45, 74, 30, 0.6)',
     },
     elevation: lightElevation,
     isDark: false,
@@ -218,10 +225,12 @@ export const useGlobalStyles = (colors: ThemeColors) => {
             fontSize: 14,
         },
         cardTitle: {
-            fontSize: 18,
-            fontWeight: '600',
-            color: colors.text,
+            fontSize: 16,
+            fontWeight: '700',
+            color: colors.textSecondary,
             marginBottom: 16,
+            textTransform: 'uppercase',
+            letterSpacing: 1.2,
         },
         header: {
             flexDirection: 'row',
@@ -230,10 +239,11 @@ export const useGlobalStyles = (colors: ThemeColors) => {
             marginBottom: 16,
         },
         headerText: {
-            fontSize: 24,
-            fontWeight: 'bold',
+            fontSize: 28,
+            fontWeight: '800',
             color: colors.text,
             marginLeft: 12,
+            letterSpacing: -0.5,
         },
     }), [colors]);
 };

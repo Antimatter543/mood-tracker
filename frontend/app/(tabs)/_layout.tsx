@@ -49,11 +49,21 @@ function TabNavigator() {
 
             
         },
-        // Tab bar styling
+        // Tab bar styling — floating rounded feel
         tabBarStyle: {
             backgroundColor: colors.secondaryBackground,
             borderTopWidth: 0,
-            elevation: 0,
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            paddingBottom: 8,
+            paddingTop: 4,
+            height: 64,
+            // Shadow above the tab bar
+            shadowColor: '#000000',
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: colors.isDark ? 0.3 : 0.08,
+            shadowRadius: 8,
+            elevation: 8,
         },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.overlays.textSecondary,

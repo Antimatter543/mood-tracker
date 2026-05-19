@@ -40,15 +40,17 @@ const useThemedStyles = (colors: any) => {
             alignItems: 'center',
         },
         cardCustom: {
-            padding: 16,  // Add padding back
-            marginBottom: 8,  // Slightly more space between cards
+            padding: 16,
+            marginBottom: 8,
+            borderLeftWidth: 2,
+            borderLeftColor: colors.accent,
         },
         loadingFooter: {
             paddingVertical: 20,
             alignItems: 'center',
         },
         sectionHeader: {
-            backgroundColor: colors.secondaryBackground,
+            backgroundColor: colors.accentLight,
             paddingVertical: 8,
             paddingHorizontal: 16,
             marginTop: 16,

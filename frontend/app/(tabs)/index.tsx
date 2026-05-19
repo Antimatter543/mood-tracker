@@ -59,6 +59,16 @@ function MoodIcon({ mood }: { mood: number | null }) {
     );
 }
 
+/** Mood-level to color mapping for the big mood number. */
+const moodColor = (mood: number | null, fallback: string): string => {
+    if (mood === null) return fallback;
+    if (mood >= 8) return '#4CAF50';
+    if (mood >= 6) return fallback; // accent
+    if (mood >= 4) return '#F9A825';
+    if (mood >= 2) return '#FB8C00';
+    return '#E57373';
+};
+
 // Today's Mood Card Component
 const TodaysMoodCard = memo(function TodaysMoodCard({
     mood,
@@ -73,23 +83,24 @@ const TodaysMoodCard = memo(function TodaysMoodCard({
     const displayMood = mood !== null ? mood.toFixed(1) : '--';
 
     return (
-        <Card>
+        <Card accentTop>
             <Text style={styles.cardTitle}>
                 {formatDate(new Date().toISOString()).full}
             </Text>
             <View style={styles.moodRow}>
-                <Text style={styles.moodValue}>{displayMood}</Text>
+                <Text style={[styles.moodValue, { color: moodColor(mood, colors.accent) }]}>
+                    {displayMood}
+                </Text>
                 <Text style={styles.moodLabel}>Today's Mood</Text>
                 <MoodIcon mood={mood} />
             </View>
             {streak > 0 && (
-                <View style={styles.streakContainer}>
+                <View style={[styles.streakContainer, { backgroundColor: colors.accentLight }]}>
                     <Text style={styles.streakText}>
-                        {streak} day streak 🔥
+                        {streak} day streak
                     </Text>
                 </View>
             )}
-            {/* <Text style={styles.lastUpdated}>Last updated 2h ago</Text> */}
         </Card>
     );
 });
@@ -179,15 +190,15 @@ const MonthlyOverviewCard = memo(function MonthlyOverviewCard({ stats }: {
         <Card>
             <Text style={styles.cardTitle}>Monthly Overview</Text>
             <View style={styles.statsGrid}>
-                <View style={styles.statItem}>
+                <View style={[styles.statItem, { backgroundColor: colors.accentLight }]}>
                     <Text style={styles.statLabel}>Average Mood</Text>
                     <Text style={styles.statValue}>{displayAverage}</Text>
                 </View>
-                <View style={styles.statItem}>
+                <View style={[styles.statItem, { backgroundColor: colors.accentLight }]}>
                     <Text style={styles.statLabel}>Total Entries</Text>
                     <Text style={styles.statValue}>{stats.totalEntries}</Text>
                 </View>
-                <View style={styles.statItem}>
+                <View style={[styles.statItem, { backgroundColor: colors.accentLight }]}>
                     <Text style={styles.statLabel}>Best Day</Text>
                     <Text style={styles.statValue}>{formatDate(stats.bestDay).short}</Text>
                 </View>
@@ -224,10 +235,12 @@ const useThemedStyles = (colors: any) => {
             flexGrow: 0,
         },
         cardTitle: {
-            fontSize: 18,
-            fontWeight: '600',
-            color: colors.text,
+            fontSize: 16,
+            fontWeight: '700',
+            color: colors.textSecondary,
             marginBottom: 16,
+            textTransform: 'uppercase',
+            letterSpacing: 1.2,
         },
         moodRow: {
             flexDirection: 'row',
@@ -235,13 +248,14 @@ const useThemedStyles = (colors: any) => {
             gap: 8,
         },
         moodValue: {
-            fontSize: 32,
-            fontWeight: 'bold',
-            color: colors.accent,  // Use the accent color for mood
+            fontSize: 48,
+            fontWeight: '800',
+            color: colors.accent,
+            letterSpacing: -1,
         },
         moodLabel: {
             fontSize: 16,
-            color: colors.textSecondary,  // More subtle text color
+            color: colors.textSecondary,
         },
         lastUpdated: {
             fontSize: 12,
@@ -259,19 +273,27 @@ const useThemedStyles = (colors: any) => {
         statsGrid: {
             flexDirection: 'row',
             justifyContent: 'space-between',
+            gap: 8,
         },
         statItem: {
             alignItems: 'flex-start',
+            flex: 1,
+            paddingVertical: 10,
+            paddingHorizontal: 12,
+            borderRadius: 16,
         },
         statLabel: {
-            fontSize: 14,
+            fontSize: 12,
             color: colors.textSecondary,
             marginBottom: 4,
+            textTransform: 'uppercase',
+            letterSpacing: 0.5,
         },
         statValue: {
-            fontSize: 18,
-            fontWeight: 'bold',
+            fontSize: 24,
+            fontWeight: '800',
             color: colors.text,
+            letterSpacing: -0.5,
         },
         activitiesContainer: {
             flexDirection: 'row',
@@ -289,17 +311,16 @@ const useThemedStyles = (colors: any) => {
             fontSize: 14,
         },
         streakContainer: {
-            marginTop: 8,
-            paddingVertical: 4,
-            paddingHorizontal: 12,
-            backgroundColor: colors.overlays.tag,
+            marginTop: 10,
+            paddingVertical: 6,
+            paddingHorizontal: 14,
             borderRadius: 12,
             alignSelf: 'flex-start',
         },
         streakText: {
-            color: colors.text,
+            color: colors.accent,
             fontSize: 14,
-            fontWeight: '500',
+            fontWeight: '600',
         },
     }), [colors]);
 };

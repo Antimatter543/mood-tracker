@@ -51,7 +51,7 @@ const StatisticsContent = () => {
       paddingBottom: 32,
     },
     chartsContainer: {
-      gap: 16, // Add space between charts
+      gap: 24, // More breathing room between chart cards
     }
   });
 

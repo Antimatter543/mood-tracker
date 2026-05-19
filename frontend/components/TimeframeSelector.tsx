@@ -14,7 +14,7 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
   onTimeframeChange
 }) => {
   const colors = useThemeColors();
-  
+
   const styles = StyleSheet.create({
     container: {
       flexDirection: 'row',
@@ -23,10 +23,12 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
       padding: 4,
       marginBottom: 16,
       alignSelf: 'center',
+      borderWidth: 1,
+      borderColor: colors.overlays.tagBorder,
     },
     option: {
-      paddingVertical: 6,
-      paddingHorizontal: 12,
+      paddingVertical: 8,
+      paddingHorizontal: 16,
       borderRadius: 16,
     },
     selectedOption: {

@@ -295,6 +295,7 @@ const useThemedStyles = (colors: any) => {
         },
         versionInfo: {
             padding: 16,
+            marginTop: 24,
             alignItems: 'center',
         },
         versionText: {
@@ -308,7 +309,10 @@ const useThemedStyles = (colors: any) => {
             justifyContent: 'center',
             alignItems: 'center',
             gap: 8,
-            paddingVertical: 12,
+            paddingVertical: 14,
+            paddingHorizontal: 24,
+            borderRadius: 24,
+            width: '100%',
         },
         linkIcon: {
             marginLeft: 8,

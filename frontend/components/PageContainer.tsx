@@ -2,7 +2,13 @@ import { ThemeColors, useThemeColors } from '@/styles/global';
 import { ViewProps, View, StatusBar, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddEntryButton } from './AddEntryButton';
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
+import Animated, {
+    useSharedValue,
+    useAnimatedStyle,
+    withTiming,
+    Easing,
+} from 'react-native-reanimated';
 
 type LayoutProps = {
     children: React.ReactNode;
@@ -32,11 +38,11 @@ const useThemedStyles = (colors: ThemeColors, insetTop: number, insetBottom: num
                     position: 'relative',
                 },
                 scrollContent: {
-                    padding: 16,
+                    padding: 20,
                     flexGrow: 1,
                     // Pad the bottom past the FAB so the last item is reachable
                     // above the floating button + the bottom safe area.
-                    paddingBottom: 80 + insetBottom,
+                    paddingBottom: 100 + insetBottom,
                 },
                 fullHeightContent: {
                     flex: 1,
@@ -58,6 +64,26 @@ export function Layout({
     const insets = useSafeAreaInsets();
     const styles = useThemedStyles(colors, insets.top, insets.bottom);
 
+    // Subtle entrance animation: fade in + slide up
+    const opacity = useSharedValue(0);
+    const translateY = useSharedValue(20);
+
+    useEffect(() => {
+        opacity.value = withTiming(1, {
+            duration: 300,
+            easing: Easing.out(Easing.cubic),
+        });
+        translateY.value = withTiming(0, {
+            duration: 300,
+            easing: Easing.out(Easing.cubic),
+        });
+    }, [opacity, translateY]);
+
+    const animatedContentStyle = useAnimatedStyle(() => ({
+        opacity: opacity.value,
+        transform: [{ translateY: translateY.value }],
+    }));
+
     return (
         <View style={[styles.container, style]} {...props}>
             <StatusBar
@@ -72,10 +98,14 @@ export function Layout({
                         showsVerticalScrollIndicator={false}
                         keyboardShouldPersistTaps="handled"
                     >
-                        {children}
+                        <Animated.View style={animatedContentStyle}>
+                            {children}
+                        </Animated.View>
                     </ScrollView>
                 ) : (
-                    <View style={styles.fullHeightContent}>{children}</View>
+                    <Animated.View style={[styles.fullHeightContent, animatedContentStyle]}>
+                        {children}
+                    </Animated.View>
                 )}
 
                 {showFab && <AddEntryButton />}
