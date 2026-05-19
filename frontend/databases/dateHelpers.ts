@@ -27,8 +27,9 @@
  * Use this as the lower bound of a `WHERE date >= ?` clause when bucketing
  * by user-local day.
  */
-export function startOfLocalDay(date: Date): string {
-  const local = new Date(date.getTime());
+export function startOfLocalDay(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  const local = new Date(d.getTime());
   local.setHours(0, 0, 0, 0);
   return local.toISOString();
 }
@@ -40,8 +41,9 @@ export function startOfLocalDay(date: Date): string {
  * Use this as the upper bound of a `WHERE date <= ?` clause when bucketing
  * by user-local day.
  */
-export function endOfLocalDay(date: Date): string {
-  const local = new Date(date.getTime());
+export function endOfLocalDay(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  const local = new Date(d.getTime());
   local.setHours(23, 59, 59, 999);
   return local.toISOString();
 }
@@ -94,4 +96,50 @@ export function daysBetween(a: string, b: string): number {
  */
 export function getDefaultEntryDate(): string {
   return new Date().toISOString();
+}
+
+/**
+ * Returns a Date at 00:00:00.000 local time for the same calendar day as
+ * `date`. Use this for in-memory picker normalisation (DatePicker) where
+ * you need a Date object back, not an ISO string for SQL.
+ */
+export function startOfLocalDayDate(date: Date): Date {
+  const d = new Date(date.getTime());
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Returns a Date at 23:59:59.999 local time for the same calendar day as
+ * `date`. In-memory counterpart of `endOfLocalDay`.
+ */
+export function endOfLocalDayDate(date: Date): Date {
+  const d = new Date(date.getTime());
+  d.setHours(23, 59, 59, 999);
+  return d;
+}
+
+/**
+ * Returns true if both Dates land on the same local calendar day. Useful
+ * for asserting day-stable round trips (e.g. the DatePicker normalisation
+ * never crosses a UTC boundary).
+ */
+export function isSameLocalDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+/**
+ * Returns the date `days` days after the YYYY-MM-DD string `date`. Negative
+ * `days` walks backwards. Operates in local time so DST 23h/25h days don't
+ * accidentally roll the calendar.
+ */
+export function addDays(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number);
+  const result = new Date(y, m - 1, d);
+  result.setDate(result.getDate() + days);
+  return localDateString(result);
 }

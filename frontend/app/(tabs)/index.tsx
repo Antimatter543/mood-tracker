@@ -5,9 +5,11 @@ import { Card } from '@/components/Card';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState, memo, useMemo } from 'react';
 import { LineChart } from 'react-native-chart-kit';
-import { GET_CURRENT_STREAK, WEEKLY_MOOD_AVERAGES_NULLED } from '@/components/visualisations/queries';
+import { WEEKLY_MOOD_AVERAGES, RECENT_ENTRY_DATES } from '@/components/visualisations/queries';
 import { CHART_PADDING, interpolateData, SCREEN_WIDTH, useChartConfig } from '@/components/visualisations/chartUtils';
 import { useDataContext } from '@/context/DataContext';
+import { startOfLocalDay, endOfLocalDay, localDateString } from '@/databases/dateHelpers';
+import { currentStreak } from '@/components/visualisations/transforms/streak';
 
 
 // Simple date formatting helper
@@ -321,61 +323,76 @@ export default function Home() {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const [today, monthStats, activities, weeklyMoods, currentStreak] = await Promise.all([
-                    // Today's mood
-                    db.getFirstAsync<{ mood: number }>(`
-                    SELECT ROUND(AVG(mood), 1) as mood 
-                    FROM entries 
-                    WHERE date(date) = date('now')
-                    `),
+                // All windows are computed in the user's local timezone and
+                // passed to SQL as UTC ISO bounds. Storing entries as UTC ISO
+                // + comparing in UTC ISO keeps things consistent; SQLite's
+                // `date('now')` (UTC) is no longer involved.
+                const now = new Date();
+                const DAY_MS = 86_400_000;
+                const todayLocal = localDateString(now);
+                const todayStart = startOfLocalDay(now);
+                const todayEnd = endOfLocalDay(now);
+                const weekStart = startOfLocalDay(new Date(now.getTime() - 7 * DAY_MS));
+                const monthStart = startOfLocalDay(new Date(now.getTime() - 30 * DAY_MS));
+                const streakWindowStart = startOfLocalDay(new Date(now.getTime() - 60 * DAY_MS));
 
-                    // Monthly stats
-                    db.getFirstAsync<{
-                        average: number,
-                        count: number,
-                        bestDay: string
-                    }>(`
-                    WITH DailyAverages AS (
-                    SELECT 
-                        date(date) as day,
-                        ROUND(AVG(mood), 1) as daily_avg
-                    FROM entries
-                    WHERE date >= date('now', '-30 days')
-                    GROUP BY date(date)
-                    )
-                    SELECT
-                    ROUND(AVG(mood), 1) as average,
-                    COUNT(*) as count,
-                    (
-                        SELECT day
-                        FROM DailyAverages
-                        WHERE daily_avg = (SELECT MAX(daily_avg) FROM DailyAverages)
-                        LIMIT 1
-                    ) as bestDay
-                    FROM entries
-                    WHERE date >= date('now', '-30 days')
-                  `),
+                const [
+                    today,
+                    monthStats,
+                    activities,
+                    weeklyRows,
+                    streakEntryDates,
+                ] = await Promise.all([
+                    db.getFirstAsync<{ mood: number }>(
+                        `SELECT ROUND(AVG(mood), 1) as mood FROM entries WHERE date BETWEEN ? AND ?`,
+                        [todayStart, todayEnd]
+                    ),
 
-                    // Recent activities
-                    db.getAllAsync<{ name: string, count: number }>(`
-                    SELECT 
-                    a.name,
-                    COUNT(*) as count
-                    FROM activities a
-                    JOIN entry_activities ea ON ea.activity_id = a.id
-                    JOIN entries e ON e.id = ea.entry_id
-                    WHERE e.date >= date('now', '-7 days')
-                    GROUP BY a.name
-                    ORDER BY count DESC
-                    LIMIT 7
-                    `),
+                    db.getFirstAsync<{ average: number; count: number; bestDay: string }>(
+                        `
+                        WITH DailyAverages AS (
+                            SELECT date(date) as day, ROUND(AVG(mood), 1) as daily_avg
+                            FROM entries
+                            WHERE date BETWEEN ? AND ?
+                            GROUP BY date(date)
+                        )
+                        SELECT
+                            ROUND(AVG(mood), 1) as average,
+                            COUNT(*) as count,
+                            (
+                                SELECT day FROM DailyAverages
+                                WHERE daily_avg = (SELECT MAX(daily_avg) FROM DailyAverages)
+                                LIMIT 1
+                            ) as bestDay
+                        FROM entries
+                        WHERE date BETWEEN ? AND ?
+                        `,
+                        [monthStart, todayEnd, monthStart, todayEnd]
+                    ),
 
-                    // Weekly mood data
-                    db.getAllAsync<{ avgMood: number | null }>(WEEKLY_MOOD_AVERAGES_NULLED),
+                    db.getAllAsync<{ name: string; count: number }>(
+                        `
+                        SELECT a.name, COUNT(*) as count
+                        FROM activities a
+                        JOIN entry_activities ea ON ea.activity_id = a.id
+                        JOIN entries e ON e.id = ea.entry_id
+                        WHERE e.date BETWEEN ? AND ?
+                        GROUP BY a.name
+                        ORDER BY count DESC
+                        LIMIT 7
+                        `,
+                        [weekStart, todayEnd]
+                    ),
 
-                    // Add streak query
-                    db.getFirstAsync<{ streak: number }>(GET_CURRENT_STREAK)
+                    db.getAllAsync<{ date: string; avgMood: number | null }>(
+                        WEEKLY_MOOD_AVERAGES,
+                        [weekStart, todayEnd]
+                    ),
 
+                    db.getAllAsync<{ date: string }>(
+                        RECENT_ENTRY_DATES,
+                        [streakWindowStart]
+                    ),
                 ]);
 
                 setTodaysMood(today?.mood || null);
@@ -384,21 +401,27 @@ export default function Home() {
                     setMonthlyStats({
                         average: monthStats.average,
                         totalEntries: monthStats.count,
-                        bestDay: monthStats.bestDay
+                        bestDay: monthStats.bestDay,
                     });
                 }
 
                 setRecentActivities(activities.map(a => `${a.name} (${a.count}) `));
-                setWeeklyData(weeklyMoods.map(row => row.avgMood));
 
-                setStreak(currentStreak?.streak || 0);
-
-                console.log("Loaded entry heyo!!!")
-                if (__DEV__) {
-                    console.log("APPARENTLY THIS ONLY SHOWS IN DEV MODE")
+                // Fill in the 8-day window (last 7 days + today, earliest first)
+                // with null for days that had no entries — same shape the chart
+                // expects.
+                const weeklyByDate: Record<string, number | null> = {};
+                for (const row of weeklyRows) weeklyByDate[row.date] = row.avgMood;
+                const weekly: (number | null)[] = [];
+                for (let i = 7; i >= 0; i--) {
+                    const dStr = localDateString(new Date(now.getTime() - i * DAY_MS));
+                    weekly.push(weeklyByDate[dStr] ?? null);
                 }
+                setWeeklyData(weekly);
+
+                setStreak(currentStreak(streakEntryDates.map(r => r.date), todayLocal));
             } catch (error) {
-                console.error('Error fetching data:', error);
+                console.error('Error fetching dashboard data:', error);
             }
         };
 

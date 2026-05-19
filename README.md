@@ -103,14 +103,18 @@ frontend/
 │   └── _layout.tsx            # Root layout (DB provider, themes)
 ├── components/
 │   ├── forms/
-│   │   ├── EntryForm.tsx      # Main mood entry form
-│   │   ├── MoodSelector.tsx   # Mood scale slider
-│   │   ├── ActivitySelector.tsx # Activity picker
-│   │   ├── ActivityEditModal.tsx # Edit/create activities
-│   │   ├── ActivityReorder.tsx # Reorder activities
-│   │   └── DatePicker.tsx     # Date/time selector
+│   │   ├── EntryForm.tsx          # Thin renderer over useEntryDraft
+│   │   ├── MoodSelector.tsx       # Consumes useMoodScale
+│   │   ├── ActivitySelector.tsx
+│   │   ├── ActivityEditModal.tsx
+│   │   ├── ActivityReorder.tsx
+│   │   ├── DatePicker.tsx         # Local-day-stable normalisation
+│   │   ├── dateHelpersStub.ts     # Re-exports databases/dateHelpers
+│   │   └── hooks/
+│   │       ├── useEntryDraft.ts   # Form state, validation, submit
+│   │       └── useMoodScale.ts    # Mood-value snapping (low/high precision)
 │   ├── visualisations/
-│   │   ├── WeeklyMoodChart.tsx
+│   │   ├── WeeklyMoodChart.tsx     # Thin renderers
 │   │   ├── DailyMoodBar.tsx
 │   │   ├── CustomHeatMap.tsx
 │   │   ├── ActivityImpactChart.tsx
@@ -118,7 +122,17 @@ frontend/
 │   │   ├── Scatterplot.tsx
 │   │   ├── MoodCalendar.tsx
 │   │   ├── chartUtils.ts
-│   │   └── queries.ts        # Chart data queries
+│   │   ├── queries.ts              # SQL with ?start, ?end params (local-tz)
+│   │   └── transforms/             # Pure functions, fully tested
+│   │       ├── weeklyMood.ts
+│   │       ├── dailyBar.ts
+│   │       ├── streak.ts           # Replaces the old recursive-CTE SQL
+│   │       ├── activityImpact.ts
+│   │       ├── recoveryPatterns.ts
+│   │       ├── scatter.ts
+│   │       ├── calendarMarkers.ts
+│   │       ├── heatmap.ts
+│   │       └── dateHelpers.ts      # Re-exports databases/dateHelpers
 │   ├── AddEntryButton.tsx     # Floating action button
 │   ├── Card.tsx               # Reusable card component
 │   ├── IconPicker.tsx         # Icon selection modal
@@ -133,9 +147,15 @@ frontend/
 │   ├── SettingsContext.tsx     # User settings context
 │   └── TimeframeContext.tsx    # Chart timeframe context
 ├── databases/
-│   ├── database.ts            # Core DB operations (CRUD)
+│   ├── database.ts            # Thin facade re-exporting the modules below
+│   ├── lifecycle.ts           # initialize, reset, V1 schema/seed
+│   ├── entries.ts             # Mood entry CRUD
+│   ├── activities.ts          # Activity CRUD + reorder
+│   ├── groups.ts              # Activity group CRUD
+│   ├── user-settings.ts       # Settings table I/O
+│   ├── settings.ts            # Settings registry (types/defaults)
 │   ├── migrations.ts          # Schema migrations
-│   ├── settings.ts            # Settings registry & DB ops
+│   ├── dateHelpers.ts         # Pure local-tz date math (used everywhere)
 │   └── data-export.ts         # JSON import/export logic
 ├── styles/
 │   └── global.ts              # Theme definitions & global styles
@@ -166,31 +186,33 @@ Migrations run automatically on app launch. To add a new migration, add an entry
 
 ## Known Issues
 
-These are known bugs and areas for improvement. PRs welcome!
+PRs welcome on any of these.
 
-### Bugs
+### Open
 
-- **SQLite migration V2**: Uses `ALTER TABLE ... DROP COLUMN` which isn't supported in all SQLite versions. Works on newer Android/iOS but may fail on older devices.
-- **Missing `icon_family` in query**: `database.ts` selects `icon_name` but not `icon_family` in some activity queries, causing undefined icon families.
-- **Import edge case**: If activities were deleted but `entry_activities` still references them, import silently drops those associations.
-- **No null guard on chart data**: Some chart components assume data arrays are non-empty without validation.
-- **Settings race condition**: Settings context could be read before initial load completes.
+- **SQLite migration V2** uses the table-rebuild pattern (`CREATE _new`, copy rows, `DROP`, `ALTER ... RENAME`). This is the SQLite-recommended workaround for missing `DROP COLUMN` support but is more fragile than a single-statement migration. Works on every SQLite version currently shipped by Expo SDK 52.
+- **Daily bucketing for users in non-UTC timezones**: query *windows* are now computed in local time, but the `GROUP BY date(date)` and `strftime('%w', date)` aggregates still bucket by UTC date. For an entry made at 11pm local on May 18 (1am UTC May 19), the timeline shows it correctly under "May 18" but `DailyMoodBar`'s day-of-week aggregate may attribute it to May 19. The complete fix is a `local_date` column populated at insert time — flagged as a follow-up because it requires a schema migration that needs device testing.
+- **Settings load timing**: a quick `<ActivityIndicator/>` is shown while `SettingsContext` loads from SQLite. Subsequent renders see the loaded values. If the loader fails the indicator stays forever — needs a timeout/fallback path.
 
-### Code Quality
-
-- Heavy use of `any` type (20+ instances) — TypeScript strict mode is on but undermined
-- Console.log statements in production code (should be wrapped in `__DEV__` checks)
-- No tests written (Jest is configured but test coverage is 0%)
-- No ESLint or Prettier config
-
-### Not Yet Implemented
+### Not yet implemented
 
 - Social features (UI exists but non-functional)
-- Media attachments (DB schema exists, no UI)
+- Media attachments (`entry_media` schema exists, no UI)
 - Push notifications / reminders
 - Cloud backup / sync
 - CSV/PDF export
 - AMOLED dark theme
+
+## Quality bar
+
+| Metric | State |
+|---|---|
+| Tests | 253 across 24 suites (`npm test`) |
+| TypeScript | `strict: true`, `tsc --noEmit` clean |
+| Lint | `expo lint` zero errors |
+| Pre-commit | `npm run check` runs typecheck + lint + tests |
+
+The database layer (`databases/`), all chart data transforms (`components/visualisations/transforms/`), the form hooks (`components/forms/hooks/`), and the date helpers (`databases/dateHelpers.ts`) are pure-function modules with their own test files — modifying them safely should not require booting the app.
 
 ## Contributing
 
