@@ -1,0 +1,51 @@
+appId: com.raeduslabs.soulsync
+---
+# Empty-database verification: the Stats screen must render on a fresh/empty
+# entries table (the RangeError: Date value out of bounds heatmap crash repro).
+# Assumes the app is ALREADY loaded (dev bundle running) and the db is empty
+# (fresh install). Does NOT launchApp (that would bounce to the dev launcher).
+# Tabs by point: 5 tabs at x = 10/30/50/70/90%, y = 89%.
+
+# Dismiss the expo-dev-client developer menu if it's showing.
+- tapOn:
+    text: "Continue"
+    optional: true
+
+# ─── Home (tab 1) — empty state ─────────────────────────────────────────────
+- tapOn:
+    point: 10%, 89%
+- assertVisible:
+    text: "Good (morning|afternoon|evening)"
+- takeScreenshot: empty-home
+
+# ─── Statistics (tab 2) — THE crash repro. Must render "Overview". ──────────
+- tapOn:
+    point: 30%, 89%
+- assertVisible:
+    text: "Overview"
+- takeScreenshot: empty-stats
+# Scroll through every chart section so the heatmap actually mounts.
+- scrollUntilVisible:
+    element:
+      text: "Patterns"
+    direction: DOWN
+    optional: true
+- takeScreenshot: empty-stats-patterns
+- scrollUntilVisible:
+    element:
+      text: "Activities"
+    direction: DOWN
+    optional: true
+- takeScreenshot: empty-stats-activities
+
+# ─── Insights (tab 4) — empty state ─────────────────────────────────────────
+- tapOn:
+    point: 70%, 89%
+- takeScreenshot: empty-insights
+
+# ─── Back to Stats to confirm it still renders after navigation ─────────────
+- tapOn:
+    point: 30%, 89%
+- assertVisible:
+    text: "Overview"
+- takeScreenshot: empty-stats-again

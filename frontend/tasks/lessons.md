@@ -1,5 +1,46 @@
 # SoulSync — Project Lessons
 
+## Empty-database (fresh-install) crash: heatmap NULL date -> RangeError (2026-06-07)
+
+**Symptom**: On a fresh/empty `entries` table (every new user before their first
+entry), the **Statistics** screen white-screened with
+`RangeError: Date value out of bounds`, pinned to `CustomHeatmap`.
+
+**Root cause**: `CustomHeatMap.tsx`'s SQL is the ONLY visualisation query that
+seeds its date axis from `(SELECT MIN(date) FROM all_entries)`. On an empty
+table MIN(date) is NULL, so `start_date` is NULL and the query returns a single
+row `{date: null}`. `buildHeatmapGrid` had an empty-array guard but not a
+null-date-row guard (`rows.length === 1`), so `addDaysUTC(null, ...)` ran
+`new Date("nullT00:00:00Z").toISOString()` which throws. Unhandled in render ->
+whole Stats screen unmounts to white.
+
+**Rule**:
+1. Any SQL that derives a date axis from `MIN/MAX(date)` (not JS-supplied
+   `BETWEEN ?start AND ?end` bounds) MUST filter out null/invalid-date rows in
+   the component before handing them to a transform: `results.filter(r => r.date)`.
+2. A pure date transform must NEVER throw on degenerate input. Validate dates
+   with a `^\d{4}-\d{2}-\d{2}$` regex at the top and early-return the empty
+   shape if nothing valid remains. An empty-array guard is NOT enough — a single
+   `{date: null}` row passes a length check.
+3. Audit the WHOLE empty-db class at once, not one rebuild at a time. The other
+   charts were already safe BECAUSE they filter by JS-supplied window bounds
+   (empty db -> `[]`, handled by transform empty-guards) or read a null-coalesced
+   scalar aggregate (`avg_mood: NULL, count: 0`, div-by-zero guarded). The
+   `MIN(date)`-seeded query was the structural outlier.
+
+**Verifying empty-db on-device**: `adb uninstall com.raeduslabs.soulsync` gives
+a guaranteed-empty db (wipes app data; EAS keystore differs from dev keystore so
+uninstall is needed anyway). Dev build: load the bundle via a deep link, NOT by
+tapping the dev-launcher row (synthetic taps on that list are unreliable):
+`adb shell am start -a android.intent.action.VIEW -d "myapp://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081"`
+(scheme is `myapp`), then tap "Continue" to dismiss the first-launch dev menu.
+Maestro `assertVisible "Overview"` on the Stats tab is the decisive empty-db
+check (if the heatmap threw, StatisticsContent unmounts and the assert fails).
+Flows: `.maestro/empty-db-verify.yaml` (dev, already-loaded) and
+`.maestro/release-empty-verify.yaml` (release, standalone `launchApp`).
+
+**Date**: 2026-06-07
+
 ## Fabric / new-architecture transparent `<Modal>` flex-collapse on Android (2026-06-07)
 
 **Symptom**: A transparent `<Modal>` (e.g. the FAB entry form) opens but renders

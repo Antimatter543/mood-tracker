@@ -1,0 +1,33 @@
+appId: com.raeduslabs.soulsync
+---
+# Release-APK empty-db smoke test. Standalone (no Metro, no dev menu).
+# Confirms the Stats screen renders on an empty entries table.
+- launchApp
+- assertVisible:
+    text: "Good (morning|afternoon|evening)"
+- takeScreenshot: release-home
+
+# Statistics (tab 2) — the crash repro. Must render "Overview".
+- tapOn:
+    point: 30%, 89%
+- assertVisible:
+    text: "Overview"
+- takeScreenshot: release-stats
+- scrollUntilVisible:
+    element:
+      text: "Activities"
+    direction: DOWN
+    optional: true
+- takeScreenshot: release-stats-bottom
+
+# Insights (tab 4)
+- tapOn:
+    point: 70%, 89%
+- takeScreenshot: release-insights
+
+# Back to Stats — still renders after navigation
+- tapOn:
+    point: 30%, 89%
+- assertVisible:
+    text: "Overview"
+- takeScreenshot: release-stats-again
