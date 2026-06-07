@@ -125,10 +125,18 @@ const CustomHeatmap: React.FC = () => {
                     ORDER BY all_dates.date
                 `, [endDate]);
 
-                setMoodData(results.map(row => ({
-                    date: row.date,
-                    mood: row.avg_mood
-                })));
+                // On an empty `entries` table, MIN(date) is NULL so the query
+                // returns a single row with date: null. Drop any falsy/invalid
+                // date rows before they reach buildHeatmapGrid, which would
+                // otherwise throw RangeError on `new Date(null)`.
+                setMoodData(
+                    results
+                        .filter(row => row.date)
+                        .map(row => ({
+                            date: row.date,
+                            mood: row.avg_mood
+                        }))
+                );
                 
                 // Scroll to the end when data is loaded
                 setTimeout(() => {

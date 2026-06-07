@@ -66,17 +66,30 @@ const daysBetweenUTC = (a: string, b: string): number => {
  * on/after the latest date, so every cell falls on an integer week column.
  *
  * Empty input -> empty grid (caller renders nothing).
+ *
+ * Degenerate input (null/garbage dates) is also dropped: a single SQL row with
+ * `date: null` (what the heatmap query returns when the entries table is empty)
+ * would otherwise reach `new Date("nullT00:00:00Z")` and throw
+ * `RangeError: Date value out of bounds`, white-screening the Stats screen.
+ * This pure transform must never throw on degenerate input.
  */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 export const buildHeatmapGrid = (rows: HeatmapInput[]): HeatmapGrid => {
-    if (!rows || rows.length === 0) {
+    // Drop any row whose date isn't a valid YYYY-MM-DD string before doing any
+    // date math. Guards against null / undefined / garbage reaching `new Date`.
+    const validRows = (rows ?? []).filter(
+        (r) => r && typeof r.date === 'string' && ISO_DATE.test(r.date),
+    );
+    if (validRows.length === 0) {
         return { cells: [], monthLabels: [], totalWeeks: 0 };
     }
 
     const moodByDate = new Map<string, number | null>();
-    for (const r of rows) moodByDate.set(r.date, r.mood);
+    for (const r of validRows) moodByDate.set(r.date, r.mood);
 
-    const earliest = rows[0].date;
-    const latest = rows[rows.length - 1].date;
+    const earliest = validRows[0].date;
+    const latest = validRows[validRows.length - 1].date;
 
     // Snap earliest back to its Monday (or itself if already Monday).
     const startOffset = mondayStartDayIndex(earliest);

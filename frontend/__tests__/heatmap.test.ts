@@ -11,6 +11,42 @@ describe('buildHeatmapGrid', () => {
     expect(out.totalWeeks).toBe(0);
   });
 
+  // Regression: empty `entries` table → heatmap SQL returns a single row with
+  // date: null, which previously reached `new Date("nullT00:00:00Z")` and threw
+  // `RangeError: Date value out of bounds`, white-screening the Stats screen.
+  it('returns an empty grid (does not throw) for a single null-date row', () => {
+    const rows = [{ date: null, mood: null }] as unknown as HeatmapInput[];
+    let out: ReturnType<typeof buildHeatmapGrid>;
+    expect(() => {
+      out = buildHeatmapGrid(rows);
+    }).not.toThrow();
+    expect(out!.cells).toEqual([]);
+    expect(out!.monthLabels).toEqual([]);
+    expect(out!.totalWeeks).toBe(0);
+  });
+
+  it('returns an empty grid (does not throw) for a garbage date string', () => {
+    const rows = [{ date: 'garbage', mood: 5 }] as unknown as HeatmapInput[];
+    let out: ReturnType<typeof buildHeatmapGrid>;
+    expect(() => {
+      out = buildHeatmapGrid(rows);
+    }).not.toThrow();
+    expect(out!.cells).toEqual([]);
+    expect(out!.totalWeeks).toBe(0);
+  });
+
+  it('drops degenerate rows but keeps valid ones', () => {
+    const rows = [
+      { date: null, mood: null },
+      { date: '2025-06-16', mood: 5 },
+      { date: 'garbage', mood: 9 },
+    ] as unknown as HeatmapInput[];
+    const out = buildHeatmapGrid(rows);
+    const cell = out.cells.find((c) => c.date === '2025-06-16');
+    expect(cell?.mood).toBe(5);
+    expect(out.cells.length).toBeGreaterThan(0);
+  });
+
   it('produces cells in Monday-start week ordering (day 0 = Mon)', () => {
     // 2025-06-15 is a Sunday → dayIndex 6 under Monday-start convention
     const rows: HeatmapInput[] = [
