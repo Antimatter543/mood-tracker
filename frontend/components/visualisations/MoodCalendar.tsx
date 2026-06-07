@@ -1,5 +1,6 @@
 import { Card } from '@/components/Card';
 import { useDataContext } from '@/context/DataContext';
+import { useThemeColors } from '@/styles/global';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { useEffect, useState } from 'react';
 import { Text } from 'react-native';
@@ -18,6 +19,7 @@ import {
 // Changed to default export
 const MoodCalendar = () => {
   const db = useSQLiteContext();
+  const colors = useThemeColors();
   const { refreshCount } = useDataContext();
   const [moodMarkers, setMoodMarkers] = useState<MoodMarking>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -68,7 +70,7 @@ const MoodCalendar = () => {
   return (
     <Card>
       {isLoading ? (
-        <Text style={{ color: '#ffffff', textAlign: 'center', padding: 20 }}>
+        <Text style={{ color: colors.textSecondary, textAlign: 'center', padding: 20 }}>
           Loading calendar...
         </Text>
       ) : (
@@ -76,16 +78,16 @@ const MoodCalendar = () => {
           markingType={'custom'}
           markedDates={moodMarkers}
           theme={{
-            backgroundColor: '#25292e',
-            calendarBackground: '#25292e',
-            textSectionTitleColor: '#ffffff',
-            selectedDayBackgroundColor: '#4CAF50',
-            selectedDayTextColor: '#ffffff',
-            todayTextColor: '#4CAF50',
-            dayTextColor: '#ffffff',
-            textDisabledColor: '#666666',
-            monthTextColor: '#ffffff',
-            arrowColor: '#ffffff',
+            backgroundColor: colors.cardBackground,
+            calendarBackground: colors.cardBackground,
+            textSectionTitleColor: colors.text,
+            selectedDayBackgroundColor: colors.accent,
+            selectedDayTextColor: '#FFFFFF',
+            todayTextColor: colors.accent,
+            dayTextColor: colors.text,
+            textDisabledColor: colors.textSecondary,
+            monthTextColor: colors.text,
+            arrowColor: colors.text,
           }}
           style={{ borderRadius: 16 }}
         />

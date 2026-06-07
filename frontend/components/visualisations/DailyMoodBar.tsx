@@ -7,23 +7,24 @@ import { useDataContext } from '@/context/DataContext';
 import { Card } from '@/components/Card';
 import { CHART_PADDING, SCREEN_WIDTH, useChartConfig } from './chartUtils';
 import InfoBubble from '../InfoBubble';
-import { buildDailyBarData, type DailyMoodRow } from './transforms/dailyBar';
+import { useTimeframe } from '@/context/TimeframeContext';
+import { DOW_MOOD_PATTERN } from './queries';
+import { computeWindow, type Timeframe } from './transforms/windowHelpers';
+import {
+  buildDowPatternData,
+  type DowRow,
+  type DowPatternData,
+} from './transforms/dayOfWeekPattern';
 
-// const screenWidth = Dimensions.get('window').width;
-// const chartWidth = screenWidth - 48; // Adjust for padding
-
-const chartWidth = SCREEN_WIDTH - CHART_PADDING; 
+const chartWidth = SCREEN_WIDTH - CHART_PADDING;
 
 const DailyMoodChart = () => {
   const colors = useThemeColors();
   const chartConfig = useChartConfig();
   const db = useSQLiteContext();
   const { refreshCount } = useDataContext();
-  const [chartData, setChartData] = useState<{
-      labels: string[];
-      datasets: { data: number[]; withDots: boolean; }[];
-      counts: number[];
-  } | null>(null);
+  const { timeframe } = useTimeframe();
+  const [pattern, setPattern] = useState<DowPatternData | null>(null);
 
   const styles = useMemo(() => StyleSheet.create({
     loadingText: {
@@ -62,48 +63,84 @@ const DailyMoodChart = () => {
       color: colors.textSecondary,
       fontSize: 10,
     },
+    callout: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      marginTop: 16,
+      paddingTop: 16,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+    },
+    calloutItem: {
+      alignItems: 'center',
+    },
+    calloutLabel: {
+      color: colors.textSecondary,
+      fontSize: 12,
+      marginBottom: 4,
+    },
+    calloutValue: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    emptyText: {
+      color: colors.textSecondary,
+      fontSize: 14,
+      textAlign: 'center',
+      padding: 20,
+    },
   }), [colors]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // SQLite's strftime('%w') returns 0=Sun..6=Sat.
-        // Note: strftime treats the stored datetime as UTC. For per-day-of-week
-        // aggregates this is a small leak (an entry made at 11pm Sun local can
-        // count as Mon under UTC) — fix lives with the entries-table layer,
-        // not here. Flagged in the brief; tracked separately.
-        const rows = await db.getAllAsync<DailyMoodRow>(`
-          SELECT
-            CAST(strftime('%w', date) AS INTEGER) as day_of_week,
-            ROUND(AVG(mood), 1) as avg_mood,
-            COUNT(*) as entry_count
-          FROM entries
-          GROUP BY day_of_week
-          ORDER BY day_of_week
-        `);
-
-        const built = buildDailyBarData(rows);
-        setChartData({
-          labels: built.labels,
-          datasets: [{ data: built.data, withDots: true }],
-          counts: built.counts,
-        });
+        // Timeframe-scoped, parameterised local-time window (?start, ?end) —
+        // replaces the previous all-time GROUP BY strftime query, which was the
+        // only chart on the screen that ignored the TimeframeSelector.
+        const { start, end } = computeWindow(timeframe as Timeframe);
+        const rows = await db.getAllAsync<DowRow>(DOW_MOOD_PATTERN, [start, end]);
+        // Monday-first to match the heatmap convention used on this screen.
+        setPattern(buildDowPatternData(rows, 1));
       } catch (error) {
         console.error('Error fetching daily mood data:', error);
+        setPattern(null);
       }
     };
 
     fetchData();
-  }, [db, refreshCount]);
+  }, [db, refreshCount, timeframe]);
 
-  if (!chartData) {
-    return <Text style={styles.loadingText}>Loading...</Text>;
+  if (!pattern) {
+    return (
+      <Card>
+        <Text style={styles.title}>Average Mood by Day</Text>
+        <Text style={styles.loadingText}>Loading...</Text>
+      </Card>
+    );
   }
+
+  if (pattern.totalEntries === 0) {
+    return (
+      <Card>
+        <Text style={styles.title}>Average Mood by Day</Text>
+        <Text style={styles.emptyText}>
+          No entries in this timeframe yet. Try a longer timeframe or add more
+          entries.
+        </Text>
+      </Card>
+    );
+  }
+
+  const chartData = {
+    labels: pattern.labels,
+    datasets: [{ data: pattern.avgMood, withDots: true }],
+  };
 
   return (
     <Card>
-      <InfoBubble 
-          text="Your daily mood entries aggregated over the seven days of the week, giving you a detailed view of mood fluctuations throughout it and potentially finding hidden patterns - maybe you're a Monday enjoyer?"
+      <InfoBubble
+          text="Your average mood aggregated over each day of the week for the selected timeframe — handy for spotting patterns like a recurring midweek dip or a Saturday lift."
           position="top-right"
       />
       <Text style={styles.title}>Average Mood by Day</Text>
@@ -126,13 +163,25 @@ const DailyMoodChart = () => {
         />
       </View>
       <View style={styles.legendContainer}>
-        {chartData.labels.map((day, index) => (
+        {pattern.labels.map((day, index) => (
           <View key={day} style={styles.legendItem}>
-            <Text style={styles.legendCount}>{chartData.counts[index]} entries</Text>
+            <Text style={styles.legendCount}>{pattern.entryCount[index]} entries</Text>
             <Text style={styles.legendDay}>{day}</Text>
           </View>
         ))}
       </View>
+      {pattern.hasEnoughData && pattern.bestDay !== '' && (
+        <View style={styles.callout}>
+          <View style={styles.calloutItem}>
+            <Text style={styles.calloutLabel}>Best day</Text>
+            <Text style={styles.calloutValue}>{pattern.bestDay}</Text>
+          </View>
+          <View style={styles.calloutItem}>
+            <Text style={styles.calloutLabel}>Toughest day</Text>
+            <Text style={styles.calloutValue}>{pattern.worstDay}</Text>
+          </View>
+        </View>
+      )}
     </Card>
   );
 };

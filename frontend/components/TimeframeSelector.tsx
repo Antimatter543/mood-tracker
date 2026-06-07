@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useThemeColors } from '@/styles/global';
 
@@ -15,7 +15,7 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
 }) => {
   const colors = useThemeColors();
 
-  const styles = StyleSheet.create({
+  const styles = useMemo(() => StyleSheet.create({
     container: {
       flexDirection: 'row',
       backgroundColor: colors.overlays.tag,
@@ -42,7 +42,7 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
       color: '#fff',
       fontWeight: '600',
     },
-  });
+  }), [colors]);
 
   const options: { value: Timeframe; label: string }[] = [
     { value: 'week', label: 'Week' },

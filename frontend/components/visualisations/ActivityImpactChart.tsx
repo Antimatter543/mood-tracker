@@ -22,19 +22,12 @@ const ActivityImpactChart = () => {
     const [impactData, setImpactData] = useState<ActivityImpact[]>([]);
     const [totalEntries, setTotalEntries] = useState(0);
 
-    // Define negative impact color based on theme
-    const negativeColor = useMemo(() => {
-        // For cherry theme, use a color that matches the theme
-        if (colors.accent === '#DB7093') { // Cherry theme
-            return '#E57373'; // Lighter red for cherry theme
-        } else if (colors.accent === '#6495ED') { // Midnight theme
-            return '#FF5252'; // Bright red for midnight theme
-        } else if (colors.accent === '#43A047') { // Forest theme
-            return '#FF7043'; // Orange-red for forest theme
-        }
-        // Default red for other themes
-        return '#ff4444';
-    }, [colors]);
+    // Semantic "negative impact" red. Driven by the theme's dark/light family
+    // (not brittle accent-hex matching, which never matched the real accents).
+    const negativeColor = useMemo(
+        () => (colors.isDark ? '#FF5252' : '#E53935'),
+        [colors]
+    );
 
     const styles = useMemo(() => StyleSheet.create({
         title: {
