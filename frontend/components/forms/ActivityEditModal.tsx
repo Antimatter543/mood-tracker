@@ -248,7 +248,7 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
                     <TextInput
                         style={styles.input}
                         placeholder="Activity Name"
-                        placeholderTextColor="#666"
+                        placeholderTextColor={colors.textSecondary}
                         value={activityName}
                         onChangeText={(text) => {
                             setActivityName(text);

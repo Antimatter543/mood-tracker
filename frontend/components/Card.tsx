@@ -55,7 +55,7 @@ export const Card = ({ children, style, variant = 'elevated', accentTop = false 
       style={[styles.container, variant === 'elevated' && styles.elevated, style]}
     >
       {accentTop && <View style={styles.accentBar} />}
-      <View>{children}</View>
+      <View style={accentTop ? { paddingTop: 3 } : undefined}>{children}</View>
     </View>
   );
 };

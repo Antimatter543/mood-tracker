@@ -1,5 +1,6 @@
 import { View, Text, StyleSheet } from 'react-native';
-import { useGlobalStyles, useThemeColors } from '@/styles/global';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useThemeColors } from '@/styles/global';
 import { Layout } from '../../components/PageContainer';
 import { Card } from '@/components/Card';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -30,39 +31,36 @@ const formatDate = (dateStr: string | null) => {
     };
 };
 
-// Mood icon component
+// Time-of-day greeting based on the local hour.
+const greetingForHour = (hour: number): string => {
+    if (hour < 12) return 'Good morning';
+    if (hour < 18) return 'Good afternoon';
+    return 'Good evening';
+};
+
+// Mood icon component — brand rule: no emoji as icons, use Ionicons sized + colored to theme.
 function MoodIcon({ mood }: { mood: number | null }) {
     const colors = useThemeColors();
-    // Since this is a very simple component, we can just define styles inline
-    // or use StyleSheet.create without useMemo
-    const styles = StyleSheet.create({
-        moodIcon: {
-            fontSize: 32,
-            marginLeft: 'auto',
-        }
-    });
-
     if (mood === null) return null;
 
-    const getMoodIcon = (mood: number) => {
-        if (mood >= 8) return "😄";  // Very happy
-        if (mood >= 6) return "🙂";  // Happy
-        if (mood >= 4) return "😐";  // Neutral
-        if (mood >= 2) return "🙁";  // Sad
-        return "😢";                 // Very sad
-    };
+    const name: keyof typeof Ionicons.glyphMap =
+        mood >= 8 ? 'happy' :
+        mood >= 6 ? 'happy-outline' :
+        mood >= 4 ? 'remove-circle-outline' :
+        mood >= 2 ? 'sad-outline' :
+                    'sad';
 
-    return (
-        <Text style={styles.moodIcon}>
-            {getMoodIcon(mood)}
-        </Text>
-    );
+    return <Ionicons name={name} size={36} color={moodColor(mood, colors.accent)} style={{ marginLeft: 'auto' }} />;
 }
 
-/** Mood-level to color mapping for the big mood number. */
+/**
+ * Mood-level to color mapping for the big mood number and icon.
+ * High mood uses the theme accent (so it matches all 5 themes); mid/low keep
+ * semantic amber(warn)/red(error) so a bad day always reads as a bad day.
+ */
 const moodColor = (mood: number | null, fallback: string): string => {
     if (mood === null) return fallback;
-    if (mood >= 8) return '#4CAF50';
+    if (mood >= 8) return fallback; // theme accent = positive
     if (mood >= 6) return fallback; // accent
     if (mood >= 4) return '#F9A825';
     if (mood >= 2) return '#FB8C00';
@@ -83,8 +81,8 @@ const TodaysMoodCard = memo(function TodaysMoodCard({
     const displayMood = mood !== null ? mood.toFixed(1) : '--';
 
     return (
-        <Card accentTop>
-            <Text style={styles.cardTitle}>
+        <Card accentTop style={styles.heroCard}>
+            <Text style={styles.heroDate}>
                 {formatDate(new Date().toISOString()).full}
             </Text>
             <View style={styles.moodRow}>
@@ -131,7 +129,6 @@ const WeeklyChartCard = memo(function WeeklyChartCard({ data }: { data: (number 
     const { data: interpolatedData, nullIndices } = useMemo(() =>
         interpolateData(data.length > 0 ? data : [0, 0, 0, 0, 0, 0, 0])
         , [data]);
-    console.log(interpolatedData);
 
     const chartData = useMemo(() => ({
         labels: getPast7Days().map(date => formatToDayName(date)),
@@ -143,7 +140,6 @@ const WeeklyChartCard = memo(function WeeklyChartCard({ data }: { data: (number 
 
     return (
         <Card>
-            <Text style={styles.cardTitle}>This Week</Text>
             <View style={styles.chartContainer}>
                 <LineChart
                     data={chartData}
@@ -169,6 +165,7 @@ const WeeklyChartCard = memo(function WeeklyChartCard({ data }: { data: (number 
                     style={styles.chart}
                 />
             </View>
+            <Text style={styles.subtitle}>Past 7 days</Text>
         </Card>
     );
 });
@@ -188,7 +185,7 @@ const MonthlyOverviewCard = memo(function MonthlyOverviewCard({ stats }: {
 
     return (
         <Card>
-            <Text style={styles.cardTitle}>Monthly Overview</Text>
+            <Text style={styles.subtitle}>Last 30 days</Text>
             <View style={styles.statsGrid}>
                 <View style={[styles.statItem, { backgroundColor: colors.accentLight }]}>
                     <Text style={styles.statLabel}>Average Mood</Text>
@@ -214,7 +211,7 @@ const RecentActivitiesCard = memo(function RecentActivitiesCard({ activities }: 
 
     return (
         <Card>
-            <Text style={styles.cardTitle}>Recent Activities</Text>
+            <Text style={styles.subtitle}>Recent activities</Text>
             <View style={styles.activitiesContainer}>
                 {activities.map((activity, index) => (
                     <View key={index} style={styles.activityTag}>
@@ -234,13 +231,28 @@ const useThemedStyles = (colors: any) => {
             gap: 8,
             flexGrow: 0,
         },
-        cardTitle: {
-            fontSize: 16,
-            fontWeight: '700',
+        greeting: {
+            fontSize: 18,
+            fontWeight: '600',
             color: colors.textSecondary,
-            marginBottom: 16,
-            textTransform: 'uppercase',
-            letterSpacing: 1.2,
+            marginBottom: 12,
+            marginLeft: 2,
+        },
+        subtitle: {
+            fontSize: 12,
+            fontWeight: '600',
+            color: colors.textSecondary,
+            marginBottom: 8,
+            letterSpacing: 0.3,
+        },
+        heroCard: {
+            marginBottom: 24,
+        },
+        heroDate: {
+            fontSize: 13,
+            fontWeight: '600',
+            color: colors.textSecondary,
+            marginBottom: 8,
         },
         moodRow: {
             flexDirection: 'row',
@@ -248,19 +260,14 @@ const useThemedStyles = (colors: any) => {
             gap: 8,
         },
         moodValue: {
-            fontSize: 48,
-            fontWeight: '800',
+            fontSize: 64,
+            fontWeight: '900',
             color: colors.accent,
-            letterSpacing: -1,
+            letterSpacing: -2,
         },
         moodLabel: {
             fontSize: 16,
             color: colors.textSecondary,
-        },
-        lastUpdated: {
-            fontSize: 12,
-            color: colors.textSecondary,
-            marginTop: 8,
         },
         chartContainer: {
             alignItems: 'center',
@@ -328,7 +335,6 @@ const useThemedStyles = (colors: any) => {
 export default function Home() {
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
-    const globalStyle = useGlobalStyles(colors);
     const db = useSQLiteContext();
     const { refreshCount } = useDataContext();
     const [todaysMood, setTodaysMood] = useState<number | null>(null);
@@ -426,15 +432,15 @@ export default function Home() {
                     });
                 }
 
-                setRecentActivities(activities.map(a => `${a.name} (${a.count}) `));
+                setRecentActivities(activities.map(a => a.name));
 
-                // Fill in the 8-day window (last 7 days + today, earliest first)
-                // with null for days that had no entries — same shape the chart
-                // expects.
+                // Fill in the 7-day window (last 6 days + today, earliest first)
+                // with null for days that had no entries — same shape (and count)
+                // the chart's 7 labels expect.
                 const weeklyByDate: Record<string, number | null> = {};
                 for (const row of weeklyRows) weeklyByDate[row.date] = row.avgMood;
                 const weekly: (number | null)[] = [];
-                for (let i = 7; i >= 0; i--) {
+                for (let i = 6; i >= 0; i--) {
                     const dStr = localDateString(new Date(now.getTime() - i * DAY_MS));
                     weekly.push(weeklyByDate[dStr] ?? null);
                 }
@@ -451,15 +457,10 @@ export default function Home() {
 
     return (
         <Layout>
-            {/* <View style={globalStyle.header}>
-                <Feather name="home" color={colors.text} size={24} />
-                <Text style={globalStyle.headerText}>Home Page</Text>
-            </View> */}
-
             <View style={styles.container}>
+                <Text style={styles.greeting}>{greetingForHour(new Date().getHours())}</Text>
                 <TodaysMoodCard mood={todaysMood} streak={streak} />
                 <WeeklyChartCard data={weeklyData} />
-                {/* <BasicLineChart /> */}
                 <MonthlyOverviewCard stats={monthlyStats} />
                 <RecentActivitiesCard activities={recentActivities} />
             </View>
