@@ -367,7 +367,12 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     };
 
     return (
-        <View style={styles.contentContainer}>
+        <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.contentContainer}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+        >
             {currentStep === 1 ? (
                 <MoodStep
                     value={draft.mood}
@@ -391,7 +396,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                     submitDisabled={!isValid}
                 />
             )}
-        </View>
+        </ScrollView>
     );
 };
 
@@ -414,9 +419,17 @@ const useThemedStyles = (colors: ThemeColors) =>
         closeButton: {
             padding: 8,
         },
-        contentContainer: {
+        scroll: {
             flex: 1,
-            paddingBottom: '5%',
+        },
+        contentContainer: {
+            // flexGrow (not flex) so the content stays vertically centred when it
+            // fits the viewport, but grows past it and scrolls when it doesn't —
+            // guarantees the Continue/Submit button is always reachable on small
+            // screens. Vertical padding gives breathing room at both ends.
+            flexGrow: 1,
+            paddingTop: 8,
+            paddingBottom: 24,
             alignItems: 'center',
             justifyContent: 'center',
             paddingHorizontal: 20,

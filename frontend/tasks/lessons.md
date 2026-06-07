@@ -1,5 +1,56 @@
 # SoulSync — Project Lessons
 
+## Four UI/chart fixes + dev-loop notes (2026-06-07)
+
+Fixed four user-reported issues on the standalone release. Notes for future work:
+
+1. **White framing around the floating tab bar** -> the Android window root
+   background defaulted to white, peeking through the rounded-corner gaps + the
+   safe-area strip below the floating tab bar. Fix:
+   `SystemUI.setBackgroundColorAsync(colors.background)` in `TabNavigator`
+   (reactive to theme) + `sceneContainerStyle.backgroundColor` on `<Tabs>`.
+   `expo-system-ui` is installed; `expo-navigation-bar` is NOT. Verify by
+   sampling corner pixels next to the tab bar (should equal theme `background`,
+   not `#fff`) — the downscaled screenshot makes `secondaryBackground` look
+   "white-ish" so trust the pixel sample, not the eyeball.
+
+2. **Modal forms must scroll** -> the entry form's `contentContainer` was
+   `flex:1, center`; on short screens the Continue button was unreachable. Fix:
+   the form's root is a `<ScrollView>` with `contentContainerStyle` using
+   `flexGrow:1` (NOT `flex:1`) + centred justify + vertical padding, so it stays
+   centred when it fits and scrolls when it overflows. Any future modal form
+   should do the same.
+
+3. **chart-kit x-axis overlaps on long timeframes** -> `weeklyMood.ts`
+   `formatLabel` returned `month:'short'` for EVERY daily point (year/alltime
+   plot one point PER DAY, 365+ points), cramming dozens of labels. The chart is
+   NOT down-sampled. Fix: for year/alltime, label only ~5 evenly-spaced index
+   positions (`isSparseLabelIndex`, anchored at both ends), blank the rest, and
+   format as `"Mon 'YY"` so years are explicit. Spread by INDEX, not calendar
+   month, because `formatLabel` only sees the current point (no neighbour info).
+
+4. **Year context + recency** -> heatmap `monthLabels` and the trend axis never
+   showed the year. Fix: append 2-digit year at each year boundary (January /
+   first label) in `heatmap.ts` ("Jan 26"); trend uses `"Mon 'YY"`. Heatmap
+   recency: replaced the racy `setTimeout(scrollToEnd, 200)` with
+   `onContentSizeChange={() => scrollToEnd()}` on the horizontal ScrollView so
+   the newest (rightmost) data is reliably in view on open.
+
+**Dev-loop gotcha**: the device's installed **Expo Go is SDK 56**, but this
+project is **SDK 52** — Expo Go refuses to load it ("Project is incompatible").
+So the coordinator's "use Expo Go for fast iteration" doesn't apply here; the
+`expo run:android` incremental dev build (android/ prebuilt, ~26s) is the loop.
+
+**Seeding year-boundary data without the flaky 50-entry button**: the in-app
+"Generate 50 Sample Entries" / Import dialogs are `<Modal>`/`Alert`-based and
+CANNOT be driven by synthetic taps (documented modal-touch limitation below).
+Instead, on a DEBUG build, seed SQLite directly:
+`adb shell run-as com.raeduslabs.soulsync cat files/SQLite/moodTracker.db > /tmp/x.db`,
+edit with host `sqlite3`/python, `adb push` to `/data/local/tmp`, then
+`run-as ... cp` back into `files/SQLite/` and `rm` the `-wal`/`-shm` journals.
+`generateData.ts seedMoodEntries` already spreads dates `2025-01-01..now`, so it
+crosses the year boundary if you CAN trigger it.
+
 ## Empty-database (fresh-install) crash: heatmap NULL date -> RangeError (2026-06-07)
 
 **Symptom**: On a fresh/empty `entries` table (every new user before their first

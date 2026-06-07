@@ -5,6 +5,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useCallback, useState, useMemo, useEffect, useRef } from "react";
 import { AppState, AppStateStatus } from "react-native";
+import * as SystemUI from "expo-system-ui";
 import { DataProvider } from "../../context/DataContext";
 import { useThemeColors } from "@/styles/global";
 import { SettingsProvider, useSettings } from "@/context/SettingsContext";
@@ -96,6 +97,17 @@ function NotificationReArm() {
 function TabNavigator() {
     const colors = useThemeColors(); // Now this will work because it's inside SettingsProvider
 
+    // Paint the native window root background to the theme background. Without
+    // this, Android's default window background (white) peeks through around the
+    // floating, rounded-top tab bar (its corner radii + the safe-area strip
+    // below it), framing the nav bar in white on dark/coloured themes. Reactive
+    // to theme changes so it always matches the active palette.
+    useEffect(() => {
+        SystemUI.setBackgroundColorAsync(colors.background).catch(() => {
+            // Cosmetic only — never crash if the native module is unavailable.
+        });
+    }, [colors.background]);
+
     // Memoize the screen options to prevent unnecessary re-renders
     const screenOptions = useMemo(() => ({
         // Header styling
@@ -109,6 +121,11 @@ function TabNavigator() {
             color: colors.text,
 
             
+        },
+        // Screen container behind every tab — paint it the theme background so
+        // no white shows around the floating tab bar or under short screens.
+        sceneContainerStyle: {
+            backgroundColor: colors.background,
         },
         // Tab bar styling — floating rounded feel
         tabBarStyle: {

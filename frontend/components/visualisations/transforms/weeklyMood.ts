@@ -29,6 +29,35 @@ export type WeeklyMoodChartData = {
  *      previous inline `formatDateLabel` captured `timeframe` from render
  *      and was not listed in the effect deps).
  */
+// Long timeframes (year/alltime) plot one point PER DAY — up to 365+ points.
+// chart-kit draws every label, so returning a month name for each point crams
+// dozens of overlapping "Jan/Feb/..." onto the axis. We instead show a label
+// only at a handful of evenly-spaced index positions (TARGET_AXIS_LABELS total),
+// blanking the rest. Spreading by index (not by calendar month) guarantees the
+// labels never overlap regardless of how dense the data is.
+const TARGET_AXIS_LABELS = 5;
+
+/**
+ * True at ~TARGET_AXIS_LABELS evenly-spaced positions across [0, totalPoints).
+ * Always includes the first and last index so the axis is anchored at both ends.
+ */
+const isSparseLabelIndex = (index: number, totalPoints: number): boolean => {
+    if (totalPoints <= TARGET_AXIS_LABELS) return true;
+    if (index === 0 || index === totalPoints - 1) return true;
+    // Step between shown labels, rounded so we land on integer indices.
+    const step = (totalPoints - 1) / (TARGET_AXIS_LABELS - 1);
+    // Show when this index is the nearest integer to one of the target slots.
+    const slot = Math.round(index / step);
+    return Math.round(slot * step) === index;
+};
+
+/** "Jan '25" — month + 2-digit year, so adjacent years are unambiguous. */
+const monthYearLabel = (date: Date): string => {
+    const month = date.toLocaleDateString(undefined, { month: 'short' });
+    const yy = String(date.getFullYear()).slice(-2);
+    return `${month} '${yy}`;
+};
+
 export const formatLabel = (
     dateStr: string,
     index: number,
@@ -48,6 +77,8 @@ export const formatLabel = (
             return `Week ${index + 1}`;
 
         case '3months': {
+            // Sparse M/D labels: endpoints + ~every 3rd point. Short enough a
+            // span that month/year context isn't needed for legibility.
             if (index === 0 || index === totalPoints - 1) {
                 return `${date.getMonth() + 1}/${date.getDate()}`;
             }
@@ -59,7 +90,11 @@ export const formatLabel = (
 
         case 'year':
         case 'alltime':
-            return date.toLocaleDateString(undefined, { month: 'short' });
+            // ~5 evenly-spaced labels, each "Mon 'YY" so the year is explicit
+            // and you can tell e.g. Jan '25 from Jan '26. Everything else blank.
+            return isSparseLabelIndex(index, totalPoints)
+                ? monthYearLabel(date)
+                : '';
 
         default:
             return date.toLocaleDateString(undefined, { weekday: 'short' });

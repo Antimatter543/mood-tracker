@@ -98,7 +98,22 @@ describe('buildHeatmapGrid', () => {
     ];
     const out = buildHeatmapGrid(rows);
     const months = out.monthLabels.map((m) => m.month);
-    // Could include Apr/May depending on grid-start snapping; verify all 3 are present.
-    expect(months).toEqual(expect.arrayContaining(['May', 'Jun', 'Jul']));
+    // First label carries the 2-digit year (year boundary / first label);
+    // subsequent same-year months are bare. Verify all 3 are present.
+    expect(months[0]).toMatch(/^[A-Za-z]{3} \d{2}$/); // e.g. "May 25"
+    expect(months).toEqual(expect.arrayContaining(['Jun', 'Jul']));
+  });
+
+  it('tags January (year boundary) with the 2-digit year', () => {
+    // Span Dec 2025 → Feb 2026: January gets the year so columns are unambiguous.
+    const rows: HeatmapInput[] = [
+      { date: '2025-12-15', mood: 5 },
+      { date: '2026-01-15', mood: 6 },
+      { date: '2026-02-15', mood: 7 },
+    ];
+    const out = buildHeatmapGrid(rows);
+    const months = out.monthLabels.map((m) => m.month);
+    // January of the new year is labelled "Jan 26"; Feb stays bare.
+    expect(months).toEqual(expect.arrayContaining(['Jan 26', 'Feb']));
   });
 });

@@ -127,7 +127,15 @@ export const buildHeatmapGrid = (rows: HeatmapInput[]): HeatmapGrid => {
                         month: 'short',
                         timeZone: 'UTC',
                     });
-                    monthLabels.push({ month, weekIndex: week });
+                    // Append the 2-digit year at each year boundary (January, or
+                    // the very first label) so columns are unambiguous across
+                    // year boundaries — e.g. "Jan 26" vs the prior "Jan 25".
+                    const isYearStart =
+                        d.getUTCMonth() === 0 || monthLabels.length === 0;
+                    const label = isYearStart
+                        ? `${month} ${String(d.getUTCFullYear()).slice(-2)}`
+                        : month;
+                    monthLabels.push({ month: label, weekIndex: week });
                 }
             }
         }

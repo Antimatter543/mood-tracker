@@ -137,11 +137,10 @@ const CustomHeatmap: React.FC = () => {
                             mood: row.avg_mood
                         }))
                 );
-                
-                // Scroll to the end when data is loaded
-                setTimeout(() => {
-                    scrollViewRef.current?.scrollToEnd({ animated: false });
-                }, 200);
+                // Scrolling to the newest (rightmost) data is handled by the
+                // ScrollView's onContentSizeChange — a timeout-based scrollToEnd
+                // races the SVG layout and often fires before content has width,
+                // leaving the heatmap parked at the oldest data.
             } catch (error) {
                 console.error('Error fetching mood data:', error);
             }
@@ -242,11 +241,17 @@ const CustomHeatmap: React.FC = () => {
             />
             <Text style={styles.title}>Mood Heatmap</Text>
             <View style={styles.chartContainer}>
-                <ScrollView 
-                    horizontal 
+                <ScrollView
+                    horizontal
                     ref={scrollViewRef}
                     showsHorizontalScrollIndicator={true}
                     style={styles.scrollContainer}
+                    // Reliably reveal the newest data: scroll to the right edge
+                    // once the SVG content has a measured width. Re-fires if the
+                    // content grows (new entries), keeping recent dates in view.
+                    onContentSizeChange={() =>
+                        scrollViewRef.current?.scrollToEnd({ animated: false })
+                    }
                 >
                     <Svg width={svgWidth} height={svgHeight}>
                         {renderDayLabels()}
