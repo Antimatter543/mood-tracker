@@ -43,7 +43,13 @@ describe('validateDraft (pure)', () => {
         activities: [],
         notes: '',
         date: new Date('2026-03-05T12:00:00Z'),
+        photos: [],
     };
+
+    it('accepts a draft with photos attached', () => {
+        const v = validateDraft({ ...baseDraft, photos: ['file:///a.jpg'] });
+        expect(v.isValid).toBe(true);
+    });
 
     it('flags mood below 0 as invalid', () => {
         const v = validateDraft({ ...baseDraft, mood: -1 });
@@ -170,6 +176,43 @@ describe('useEntryDraft state machine', () => {
         expect(r.hook.draft.mood).toBe(5);
         expect(r.hook.draft.notes).toBe('');
         expect(r.hook.draft.activities).toEqual([]);
+    });
+
+    it('addPhoto appends a photo uri (and is idempotent on the same value)', () => {
+        const r = renderUseEntryDraft();
+        act(() => {
+            r.hook.addPhoto('file:///shot.jpg');
+        });
+        expect(r.hook.draft.photos).toEqual(['file:///shot.jpg']);
+        act(() => {
+            r.hook.addPhoto('file:///shot.jpg');
+        });
+        expect(r.hook.draft.photos).toEqual(['file:///shot.jpg']);
+    });
+
+    it('removePhoto removes a photo uri and is a no-op when absent', () => {
+        const r = renderUseEntryDraft({ photos: ['file:///a.jpg', 'file:///b.jpg'] });
+        act(() => {
+            r.hook.removePhoto('file:///a.jpg');
+        });
+        expect(r.hook.draft.photos).toEqual(['file:///b.jpg']);
+        act(() => {
+            r.hook.removePhoto('file:///missing.jpg');
+        });
+        expect(r.hook.draft.photos).toEqual(['file:///b.jpg']);
+    });
+
+    it('seeds photos from init', () => {
+        const r = renderUseEntryDraft({ photos: ['file:///seed.jpg'] });
+        expect(r.hook.draft.photos).toEqual(['file:///seed.jpg']);
+    });
+
+    it('reset clears photos back to empty', () => {
+        const r = renderUseEntryDraft({ photos: ['file:///x.jpg'] });
+        act(() => {
+            r.hook.reset();
+        });
+        expect(r.hook.draft.photos).toEqual([]);
     });
 
     it('reset accepts new init values', () => {

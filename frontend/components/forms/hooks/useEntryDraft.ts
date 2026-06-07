@@ -10,6 +10,14 @@ export type EntryDraft = {
     activities: number[];
     notes: string;
     date: Date;
+    /**
+     * Photo URIs attached to this entry. For a new entry these are *source*
+     * URIs from the image picker (copied into MEDIA_DIR at save time). For an
+     * edit they are the already-persisted MEDIA_DIR file paths of existing
+     * photos, plus any newly-picked source URIs. The DB layer distinguishes
+     * the two by checking which paths already live under MEDIA_DIR.
+     */
+    photos: string[];
 };
 
 export type EntryDraftInit = Partial<EntryDraft>;
@@ -26,6 +34,7 @@ const DEFAULT_DRAFT: EntryDraft = {
     activities: [],
     notes: '',
     date: new Date(0), // placeholder; replaced in init
+    photos: [],
 };
 
 /**
@@ -38,6 +47,7 @@ function buildInitialDraft(init?: EntryDraftInit): EntryDraft {
         activities: init?.activities ? [...init.activities] : [],
         notes: init?.notes ?? '',
         date: init?.date ? new Date(init.date) : new Date(),
+        photos: init?.photos ? [...init.photos] : [],
     };
 }
 
@@ -85,6 +95,10 @@ export type UseEntryDraft = {
     toggleActivity: (activityId: number) => void;
     setActivities: (activities: number[]) => void;
     setDate: (date: Date) => void;
+    /** Append a photo URI to the draft. Idempotent on the value. */
+    addPhoto: (uri: string) => void;
+    /** Remove a photo URI from the draft. No-op if absent. */
+    removePhoto: (uri: string) => void;
     validation: EntryDraftValidation;
     isValid: boolean;
     reset: (init?: EntryDraftInit) => void;
@@ -138,6 +152,21 @@ export function useEntryDraft(init?: EntryDraftInit): UseEntryDraft {
         setDraft(prev => ({ ...prev, date }));
     }, []);
 
+    const addPhoto = useCallback((uri: string) => {
+        setDraft(prev =>
+            prev.photos.includes(uri)
+                ? prev
+                : { ...prev, photos: [...prev.photos, uri] }
+        );
+    }, []);
+
+    const removePhoto = useCallback((uri: string) => {
+        setDraft(prev => ({
+            ...prev,
+            photos: prev.photos.filter(p => p !== uri),
+        }));
+    }, []);
+
     const reset = useCallback((nextInit?: EntryDraftInit) => {
         setDraft(buildInitialDraft(nextInit));
     }, []);
@@ -167,6 +196,8 @@ export function useEntryDraft(init?: EntryDraftInit): UseEntryDraft {
         toggleActivity,
         setActivities,
         setDate,
+        addPhoto,
+        removePhoto,
         validation,
         isValid: validation.isValid,
         reset,

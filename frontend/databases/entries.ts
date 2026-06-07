@@ -1,6 +1,8 @@
 import { SQLiteDatabase } from 'expo-sqlite';
 import { Activity, DatabaseResult, MoodEntry } from '@/components/types';
 import { getDefaultEntryDate } from '@/databases/dateHelpers';
+import { addEntryMedia, getEntryMedia } from '@/databases/entry-media';
+import { copyToMediaDir } from '@/databases/mediaHelpers';
 
 /**
  * CRUD for mood entries.
@@ -53,13 +55,21 @@ export async function filterValidActivityIds(
  *   through (the previous implementation did this outside the txn).
  * - If some activities became invalid mid-call, we still succeed and just
  *   warn — losing the link is preferable to losing the entry.
+ *
+ * `photos` is an optional trailing arg of *source* URIs (from the image
+ * picker). Each is copied into the persistent MEDIA_DIR *before* the
+ * transaction (file IO inside a SQLite transaction would hold the write lock
+ * for the whole copy), then a row per stable path is inserted alongside the
+ * entry. Backward-compatible: existing callers that omit `photos` are
+ * unaffected.
  */
 export async function addMoodEntry(
   db: SQLiteDatabase,
   mood: number,
   activityIds: number[],
   notes: string,
-  date?: string
+  date?: string,
+  photos?: string[]
 ): Promise<DatabaseResult> {
   try {
     if (isNaN(mood) || mood < 0 || mood > 10) {
@@ -70,6 +80,17 @@ export async function addMoodEntry(
     }
 
     const entryDate = date || getDefaultEntryDate();
+
+    // Copy source photos into the persistent media dir BEFORE opening the
+    // transaction — file copies are slow and must not block the DB write lock.
+    // These files are orphaned only if the transaction below throws (rare);
+    // the form's cancel path handles the much more common cancel-orphan case.
+    const photoPaths: string[] = [];
+    if (photos?.length) {
+      for (const sourceUri of photos) {
+        photoPaths.push(await copyToMediaDir(sourceUri));
+      }
+    }
 
     await db.withTransactionAsync(async () => {
       // Filter inside the transaction so concurrent activity deletes can't
@@ -95,6 +116,8 @@ export async function addMoodEntry(
           [entryId, activityId]
         );
       }
+
+      await addEntryMedia(db, entryId, photoPaths);
     });
 
     return {
@@ -121,7 +144,7 @@ export async function getMoodEntries(db: SQLiteDatabase): Promise<MoodEntry[]> {
     let entriesWithActivities: MoodEntry[] = [];
 
     await db.withTransactionAsync(async () => {
-      const rawEntries = await db.getAllAsync<Omit<MoodEntry, 'activities'>>(
+      const rawEntries = await db.getAllAsync<Omit<MoodEntry, 'activities' | 'photos'>>(
         'SELECT * FROM entries ORDER BY date DESC'
       );
 
@@ -138,9 +161,12 @@ export async function getMoodEntries(db: SQLiteDatabase): Promise<MoodEntry[]> {
             [entry.id]
           );
 
+          const photos = await getEntryMedia(db, entry.id);
+
           return {
             ...entry,
             activities,
+            photos,
           };
         })
       );

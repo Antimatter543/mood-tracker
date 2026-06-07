@@ -1,9 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, SectionList, ActivityIndicator } from 'react-native';
+import {
+    View,
+    Text,
+    StyleSheet,
+    Pressable,
+    SectionList,
+    ActivityIndicator,
+    Image,
+    ScrollView,
+    Modal,
+    Dimensions,
+    FlatList,
+} from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
-import { colors, useThemeColors } from '@/styles/global';
+import { useThemeColors } from '@/styles/global';
 import { useDataContext } from '@/context/DataContext';
-import { MoodEntry, Activity } from './types';
+import { MoodEntry, Activity, EntryPhoto } from './types';
 
 
 import Feather from '@expo/vector-icons/Feather';
@@ -11,6 +23,8 @@ import Feather from '@expo/vector-icons/Feather';
 import { Card } from './Card';
 import { EntryFormData, EntryFormModal } from './forms/EntryForm';
 import { EmptyState } from './EmptyState';
+import { getMediaByEntryIds } from '@/databases/entry-media';
+import { MEDIA_DIR, copyToMediaDir, deleteMediaFile } from '@/databases/mediaHelpers';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -73,6 +87,10 @@ const useThemedStyles = (colors: any) => {
             padding: 8,
             borderRadius: 20,
             backgroundColor: colors.overlays.tag,
+            minHeight: 44,
+            minWidth: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
         },
         moodValue: {
             color: colors.text,
@@ -209,6 +227,21 @@ const useThemedStyles = (colors: any) => {
         },
         deleteButton: {
             backgroundColor: 'rgba(255, 68, 68, 0.2)', // Keep error color consistent
+            minHeight: 44,
+            minWidth: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        photoStrip: {
+            flexDirection: 'row',
+            marginTop: 8,
+            paddingHorizontal: 4,
+        },
+        photoThumb: {
+            width: 64,
+            height: 64,
+            borderRadius: 6,
+            marginRight: 6,
         },
     }), [colors]);
 }
@@ -243,12 +276,21 @@ const EntryCard: React.FC<EntryCardProps> = ({ entry, onEdit, onDelete, styles, 
         <View style={styles.cardHeader}>
             <Text style={styles.moodValue}>Mood: {entry.mood}</Text>
             <View style={styles.actionButton}>
-                <Pressable style={styles.editButton} onPress={onEdit}>
+                <Pressable
+                    style={styles.editButton}
+                    onPress={onEdit}
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit entry"
+                    hitSlop={8}
+                >
                     <Feather name="pen-tool" color={colors.text} size={16} />
                 </Pressable>
                 <Pressable
                     style={[styles.actionButton, styles.deleteButton]}
                     onPress={() => onDelete(entry.id)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Delete entry"
+                    hitSlop={8}
                 >
                     <Feather name="trash-2" color={colors.text} size={16} />
                 </Pressable>
@@ -257,6 +299,9 @@ const EntryCard: React.FC<EntryCardProps> = ({ entry, onEdit, onDelete, styles, 
 
         <ActivitiesList activities={entry.activities} styles={styles} />
         {entry.notes && <Text style={styles.notes}>Notes: {entry.notes}</Text>}
+        {entry.photos && entry.photos.length > 0 && (
+            <PhotoStrip photos={entry.photos} styles={styles} colors={colors} />
+        )}
         <Text style={styles.date}>
             {new Date(entry.date).toLocaleTimeString()}
         </Text>
@@ -279,6 +324,122 @@ const ActivitiesList: React.FC<{ activities: Activity[], styles: any }> = ({ act
         </View>
     );
 };
+
+const { width: VIEWER_WIDTH, height: VIEWER_HEIGHT } = Dimensions.get('window');
+
+/**
+ * Full-screen, swipeable photo viewer. Opens at `initialIndex` and pages
+ * horizontally through the entry's photos. Used by PhotoStrip below.
+ */
+const PhotoViewer: React.FC<{
+    visible: boolean;
+    photos: EntryPhoto[];
+    initialIndex: number;
+    onClose: () => void;
+}> = ({ visible, photos, initialIndex, onClose }) => {
+    return (
+        <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+            <View style={viewerStyles.overlay}>
+                <Pressable
+                    style={viewerStyles.closeButton}
+                    onPress={onClose}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close photo viewer"
+                    hitSlop={16}
+                >
+                    <Feather name="x" size={28} color="#fff" />
+                </Pressable>
+                <FlatList
+                    data={photos}
+                    horizontal
+                    pagingEnabled
+                    showsHorizontalScrollIndicator={false}
+                    keyExtractor={(p) => String(p.id)}
+                    initialScrollIndex={Math.min(initialIndex, Math.max(photos.length - 1, 0))}
+                    getItemLayout={(_, index) => ({
+                        length: VIEWER_WIDTH,
+                        offset: VIEWER_WIDTH * index,
+                        index,
+                    })}
+                    renderItem={({ item }) => (
+                        <Image
+                            source={{ uri: item.file_path }}
+                            style={{ width: VIEWER_WIDTH, height: VIEWER_HEIGHT * 0.85 }}
+                            resizeMode="contain"
+                        />
+                    )}
+                />
+            </View>
+        </Modal>
+    );
+};
+
+/**
+ * Horizontal strip of entry thumbnails. Tapping a thumbnail opens the
+ * full-screen PhotoViewer at that photo.
+ */
+const PhotoStrip: React.FC<{ photos: EntryPhoto[]; styles: any; colors: any }> = ({
+    photos,
+    styles,
+    colors,
+}) => {
+    const [viewerVisible, setViewerVisible] = useState(false);
+    const [activeIndex, setActiveIndex] = useState(0);
+
+    if (!photos.length) return null;
+
+    return (
+        <>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.photoStrip}
+            >
+                {photos.map((photo, index) => (
+                    <Pressable
+                        key={photo.id}
+                        onPress={() => {
+                            setActiveIndex(index);
+                            setViewerVisible(true);
+                        }}
+                        accessibilityRole="imagebutton"
+                        accessibilityLabel={`View photo ${index + 1}`}
+                    >
+                        <Image
+                            source={{ uri: photo.file_path }}
+                            style={[
+                                styles.photoThumb,
+                                { backgroundColor: colors.cardBackground },
+                            ]}
+                            resizeMode="cover"
+                        />
+                    </Pressable>
+                ))}
+            </ScrollView>
+            <PhotoViewer
+                visible={viewerVisible}
+                photos={photos}
+                initialIndex={activeIndex}
+                onClose={() => setViewerVisible(false)}
+            />
+        </>
+    );
+};
+
+const viewerStyles = StyleSheet.create({
+    overlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.95)',
+        justifyContent: 'center',
+    },
+    closeButton: {
+        position: 'absolute',
+        top: 48,
+        right: 20,
+        zIndex: 10,
+        padding: 8,
+    },
+});
 
 
 // Main Component
@@ -319,7 +480,7 @@ export function DatabaseViewer() {
                 SELECT * FROM EntryData
             `, [ITEMS_PER_PAGE, offset]);
 
-            return result.map(row => ({
+            const baseEntries: MoodEntry[] = result.map(row => ({
                 id: row.id,
                 mood: row.mood,
                 notes: row.notes,
@@ -329,8 +490,22 @@ export function DatabaseViewer() {
                     name: row.activity_names.split(',')[index],
                     group_id: parseInt(row.activity_group_ids.split(',')[index]),
                     icon_name: row.activity_icon_names.split(',')[index]
-                })) : []
+                })) : [],
+                photos: [],
             }));
+
+            // Batch-load photos for the whole page in a single query (avoids
+            // the N+1 the per-entry GROUP_CONCAT pattern would create if we
+            // joined entry_media into the big query and re-split it).
+            const mediaByEntry = await getMediaByEntryIds(
+                db,
+                baseEntries.map(e => e.id)
+            );
+            for (const entry of baseEntries) {
+                entry.photos = mediaByEntry[entry.id] ?? [];
+            }
+
+            return baseEntries;
         } catch (error) {
             console.error('Error fetching entries page:', error);
             return [];
@@ -340,6 +515,15 @@ export function DatabaseViewer() {
     // Event Handlers
     const handleDelete = async (entryId: number) => {
         try {
+            // Delete photo FILES first, while their paths are still queryable.
+            // SQLite ON DELETE CASCADE removes the entry_media ROWS when the
+            // entry is deleted, but never the files on disk — without this the
+            // images would orphan in MEDIA_DIR forever.
+            const media = await getMediaByEntryIds(db, [entryId]);
+            await Promise.all(
+                (media[entryId] ?? []).map(p => deleteMediaFile(p.file_path))
+            );
+
             await db.runAsync('DELETE FROM entries WHERE id = ?', [entryId]);
             setSections(currentSections => {
                 const updatedSections = currentSections
@@ -360,6 +544,29 @@ export function DatabaseViewer() {
         if (!currentEntry) return;
 
         try {
+            // ---- Photo diff (computed against the entry's current DB photos) ----
+            // The edit form seeds `formData.photos` with existing MEDIA_DIR
+            // paths; the user may have removed some and/or added new picker
+            // source URIs. Photos already under MEDIA_DIR are kept as-is; any
+            // path NOT under MEDIA_DIR is a freshly-picked source URI to copy.
+            const dbPhotos = (await getMediaByEntryIds(db, [currentEntry.id]))[
+                currentEntry.id
+            ] ?? [];
+            const draftPaths = new Set(formData.photos);
+
+            const removedPhotos = dbPhotos.filter(p => !draftPaths.has(p.file_path));
+            const addedSourceUris = formData.photos.filter(
+                p => !p.startsWith(MEDIA_DIR)
+            );
+
+            // Copy newly-picked photos into MEDIA_DIR BEFORE the transaction
+            // (file IO must not hold the write lock). Orphaned only if the
+            // transaction below throws — acceptable for the rare failure case.
+            const addedPaths: string[] = [];
+            for (const uri of addedSourceUris) {
+                addedPaths.push(await copyToMediaDir(uri));
+            }
+
             await db.withTransactionAsync(async () => {
                 await db.runAsync(
                     `UPDATE entries SET mood = ?, notes = ?, date = ? WHERE id = ?`,
@@ -377,7 +584,23 @@ export function DatabaseViewer() {
                         [currentEntry.id, activityId]
                     );
                 }
+
+                for (const photo of removedPhotos) {
+                    await db.runAsync('DELETE FROM entry_media WHERE id = ?', [photo.id]);
+                }
+
+                for (const path of addedPaths) {
+                    await db.runAsync(
+                        `INSERT INTO entry_media (entry_id, file_path, media_type) VALUES (?, ?, 'image')`,
+                        [currentEntry.id, path]
+                    );
+                }
             });
+
+            // Files for removed photos are unlinked AFTER the rows are gone, so
+            // a transaction rollback can't leave us with a missing file but a
+            // live row. Best-effort: a failed unlink never blocks the update.
+            await Promise.all(removedPhotos.map(p => deleteMediaFile(p.file_path)));
 
             setEditModalVisible(false);
             refetchEntries();
@@ -488,7 +711,8 @@ export function DatabaseViewer() {
                     mood: currentEntry.mood,
                     activities: currentEntry.activities.map(a => a.id),
                     notes: currentEntry.notes,
-                    date: new Date(currentEntry.date)
+                    date: new Date(currentEntry.date),
+                    photos: (currentEntry.photos ?? []).map(p => p.file_path),
                 } : undefined}
                 onSubmit={handleUpdate}
             />
