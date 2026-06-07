@@ -385,7 +385,7 @@ const AddActivityModal = ({ visible, onClose, onAdd, groupName }: AddActivityMod
                     <TextInput
                         style={styles.input}
                         placeholder="Activity Name"
-                        placeholderTextColor="#666"
+                        placeholderTextColor={colors.textSecondary}
                         value={newActivityName}
                         onChangeText={setNewActivityName}
                         autoFocus
@@ -445,7 +445,7 @@ const AddGroupModal = ({ visible, onClose, onAdd, error }: AddGroupModalProps) =
                     <TextInput
                         style={styles.input}
                         placeholder="Group Name"
-                        placeholderTextColor="#666"
+                        placeholderTextColor={colors.textSecondary}
                         value={newGroupName}
                         onChangeText={setNewGroupName}
                         autoFocus

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, NativeSyntheticEvent, NativeScrollEvent } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useThemeColors } from '@/styles/global';
 import { useMoodScale, MoodPrecision } from './hooks/useMoodScale';
 
@@ -13,11 +14,11 @@ type MoodSelectorProps = {
 // Mood benchmarks — partial mapping (only special anchor values get a face).
 // Typed as `Partial<Record<number, ...>>` so an integer index returns
 // `undefined` cleanly rather than triggering a TS implicit-any.
-const moodBenchmarks: Partial<Record<number, { emoji: string; label: string }>> = {
-    2: { emoji: '💀', label: 'Terrible' },
-    5: { emoji: '😐', label: 'Neutral' },
-    7: { emoji: '🙂', label: 'Good' },
-    9: { emoji: '😄', label: 'Terrific!' },
+const moodBenchmarks: Partial<Record<number, { iconName: keyof typeof Ionicons.glyphMap; label: string }>> = {
+    2: { iconName: 'sad', label: 'Terrible' },
+    5: { iconName: 'remove-circle-outline', label: 'Neutral' },
+    7: { iconName: 'happy-outline', label: 'Good' },
+    9: { iconName: 'happy', label: 'Terrific!' },
 };
 
 export default function MoodSelector({
@@ -87,10 +88,6 @@ export default function MoodSelector({
                     textAlign: 'center',
                     marginVertical: 10,
                 },
-                emoji: {
-                    fontSize: 20,
-                    marginBottom: 2,
-                },
                 benchmarkLabel: {
                     color: colors.textSecondary,
                     fontSize: 10,
@@ -125,7 +122,7 @@ export default function MoodSelector({
         if (!benchmark) return null;
         return (
             <View style={styles.benchmarkContainer}>
-                <Text style={styles.emoji}>{benchmark.emoji}</Text>
+                <Ionicons name={benchmark.iconName} size={20} color={colors.textSecondary} style={{ marginBottom: 2 }} />
                 <Text style={styles.benchmarkLabel}>{benchmark.label}</Text>
             </View>
         );
