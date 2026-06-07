@@ -428,7 +428,11 @@ const PhotoStrip: React.FC<{ photos: EntryPhoto[]; styles: any; colors: any }> =
 
 const viewerStyles = StyleSheet.create({
     overlay: {
-        flex: 1,
+        // Explicit window dimensions instead of `flex: 1`: a transparent <Modal>
+        // root collapses to zero height on RN 0.76 Android new arch (Fabric).
+        // See components/forms/EntryForm.tsx for the full note (expo/expo#34470).
+        width: VIEWER_WIDTH,
+        height: VIEWER_HEIGHT,
         backgroundColor: 'rgba(0,0,0,0.95)',
         justifyContent: 'center',
     },

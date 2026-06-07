@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, Modal, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { View, Text, Modal, Pressable, ScrollView, StyleSheet, TextInput, Dimensions } from 'react-native';
 import { useThemeColors } from '@/styles/global';
 import * as Feather from '@expo/vector-icons/Feather';
 import * as MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as FontAwesome6 from '@expo/vector-icons/MaterialCommunityIcons';
 
+
+// Opaque (non-transparent) modal gets a measured native window, so it's far less
+// prone to the Fabric flex-collapse than the transparent modals — but size the
+// root explicitly too for consistency/safety on RN 0.76 Android new arch.
+const WINDOW = Dimensions.get('window');
 
 // Define the icon category structure
 type IconInfo = {
@@ -200,7 +205,8 @@ export const IconPicker: React.FC<IconPickerProps> = ({
     
     const styles = StyleSheet.create({
         modalContainer: {
-            flex: 1,
+            width: WINDOW.width,
+            height: WINDOW.height,
             backgroundColor: colors.background,
         },
         header: {

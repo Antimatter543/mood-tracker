@@ -1,11 +1,16 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, Switch, StyleSheet, TouchableOpacity, Modal, FlatList, Platform, Pressable } from 'react-native';
+import { View, Text, Switch, StyleSheet, TouchableOpacity, Modal, FlatList, Platform, Pressable, Dimensions } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useThemeColors } from '@/styles/global';
 import { SettingConfig, SETTINGS_REGISTRY } from '@/databases/settings';
 import { useSettings } from '@/context/SettingsContext';
 import { Ionicons } from '@expo/vector-icons';
 import { requestNotificationPermission, parseReminderTime, formatReminderTime } from '@/lib/notifications';
+
+// Transparent <Modal> roots collapse to zero height on RN 0.76 Android new arch
+// (Fabric) when sized with `flex: 1`. Size the overlay to the window explicitly.
+// See components/forms/EntryForm.tsx for the full note (expo/expo#34470).
+const WINDOW = Dimensions.get('window');
 
 type SettingRowProps = {
   config: SettingConfig;
@@ -64,7 +69,8 @@ function SettingRow({ config, value, onValueChange }: SettingRowProps) {
       marginRight: 6,
     },
     modalContainer: {
-      flex: 1,
+      width: WINDOW.width,
+      height: WINDOW.height,
       justifyContent: 'center',
       alignItems: 'center',
       backgroundColor: 'rgba(0, 0, 0, 0.5)',

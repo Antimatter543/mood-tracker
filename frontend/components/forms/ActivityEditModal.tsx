@@ -1,6 +1,6 @@
 // ActivityEditModal.tsx
 import React, { useEffect, useState } from 'react';
-import { Modal, View, Text, TextInput, Pressable, StyleSheet, Alert } from 'react-native';
+import { Modal, View, Text, TextInput, Pressable, StyleSheet, Alert, Dimensions } from 'react-native';
 import { useThemeColors } from '@/styles/global';
 import { SQLiteDatabase } from 'expo-sqlite';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -9,6 +9,11 @@ import { updateActivity, deleteActivity } from "@/databases/database";
 import { Activity } from '../types';
 import { useDataContext } from '@/context/DataContext';
 import { ICON_FAMILIES, IconFamilyType, IconPicker } from '../IconPicker';
+
+// Transparent <Modal> roots collapse to zero height on RN 0.76 Android new arch
+// (Fabric) when sized with `flex: 1`. Size the overlay to the window explicitly.
+// See components/forms/EntryForm.tsx for the full note (expo/expo#34470).
+const WINDOW = Dimensions.get('window');
 
 type ActivityEditModalProps = {
     visible: boolean;
@@ -142,7 +147,8 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
 
     const styles = StyleSheet.create({
         modalContainer: {
-            flex: 1,
+            width: WINDOW.width,
+            height: WINDOW.height,
             backgroundColor: 'rgba(0, 0, 0, 0.5)',
             justifyContent: 'center',
             alignItems: 'center',

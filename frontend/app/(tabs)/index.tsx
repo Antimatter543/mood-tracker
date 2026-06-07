@@ -78,17 +78,21 @@ const TodaysMoodCard = memo(function TodaysMoodCard({
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
 
-    const displayMood = mood !== null ? mood.toFixed(1) : '--';
-
     return (
         <Card accentTop style={styles.heroCard}>
             <Text style={styles.heroDate}>
                 {formatDate(new Date().toISOString()).full}
             </Text>
             <View style={styles.moodRow}>
-                <Text style={[styles.moodValue, { color: moodColor(mood, colors.accent) }]}>
-                    {displayMood}
-                </Text>
+                {mood !== null ? (
+                    <Text style={[styles.moodValue, { color: moodColor(mood, colors.accent) }]}>
+                        {mood.toFixed(1)}
+                    </Text>
+                ) : (
+                    // No entry today: a 64px accent "--" reads as two solid green
+                    // bars. Show a clear, muted empty state instead.
+                    <Text style={styles.moodValueEmpty}>No entry yet</Text>
+                )}
                 <Text style={styles.moodLabel}>Today's Mood</Text>
                 <MoodIcon mood={mood} />
             </View>
@@ -264,6 +268,12 @@ const useThemedStyles = (colors: any) => {
             fontWeight: '900',
             color: colors.accent,
             letterSpacing: -2,
+        },
+        moodValueEmpty: {
+            fontSize: 22,
+            fontWeight: '600',
+            color: colors.textSecondary,
+            letterSpacing: 0,
         },
         moodLabel: {
             fontSize: 16,

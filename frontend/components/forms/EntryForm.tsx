@@ -11,6 +11,7 @@ import {
     ScrollView,
     Alert,
     ActivityIndicator,
+    Dimensions,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { ThemeColors, useThemeColors } from '@/styles/global';
@@ -25,6 +26,13 @@ import { useSettings } from '@/context/SettingsContext';
 import { useEntryDraft, EntryDraft } from './hooks/useEntryDraft';
 
 const MAX_PHOTOS = 5;
+
+// RN 0.76 Android new-arch (Fabric) does not hand a measured height to a
+// transparent <Modal>'s child tree on first mount, so a `flex: 1` modal root
+// collapses to zero height and the form renders blank. Sizing the root view to
+// the window explicitly is the documented fix (expo/expo#34470). Read once at
+// module load; orientation is locked to portrait (see app.json).
+const WINDOW = Dimensions.get('window');
 
 /**
  * Inline photo-attachment affordance for the entry form. Offers camera +
@@ -391,7 +399,9 @@ export const EntryForm: React.FC<EntryFormProps> = ({
 const useThemedStyles = (colors: ThemeColors) =>
     StyleSheet.create({
         modalContainer: {
-            flex: 1,
+            // Explicit window dimensions instead of `flex: 1` — see WINDOW note.
+            width: WINDOW.width,
+            height: WINDOW.height,
             backgroundColor: colors.background,
             paddingTop: 16,
         },
