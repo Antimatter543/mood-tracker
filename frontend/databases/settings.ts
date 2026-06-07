@@ -45,6 +45,20 @@ export const SETTINGS_REGISTRY = {
         type: 'switch',
         label: 'Show Mood Benchmarks',
         description: 'Show emoji indicators on the mood scale',
+    },
+    reminder_enabled: {
+        key: 'reminder_enabled',
+        default: false,
+        type: 'switch' as const,
+        label: 'Daily Reminder',
+        description: 'Get a nudge to log your mood each day',
+    },
+    reminder_time: {
+        key: 'reminder_time',
+        default: '20:00',       // "HH:MM" 24-hour local time string
+        type: 'text' as const,  // controlled by custom UI, not a generic text input
+        label: 'Reminder Time',
+        description: 'When to send your daily reminder',
     }
 } as const;
 
@@ -55,6 +69,8 @@ export type SettingValues = {
     theme: '' | 'light' | 'dark' | 'cherry' | 'midnight' | 'forest';  // Empty string means use theme_mode
     mood_precision: 'high' | 'low';
     show_mood_benchmarks: boolean;
+    reminder_enabled: boolean;
+    reminder_time: string;   // "HH:MM" 24-hour local time
 };
 
 export type SettingKey = keyof typeof SETTINGS_REGISTRY;

@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
-import { View, Text, Switch, StyleSheet, TouchableOpacity, Modal, FlatList } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, Switch, StyleSheet, TouchableOpacity, Modal, FlatList, Platform, Pressable } from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useThemeColors } from '@/styles/global';
 import { SettingConfig, SETTINGS_REGISTRY } from '@/databases/settings';
 import { useSettings } from '@/context/SettingsContext';
 import { Ionicons } from '@expo/vector-icons';
+import { requestNotificationPermission, parseReminderTime, formatReminderTime } from '@/lib/notifications';
 
 type SettingRowProps = {
   config: SettingConfig;
@@ -15,7 +17,7 @@ function SettingRow({ config, value, onValueChange }: SettingRowProps) {
   const colors = useThemeColors();
   const [modalVisible, setModalVisible] = useState(false);
   
-  const styles = StyleSheet.create({
+  const styles = useMemo(() => StyleSheet.create({
     row: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -106,7 +108,7 @@ function SettingRow({ config, value, onValueChange }: SettingRowProps) {
       fontSize: 16,
       fontWeight: '600',
     },
-  });
+  }), [colors]);
 
   const handleChange = (newValue: any) => {
     if (config.valueLabels) {
@@ -253,8 +255,8 @@ function ThemeColorPreview({ themeName }: { themeName: string }) {
   };
   
   const previewColors = getPreviewColors();
-  
-  const styles = StyleSheet.create({
+
+  const styles = useMemo(() => StyleSheet.create({
     container: {
       flexDirection: 'row',
       marginRight: 8,
@@ -276,7 +278,7 @@ function ThemeColorPreview({ themeName }: { themeName: string }) {
     textDot: {
       backgroundColor: previewColors.text,
     },
-  });
+  }), [previewColors.bg, previewColors.accent, previewColors.text]);
   
   return (
     <View style={styles.container}>
@@ -291,7 +293,7 @@ export function SettingsSection() {
     const colors = useThemeColors();
     const { settings, updateSetting } = useSettings();
     
-    const styles = StyleSheet.create({
+    const styles = useMemo(() => StyleSheet.create({
       section: {
         backgroundColor: colors.cardBackground,
         borderRadius: 16,
@@ -319,24 +321,32 @@ export function SettingsSection() {
         marginBottom: 8,
         paddingHorizontal: 8,
       },
-    });
-    
+    }), [colors]);
+
     // Hide theme_mode toggle if a specific theme is selected
     const shouldShowThemeMode = !settings.theme;
-  
+
+    // Reminder keys render in their own RemindersSection card; exclude them here.
+    const REMINDER_KEYS = ['reminder_enabled', 'reminder_time'];
+
     return (
       <View style={styles.section}>
         <View style={styles.header}>
           <Ionicons name="color-palette-outline" size={20} color={colors.text} />
           <Text style={styles.title}>Appearance & Behavior</Text>
         </View>
-        
+
         {Object.entries(SETTINGS_REGISTRY).map(([key, config]) => {
           // Skip theme_mode if a theme is selected
           if (key === 'theme_mode' && !shouldShowThemeMode) {
             return null;
           }
-          
+
+          // Reminder settings are owned by RemindersSection — don't duplicate.
+          if (REMINDER_KEYS.includes(key)) {
+            return null;
+          }
+
           // Type assertion to fix TypeScript errors
           const typedKey = key as keyof typeof SETTINGS_REGISTRY;
           const typedConfig = config as SettingConfig;
@@ -366,3 +376,126 @@ export function SettingsSection() {
       </View>
     );
   }
+
+/**
+ * Daily-reminder settings card. Owns both reminder_enabled (a switch reusing
+ * SettingRow) and reminder_time (a custom DateTimePicker row, since the generic
+ * renderer can't render a time picker). The permission request is gated on the
+ * user toggling the switch — never on cold boot.
+ */
+export function RemindersSection() {
+  const colors = useThemeColors();
+  const { settings, updateSetting } = useSettings();
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
+  // Parse stored "HH:MM" into a Date for the picker + a friendly display string.
+  const { hour, minute } = parseReminderTime(settings.reminder_time);
+
+  const styles = useMemo(() => StyleSheet.create({
+    section: {
+      backgroundColor: colors.cardBackground,
+      borderRadius: 16,
+      padding: 16,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    header: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+    title: { fontSize: 18, fontWeight: '600', color: colors.text, marginLeft: 8 },
+    timeRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+      minHeight: 56,
+      backgroundColor: colors.overlays.tag,
+      borderRadius: 10,
+      marginBottom: 8,
+      opacity: settings.reminder_enabled ? 1 : 0.4,
+    },
+    timeLabel: { color: colors.text, fontSize: 16, fontWeight: '500' },
+    timeValue: { color: colors.accent, fontSize: 16, fontWeight: '600' },
+    permissionNote: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      fontStyle: 'italic',
+      marginTop: 4,
+      paddingHorizontal: 4,
+    },
+  }), [colors, settings.reminder_enabled]);
+
+  const handleToggle = async (enabled: boolean) => {
+    if (enabled) {
+      const granted = await requestNotificationPermission();
+      if (!granted) {
+        // Permission denied — leave the switch off.
+        return;
+      }
+    }
+    await updateSetting('reminder_enabled', enabled);
+  };
+
+  const handleTimeChange = async (_event: unknown, selected?: Date) => {
+    // Android dismisses the dialog itself; keep it open on iOS (inline spinner).
+    setShowTimePicker(Platform.OS === 'ios');
+    if (selected) {
+      await updateSetting(
+        'reminder_time',
+        formatReminderTime(selected.getHours(), selected.getMinutes())
+      );
+    }
+  };
+
+  const pickerDate = useMemo(() => {
+    const d = new Date();
+    d.setHours(hour, minute, 0, 0);
+    return d;
+  }, [hour, minute]);
+
+  // Format time for display: "8:00 PM" style.
+  const displayTime = useMemo(() => {
+    const d = new Date();
+    d.setHours(hour, minute);
+    return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }, [hour, minute]);
+
+  return (
+    <View style={styles.section}>
+      <View style={styles.header}>
+        <Ionicons name="notifications-outline" size={20} color={colors.text} />
+        <Text style={styles.title}>Reminders</Text>
+      </View>
+
+      {/* Toggle row — reuse the generic SettingRow shape. */}
+      <SettingRow
+        config={SETTINGS_REGISTRY.reminder_enabled as SettingConfig}
+        value={settings.reminder_enabled}
+        onValueChange={handleToggle}
+      />
+
+      {/* Time picker row — disabled (and dimmed) when reminders are off. */}
+      <Pressable
+        style={styles.timeRow}
+        onPress={() => settings.reminder_enabled && setShowTimePicker(true)}
+        disabled={!settings.reminder_enabled}
+      >
+        <Text style={styles.timeLabel}>Reminder Time</Text>
+        <Text style={styles.timeValue}>{displayTime}</Text>
+      </Pressable>
+
+      {showTimePicker && (
+        <DateTimePicker
+          value={pickerDate}
+          mode="time"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleTimeChange}
+        />
+      )}
+
+      <Text style={styles.permissionNote}>
+        Requires notification permission. Tap the toggle to enable.
+      </Text>
+    </View>
+  );
+}

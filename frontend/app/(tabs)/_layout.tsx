@@ -4,12 +4,16 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { useCallback, useState, useMemo } from "react";
+import { useCallback, useState, useMemo, useEffect, useRef } from "react";
+import { AppState, AppStateStatus } from "react-native";
 import { DataProvider } from "../../context/DataContext";
 import { useThemeColors } from "@/styles/global";
-import { SettingsProvider } from "@/context/SettingsContext";
+import { SettingsProvider, useSettings } from "@/context/SettingsContext";
 import { initializeDatabase } from "@/databases/database";
-import { SQLiteProvider } from "expo-sqlite";
+import { SQLiteProvider, useSQLiteContext } from "expo-sqlite";
+import { localDateString, startOfLocalDay } from "@/databases/dateHelpers";
+import { currentStreak } from "@/components/visualisations/transforms/streak";
+import { scheduleOrSkipDailyReminder } from "@/lib/notifications";
 
 export default function RootLayout() {
     const colors = useThemeColors();
@@ -25,11 +29,69 @@ export default function RootLayout() {
         <SQLiteProvider databaseName='moodTracker.db' onInit={initializeDatabase}>
             <DataProvider value={{ refetchEntries, refreshCount }}>
                 <SettingsProvider>
+                    <NotificationReArm />
                     <TabNavigator />
                 </SettingsProvider>
             </DataProvider>
         </SQLiteProvider>
     );
+}
+
+/**
+ * Renders nothing — holds the daily-reminder re-arm effect. Lives inside the
+ * SettingsProvider + SQLiteProvider tree so it can read settings + query the DB.
+ *
+ * Re-arms on mount (cold boot / navigation return) and on every transition to
+ * the foreground, because the OS can silently drop scheduled notifications.
+ * Notifications are non-critical, so all errors are caught and never crash.
+ */
+function NotificationReArm() {
+    const db = useSQLiteContext();
+    const { settings } = useSettings();
+    const appState = useRef(AppState.currentState);
+
+    const reArm = useCallback(async () => {
+        try {
+            const todayKey = localDateString(new Date());
+            // Recent entry dates (last 90 days is plenty for streak accuracy).
+            const since = startOfLocalDay(
+                new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+            );
+            const rows = await db.getAllAsync<{ date: string }>(
+                `SELECT DISTINCT date(date) as date FROM entries WHERE date >= ? ORDER BY date DESC`,
+                [since]
+            );
+            const entryDates = rows.map(r => r.date);
+            const streak = currentStreak(entryDates, todayKey);
+
+            await scheduleOrSkipDailyReminder({
+                enabled: settings.reminder_enabled,
+                reminderTime: settings.reminder_time,
+                currentStreak: streak,
+                todayKey,
+                entryDates,
+            });
+        } catch (e) {
+            // Notifications are non-critical; never crash the app.
+            console.warn('[notifications] re-arm failed:', e);
+        }
+    }, [db, settings.reminder_enabled, settings.reminder_time]);
+
+    useEffect(() => {
+        // Re-arm on mount.
+        reArm();
+
+        // Re-arm whenever the app comes to the foreground.
+        const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+            if (appState.current.match(/inactive|background/) && state === 'active') {
+                reArm();
+            }
+            appState.current = state;
+        });
+        return () => sub.remove();
+    }, [reArm]);
+
+    return null;
 }
 
 function TabNavigator() {
