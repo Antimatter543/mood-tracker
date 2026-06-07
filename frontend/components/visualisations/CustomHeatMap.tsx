@@ -7,6 +7,7 @@ import { useDataContext } from '@/context/DataContext';
 import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
 import { buildHeatmapGrid, type HeatmapInput } from './transforms/heatmap';
+import { localDateString } from './transforms/dateHelpers';
 
 const screenWidth = Dimensions.get('window').width;
 const PADDING = 24;
@@ -84,6 +85,12 @@ const CustomHeatmap: React.FC = () => {
     useEffect(() => {
         const fetchData = async () => {
             try {
+                // End date is the user's LOCAL today (YYYY-MM-DD), computed in
+                // JS and passed as a param — NOT SQLite's UTC date('now'), which
+                // would drop today's grid cell for users east of UTC after their
+                // local midnight.
+                const endDate = localDateString(new Date());
+
                 // Fetch all mood data without limit
                 const results = await db.getAllAsync<{ date: string; avg_mood: number | null }>(`
                     WITH all_entries AS (
@@ -92,12 +99,12 @@ const CustomHeatmap: React.FC = () => {
                         GROUP BY date(date)
                     ),
                     date_range AS (
-                        SELECT 
+                        SELECT
                             date(
-                                (SELECT MIN(date) FROM all_entries), 
+                                (SELECT MIN(date) FROM all_entries),
                                 '-${EXTRA_MONTHS} months'
                             ) as start_date,
-                            date('now') as end_date
+                            ? as end_date
                     ),
                     all_dates AS (
                         WITH RECURSIVE dates(date) AS (
@@ -109,14 +116,14 @@ const CustomHeatmap: React.FC = () => {
                         )
                         SELECT date FROM dates
                     )
-                    SELECT 
+                    SELECT
                         all_dates.date,
                         ROUND(AVG(entries.mood), 1) as avg_mood
                     FROM all_dates
                     LEFT JOIN entries ON date(entries.date) = all_dates.date
                     GROUP BY all_dates.date
                     ORDER BY all_dates.date
-                `);
+                `, [endDate]);
 
                 setMoodData(results.map(row => ({
                     date: row.date,

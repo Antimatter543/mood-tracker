@@ -7,6 +7,8 @@ import { useDataContext } from '@/context/DataContext';
 import InfoBubble from '../InfoBubble';
 import { MoodEntry } from '../types';
 import { bucketMoodHistogram, NUM_BUCKETS } from './transforms/scatter';
+import { useTimeframe } from '@/context/TimeframeContext';
+import { computeWindow, type Timeframe } from './transforms/windowHelpers';
 
 const PLOT_HEIGHT = 200;
 
@@ -14,6 +16,7 @@ const MoodHistogram = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
     const { refreshCount } = useDataContext();
+    const { timeframe } = useTimeframe();
     const [buckets, setBuckets] = useState(Array(NUM_BUCKETS).fill(0));
     const [maxFrequency, setMaxFrequency] = useState(0);
 
@@ -120,11 +123,16 @@ const MoodHistogram = () => {
     useEffect(() => {
         const fetchMoodData = async () => {
             try {
+                // Scope to the TimeframeSelector window. Boundaries are
+                // parameterised local-time UTC ISO strings — NOT the previous
+                // hardcoded UTC date('now', '-30 days'), which ignored the
+                // selector entirely and always showed the last 30 days.
+                const { start, end } = computeWindow(timeframe as Timeframe);
                 const entries = await db.getAllAsync<MoodEntry>(`
                     SELECT mood FROM entries
-                    WHERE date >= date('now', '-30 days')
+                    WHERE date BETWEEN ? AND ?
                     ORDER BY mood
-                `);
+                `, [start, end]);
 
                 const newBuckets = bucketMoodHistogram(entries);
                 const max = newBuckets.length > 0 ? Math.max(...newBuckets) : 0;
@@ -136,7 +144,7 @@ const MoodHistogram = () => {
         };
 
         fetchMoodData();
-    }, [db, refreshCount]);
+    }, [db, refreshCount, timeframe]);
 
     const getBarHeight = (count: number) => {
         if (maxFrequency === 0) return 0;
@@ -155,7 +163,7 @@ const MoodHistogram = () => {
                 text="A histogram showing how frequently you experience each mood level (0-10). Taller bars mean you log that mood more often, giving you insight into your most common emotional states. I wonder if it's a gaussian distribution?"
                 position="top-right"
             />
-            <Text style={styles.title}>Monthly Mood Distribution</Text>
+            <Text style={styles.title}>Mood Distribution</Text>
 
             <View style={styles.container}>
                 {/* Y-axis title */}

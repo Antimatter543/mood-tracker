@@ -1,22 +1,53 @@
 // chartConfig.ts
-import { colors, useThemeColors } from '@/styles/global';
+import { useThemeColors } from '@/styles/global';
 import { useMemo } from 'react';
 import { Dimensions } from 'react-native';
 
 export const CHART_PADDING = 48; // 16px container padding × 2 sides + safe margin
 export const SCREEN_WIDTH = Dimensions.get('window').width;
 
+/**
+ * Parse a CSS hex (`#RGB` or `#RRGGBB`) into an `{r,g,b}` triple. Returns null
+ * for non-hex values (e.g. `rgba(...)` accents) so callers can fall back.
+ */
+export const parseHexColor = (
+    hex: string
+): { r: number; g: number; b: number } | null => {
+    if (typeof hex !== 'string') return null;
+    let h = hex.trim().replace('#', '');
+    if (h.length === 3) {
+        h = h
+            .split('')
+            .map((c) => c + c)
+            .join('');
+    }
+    if (h.length !== 6 || /[^0-9a-fA-F]/.test(h)) return null;
+    return {
+        r: parseInt(h.substring(0, 2), 16),
+        g: parseInt(h.substring(2, 4), 16),
+        b: parseInt(h.substring(4, 6), 16),
+    };
+};
+
 // New hook for theme-aware chart config
 export const useChartConfig = () => {
     const colors = useThemeColors();
-    
-    return useMemo(() => ({
+
+    return useMemo(() => {
+        // Derive the chart line/bar color from the active theme's accent so
+        // every theme (dark/light/cherry/midnight/forest) renders its own
+        // accent instead of a hardcoded green.
+        const rgb = parseHexColor(colors.accent) ?? { r: 76, g: 175, b: 80 };
+        const accentColor = (opacity = 1) =>
+            `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacity})`;
+
+        return {
         backgroundColor: colors.cardBackground,
         backgroundGradientFrom: colors.cardBackground,
         backgroundGradientTo: colors.cardBackground,
         decimalPlaces: 1,
-        color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`, // Keep accent color consistent
-        labelColor: (opacity = 1) => `rgba(${colors.text === '#FFFFFF' ? '255, 255, 255' : '0, 0, 0'}, ${opacity})`,
+        color: accentColor,
+        labelColor: (opacity = 1) => `rgba(${colors.isDark ? '255, 255, 255' : '0, 0, 0'}, ${opacity})`,
         propsForLabels: {
             fontSize: 10,
             fill: colors.text,
@@ -25,7 +56,8 @@ export const useChartConfig = () => {
         style: {
             borderRadius: 16,
         },
-    }), [colors]);
+        };
+    }, [colors]);
 };
 
 // Keep other configs for future reference

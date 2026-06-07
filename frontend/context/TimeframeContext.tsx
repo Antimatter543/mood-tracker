@@ -2,7 +2,13 @@ import React, { createContext, useContext, useState, ReactNode } from 'react';
 
 export type Timeframe = 'week' | 'month' | '3months' | 'year' | 'alltime';
 
-// Helper function to get SQL date condition string based on timeframe
+// Helper function to get SQL date condition string based on timeframe.
+//
+// TODO: Replace callers with parameterised start/end dates (see
+// transforms/windowHelpers.computeWindow). These strings are UTC-anchored
+// (`date('now')`), which mis-buckets late-evening entries for users east/west
+// of UTC. No live chart should use this anymore; kept only as a deprecated
+// fallback until all surfaces are confirmed migrated.
 export const getTimeframeCondition = (timeframe: Timeframe): string => {
   switch (timeframe) {
     case 'week':

@@ -10,6 +10,11 @@ import {
   type MoodActivityRow,
   type RecoveryEpisode,
 } from './transforms/recoveryPatterns';
+import {
+  startOfLocalDay,
+  addDays,
+  localDateString,
+} from './transforms/dateHelpers';
 
 const RecoveryAnalysis = () => {
     const colors = useThemeColors();
@@ -80,11 +85,13 @@ const RecoveryAnalysis = () => {
   useEffect(() => {
     const run = async () => {
       try {
-        // Last 30 days of entries with activity names. Note: the date filter
-        // here is still UTC-anchored; the windowing issue is being tackled
-        // chart-by-chart and this surface will move to parameterised dates
-        // in a follow-up. For now the analysis works on whatever the DB
-        // returns; the transform is window-agnostic.
+        // Last 30 days of entries with activity names. The lower bound is now a
+        // parameterised LOCAL-time UTC ISO string (start of 30 days ago in the
+        // user's timezone) rather than SQLite's UTC date('now', '-30 days'),
+        // which silently dropped late-evening entries for users east of UTC.
+        const start = startOfLocalDay(
+          addDays(localDateString(new Date()), -30)
+        );
         const entries = await db.getAllAsync<MoodActivityRow>(`
           WITH MoodActivities AS (
             SELECT
@@ -94,12 +101,12 @@ const RecoveryAnalysis = () => {
             FROM entries e
             LEFT JOIN entry_activities ea ON e.id = ea.entry_id
             LEFT JOIN activities a ON ea.activity_id = a.id
-            WHERE e.date >= date('now', '-30 days')
+            WHERE e.date >= ?
             GROUP BY e.date
             ORDER BY e.date DESC
           )
           SELECT * FROM MoodActivities
-        `);
+        `, [start]);
 
         const result = analyseRecoveryPatterns(entries);
         setSuccessRate(result.successRate);

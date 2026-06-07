@@ -22,16 +22,30 @@ export type DailyBarChartData = {
 export const DAY_LABELS_SUN_FIRST: readonly string[] =
     ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
 
+export const DAY_LABELS_MON_FIRST: readonly string[] =
+    ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
+
+// Monday-first display index -> strftime %w value (0=Sun..6=Sat).
+const DOW_FOR_MON_FIRST_INDEX = [1, 2, 3, 4, 5, 6, 0];
+
 /**
  * Build the bar-chart shape from per-day aggregates.
  *
  * Days with no rows show as 0 (a real "no data" state — the bar collapses).
  * Out-of-range day_of_week values are ignored.
+ *
+ * @param rows         per-day aggregates (day_of_week is strftime %w, 0=Sun).
+ * @param mondayFirst  when true, emit a Monday-first labels/data/counts ordering
+ *                     (to match the heatmap convention on the stats screen).
+ *                     Defaults to false, preserving the existing Sun-first
+ *                     behaviour for any other caller.
  */
-export const buildDailyBarData = (rows: DailyMoodRow[]): DailyBarChartData => {
-    const data = new Array(7).fill(0);
-    const counts = new Array(7).fill(0);
-
+export const buildDailyBarData = (
+    rows: DailyMoodRow[],
+    mondayFirst: boolean = false
+): DailyBarChartData => {
+    // Index incoming rows by %w for O(1) lookup.
+    const byDow = new Map<number, DailyMoodRow>();
     for (const row of rows) {
         if (
             typeof row.day_of_week !== 'number' ||
@@ -40,12 +54,27 @@ export const buildDailyBarData = (rows: DailyMoodRow[]): DailyBarChartData => {
         ) {
             continue;
         }
-        data[row.day_of_week] = row.avg_mood;
-        counts[row.day_of_week] = row.entry_count;
+        byDow.set(row.day_of_week, row);
+    }
+
+    const data = new Array(7).fill(0);
+    const counts = new Array(7).fill(0);
+
+    // For each display slot, resolve which %w value sits there.
+    const dowForSlot = (slot: number) =>
+        mondayFirst ? DOW_FOR_MON_FIRST_INDEX[slot] : slot;
+
+    for (let slot = 0; slot < 7; slot++) {
+        const row = byDow.get(dowForSlot(slot));
+        if (!row) continue;
+        data[slot] = row.avg_mood;
+        counts[slot] = row.entry_count;
     }
 
     return {
-        labels: [...DAY_LABELS_SUN_FIRST],
+        labels: mondayFirst
+            ? [...DAY_LABELS_MON_FIRST]
+            : [...DAY_LABELS_SUN_FIRST],
         data,
         counts,
     };
