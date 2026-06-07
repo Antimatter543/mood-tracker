@@ -46,7 +46,8 @@ export function AddEntryButton() {
                 formData.mood,
                 formData.activities,
                 formData.notes,
-                formData.date.toISOString()
+                formData.date.toISOString(),
+                formData.photos
             );
             if (result.success) {
                 setModalVisible(false);

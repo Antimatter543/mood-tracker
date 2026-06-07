@@ -1,8 +1,21 @@
 // EntryForm.tsx
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, TextInput, Modal } from 'react-native';
+import {
+    View,
+    Text,
+    StyleSheet,
+    Pressable,
+    TextInput,
+    Modal,
+    Image,
+    ScrollView,
+    Alert,
+    ActivityIndicator,
+} from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import Feather from '@expo/vector-icons/Feather';
 
 import { ActivitySelector } from './ActivitySelector';
 import MoodSelector from './MoodSelector';
@@ -10,6 +23,134 @@ import InfoBubble from '../InfoBubble';
 import { DatePicker } from './DatePicker';
 import { useSettings } from '@/context/SettingsContext';
 import { useEntryDraft, EntryDraft } from './hooks/useEntryDraft';
+
+const MAX_PHOTOS = 5;
+
+/**
+ * Inline photo-attachment affordance for the entry form. Offers camera +
+ * library, requests the matching permission on tap, and renders a horizontal
+ * thumbnail strip with a per-photo remove (×) button. The selected URIs live in
+ * the draft (`photos`); copying into the persistent media dir happens later at
+ * save time (addMoodEntry / handleUpdate), so cancelling the form leaves no
+ * files on disk.
+ */
+const PhotoAttachments = ({
+    photos,
+    onAdd,
+    onRemove,
+}: {
+    photos: string[];
+    onAdd: (uri: string) => void;
+    onRemove: (uri: string) => void;
+}) => {
+    const colors = useThemeColors();
+    const styles = useThemedStyles(colors);
+    const [loading, setLoading] = useState(false);
+
+    const pick = async (source: 'camera' | 'library') => {
+        if (photos.length >= MAX_PHOTOS) {
+            Alert.alert('Limit reached', `You can attach up to ${MAX_PHOTOS} photos.`);
+            return;
+        }
+
+        const perm =
+            source === 'camera'
+                ? await ImagePicker.requestCameraPermissionsAsync()
+                : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+        if (!perm.granted) {
+            Alert.alert(
+                'Permission required',
+                source === 'camera'
+                    ? 'Camera access is needed to take a photo.'
+                    : 'Photo library access is needed to attach a photo.'
+            );
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const result =
+                source === 'camera'
+                    ? await ImagePicker.launchCameraAsync({
+                          mediaTypes: ['images'],
+                          quality: 0.8,
+                      })
+                    : await ImagePicker.launchImageLibraryAsync({
+                          mediaTypes: ['images'],
+                          quality: 0.8,
+                          allowsMultipleSelection: false,
+                      });
+
+            if (!result.canceled && result.assets?.[0]) {
+                onAdd(result.assets[0].uri);
+            }
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <View style={styles.photoContainer}>
+            <View style={styles.photoHeaderRow}>
+                <Text style={styles.label}>Photos</Text>
+                <View style={styles.photoAddButtons}>
+                    {loading ? (
+                        <ActivityIndicator color={colors.accent} />
+                    ) : (
+                        <>
+                            <Pressable
+                                style={styles.photoIconButton}
+                                onPress={() => pick('camera')}
+                                accessibilityRole="button"
+                                accessibilityLabel="Take photo"
+                                hitSlop={8}
+                            >
+                                <Feather name="camera" size={20} color={colors.text} />
+                            </Pressable>
+                            <Pressable
+                                style={styles.photoIconButton}
+                                onPress={() => pick('library')}
+                                accessibilityRole="button"
+                                accessibilityLabel="Choose photo from library"
+                                hitSlop={8}
+                            >
+                                <Feather name="image" size={20} color={colors.text} />
+                            </Pressable>
+                        </>
+                    )}
+                </View>
+            </View>
+
+            {photos.length > 0 && (
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.photoStrip}
+                >
+                    {photos.map((uri) => (
+                        <View key={uri} style={styles.photoThumbWrap}>
+                            <Image
+                                source={{ uri }}
+                                style={styles.photoThumb}
+                                resizeMode="cover"
+                            />
+                            <Pressable
+                                style={styles.photoRemoveButton}
+                                onPress={() => onRemove(uri)}
+                                accessibilityRole="button"
+                                accessibilityLabel="Remove photo"
+                                hitSlop={8}
+                            >
+                                <Feather name="x" size={12} color="#fff" />
+                            </Pressable>
+                        </View>
+                    ))}
+                </ScrollView>
+            )}
+        </View>
+    );
+};
 
 // Types
 type EntryFormProps = {
@@ -77,16 +218,22 @@ const MoodStep = ({
 const DetailsStep = ({
     activities,
     notes,
+    photos,
     onToggleActivity,
     onNotesChange,
+    onAddPhoto,
+    onRemovePhoto,
     onBack,
     onSubmit,
     submitDisabled,
 }: {
     activities: number[];
     notes: string;
+    photos: string[];
     onToggleActivity: (activityId: number) => void;
     onNotesChange: (notes: string) => void;
+    onAddPhoto: (uri: string) => void;
+    onRemovePhoto: (uri: string) => void;
     onBack: () => void;
     onSubmit: () => void;
     submitDisabled?: boolean;
@@ -108,9 +255,15 @@ const DetailsStep = ({
                 value={notes}
                 onChangeText={onNotesChange}
                 placeholder="How are you feeling?"
-                placeholderTextColor="#666"
+                placeholderTextColor={colors.textSecondary}
                 multiline
                 numberOfLines={3}
+            />
+
+            <PhotoAttachments
+                photos={photos}
+                onAdd={onAddPhoto}
+                onRemove={onRemovePhoto}
             />
 
             <View style={styles.buttonContainer}>
@@ -189,6 +342,8 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         setNotes,
         toggleActivity,
         setDate,
+        addPhoto,
+        removePhoto,
         validation,
         isValid,
         submit,
@@ -218,8 +373,11 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                 <DetailsStep
                     activities={draft.activities}
                     notes={draft.notes}
+                    photos={draft.photos}
                     onToggleActivity={toggleActivity}
                     onNotesChange={setNotes}
+                    onAddPhoto={addPhoto}
+                    onRemovePhoto={removePhoto}
                     onBack={() => setCurrentStep(1)}
                     onSubmit={handleSubmit}
                     submitDisabled={!isValid}
@@ -321,5 +479,50 @@ const useThemedStyles = (colors: ThemeColors) =>
             fontSize: 14,
             marginTop: 8,
             alignSelf: 'flex-start',
+        },
+        photoContainer: {
+            width: '100%',
+            marginTop: 16,
+        },
+        photoHeaderRow: {
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 8,
+        },
+        photoAddButtons: {
+            flexDirection: 'row',
+            gap: 8,
+            minHeight: 44,
+            alignItems: 'center',
+        },
+        photoIconButton: {
+            backgroundColor: colors.overlays.tag,
+            borderRadius: 22,
+            minWidth: 44,
+            minHeight: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        photoStrip: {
+            flexDirection: 'row',
+        },
+        photoThumbWrap: {
+            position: 'relative',
+            marginRight: 8,
+        },
+        photoThumb: {
+            width: 72,
+            height: 72,
+            borderRadius: 8,
+            backgroundColor: colors.cardBackground,
+        },
+        photoRemoveButton: {
+            position: 'absolute',
+            top: 2,
+            right: 2,
+            backgroundColor: 'rgba(0,0,0,0.6)',
+            borderRadius: 10,
+            padding: 3,
         },
     });

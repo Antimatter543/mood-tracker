@@ -103,6 +103,7 @@ describe('exportDatabaseData', () => {
     const db = createMockDatabase();
     db.getAllAsync
       .mockResolvedValueOnce([]) // entries
+      .mockResolvedValueOnce([]) // entry_media (photos)
       .mockResolvedValueOnce([]) // activities
       .mockResolvedValueOnce([]) // activity groups
       .mockResolvedValueOnce([]); // settings
@@ -113,8 +114,41 @@ describe('exportDatabaseData', () => {
     // Verify the written JSON contains version and exportDate
     const writeCall = (FileSystem.writeAsStringAsync as jest.Mock).mock.calls[0];
     const writtenJson = JSON.parse(writeCall[1]);
-    expect(writtenJson).toHaveProperty('version');
+    expect(writtenJson).toHaveProperty('version', 2);
     expect(writtenJson).toHaveProperty('exportDate');
+  });
+
+  it('embeds a photos array (file refs) on each exported entry', async () => {
+    const db = createMockDatabase();
+    db.getAllAsync
+      .mockResolvedValueOnce([
+        { id: 1, mood: 5, notes: 'a', date: '2025-01-01' },
+        { id: 2, mood: 7, notes: 'b', date: '2025-01-02' },
+      ]) // entries
+      .mockResolvedValueOnce([
+        { entry_id: 1, file_path: '/media/x.jpg', media_type: 'image' },
+        { entry_id: 1, file_path: '/media/y.jpg', media_type: 'image' },
+      ]) // entry_media (photos)
+      .mockResolvedValueOnce([]) // activities
+      .mockResolvedValueOnce([]) // activity groups
+      .mockResolvedValueOnce([]); // settings
+
+    const result = await exportDatabaseData(db as any);
+    expect(result.success).toBe(true);
+
+    // Mocks aren't cleared between tests in this suite, so use the most recent
+    // write call (this test's own export), not calls[0].
+    const writeCalls = (FileSystem.writeAsStringAsync as jest.Mock).mock.calls;
+    const writeCall = writeCalls[writeCalls.length - 1];
+    const writtenJson = JSON.parse(writeCall[1]);
+    const entries = writtenJson.data.entries;
+    const entry1 = entries.find((e: any) => e.id === 1);
+    const entry2 = entries.find((e: any) => e.id === 2);
+    expect(entry1.photos).toHaveLength(2);
+    expect(entry1.photos[0].file_path).toBe('/media/x.jpg');
+    expect(entry2.photos).toEqual([]);
+    // File refs only — no embedded base64 blob.
+    expect(JSON.stringify(entry1.photos)).not.toMatch(/base64|data:image/);
   });
 
   it('handles sharing unavailable gracefully', async () => {

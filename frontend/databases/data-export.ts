@@ -24,16 +24,46 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
         ORDER BY e.date DESC
       `);
   
+      // Photos are exported as FILE-REFERENCE URIs only, never base64. A
+      // base64 backup of a photo-heavy user would balloon to tens of MB and be
+      // unshareable. The tradeoff: the photo FILES are not part of this JSON,
+      // so importing on a different device leaves the entry_media rows pointing
+      // at paths that don't exist there. The `_note` field below documents this
+      // for anyone reading the file, and importDatabaseData surfaces a warning.
+      const photoRows = await db.getAllAsync<{
+        entry_id: number;
+        file_path: string;
+        media_type: string;
+      }>('SELECT entry_id, file_path, media_type FROM entry_media ORDER BY entry_id, id');
+
+      const photosByEntryId = photoRows.reduce((acc, p) => {
+        (acc[p.entry_id] ??= []).push({
+          file_path: p.file_path,
+          media_type: p.media_type,
+        });
+        return acc;
+      }, {} as Record<number, { file_path: string; media_type: string }[]>);
+
+      const enrichedEntries = (entries as { id: number }[]).map(e => ({
+        ...e,
+        photos: photosByEntryId[e.id] ?? [],
+      }));
+
       const activities = await db.getAllAsync('SELECT * FROM activities');
       const activityGroups = await db.getAllAsync('SELECT * FROM activity_groups');
       const settings = await db.getAllAsync('SELECT * FROM user_settings');
-  
+
       // Create an export object
       const exportData = {
-        version: 1,
+        version: 2,
         exportDate: new Date().toISOString(),
+        // What "import" means for media: only the file-PATH references travel
+        // in this JSON. The image files themselves stay on the originating
+        // device. Importing recreates the entry_media rows, but the thumbnails
+        // will be broken unless the same files exist at the same paths.
+        _note: 'Photos are stored as file references, not embedded data. The photo files are not included in this export and must be re-added manually when importing on a new device.',
         data: {
-          entries,
+          entries: enrichedEntries,
           activities,
           activityGroups,
           settings
@@ -282,11 +312,11 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
                   const activityIds = entry.activity_ids.split(',');
                   for (const activityIdStr of activityIds) {
                     if (!activityIdStr) continue;
-                    
+
                     const oldActivityId = parseInt(activityIdStr);
                     // Get the new mapped activity ID
                     const newActivityId = activityIdMapping.get(oldActivityId) || oldActivityId;
-                    
+
                     try {
                       await db.runAsync(
                         'INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?)',
@@ -295,6 +325,26 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
                     } catch (error) {
                       console.warn(`Skipping activity relationship: ${error}`);
                       // Continue even if one link fails
+                    }
+                  }
+                }
+
+                // Import photo refs (v2 exports only). These are file-path
+                // references, NOT the image data — on a new device the files
+                // won't exist, so the rows are inserted but thumbnails may be
+                // broken. We clear this entry's media first so a re-import is
+                // idempotent rather than accumulating duplicate rows.
+                if (entry.photos && Array.isArray(entry.photos)) {
+                  await db.runAsync('DELETE FROM entry_media WHERE entry_id = ?', [entry.id]);
+                  for (const photo of entry.photos) {
+                    if (!photo || !photo.file_path) continue;
+                    try {
+                      await db.runAsync(
+                        `INSERT INTO entry_media (entry_id, file_path, media_type) VALUES (?, ?, ?)`,
+                        [entry.id, photo.file_path, photo.media_type ?? 'image']
+                      );
+                    } catch (error) {
+                      console.warn(`Skipping photo import: ${error}`);
                     }
                   }
                 }
@@ -326,7 +376,7 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
   
       return {
         success: true,
-        message: 'Data imported successfully'
+        message: 'Data imported successfully. Note: photo files are not included in exports and must be re-added manually.'
       };
     } catch (error) {
       console.error('Error importing data:', error);

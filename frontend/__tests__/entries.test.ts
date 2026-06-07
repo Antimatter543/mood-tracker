@@ -172,6 +172,9 @@ describe('filterValidActivityIds', () => {
 describe('getMoodEntries — additional', () => {
   it('hydrates each entry with its activities', async () => {
     const db = createMockDatabase();
+    // Default any unspecified getAllAsync (e.g. the per-entry photo fetch) to
+    // an empty array so the activity-fetch ordering below is unaffected.
+    db.getAllAsync.mockResolvedValue([]);
     db.getAllAsync
       .mockResolvedValueOnce([
         { id: 1, mood: 5, notes: 'a', date: '2025-01-01' },
@@ -187,5 +190,56 @@ describe('getMoodEntries — additional', () => {
     expect(result).toHaveLength(2);
     expect(result[0].activities).toHaveLength(1);
     expect(result[1].activities).toHaveLength(2);
+  });
+});
+
+describe('addMoodEntry — photos', () => {
+  it('copies each photo and inserts an entry_media row per photo', async () => {
+    // copyToMediaDir hits expo-file-system; mock it so no real IO happens.
+    jest.resetModules();
+    jest.doMock('@/databases/mediaHelpers', () => ({
+      copyToMediaDir: jest
+        .fn()
+        .mockImplementation(async (uri: string) => `/mock/media/${uri.split('/').pop()}`),
+      deleteMediaFile: jest.fn(),
+    }));
+    const { addMoodEntry: addWithMockedMedia } = require('@/databases/entries');
+
+    const db = createMockDatabase();
+    db.getAllAsync.mockResolvedValue([]);
+    db.runAsync.mockResolvedValue({ lastInsertRowId: 99, changes: 1 });
+
+    await addWithMockedMedia(
+      db as any,
+      6,
+      [],
+      'with photos',
+      undefined,
+      ['file:///cache/a.jpg', 'file:///cache/b.png']
+    );
+
+    const mediaInserts = db.runAsync.mock.calls.filter((c: any[]) =>
+      typeof c[0] === 'string' && c[0].includes('INSERT INTO entry_media')
+    );
+    expect(mediaInserts.length).toBe(2);
+    for (const call of mediaInserts) {
+      expect(call[1][0]).toBe(99); // entry_id = lastInsertRowId
+    }
+
+    jest.dontMock('@/databases/mediaHelpers');
+    jest.resetModules();
+  });
+
+  it('inserts no media rows when no photos are supplied', async () => {
+    const db = createMockDatabase();
+    db.getAllAsync.mockResolvedValue([]);
+    db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
+
+    await addMoodEntry(db as any, 5, [], 'no photos');
+
+    const mediaInserts = db.runAsync.mock.calls.filter((c: any[]) =>
+      typeof c[0] === 'string' && c[0].includes('INSERT INTO entry_media')
+    );
+    expect(mediaInserts.length).toBe(0);
   });
 });
