@@ -15,7 +15,7 @@ import Feather from '@expo/vector-icons/Feather';
 
 import { useMemo } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
-import { SettingsSection } from "@/components/SettingRow";
+import { SettingsSection, RemindersSection } from "@/components/SettingRow";
 import { runMigrations } from "@/databases/migrations";
 import { DataManagementSection } from "@/components/DataManagementSection";
 
@@ -83,8 +83,7 @@ const DevDatabaseSection = ({
                     pressed && styles.buttonPressed
                 ]}
                 onPress={async () => {
-                    const result = await seedMoodEntries(db, 50);
-                    console.log(result.message);
+                    await seedMoodEntries(db, 50);
                     refetchEntries();
                 }}
             >
@@ -116,8 +115,7 @@ const DangerZoneSection = ({
             <Pressable
                 style={({ pressed }) => [styles.button, styles.buttonDanger, pressed && styles.buttonPressed]}
                 onPress={async () => {
-                    const result = await clearAllEntries(db);
-                    console.log(result.message);
+                    await clearAllEntries(db);
                     refetchEntries();
                 }}
             >
@@ -127,8 +125,7 @@ const DangerZoneSection = ({
             <Pressable
                 style={({ pressed }) => [styles.button, styles.buttonDanger, pressed && styles.buttonPressed]}
                 onPress={async () => {
-                    const result = await resetDatabase(db);
-                    console.log(result.message);
+                    await resetDatabase(db);
                     refetchEntries();
                 }}
             >
@@ -153,8 +150,6 @@ const DangerZoneSection = ({
 
                         // Force refresh app state
                         refetchEntries();
-
-                        console.log('Force reset completed successfully');
                     } catch (error) {
                         console.error('Force reset error:', error);
                     }
@@ -181,6 +176,8 @@ function Setting() {
 
             <SettingsSection />
 
+            <RemindersSection />
+
             <DataManagementSection />
 
             {__DEV__ && <DevDatabaseSection db={db} refetchEntries={refetchEntries} />}
@@ -189,7 +186,7 @@ function Setting() {
 
             <View style={styles.versionInfo}>
                 <Text style={styles.versionText}>Version 1.0.0</Text>
-                <Text style={styles.versionText}>© 2024 Raedus Labs. All rights reserved.</Text>
+                <Text style={styles.versionText}>© 2025 Raedus Labs. All rights reserved.</Text>
                 <Text style={styles.versionText}> Have feedback? Email us at hello@raeduslabs.com! </Text>
 
             </View>
