@@ -1,6 +1,5 @@
 import { Tabs } from "expo-router";
 
-import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
@@ -152,12 +151,6 @@ function TabNavigator() {
                     <Ionicons name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} size={24} />),
                 // headerShown: false,
             }} />
-            {/* <Tabs.Screen name="entry" options={{
-                title: 'Entry',
-                tabBarIcon: ({ color, focused }) => (
-                    <Ionicons name={focused ? 'information-circle' : 'information-circle-outline'} color={color} size={24} />),
-                headerShown: false,
-                }} /> */}
             <Tabs.Screen name="timeline" options={{
                 title: 'Timeline',
                 headerTitleAlign: 'center',
@@ -168,15 +161,12 @@ function TabNavigator() {
                 // headerShown: false,
             }} />
 
-            <Tabs.Screen name="social" options={{
-                title: 'Social',
+            <Tabs.Screen name="insights" options={{
+                title: 'Insights',
                 headerTitleAlign: 'center',
-
                 tabBarIcon: ({ color, focused }) => (
-                    <MaterialIcons name={focused ? 'mood' : 'mood'} color={color} size={30} />
+                    <Ionicons name={focused ? 'bulb' : 'bulb-outline'} color={color} size={28} />
                 ),
-                // headerShown: false,
-
             }} />
 
             <Tabs.Screen name="settings" options={{
