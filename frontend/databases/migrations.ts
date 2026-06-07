@@ -63,13 +63,59 @@ export const migrations: Migration[] = [
             await updateV1ActivitiesToV2(db);
         }
     },
-    { 
+    {
         version: 3,
         up: async (db: SQLiteDatabase) => {
             // Add show_mood_benchmarks setting with default value of true
             await db.runAsync(`
-                INSERT OR IGNORE INTO user_settings (key, value) 
+                INSERT OR IGNORE INTO user_settings (key, value)
                 VALUES ('show_mood_benchmarks', 'true')
+            `);
+        }
+    },
+    {
+        // Daily-reminder notification settings. user_settings is a key-value
+        // store, so seeding two rows is all that's needed — no schema change.
+        // The matching SETTINGS_REGISTRY entries live in databases/settings.ts.
+        version: 4,
+        up: async (db: SQLiteDatabase) => {
+            await db.runAsync(`
+                INSERT OR IGNORE INTO user_settings (key, value)
+                VALUES ('reminder_enabled', 'false')
+            `);
+            await db.runAsync(`
+                INSERT OR IGNORE INTO user_settings (key, value)
+                VALUES ('reminder_time', '20:00')
+            `);
+        }
+    },
+    {
+        // Media attachments. The `entry_media` table was created back in V1
+        // (createInitialSchema) but never used and never indexed. Rebuild it
+        // with a `created_at` column (so photos sort in insertion order) and
+        // an index on entry_id. Copy-into-new-table pattern preserves any
+        // existing rows (there shouldn't be any) and never touches `entries`.
+        version: 5,
+        up: async (db: SQLiteDatabase) => {
+            await db.execAsync(`
+                ALTER TABLE entry_media RENAME TO entry_media_v1;
+
+                CREATE TABLE entry_media (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entry_id    INTEGER NOT NULL,
+                    file_path   TEXT    NOT NULL,
+                    media_type  TEXT    NOT NULL DEFAULT 'image',
+                    created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                    FOREIGN KEY(entry_id) REFERENCES entries(id) ON DELETE CASCADE
+                );
+
+                INSERT INTO entry_media (id, entry_id, file_path, media_type)
+                SELECT id, entry_id, file_path, media_type FROM entry_media_v1;
+
+                DROP TABLE entry_media_v1;
+
+                CREATE INDEX IF NOT EXISTS idx_entry_media_entry_id
+                    ON entry_media(entry_id);
             `);
         }
     }

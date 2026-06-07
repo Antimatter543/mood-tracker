@@ -72,11 +72,13 @@ describe('runMigrations', () => {
 
     expect(db.withTransactionAsync).toHaveBeenCalled();
     // Inside the transaction, runAsync should be called to set PRAGMA user_version
-    // for each pending migration (v2 and v3)
+    // for each pending migration (v2..vN). Derive the expected count from the
+    // array so adding migrations doesn't require touching this number.
     const pragmaCalls = db.runAsync.mock.calls.filter(
       (call: any[]) => typeof call[0] === 'string' && call[0].includes('PRAGMA user_version')
     );
-    expect(pragmaCalls.length).toBe(2);
+    const pendingFromV1 = migrations.filter(m => m.version > 1).length;
+    expect(pragmaCalls.length).toBe(pendingFromV1);
   });
 
   it('updates pragma user_version after each migration', async () => {
@@ -153,5 +155,45 @@ describe('Migration V3', () => {
     );
     expect(seedCall).toBeDefined();
     expect((seedCall![0] as string).toUpperCase()).toContain('INSERT OR IGNORE');
+  });
+});
+
+describe('Migration V4', () => {
+  it('seeds reminder_enabled and reminder_time with INSERT OR IGNORE', async () => {
+    const db = createMockDatabase();
+    const v4 = migrations.find(m => m.version === 4)!;
+    expect(v4).toBeDefined();
+
+    await v4.up(db as any);
+
+    const sql = db.runAsync.mock.calls
+      .map((c: any[]) => (c[0] as string))
+      .join(' ');
+    expect(sql).toContain('reminder_enabled');
+    expect(sql).toContain('reminder_time');
+    expect(sql.toUpperCase()).toContain('INSERT OR IGNORE');
+  });
+});
+
+describe('Migration V5', () => {
+  it('rebuilds entry_media without dropping entries, adds created_at + index', async () => {
+    const db = createMockDatabase();
+    const v5 = migrations.find(m => m.version === 5)!;
+    expect(v5).toBeDefined();
+
+    await v5.up(db as any);
+
+    const sql = db.execAsync.mock.calls
+      .map((c: any[]) => (c[0] as string).toUpperCase())
+      .join(' ');
+    // Never touches the entries table.
+    expect(sql).not.toContain('DROP TABLE ENTRIES');
+    expect(sql).not.toContain('DROP TABLE IF EXISTS ENTRIES');
+    // Rebuilds entry_media via the copy-into-new-table pattern.
+    expect(sql).toContain('ALTER TABLE ENTRY_MEDIA RENAME TO ENTRY_MEDIA_V1');
+    expect(sql).toContain('CREATE TABLE ENTRY_MEDIA');
+    expect(sql).toContain('CREATED_AT');
+    expect(sql).toContain('IDX_ENTRY_MEDIA_ENTRY_ID');
+    expect(sql).toContain('DROP TABLE ENTRY_MEDIA_V1');
   });
 });

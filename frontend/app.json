@@ -13,6 +13,10 @@
     },
     "android": {
       "package": "com.raeduslabs.soulsync",
+      "permissions": [
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.SCHEDULE_EXACT_ALARM"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#ffffff"
@@ -34,7 +38,22 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#4CAF50",
+          "defaultChannel": "daily-reminder"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SoulSync lets you attach photos to your mood entries. Your photos stay on this device.",
+          "cameraPermission": "SoulSync lets you take photos to attach to your mood entries. Your photos stay on this device."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
