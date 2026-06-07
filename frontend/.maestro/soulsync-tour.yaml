@@ -1,0 +1,65 @@
+appId: com.raeduslabs.soulsync
+---
+# SoulSync device tour — deterministic screenshot walk of the new features.
+# Tab-bar labels aren't exposed to Maestro (react-navigation), so tabs are
+# tapped by relative point: 5 tabs at x = 10/30/50/70/90%, y = 89%.
+# Screen content (headers, buttons) IS exposed, so those use text matchers.
+# Run from ~/Pictures/screenshots so the PNGs land there. No clearState =>
+# seeded sample data stays visible.
+
+- launchApp
+# Dismiss the expo-dev-client developer menu if it appears.
+- tapOn:
+    text: "Continue"
+    optional: true
+
+- assertVisible:
+    text: "Good (morning|afternoon|evening)"
+- takeScreenshot: ss-home
+
+# ─── Statistics (tab 2) ──────────────────────────────────────────────────────
+- tapOn:
+    point: 30%, 89%
+- assertVisible:
+    text: "Overview"
+- takeScreenshot: ss-stats-month
+- tapOn:
+    text: "All Time"
+- takeScreenshot: ss-stats-alltime
+
+# ─── Insights (tab 4) — replaces the old fake Social tab ─────────────────────
+- tapOn:
+    point: 70%, 89%
+- assertVisible:
+    text: "What your entries say about you"
+- takeScreenshot: ss-insights
+
+# ─── Settings (tab 5) + Reminders ────────────────────────────────────────────
+- tapOn:
+    point: 90%, 89%
+- assertVisible:
+    text: "Appearance & Behavior"
+- takeScreenshot: ss-settings
+- scrollUntilVisible:
+    element:
+      text: "Daily Reminder"
+    direction: DOWN
+- takeScreenshot: ss-reminders
+
+# ─── Entry form + photo attachment ───────────────────────────────────────────
+- tapOn:
+    point: 10%, 89%
+# FAB — target its accessibility label (point taps were unreliable).
+- tapOn:
+    text: "Add mood entry"
+- assertVisible:
+    text: "How were you?"
+- takeScreenshot: ss-entry-mood
+- tapOn:
+    text: "Continue"
+- assertVisible:
+    text: "Photos"
+- takeScreenshot: ss-entry-details
+- tapOn:
+    text: "Choose photo from library"
+- takeScreenshot: ss-photo-picker
