@@ -56,7 +56,17 @@
           "photosPermission": "SoulSync lets you attach photos to your mood entries. Your photos stay on this device.",
           "cameraPermission": "SoulSync lets you take photos to attach to your mood entries. Your photos stay on this device."
         }
-      ]
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableProguardInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ],
+      "./plugins/withReleaseAbis"
     ],
     "experiments": {
       "typedRoutes": true
