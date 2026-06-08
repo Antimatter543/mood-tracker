@@ -29,18 +29,27 @@ Public repo: `Antimatter543/mood-tracker` (Anti's). Releases: GitHub Releases (A
 ## Build / test / gates
 ```bash
 cd frontend
-npm run check        # tsc --noEmit + lint + jest  (the pre-ship gate)
+npm run check        # tsc --noEmit + lint + jest  (the pre-ship gate, light on CPU)
 npx jest             # tests (pure transforms, hooks, db layer all unit-tested)
-npx expo run:android # incremental dev build to the Pixel 3 (~30s after first build)
 ```
+**NEVER run a LOCAL native build** (`npx expo run:android`, `gradlew`, prebuild compiles). They peg the
+CPU to 100%+ and lag Anti's interactive machine (he is ON this box). **Builds go to EAS cloud only** ->
+`scripts/release.sh` (or `eas build`). This app also can't be relied on to build locally anyway.
+For fast JS-only iteration without a native rebuild, use **`eas update`** (OTA) to a dev client, not a local build.
+
 APK is optimized: `eas.json` preview profile = **arm-only ABIs** (via `plugins/withReleaseAbis.js`,
 drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-properties`). ~45MB, not ~98MB.
 
 ## On-device QA (the only reliable way to verify UI on this app)
 - Pixel 3 at `192.168.1.68:5555`, app `com.raeduslabs.soulsync`, **device PIN `1337`**
   (unlock: `adb shell input keyevent KEYCODE_WAKEUP && adb shell input swipe 540 1600 540 300 && adb shell input text 1337 && adb shell input keyevent 66`).
-- **Expo Go does NOT work here** — the device's Expo Go is SDK 56, the project is SDK 52, so it refuses to load.
-  Use the incremental dev build (~30s), not Expo Go.
+- **How to get a build on the device:** EAS only (`scripts/release.sh` or `eas build`), then `adb install`.
+  Do NOT local-build to iterate (see Build section). Expo Go also does NOT work here (device Expo Go is SDK 56,
+  project is SDK 52). For JS-only changes, `eas update` to an existing dev client avoids a native rebuild.
+- **Synthetic taps (adb/Maestro) CANNOT drive controls inside this app's `<Modal>`** (the UP event is lost
+  across the modal's second React root). The modal *renders* fine and tabs/FAB outside it are tappable, but
+  in-modal taps/scrolls can ONLY be confirmed by a real finger. Don't conclude a modal-interaction fix works
+  or fails from adb input alone.
 - **Use Maestro, not blind adb taps** (`~/.maestro/bin/maestro`; flows in `frontend/.maestro/`). RN/Fabric does
   NOT expose tab-bar labels or react-navigation text to uiautomator, so:
   - Tap tabs by **point**: `point: X%, 89%` (Home 10 / Stats 30 / Timeline 50 / Insights 70 / Settings 90).
