@@ -1,6 +1,7 @@
 // ActivityEditModal.tsx
 import React, { useEffect, useState } from 'react';
 import { Modal, View, Text, TextInput, Pressable, StyleSheet, Alert, Dimensions } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useThemeColors } from '@/styles/global';
 import { SQLiteDatabase } from 'expo-sqlite';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -242,6 +243,9 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
             visible={visible}
             onRequestClose={onClose}
         >
+            {/* Modal renders outside the app-root GestureHandlerRootView; wrap
+                its content so its controls receive touches. See tasks/lessons.md. */}
+            <GestureHandlerRootView style={{ flex: 1 }}>
             <View style={styles.modalContainer}>
                 <View style={styles.modalContent}>
                     <View style={styles.modalHeader}>
@@ -307,6 +311,7 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
                     </View>
                 </View>
             </View>
+            </GestureHandlerRootView>
         </Modal>
     );
 };

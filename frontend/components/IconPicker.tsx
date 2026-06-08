@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, Modal, Pressable, ScrollView, StyleSheet, TextInput, Dimensions } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useThemeColors } from '@/styles/global';
 import * as Feather from '@expo/vector-icons/Feather';
 import * as MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -454,6 +455,10 @@ export const IconPicker: React.FC<IconPickerProps> = ({
             animationType="slide"
             onRequestClose={onClose}
         >
+            {/* Modal renders outside the app-root GestureHandlerRootView; wrap
+                its content so its scroll lists and buttons receive touches.
+                See tasks/lessons.md. */}
+            <GestureHandlerRootView style={{ flex: 1 }}>
             <View style={styles.modalContainer}>
                 <View style={styles.header}>
                     <Text style={styles.title}>Select Icon</Text>
@@ -592,6 +597,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({
                     )}
                 </ScrollView>
             </View>
+            </GestureHandlerRootView>
         </Modal>
     );
 };

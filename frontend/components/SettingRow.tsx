@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, Switch, StyleSheet, TouchableOpacity, Modal, FlatList, Platform, Pressable, Dimensions } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useThemeColors } from '@/styles/global';
 import { SettingConfig, SETTINGS_REGISTRY } from '@/databases/settings';
 import { useSettings } from '@/context/SettingsContext';
@@ -172,10 +173,13 @@ function SettingRow({ config, value, onValueChange }: SettingRowProps) {
             visible={modalVisible}
             onRequestClose={() => setModalVisible(false)}
           >
+            {/* Modal renders outside the app-root GestureHandlerRootView; wrap
+                its content so the option list receives touches. See tasks/lessons.md. */}
+            <GestureHandlerRootView style={{ flex: 1 }}>
             <View style={styles.modalContainer}>
               <View style={styles.modalContent}>
                 <Text style={styles.modalTitle}>{config.label}</Text>
-                
+
                 <FlatList
                   data={config.options || []}
                   keyExtractor={(item) => item.value}
@@ -208,6 +212,7 @@ function SettingRow({ config, value, onValueChange }: SettingRowProps) {
                 </TouchableOpacity>
               </View>
             </View>
+            </GestureHandlerRootView>
           </Modal>
         </>
       )}
