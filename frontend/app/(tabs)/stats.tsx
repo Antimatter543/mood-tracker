@@ -1,6 +1,10 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { useSQLiteContext } from 'expo-sqlite';
 import { Layout } from '@/components/PageContainer';
+import { EmptyState } from '@/components/EmptyState';
+import { useDataContext } from '@/context/DataContext';
+import { TOTAL_ENTRIES } from '@/components/visualisations/queries';
 import SectionHeader from '@/components/SectionHeader';
 import StatSummaryCard from '@/components/visualisations/StatSummaryCard';
 import MoodTrendChart from '@/components/visualisations/MoodTrendChart';
@@ -19,6 +23,27 @@ const DEFAULT_HEADER_HEIGHT = 96;
 const StatisticsContent = () => {
   const { timeframe, setTimeframe, timeframeDescription } = useTimeframe();
   const colors = useThemeColors();
+  const db = useSQLiteContext();
+  const { refreshCount } = useDataContext();
+  // Whole-DB empty check. `null` = still loading (render nothing to avoid a
+  // flash of empty charts before the count returns).
+  const [hasEntries, setHasEntries] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    db.getFirstAsync<{ count: number }>(TOTAL_ENTRIES)
+      .then((row) => {
+        if (active) setHasEntries((row?.count ?? 0) > 0);
+      })
+      .catch(() => {
+        // On a query error, fall back to showing the charts (they degrade
+        // gracefully) rather than hiding everything.
+        if (active) setHasEntries(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [db, refreshCount]);
   // Measure the sticky header instead of hardcoding paddingTop: 120 — the
   // header height varies with font scaling / description length.
   const [headerHeight, setHeaderHeight] = useState(DEFAULT_HEADER_HEIGHT);
@@ -75,6 +100,22 @@ const StatisticsContent = () => {
       }),
     [colors, headerHeight],
   );
+
+  // Still counting — render nothing briefly to avoid flashing empty charts.
+  if (hasEntries === null) {
+    return <View style={styles.container} />;
+  }
+
+  // Brand-new user: one calm empty state instead of a wall of empty charts.
+  if (!hasEntries) {
+    return (
+      <EmptyState
+        icon="bar-chart-2"
+        title="No data yet"
+        subtitle="Log your mood to see your statistics. Your charts and patterns will appear here."
+      />
+    );
+  }
 
   return (
     <View style={styles.container}>

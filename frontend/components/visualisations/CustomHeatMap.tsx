@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, Dimensions, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Svg, Rect, Text as SvgText } from 'react-native-svg';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
@@ -8,10 +8,6 @@ import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
 import { buildHeatmapGrid, type HeatmapInput } from './transforms/heatmap';
 import { localDateString } from './transforms/dateHelpers';
-
-const screenWidth = Dimensions.get('window').width;
-const PADDING = 24;
-const chartWidth = screenWidth - (2 * PADDING);
 
 interface DayData {
     date: string;

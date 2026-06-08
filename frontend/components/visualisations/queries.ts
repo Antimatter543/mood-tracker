@@ -39,6 +39,12 @@ export const WEEKLY_MOOD_AVERAGES = `
 export const MONTHLY_MOOD_AVERAGES = WEEKLY_MOOD_AVERAGES;
 
 // -----------------------------------------------------------------------------
+// All-time entry count. The single source of truth for "is the DB empty?" used
+// by the Home + Statistics empty states. No parameters.
+// -----------------------------------------------------------------------------
+export const TOTAL_ENTRIES = `SELECT COUNT(*) as count FROM entries`;
+
+// -----------------------------------------------------------------------------
 // Raw mood points in a window (rarely used; kept for completeness).
 // -----------------------------------------------------------------------------
 export const MOOD_POINTS_IN_RANGE = `

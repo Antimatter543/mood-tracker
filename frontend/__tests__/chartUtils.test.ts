@@ -1,4 +1,22 @@
-import { interpolateData, getLast7Days, formatDayLabel } from '@/components/visualisations/chartUtils';
+import { interpolateData, isWeekEmpty, getLast7Days, formatDayLabel } from '@/components/visualisations/chartUtils';
+
+describe('isWeekEmpty', () => {
+  it('is true for an all-null week (fresh install)', () => {
+    expect(isWeekEmpty([null, null, null, null, null, null, null])).toBe(true);
+  });
+
+  it('is true for an empty array (nothing to plot)', () => {
+    expect(isWeekEmpty([])).toBe(true);
+  });
+
+  it('is false when any day has a real value', () => {
+    expect(isWeekEmpty([null, null, 6.5, null, null, null, null])).toBe(false);
+  });
+
+  it('is false when a day is a real zero (mood 0 is data, not absence)', () => {
+    expect(isWeekEmpty([null, null, null, 0, null, null, null])).toBe(false);
+  });
+});
 
 describe('interpolateData', () => {
   it('interpolates the docstring example: [1,null,3,null,5] -> [1,2,3,4,5]', () => {

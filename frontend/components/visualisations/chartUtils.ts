@@ -162,3 +162,14 @@ export const interpolateData = (dataArray: (number | null)[]) => {
     }
     return { data: result, nullIndices };
 };
+
+/**
+ * True when a day-window array carries no real data (every slot is null) — i.e.
+ * the user has no entries in that window. The Home weekly chart uses this to
+ * decide whether to render a calm empty placeholder instead of a flat,
+ * red-interpolated line that looks like an error.
+ *
+ * An empty array (`[]`) also counts as "empty" — there is nothing to plot.
+ */
+export const isWeekEmpty = (data: (number | null)[]): boolean =>
+    data.every((v) => v === null);

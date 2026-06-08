@@ -1,5 +1,31 @@
 # SoulSync — Project Lessons
 
+## Empty-state early return BELOW its hooks -> "Rendered more hooks" crash (2026-06-08)
+
+**Mistake**: While adding the Home weekly-chart empty placeholder, the
+`if (isWeekEmpty(data)) return <placeholder/>` early return was placed ABOVE the
+two `useMemo` hooks (`interpolateData` + `chartData`) in `WeeklyChartCard`
+(`app/(tabs)/index.tsx`). On a FRESH/empty DB the week is empty -> the component
+returns early and runs 4 hooks. As soon as the user logs an entry the week is no
+longer empty -> the component runs 6 hooks. React throws
+`Render Error: Rendered more hooks than during the previous render.` and the
+whole Home screen redboxes. The empty path looked fine on-device; the bug only
+surfaced when transitioning empty -> populated (i.e. exactly the first-entry
+moment we were polishing for). Pure-transform jest tests (`isWeekEmpty`) cannot
+catch this; it is a component hook-ordering bug.
+
+**Rule**: A conditional/early `return` inside a component MUST sit BELOW every
+hook call. Compute all `useMemo`/`useState`/etc. unconditionally first, then
+branch on the result. The work done by a now-unused `useMemo` on the empty
+branch is cheap and harmless. `npx eslint app/(tabs)/index.tsx` flags this via
+`react-hooks/rules-of-hooks` -- run eslint (not just tsc + jest) on any file
+where you add an early return, and ALWAYS verify the empty->populated TRANSITION
+on-device, not just the two end states in isolation. (`stats.tsx`'s
+`hasEntries === null / !hasEntries` early returns are correctly placed below all
+its hooks -- that one is the right pattern to copy.)
+
+**Date**: 2026-06-08
+
 ## Four UI/chart fixes + dev-loop notes (2026-06-07)
 
 Fixed four user-reported issues on the standalone release. Notes for future work:

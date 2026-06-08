@@ -6,8 +6,8 @@ import { Card } from '@/components/Card';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState, memo, useMemo } from 'react';
 import { LineChart } from 'react-native-chart-kit';
-import { WEEKLY_MOOD_AVERAGES, RECENT_ENTRY_DATES } from '@/components/visualisations/queries';
-import { CHART_PADDING, interpolateData, SCREEN_WIDTH, useChartConfig } from '@/components/visualisations/chartUtils';
+import { WEEKLY_MOOD_AVERAGES, RECENT_ENTRY_DATES, TOTAL_ENTRIES } from '@/components/visualisations/queries';
+import { CHART_PADDING, interpolateData, isWeekEmpty, SCREEN_WIDTH, useChartConfig } from '@/components/visualisations/chartUtils';
 import { useDataContext } from '@/context/DataContext';
 import { startOfLocalDay, endOfLocalDay, localDateString } from '@/databases/dateHelpers';
 import { currentStreak } from '@/components/visualisations/transforms/streak';
@@ -113,34 +113,51 @@ const WeeklyChartCard = memo(function WeeklyChartCard({ data }: { data: (number 
     const styles = useThemedStyles(colors);
     const chartConfig = useChartConfig();
     const chartWidth = SCREEN_WIDTH - (CHART_PADDING + 32);
+    const weekEmpty = isWeekEmpty(data);
 
-    const getPast7Days = () => {
-        const dates = [];
-        for (let i = 6; i >= 0; i--) {
-            const date = new Date();
-            date.setDate(date.getDate() - i);
-            dates.push(date.toISOString());
-        }
-        return dates;
-    };
-
-    const formatToDayName = (dateStr: string) => {
-        const date = new Date(dateStr);
-        return date.toLocaleDateString('en-US', { weekday: 'short' });
-    };
-
-    // Process data with interpolation
+    // NOTE: all hooks must run on every render (Rules of Hooks). The empty-week
+    // early return lives BELOW these `useMemo`s — never above them — so the hook
+    // count stays constant whether or not the week has data. The interpolation
+    // is cheap and harmless on an empty week (its result is simply unused).
     const { data: interpolatedData, nullIndices } = useMemo(() =>
         interpolateData(data.length > 0 ? data : [0, 0, 0, 0, 0, 0, 0])
         , [data]);
 
-    const chartData = useMemo(() => ({
-        labels: getPast7Days().map(date => formatToDayName(date)),
-        datasets: [{
-            data: interpolatedData,
-            withDots: true
-        }]
-    }), [interpolatedData]);
+    const chartData = useMemo(() => {
+        const getPast7Days = () => {
+            const dates = [];
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date();
+                date.setDate(date.getDate() - i);
+                dates.push(date.toISOString());
+            }
+            return dates;
+        };
+        const formatToDayName = (dateStr: string) =>
+            new Date(dateStr).toLocaleDateString('en-US', { weekday: 'short' });
+
+        return {
+            labels: getPast7Days().map(formatToDayName),
+            datasets: [{ data: interpolatedData, withDots: true }],
+        };
+    }, [interpolatedData]);
+
+    // An empty week (no entries in the last 7 days) would otherwise render as a
+    // flat zero line with red interpolated dots — it reads as an error. Show a
+    // calm placeholder inside the same card instead.
+    if (weekEmpty) {
+        return (
+            <Card>
+                <View style={styles.weekEmpty}>
+                    <Ionicons name="analytics-outline" size={32} color={colors.textSecondary} />
+                    <Text style={styles.weekEmptyText}>
+                        Log your mood to start seeing your week
+                    </Text>
+                </View>
+                <Text style={styles.subtitle}>Past 7 days</Text>
+            </Card>
+        );
+    }
 
     return (
         <Card>
@@ -203,6 +220,27 @@ const MonthlyOverviewCard = memo(function MonthlyOverviewCard({ stats }: {
                     <Text style={styles.statLabel}>Best Day</Text>
                     <Text style={styles.statValue}>{formatDate(stats.bestDay).short}</Text>
                 </View>
+            </View>
+        </Card>
+    );
+});
+
+// First-entry nudge — only shown on a brand-new (empty) database. Points the
+// user at the floating "+" button. Intentionally a single tasteful card, not a
+// multi-screen onboarding.
+const FirstEntryNudge = memo(function FirstEntryNudge() {
+    const colors = useThemeColors();
+    const styles = useThemedStyles(colors);
+
+    return (
+        <Card>
+            <View style={styles.nudgeCard}>
+                <View style={styles.nudgeIcon}>
+                    <Ionicons name="add" size={24} color={colors.accent} />
+                </View>
+                <Text style={styles.nudgeText}>
+                    Tap the + button to log your first mood
+                </Text>
             </View>
         </Card>
     );
@@ -283,6 +321,40 @@ const useThemedStyles = (colors: any) => {
             alignItems: 'center',
             width: '100%',
         },
+        // Calm in-card placeholder shown when the week has no entries (replaces
+        // the red-dotted flat line). Matches the chart's ~120px height so the
+        // card doesn't jump when the first entry lands.
+        weekEmpty: {
+            height: 120,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 10,
+        },
+        weekEmptyText: {
+            fontSize: 14,
+            color: colors.textSecondary,
+            textAlign: 'center',
+        },
+        // First-entry nudge: a gentle row pointing the new user at the FAB.
+        nudgeCard: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 12,
+        },
+        nudgeIcon: {
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            backgroundColor: colors.accentLight,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        nudgeText: {
+            flex: 1,
+            fontSize: 15,
+            color: colors.text,
+            fontWeight: '500',
+        },
         chart: {
             borderRadius: 16,
             paddingRight: 0,
@@ -356,6 +428,8 @@ export default function Home() {
     const [recentActivities, setRecentActivities] = useState<string[]>([]);
     const [weeklyData, setWeeklyData] = useState<(number | null)[]>([]);
     const [streak, setStreak] = useState<number>(0);
+    // All-time entry count — drives the brand-new-user first-entry nudge.
+    const [totalEntries, setTotalEntries] = useState<number>(0);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -379,6 +453,7 @@ export default function Home() {
                     activities,
                     weeklyRows,
                     streakEntryDates,
+                    totals,
                 ] = await Promise.all([
                     db.getFirstAsync<{ mood: number }>(
                         `SELECT ROUND(AVG(mood), 1) as mood FROM entries WHERE date BETWEEN ? AND ?`,
@@ -430,9 +505,12 @@ export default function Home() {
                         RECENT_ENTRY_DATES,
                         [streakWindowStart]
                     ),
+
+                    db.getFirstAsync<{ count: number }>(TOTAL_ENTRIES),
                 ]);
 
                 setTodaysMood(today?.mood || null);
+                setTotalEntries(totals?.count ?? 0);
 
                 if (monthStats) {
                     setMonthlyStats({
@@ -471,6 +549,7 @@ export default function Home() {
                 <Text style={styles.greeting}>{greetingForHour(new Date().getHours())}</Text>
                 <TodaysMoodCard mood={todaysMood} streak={streak} />
                 <WeeklyChartCard data={weeklyData} />
+                {totalEntries === 0 && <FirstEntryNudge />}
                 <MonthlyOverviewCard stats={monthlyStats} />
                 <RecentActivitiesCard activities={recentActivities} />
             </View>

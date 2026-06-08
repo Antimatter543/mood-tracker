@@ -16,7 +16,6 @@ import { currentStreak } from "@/components/visualisations/transforms/streak";
 import { scheduleOrSkipDailyReminder } from "@/lib/notifications";
 
 export default function RootLayout() {
-    const colors = useThemeColors();
     const [refreshCount, setRefreshCount] = useState(0);
 
     // Create our refetch function so we can refresh states whenever our db changes/adds or edits new entries
