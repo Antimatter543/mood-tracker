@@ -2,7 +2,7 @@
   "expo": {
     "name": "Soulsync",
     "slug": "soulsync-mood",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
@@ -13,6 +13,7 @@
     },
     "android": {
       "package": "com.raeduslabs.soulsync",
+      "versionCode": 10201,
       "permissions": [
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.SCHEDULE_EXACT_ALARM"
