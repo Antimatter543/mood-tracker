@@ -12,6 +12,7 @@ import {
     Dimensions,
     FlatList,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
 import { useDataContext } from '@/context/DataContext';
@@ -339,6 +340,9 @@ const PhotoViewer: React.FC<{
 }> = ({ visible, photos, initialIndex, onClose }) => {
     return (
         <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+            {/* Modal renders outside the app-root GestureHandlerRootView; wrap so
+                the photo FlatList can pan/swipe. See tasks/lessons.md. */}
+            <GestureHandlerRootView style={{ flex: 1 }}>
             <View style={viewerStyles.overlay}>
                 <Pressable
                     style={viewerStyles.closeButton}
@@ -370,6 +374,7 @@ const PhotoViewer: React.FC<{
                     )}
                 />
             </View>
+            </GestureHandlerRootView>
         </Modal>
     );
 };

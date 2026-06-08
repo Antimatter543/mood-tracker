@@ -14,6 +14,7 @@ import {
     Dimensions,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Feather from '@expo/vector-icons/Feather';
@@ -315,24 +316,30 @@ export const EntryFormModal: React.FC<{
             visible={visible}
             onRequestClose={onClose}
         >
-            <View style={styles.modalContainer}>
-                <View style={styles.modalHeader}>
-                    <Pressable style={styles.closeButton} onPress={onClose}>
-                        <Ionicons name="close" color={colors.text} size={24} />
-                    </Pressable>
+            {/* RNGH renders this modal in a native window OUTSIDE the app-root
+                GestureHandlerRootView, so it needs its own to receive touches /
+                scroll. The inner modalContainer keeps its explicit window
+                dimensions (Fabric flex-collapse fix). See tasks/lessons.md. */}
+            <GestureHandlerRootView style={{ flex: 1 }}>
+                <View style={styles.modalContainer}>
+                    <View style={styles.modalHeader}>
+                        <Pressable style={styles.closeButton} onPress={onClose}>
+                            <Ionicons name="close" color={colors.text} size={24} />
+                        </Pressable>
 
-                    <InfoBubble
-                        text="Hold an activity to edit or delete it"
-                        position="top-right"
+                        <InfoBubble
+                            text="Hold an activity to edit or delete it"
+                            position="top-right"
+                        />
+                    </View>
+
+                    <EntryForm
+                        initialData={initialData}
+                        onSubmit={onSubmit}
+                        onCancel={onClose}
                     />
                 </View>
-
-                <EntryForm
-                    initialData={initialData}
-                    onSubmit={onSubmit}
-                    onCancel={onClose}
-                />
-            </View>
+            </GestureHandlerRootView>
         </Modal>
     );
 };

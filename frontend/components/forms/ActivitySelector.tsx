@@ -8,6 +8,7 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 
 import React, { useMemo, useState, useRef } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { Activity, ActivityGroup } from "../types";
 import { ActivityEditModal } from "./ActivityEditModal";
 import { ICON_FAMILIES, IconFamilyType, IconPicker } from "../IconPicker";
@@ -373,6 +374,9 @@ const AddActivityModal = ({ visible, onClose, onAdd, groupName }: AddActivityMod
 
     return (
         <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
+            {/* Modal renders outside the app-root GestureHandlerRootView; wrap so
+                its inputs/buttons receive touches. See tasks/lessons.md. */}
+            <GestureHandlerRootView style={{ flex: 1 }}>
             <View style={styles.modalContainer}>
                 <View style={styles.modalContent}>
                     <View style={styles.modalHeader}>
@@ -418,6 +422,7 @@ const AddActivityModal = ({ visible, onClose, onAdd, groupName }: AddActivityMod
                     />
                 </View>
             </View>
+            </GestureHandlerRootView>
         </Modal>
     );
 };
@@ -434,6 +439,9 @@ const AddGroupModal = ({ visible, onClose, onAdd, error }: AddGroupModalProps) =
 
     return (
         <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
+            {/* Modal renders outside the app-root GestureHandlerRootView; wrap so
+                its input/button receive touches. See tasks/lessons.md. */}
+            <GestureHandlerRootView style={{ flex: 1 }}>
             <View style={styles.modalContainer}>
                 <View style={styles.modalContent}>
                     <View style={styles.modalHeader}>
@@ -456,6 +464,7 @@ const AddGroupModal = ({ visible, onClose, onAdd, error }: AddGroupModalProps) =
                     </Pressable>
                 </View>
             </View>
+            </GestureHandlerRootView>
         </Modal>
     );
 };

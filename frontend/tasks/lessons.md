@@ -150,6 +150,44 @@ not referenced in JSX — only `viewerStyles.overlay` is used. Left untouched.
 **If you add a new `<Modal transparent>`**: size its root view to the window, don't
 use `flex: 1`.
 
+## GestureHandlerRootView added app-root + per-modal (2026-06-08) — touch fix UNVERIFIABLE via ADB
+
+**Context**: A REAL-finger user report said the "add mood" modal is fully dead (no scroll,
+no Continue, nothing tappable). The app had NO `GestureHandlerRootView` anywhere even though
+`react-native-gesture-handler@2.20.2` is installed (transitive via react-navigation /
+react-native-screens). Documented RNGH guidance: a root `GestureHandlerRootView` is required,
+and every `<Modal>` (which renders in a SEPARATE native window outside that root) needs its
+OWN `GestureHandlerRootView` wrapping its content.
+
+**Change applied**: added `<GestureHandlerRootView style={{ flex: 1 }}>` at the app root
+(`app/_layout.tsx`, wrapping `<Stack>`) AND as the outermost child inside every native
+`<Modal>`: EntryForm (EntryFormModal), SettingRow (select), ActivityEditModal, IconPicker,
+DBViewer (PhotoViewer), ActivitySelector (AddActivityModal + AddGroupModal). The inner
+modalContainer keeps its explicit-window-Dimensions sizing (the prior Fabric flex-collapse
+fix) INSIDE the GHRV — both layers coexist. tsc/eslint/jest all green; modal still renders
++ closes cleanly (no regression, no redbox).
+
+**The verification wall (this is the load-bearing lesson)**: on-device, `adb input tap`,
+`adb input swipe`, AND explicit separate `adb input motionevent DOWN`/`UP` on the Continue
+button + mood scroller ALL still do nothing, and still log
+`E unknown:ReactNative: Got DOWN touch before receiving UP or CANCEL from last gesture`
+— i.e. EXACTLY the synthetic-injection limitation already documented below. So the GHRV
+change neither passes nor fails the ADB test: ADB simply **cannot** drive this app's modal
+window regardless of whether the fix works. The task's premise ("a clean adb tap sends
+DOWN+UP so it WILL register if the gesture root is fixed") does NOT hold for this app — the
+UP is lost across the modal's second React root no matter what. **Only a real finger can
+confirm whether GHRV fixed the genuine real-finger deadness.** Did NOT ship v1.2.2 on an
+unverified guess (per explicit instruction: do not claim fixed if the tap doesn't advance).
+
+**Rule**: For this app, the modal-touch fix CANNOT be verified by any synthetic ADB input.
+The only valid verification is a real finger (the original reporter) on a build. When a
+real-finger modal-interaction bug is reported, the dev loop is: apply the
+best-practice fix (GHRV here) -> gate (tsc/eslint/jest) -> screenshot-confirm the modal
+still RENDERS + closes -> hand a build to a human for the actual touch confirmation. Do not
+treat "adb tap didn't advance the step" as evidence the fix failed.
+
+**Date**: 2026-06-08
+
 ## Synthetic touch CANNOT drive an open `<Modal>` on RN 0.76 new arch (2026-06-07)
 
 While verifying the modal fix on-device, neither `adb input tap`/`swipe`/`motionevent`
