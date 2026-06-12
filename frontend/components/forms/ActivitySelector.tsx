@@ -6,12 +6,13 @@ import Feather from "@expo/vector-icons/Feather";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 
-import React, { useMemo, useState, useRef } from "react";
+import React, { useMemo, useState, useRef, useCallback } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Activity, ActivityGroup } from "../types";
 import { ActivityEditModal } from "./ActivityEditModal";
 import { ICON_FAMILIES, IconFamilyType, IconPicker } from "../IconPicker";
 import { OverlayModal } from "../OverlayModal";
+import { OverlayPopover, PopoverAnchor } from "../OverlayPopover";
 import ActivityReorder from "./ActivityReorder";
 
 import { 
@@ -58,16 +59,20 @@ type ActivityGroupSectionProps = {
     onLongPressActivity: (activity: Activity) => void;
     onDeleteGroup: () => void;
     onReorderActivities: (activities: Activity[]) => void;
+    /** Whether THIS group's "..." menu is the one currently open. */
+    menuOpen: boolean;
+    /** Open this group's menu, anchored to the measured "..." button. */
+    onOpenMenu: (anchor: PopoverAnchor) => void;
+    /** Close any open menu. */
+    onCloseMenu: () => void;
 };
 
-// Add a new type for the dropdown menu
+// Action menu rendered as the CONTENT of an anchored OverlayPopover (the popover
+// owns positioning + dismiss-on-outside-tap, so this is just the card body).
 type GroupActionMenuProps = {
-    visible: boolean;
-    onClose: () => void;
     onAddActivity: () => void;
     onDeleteGroup: () => void;
     onReorderActivities: () => void;
-    position: { x: number, y: number };
 };
 
 const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
@@ -84,19 +89,8 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
         gap: 24,
     },
 
-    menuOverlay: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'transparent',
-        zIndex: 1,
-    },
-
     groupContainer: {
         gap: 12,
-        position:'relative',
     },
     groupHeader: {
         flexDirection: "row",
@@ -152,9 +146,8 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
         backgroundColor: colors.accent,
         borderColor: colors.accent,
     },
-    // Dropdown menu styles
+    // Dropdown menu card body (positioning is handled by OverlayPopover).
     menuContainer: {
-        position: 'absolute',
         backgroundColor: colors.cardBackground,
         borderRadius: 8,
         padding: 4,
@@ -163,7 +156,6 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
         shadowOpacity: 0.25,
         shadowRadius: 3.84,
         elevation: 5,
-        zIndex: 2,
         borderWidth: 1,
         borderColor: colors.border,
     },
@@ -453,26 +445,38 @@ const AddGroupModal = ({ visible, onClose, onAdd, error }: AddGroupModalProps) =
 
 
 // Update the ActivityGroupSection component
-const ActivityGroupSection = ({ 
-    group, 
-    activities, 
-    selectedActivities, 
-    onSelectActivity, 
+const ActivityGroupSection = ({
+    group,
+    activities,
+    selectedActivities,
+    onSelectActivity,
     onAddActivity,
     onLongPressActivity,
     onDeleteGroup,
-    onReorderActivities
+    onReorderActivities,
+    menuOpen,
+    onOpenMenu,
+    onCloseMenu,
 }: ActivityGroupSectionProps) => {
     const colors = useThemeColors();
     const styles = useStyles(colors);
-    const [menuVisible, setMenuVisible] = useState(false);
-    const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
     const [isReordering, setIsReordering] = useState(false);
+    const [anchor, setAnchor] = useState<PopoverAnchor>({ x: 0, y: 0, width: 0, height: 0 });
     const menuButtonRef = useRef<View>(null);
 
     const handleMenuPress = () => {
-        // Simplified approach - just show the menu without trying to position it precisely
-        setMenuVisible(true);
+        // Measure the "..." button in window coords so the popover can anchor to
+        // it, then ask the parent to open THIS group's menu (closing any other).
+        const node = menuButtonRef.current;
+        if (!node) {
+            onOpenMenu({ x: 0, y: 0, width: 0, height: 0 });
+            return;
+        }
+        node.measureInWindow((x, y, width, height) => {
+            const a = { x, y, width, height };
+            setAnchor(a);
+            onOpenMenu(a);
+        });
     };
 
     const handleReorderActivities = () => {
@@ -486,40 +490,44 @@ const ActivityGroupSection = ({
 
     return (
         <View style={styles.groupContainer}>
-            {/* Overlay to capture clicks outside the menu */}
-            {menuVisible && (
-                <Pressable 
-                    style={styles.menuOverlay}
-                    onPress={() => setMenuVisible(false)}
-                />
-            )}
-            
             <View style={styles.groupHeader}>
                 <Text style={styles.groupTitle}>{group.name}</Text>
-                <View style={{ position: 'relative', zIndex: menuVisible ? 2 : 1 }}>
-                    <Pressable 
-                        ref={menuButtonRef}
-                        style={styles.groupActionButton} 
-                        onPress={handleMenuPress}
-                    >
-                        <MaterialIcons name="more-vert" color={colors.text} size={20} />
-                    </Pressable>
-                    
-                    {menuVisible && (
-                        <GroupActionMenu 
-                            visible={menuVisible}
-                            onClose={() => setMenuVisible(false)}
-                            onAddActivity={onAddActivity}
-                            onDeleteGroup={onDeleteGroup}
-                            onReorderActivities={handleReorderActivities}
-                            position={menuPosition}
-                        />
-                    )}
-                </View>
+                <Pressable
+                    ref={menuButtonRef}
+                    style={styles.groupActionButton}
+                    onPress={handleMenuPress}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${group.name} group options`}
+                >
+                    <MaterialIcons name="more-vert" color={colors.text} size={20} />
+                </Pressable>
             </View>
-            
+
+            {/* Anchored popover: a tap anywhere outside the card dismisses it. */}
+            <OverlayPopover
+                visible={menuOpen}
+                onClose={onCloseMenu}
+                anchor={anchor}
+                width={200}
+            >
+                <GroupActionMenu
+                    onAddActivity={() => {
+                        onCloseMenu();
+                        onAddActivity();
+                    }}
+                    onReorderActivities={() => {
+                        onCloseMenu();
+                        handleReorderActivities();
+                    }}
+                    onDeleteGroup={() => {
+                        onCloseMenu();
+                        onDeleteGroup();
+                    }}
+                />
+            </OverlayPopover>
+
             {isReordering ? (
-                <ActivityReorder 
+                <ActivityReorder
                     activities={activities}
                     onReorder={handleReorderComplete}
                     onClose={() => setIsReordering(false)}
@@ -541,63 +549,30 @@ const ActivityGroupSection = ({
     );
 };
 
-// Update the GroupActionMenu component
-const GroupActionMenu = ({ 
-    visible, 
-    onClose, 
-    onAddActivity, 
-    onDeleteGroup, 
+// GroupActionMenu — the card body of the anchored popover. The popover owns
+// positioning + dismiss-on-outside-tap; each handler here is pre-wired by the
+// caller to close the menu before running the action.
+const GroupActionMenu = ({
+    onAddActivity,
+    onDeleteGroup,
     onReorderActivities,
-    position 
 }: GroupActionMenuProps) => {
     const colors = useThemeColors();
     const styles = useStyles(colors);
 
-    if (!visible) return null;
-
     return (
-        <View 
-            style={[
-                styles.menuContainer, 
-                { 
-                    position: 'absolute',
-                    top: 40,
-                    right: 0,
-                    zIndex: 2,
-                    width: 200,
-                    elevation: 5, // Android elevation
-                }
-            ]}
-        >
-            <Pressable 
-                style={styles.menuItem} 
-                onPress={() => {
-                    onClose();
-                    onAddActivity();
-                }}
-            >
+        <View style={styles.menuContainer}>
+            <Pressable style={styles.menuItem} onPress={onAddActivity}>
                 <MaterialIcons name="add" size={18} color={colors.text} />
                 <Text style={styles.menuItemText}>Add Activity</Text>
             </Pressable>
-            
-            <Pressable 
-                style={styles.menuItem} 
-                onPress={() => {
-                    onClose();
-                    onReorderActivities();
-                }}
-            >
+
+            <Pressable style={styles.menuItem} onPress={onReorderActivities}>
                 <MaterialIcons name="reorder" size={18} color={colors.text} />
                 <Text style={styles.menuItemText}>Reorder Activities</Text>
             </Pressable>
-            
-            <Pressable 
-                style={styles.menuItem} 
-                onPress={() => {
-                    onClose();
-                    onDeleteGroup();
-                }}
-            >
+
+            <Pressable style={styles.menuItem} onPress={onDeleteGroup}>
                 <MaterialIcons name="delete" size={18} color="#ff6b6b" />
                 <Text style={[styles.menuItemText, styles.menuItemDanger]}>Delete Group</Text>
             </Pressable>
@@ -622,6 +597,11 @@ export function ActivitySelector({ onSelectActivity, selectedActivities }: Activ
     const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
     const [newActivityName, setNewActivityName] = useState("");
     const [newGroupName, setNewGroupName] = useState("");
+    // Which group's "..." menu is open (only one at a time — opening another
+    // group's menu replaces it). null = none open.
+    const [openMenuGroupId, setOpenMenuGroupId] = useState<number | null>(null);
+
+    const closeMenu = useCallback(() => setOpenMenuGroupId(null), []);
 
     const loadActivities = async () => {
         try {
@@ -793,6 +773,9 @@ export function ActivitySelector({ onSelectActivity, selectedActivities }: Activ
                         onReorderActivities={(activities) => {
                             handleReorderActivities(activities);
                         }}
+                        menuOpen={openMenuGroupId === group.id}
+                        onOpenMenu={() => setOpenMenuGroupId(group.id)}
+                        onCloseMenu={closeMenu}
                     />
                 ))}
 
