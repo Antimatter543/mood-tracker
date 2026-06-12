@@ -1,17 +1,13 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, Switch, StyleSheet, TouchableOpacity, Modal, FlatList, Platform, Pressable, Dimensions } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, Switch, StyleSheet, TouchableOpacity, FlatList, Platform, Pressable, BackHandler } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useThemeColors } from '@/styles/global';
 import { SettingConfig, SETTINGS_REGISTRY } from '@/databases/settings';
 import { useSettings } from '@/context/SettingsContext';
+import { useOverlay } from '@/context/OverlayHost';
 import { Ionicons } from '@expo/vector-icons';
 import { requestNotificationPermission, parseReminderTime, formatReminderTime } from '@/lib/notifications';
-
-// Transparent <Modal> roots collapse to zero height on RN 0.76 Android new arch
-// (Fabric) when sized with `flex: 1`. Size the overlay to the window explicitly.
-// See components/forms/EntryForm.tsx for the full note (expo/expo#34470).
-const WINDOW = Dimensions.get('window');
 
 type SettingRowProps = {
   config: SettingConfig;
@@ -19,9 +15,148 @@ type SettingRowProps = {
   onValueChange: (value: any) => void;
 };
 
+// Styles for the select-option overlay (backdrop + centered card). Kept separate
+// from the row styles since the overlay is rendered by SelectOverlay, not the row.
+const useSelectOverlayStyles = () => {
+  const colors = useThemeColors();
+  return useMemo(() => StyleSheet.create({
+    modalContainer: {
+      // Full-window via StyleSheet.absoluteFill at the call site (in-tree overlay,
+      // not a native <Modal>). Centers the option card over a dimmed backdrop.
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    },
+    modalContent: {
+      width: '80%',
+      backgroundColor: colors.cardBackground,
+      borderRadius: 12,
+      padding: 16,
+      maxHeight: '70%',
+    },
+    modalTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: colors.text,
+      marginBottom: 16,
+      textAlign: 'center',
+    },
+    optionItem: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    optionText: {
+      fontSize: 16,
+      color: colors.text,
+    },
+    selectedOption: {
+      backgroundColor: colors.overlays.tag,
+    },
+    closeButton: {
+      marginTop: 16,
+      alignItems: 'center',
+      paddingVertical: 10,
+      backgroundColor: colors.accent,
+      borderRadius: 8,
+    },
+    closeButtonText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+  }), [colors]);
+};
+
+/**
+ * Full-window option-picker overlay for a `select` setting. Rendered THROUGH the
+ * root OverlayProvider (not a native <Modal>) so the option list receives touches
+ * — a native <Modal>'s second window has dead touch dispatch on RN 0.76 new arch.
+ * Tap the backdrop or hardware-back to dismiss. See context/OverlayHost.tsx.
+ */
+function SelectOverlay({
+  config,
+  value,
+  onSelect,
+  onClose,
+}: {
+  config: SettingConfig;
+  value: any;
+  onSelect: (value: string) => void;
+  onClose: () => void;
+}) {
+  const styles = useSelectOverlayStyles();
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [onClose]);
+
+  return (
+    <Animated.View entering={FadeIn.duration(150)} style={StyleSheet.absoluteFill}>
+      {/* Backdrop closes on tap; the card is its own Pressable so it becomes the
+          touch responder and the backdrop's onPress doesn't fire for card taps. */}
+      <Pressable style={styles.modalContainer} onPress={onClose}>
+        <Pressable style={styles.modalContent} onPress={() => {}}>
+          <Text style={styles.modalTitle}>{config.label}</Text>
+
+          <FlatList
+            data={config.options || []}
+            keyExtractor={(item) => item.value}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={[
+                  styles.optionItem,
+                  item.value === value && styles.selectedOption,
+                ]}
+                onPress={() => onSelect(item.value)}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  {config.key === 'theme' && (
+                    <ThemeColorPreview themeName={item.value} />
+                  )}
+                  <Text style={styles.optionText}>{item.label}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+          />
+
+          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+            <Text style={styles.closeButtonText}>Close</Text>
+          </TouchableOpacity>
+        </Pressable>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 function SettingRow({ config, value, onValueChange }: SettingRowProps) {
   const colors = useThemeColors();
+  const { mount } = useOverlay();
   const [modalVisible, setModalVisible] = useState(false);
+
+  // Mount the select overlay while open; unmount on close/unmount.
+  useEffect(() => {
+    if (!modalVisible) return;
+
+    const handle = mount(
+      <SelectOverlay
+        config={config}
+        value={value}
+        onSelect={(v) => {
+          onValueChange(v);
+          setModalVisible(false);
+        }}
+        onClose={() => setModalVisible(false)}
+      />
+    );
+    return () => handle.unmount();
+  }, [modalVisible, mount, config, value, onValueChange]);
   
   const styles = useMemo(() => StyleSheet.create({
     row: {
@@ -69,52 +204,6 @@ function SettingRow({ config, value, onValueChange }: SettingRowProps) {
       fontSize: 14,
       marginRight: 6,
     },
-    modalContainer: {
-      width: WINDOW.width,
-      height: WINDOW.height,
-      justifyContent: 'center',
-      alignItems: 'center',
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    },
-    modalContent: {
-      width: '80%',
-      backgroundColor: colors.cardBackground,
-      borderRadius: 12,
-      padding: 16,
-      maxHeight: '70%',
-    },
-    modalTitle: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      color: colors.text,
-      marginBottom: 16,
-      textAlign: 'center',
-    },
-    optionItem: {
-      paddingVertical: 12,
-      paddingHorizontal: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
-    },
-    optionText: {
-      fontSize: 16,
-      color: colors.text,
-    },
-    selectedOption: {
-      backgroundColor: colors.overlays.tag,
-    },
-    closeButton: {
-      marginTop: 16,
-      alignItems: 'center',
-      paddingVertical: 10,
-      backgroundColor: colors.accent,
-      borderRadius: 8,
-    },
-    closeButtonText: {
-      color: '#fff',
-      fontSize: 16,
-      fontWeight: '600',
-    },
   }), [colors]);
 
   const handleChange = (newValue: any) => {
@@ -158,63 +247,13 @@ function SettingRow({ config, value, onValueChange }: SettingRowProps) {
       )}
       
       {config.type === 'select' && (
-        <>
-          <TouchableOpacity 
-            style={styles.selectButton}
-            onPress={() => setModalVisible(true)}
-          >
-            <Text style={styles.selectText}>{getSelectedOptionLabel()}</Text>
-            <Ionicons name="chevron-down" size={16} color={colors.text} />
-          </TouchableOpacity>
-          
-          <Modal
-            animationType="fade"
-            transparent={true}
-            visible={modalVisible}
-            onRequestClose={() => setModalVisible(false)}
-          >
-            {/* Modal renders outside the app-root GestureHandlerRootView; wrap
-                its content so the option list receives touches. See tasks/lessons.md. */}
-            <GestureHandlerRootView style={{ flex: 1 }}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalContent}>
-                <Text style={styles.modalTitle}>{config.label}</Text>
-
-                <FlatList
-                  data={config.options || []}
-                  keyExtractor={(item) => item.value}
-                  renderItem={({ item }) => (
-                    <TouchableOpacity
-                      style={[
-                        styles.optionItem,
-                        item.value === value && styles.selectedOption
-                      ]}
-                      onPress={() => {
-                        onValueChange(item.value);
-                        setModalVisible(false);
-                      }}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        {config.key === 'theme' && (
-                          <ThemeColorPreview themeName={item.value} />
-                        )}
-                        <Text style={styles.optionText}>{item.label}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  )}
-                />
-                
-                <TouchableOpacity
-                  style={styles.closeButton}
-                  onPress={() => setModalVisible(false)}
-                >
-                  <Text style={styles.closeButtonText}>Close</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-            </GestureHandlerRootView>
-          </Modal>
-        </>
+        <TouchableOpacity
+          style={styles.selectButton}
+          onPress={() => setModalVisible(true)}
+        >
+          <Text style={styles.selectText}>{getSelectedOptionLabel()}</Text>
+          <Ionicons name="chevron-down" size={16} color={colors.text} />
+        </TouchableOpacity>
       )}
     </View>
   );

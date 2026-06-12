@@ -134,6 +134,11 @@ export default function MoodSelector({
             <ScrollView
                 ref={scrollViewRef}
                 horizontal
+                // Belt-and-braces for Android: this horizontal scroller is nested
+                // inside the entry form's vertical ScrollView, so enable nested
+                // scrolling so the inner horizontal pan isn't swallowed by the
+                // outer vertical one.
+                nestedScrollEnabled
                 showsHorizontalScrollIndicator={false}
                 onScroll={handleScroll}
                 scrollEventThrottle={16}
