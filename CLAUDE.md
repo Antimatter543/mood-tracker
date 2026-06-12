@@ -77,11 +77,19 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
 ## On-device QA (the only reliable way to verify UI on this app)
 - Pixel 3 at `192.168.1.68:5555`, app `com.raeduslabs.soulsync`, **device PIN `1337`**
   (unlock: `adb shell input keyevent KEYCODE_WAKEUP && adb shell input swipe 540 1600 540 300 && adb shell input text 1337 && adb shell input keyevent 66`).
-- **How to get a build on the device:** EAS only (`scripts/release.sh` or `eas build`), then `adb install`.
-  Do NOT local-build to iterate (see Build section). The project now MATCHES the device's Expo Go (both
-  SDK 56), but the dev-client (`expo-dev-client`) remains the canonical iteration path here — overlays /
-  native modules / the R8 release shape are only faithfully exercised on a dev-client or EAS build.
-  For JS-only changes, `eas update` to an existing dev client avoids a native rebuild.
+- **Iteration loop = Expo Go (Anti-directed, 2026-06-12).** Expo Go 56.0.1 is installed on the Pixel and
+  version-matches the project (SDK 56+). This app is vanilla CNG with NO custom native modules, so Go runs
+  it faithfully (new-arch/Fabric, gesture-handler/reanimated/sortables/sqlite all bundled or pure-JS;
+  `react-native-haptic-feedback` is absent in Go but fully guarded — degrades to no-haptics).
+  Loop: `cd frontend && npx expo start` (Metro is a JS bundler — light, NOT a native build, doesn't violate
+  the no-local-builds rule) → `npx expo start --android` auto-opens Go on the adb-connected Pixel, or
+  deep-link: `adb shell am start -a android.intent.action.VIEW -d "exp://<laptop-LAN-ip>:8081"`.
+  Go keeps its OWN sandboxed SQLite DB (separate from the installed release app's data — QA data stays clean).
+  Dismiss the dev menu on first launch if it overlays.
+- **Ship gate = CI release APK** (`gh workflow run release-apk.yml --ref <branch>`), then `adb install`.
+  R8/proguard/release shape + the signed artifact are only exercised there — every batch gets ONE release-APK
+  QA pass before merge, even when Go iteration looked perfect. (There is no dev-client build and no
+  `eas update` wiring for this app; EAS itself is quota-bound — the CI lane is the build path.)
 - **NO native `<Modal>` in this app (since v1.2.3) — use in-tree overlays.** Native `<Modal>` on RN 0.76
   Fabric routes into a second native window whose touch dispatch is broken (every in-modal control dead to a
   REAL finger, not just to automation). All modal-like UI now renders through `context/OverlayHost.tsx`
