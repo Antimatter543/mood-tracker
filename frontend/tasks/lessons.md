@@ -20,6 +20,42 @@
 > Release: https://github.com/Antimatter543/mood-tracker/releases/tag/v2.0.0. Endgame detail +
 > the per-check QA table: `frontend/docs/sdk56-endgame-notes.md`.
 
+## 2026-06-13: Data refresh must be FOCUS-aware, not just a refreshCount counter (frozen blurred tabs)
+**Mistake**: Every data-reading screen reloaded via `useEffect(() => load(), [db, refreshCount])`.
+Adding an entry bumped `refreshCount` but the timeline/stats stayed STALE until a full app reopen.
+Root cause: expo-router v6 bottom-tabs (SDK-56 forked react-navigation) FREEZE blurred tabs —
+`BottomTabView.js:202` wraps each inactive tab in `<MaybeScreen shouldFreeze={activityState===STATE_INACTIVE && !isPreloaded}>` → react-native-screens `<Screen>` → react-freeze `<Freeze>`. A frozen
+subtree is SUSPENDED, so React never runs its effects. A `refreshCount` bump while a screen is blurred
+is invisible to that screen's reload effect.
+**Rule**: Read data through `hooks/useDataRefresh(load, extraDeps)` (wraps expo-router's `useFocusEffect`).
+It reloads on every FOCUS gain (navigating to a tab always refetches — no reopen) AND re-runs while
+focused when `refreshCount`/extraDeps change (live in-focus updates). Verified against
+`expo-router/build/useFocusEffect.js`: it resolves the NEAREST route's focus, so chart cards nested in a
+tab screen correctly refetch on that tab's focus; it forwards a returned cleanup on blur/unmount and
+swallows async Promises (the hook matches that contract). KEEP `refreshCount`/`refetchEntries` — writers
+bump it, the hook consumes it. Put `db` + any timeframe/prop in `extraDeps`. NEVER add a new
+`useEffect([db, refreshCount])` data-load — use the hook. Tests: `__tests__/useDataRefresh.test.tsx`.
+**Corollary (DBViewer)**: a modal/edit form whose mount sits BELOW an `if (isLoading) return` /
+`if (empty) return` gets UNMOUNTED when a focus refetch flips `isLoading` — destroying the user's draft.
+Render such overlays UNCONDITIONALLY (loading/empty/list chosen inline, form always mounted), and show the
+full-screen spinner only on the INITIAL load (keep the stale list visible on refetch — no spinner flash).
+Guard: `__tests__/dbViewerEntryFormMount.test.tsx`.
+**Date**: 2026-06-13
+
+## 2026-06-13: Icon catalog + seed icons need a glyphmap-validation test (invalid names render "?")
+**Mistake**: `IconPicker.tsx` `ICON_CATEGORIES` carried names that don't exist in their family's glyphmap
+(`refresh`/Feather, `brain-freeze` + `guitar`/MaterialCommunityIcons) → console warns + fallback "?"
+glyph. Separately, line-8 imported `FontAwesome6` from `@expo/vector-icons/MaterialCommunityIcons`, so the
+seeded "Okay Sleep" activity (`icon_family:'FontAwesome6', icon_name:'bed'`, persisted by
+`databases/migrations.ts` `updateV1ActivitiesToV2`) rendered a fallback glyph.
+**Rule**: Every catalog/seed icon name MUST exist in its family's glyphmap at
+`node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/glyphmaps/<Family>.json` (FA6 uses
+`FontAwesome6Free.json`; the FA6 import must be the REAL `@expo/vector-icons/FontAwesome6`, NOT MCI — a
+migrated DB can reference the FA6 family, so fix the import, don't drop the family). `__tests__/iconCatalog.test.ts`
+asserts the whole catalog + all seeds against the glyphmaps — a CLASS-LEVEL invariant test (validate every
+icon, not one) that permanently blocks invalid-icon regressions. When adding an icon, run that test.
+**Date**: 2026-06-13
+
 ## 2026-06-12: OverlayModal dialog width collapse + Expo-Go boots crash on the notifications native import
 
 Two gotchas hit while fixing the Edit-Activity device-QA batch on `qol/v2.1.0`.
