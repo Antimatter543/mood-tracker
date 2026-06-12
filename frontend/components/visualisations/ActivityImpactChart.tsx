@@ -1,7 +1,7 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useThemeColors } from '@/styles/global';
 import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
@@ -17,7 +17,6 @@ type ActivityImpact = ActivityImpactRow;
 const ActivityImpactChart = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
-    const { refreshCount } = useDataContext();
     const { timeframeCondition, timeframeDescription } = useTimeframe();
     const [impactData, setImpactData] = useState<ActivityImpact[]>([]);
     const [totalEntries, setTotalEntries] = useState(0);
@@ -149,8 +148,7 @@ const ActivityImpactChart = () => {
         },
     }), [colors, negativeColor]);
 
-    useEffect(() => {
-        const fetchActivityImpact = async () => {
+    const fetchActivityImpact = useCallback(async () => {
             try {
                 const results = await db.getAllAsync<ActivityImpact>(`
                     WITH OverallAvg AS (
@@ -180,10 +178,10 @@ const ActivityImpactChart = () => {
             } catch (error) {
                 console.error('Error fetching activity impact:', error);
             }
-        };
-
-        fetchActivityImpact();
-    }, [db, refreshCount, timeframeCondition]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframeCondition; setState identities are stable
+        }, [db, timeframeCondition]);
+    // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframeCondition])).
+    useDataRefresh(fetchActivityImpact, [db, timeframeCondition]);
 
     // Delegate display ordering + scaling to the transform.
     // The transform also filters NaN/null impacts (which can arise when the

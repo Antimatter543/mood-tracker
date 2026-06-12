@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useCallback, useState, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Svg, Rect, Text as SvgText } from 'react-native-svg';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
 import { buildHeatmapGrid, type HeatmapInput } from './transforms/heatmap';
@@ -17,7 +17,6 @@ interface DayData {
 const CustomHeatmap: React.FC = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
-    const { refreshCount } = useDataContext();
     const [moodData, setMoodData] = useState<DayData[]>([]);
     const scrollViewRef = useRef<ScrollView>(null);
 
@@ -78,8 +77,7 @@ const CustomHeatmap: React.FC = () => {
         return mood > 6 ? colors.text : colors.overlays.textSecondary;
     };
 
-    useEffect(() => {
-        const fetchData = async () => {
+    const fetchData = useCallback(async () => {
             try {
                 // End date is the user's LOCAL today (YYYY-MM-DD), computed in
                 // JS and passed as a param — NOT SQLite's UTC date('now'), which
@@ -140,10 +138,10 @@ const CustomHeatmap: React.FC = () => {
             } catch (error) {
                 console.error('Error fetching mood data:', error);
             }
-        };
-
-        fetchData();
-    }, [db, refreshCount]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
+        }, [db]);
+    // Focus-aware refetch (replaces useEffect([db, refreshCount])).
+    useDataRefresh(fetchData, [db]);
 
     const renderDayLabels = () => {
         // Day labels: Monday to Sunday in correct order

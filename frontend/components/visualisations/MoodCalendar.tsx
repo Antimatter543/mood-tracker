@@ -1,8 +1,8 @@
 import { Card } from '@/components/Card';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useThemeColors } from '@/styles/global';
 import { useSQLiteContext } from 'expo-sqlite';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Text } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import {
@@ -20,12 +20,10 @@ import {
 const MoodCalendar = () => {
   const db = useSQLiteContext();
   const colors = useThemeColors();
-  const { refreshCount } = useDataContext();
   const [moodMarkers, setMoodMarkers] = useState<MoodMarking>({});
   const [isLoading, setIsLoading] = useState(true);
 
-  useEffect(() => {
-    const loadMonthData = async () => {
+  const loadMonthData = useCallback(async () => {
       try {
         setIsLoading(true);
         // Use LOCAL-time boundaries so an entry made late on the last day of
@@ -52,10 +50,10 @@ const MoodCalendar = () => {
         console.error('Error loading mood calendar data:', error);
         setIsLoading(false);
       }
-    };
-
-    loadMonthData();
-  }, [db, refreshCount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
+    }, [db]);
+  // Focus-aware refetch (replaces useEffect([db, refreshCount])).
+  useDataRefresh(loadMonthData, [db]);
 
   if (!Calendar) {
     return (

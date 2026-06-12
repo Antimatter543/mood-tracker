@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -14,6 +14,7 @@ import {
 import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
 import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { MoodEntry, Activity, EntryPhoto } from './types';
 
 
@@ -451,11 +452,19 @@ export function DatabaseViewer() {
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
     const db = useSQLiteContext();
-    const { refetchEntries, refreshCount } = useDataContext();
+    // refetchEntries bumps the global data version after writes here; the
+    // focus-aware useDataRefresh below consumes that bump (no direct refreshCount
+    // read needed — the hook reads it internally).
+    const { refetchEntries } = useDataContext();
 
     // State
     const [sections, setSections] = useState<Section[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    // True once the first load has resolved. Gates the full-screen spinner to
+    // the initial load only, so on-focus refetches don't flash a spinner over
+    // the already-rendered list. A ref (not state) — it's read inside the
+    // loader and must not trigger a re-render when it flips.
+    const hasLoadedOnce = useRef(false);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
     const [page, setPage] = useState(0);
@@ -613,23 +622,28 @@ export function DatabaseViewer() {
         }
     };
 
-    // Effects
-    useEffect(() => {
-        const loadInitialData = async () => {
-            setIsLoading(true);
-            try {
-                const initialEntries = await fetchEntriesPage(0);
-                setSections(groupEntriesByDate(initialEntries));
-                setPage(0);
-                setHasMore(initialEntries.length === ITEMS_PER_PAGE);
-            } catch (error) {
-                console.error('Error loading initial data:', error);
-            }
-            setIsLoading(false);
-        };
-
-        loadInitialData();
-    }, [db, refreshCount]);
+    // Focus-aware reload (replaces useEffect([db, refreshCount])). Runs whenever
+    // the Timeline tab regains focus — so an entry added on another tab shows
+    // immediately, no app reopen — and re-runs while focused when refreshCount
+    // bumps (a write here). The full-screen spinner shows ONLY on the very first
+    // load; a refetch over an already-populated list keeps the stale list
+    // visible (no spinner flash) and swaps it for fresh data when the query
+    // resolves. `hasLoadedOnce` is a ref so toggling it never itself re-renders.
+    const loadInitialData = useCallback(async () => {
+        if (!hasLoadedOnce.current) setIsLoading(true);
+        try {
+            const initialEntries = await fetchEntriesPage(0);
+            setSections(groupEntriesByDate(initialEntries));
+            setPage(0);
+            setHasMore(initialEntries.length === ITEMS_PER_PAGE);
+        } catch (error) {
+            console.error('Error loading initial data:', error);
+        }
+        hasLoadedOnce.current = true;
+        setIsLoading(false);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchEntriesPage closes over `db`; setState identities are stable
+    }, [db]);
+    useDataRefresh(loadInitialData, [db]);
 
     const loadMoreData = async () => {
         if (isLoadingMore || !hasMore) return;
@@ -675,39 +689,41 @@ export function DatabaseViewer() {
         </Card>
     );
 
-    if (isLoading) {
-        return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={colors.accent} />
-            </View>
-        );
-    }
-
-
-    if (sections.length === 0) {
-        return <EmptyState />;
-    }
-
+    // EntryFormModal is rendered UNCONDITIONALLY below — never behind an early
+    // return. A focus refetch can flip `isLoading`, and if the edit form lived
+    // past an early return it would unmount mid-edit and destroy the user's
+    // draft. So the loading/empty/list states are chosen inline while the form
+    // stays mounted across all of them. The full-screen spinner shows only on
+    // the INITIAL load (isLoading && no sections yet) — a refetch over an
+    // existing list keeps the stale list visible until fresh data arrives.
     return (
         <>
-            <SectionList
-                sections={sections}
-                renderItem={renderItem}
-                renderSectionHeader={renderSectionHeader}
-                keyExtractor={item => item.id.toString()}
-                onEndReached={loadMoreData}
-                onEndReachedThreshold={0.5}
-                stickySectionHeadersEnabled={true}
-                maintainVisibleContentPosition={{
-                    minIndexForVisible: 0,
-                }}
-                ListFooterComponent={isLoadingMore ? (
-                    <View style={styles.loadingFooter}>
-                        <ActivityIndicator size="small" color={colors.accent} />
-                    </View>
-                ) : null}
-                contentContainerStyle={styles.container}
-            />
+            {isLoading && sections.length === 0 ? (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={colors.accent} />
+                </View>
+            ) : sections.length === 0 ? (
+                <EmptyState />
+            ) : (
+                <SectionList
+                    sections={sections}
+                    renderItem={renderItem}
+                    renderSectionHeader={renderSectionHeader}
+                    keyExtractor={item => item.id.toString()}
+                    onEndReached={loadMoreData}
+                    onEndReachedThreshold={0.5}
+                    stickySectionHeadersEnabled={true}
+                    maintainVisibleContentPosition={{
+                        minIndexForVisible: 0,
+                    }}
+                    ListFooterComponent={isLoadingMore ? (
+                        <View style={styles.loadingFooter}>
+                            <ActivityIndicator size="small" color={colors.accent} />
+                        </View>
+                    ) : null}
+                    contentContainerStyle={styles.container}
+                />
+            )}
             <EntryFormModal
                 visible={editModalVisible}
                 onClose={() => setEditModalVisible(false)}

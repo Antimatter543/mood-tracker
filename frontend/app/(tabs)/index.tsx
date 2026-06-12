@@ -4,11 +4,11 @@ import { useThemeColors } from '@/styles/global';
 import { Layout } from '../../components/PageContainer';
 import { Card } from '@/components/Card';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useEffect, useState, memo, useMemo } from 'react';
+import { useCallback, useState, memo, useMemo } from 'react';
 import { LineChart } from 'react-native-chart-kit';
 import { WEEKLY_MOOD_AVERAGES, RECENT_ENTRY_DATES, TOTAL_ENTRIES } from '@/components/visualisations/queries';
 import { CHART_PADDING, interpolateData, isWeekEmpty, SCREEN_WIDTH, useChartConfig } from '@/components/visualisations/chartUtils';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { startOfLocalDay, endOfLocalDay, localDateString } from '@/databases/dateHelpers';
 import { currentStreak } from '@/components/visualisations/transforms/streak';
 
@@ -418,7 +418,6 @@ export default function Home() {
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
     const db = useSQLiteContext();
-    const { refreshCount } = useDataContext();
     const [todaysMood, setTodaysMood] = useState<number | null>(null);
     const [monthlyStats, setMonthlyStats] = useState({
         average: 0,
@@ -431,8 +430,7 @@ export default function Home() {
     // All-time entry count — drives the brand-new-user first-entry nudge.
     const [totalEntries, setTotalEntries] = useState<number>(0);
 
-    useEffect(() => {
-        const fetchData = async () => {
+    const fetchData = useCallback(async () => {
             try {
                 // All windows are computed in the user's local timezone and
                 // passed to SQL as UTC ISO bounds. Storing entries as UTC ISO
@@ -538,10 +536,12 @@ export default function Home() {
             } catch (error) {
                 console.error('Error fetching dashboard data:', error);
             }
-        };
-
-        fetchData();
-    }, [db, refreshCount]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- queries read only db; setState identities are stable
+        }, [db]);
+    // Focus-aware refetch (replaces useEffect([db, refreshCount])): the Home
+    // dashboard always reflects the latest data when the tab regains focus
+    // (e.g. after adding an entry), and live-updates while focused.
+    useDataRefresh(fetchData, [db]);
 
     return (
         <Layout>

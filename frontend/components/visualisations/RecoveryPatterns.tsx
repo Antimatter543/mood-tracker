@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Card } from '@/components/Card';
 import { useThemeColors } from '@/styles/global';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import InfoBubble from '../InfoBubble';
 import {
   analyseRecoveryPatterns,
@@ -19,7 +19,6 @@ import {
 const RecoveryAnalysis = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
-    const { refreshCount } = useDataContext();
     const [currentEpisode, setCurrentEpisode] = useState<RecoveryEpisode | null>(null);
     const [historicalEpisodes, setHistoricalEpisodes] = useState<RecoveryEpisode[]>([]);
     const [successRate, setSuccessRate] = useState<number>(0);
@@ -82,8 +81,7 @@ const RecoveryAnalysis = () => {
       },
     }), [colors]);
 
-  useEffect(() => {
-    const run = async () => {
+  const run = useCallback(async () => {
       try {
         // Last 30 days of entries with activity names. The lower bound is now a
         // parameterised LOCAL-time UTC ISO string (start of 30 days ago in the
@@ -116,10 +114,10 @@ const RecoveryAnalysis = () => {
       } catch (error) {
         console.error('Error analyzing recovery patterns:', error);
       }
-    };
-
-    run();
-  }, [db, refreshCount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
+    }, [db]);
+  // Focus-aware refetch (replaces useEffect([db, refreshCount])).
+  useDataRefresh(run, [db]);
 
   return (
     <Card>

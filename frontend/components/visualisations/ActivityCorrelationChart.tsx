@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Svg, Rect } from 'react-native-svg';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useThemeColors } from '@/styles/global';
 import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
@@ -22,7 +22,6 @@ const MIN_MEANINGFUL_ITEMS = 2;
 const ActivityCorrelationChart = () => {
   const colors = useThemeColors();
   const db = useSQLiteContext();
-  const { refreshCount } = useDataContext();
   const { timeframe } = useTimeframe();
   const [meaningful, setMeaningful] = useState<ActivityCorrelationResult[]>([]);
   const [barWidth, setBarWidth] = useState(0);
@@ -94,8 +93,7 @@ const ActivityCorrelationChart = () => {
     },
   }), [colors]);
 
-  useEffect(() => {
-    const fetchData = async () => {
+  const fetchData = useCallback(async () => {
       try {
         // Parameterised local-time window (?start, ?end) — NOT the UTC-anchored
         // timeframeCondition string the old delta-from-mean chart used.
@@ -110,10 +108,10 @@ const ActivityCorrelationChart = () => {
         console.error('Error fetching activity correlation:', error);
         setMeaningful([]);
       }
-    };
-
-    fetchData();
-  }, [db, refreshCount, timeframe]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframe; setState identities are stable
+    }, [db, timeframe]);
+  // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe])).
+  useDataRefresh(fetchData, [db, timeframe]);
 
   if (meaningful.length < MIN_MEANINGFUL_ITEMS) {
     return (

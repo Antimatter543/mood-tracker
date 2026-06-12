@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { Text, StyleSheet } from "react-native";
 import { LineChart } from "react-native-chart-kit";
 import { useThemeColors } from "@/styles/global";
 import { useSQLiteContext } from "expo-sqlite";
 import { CHART_PADDING, SCREEN_WIDTH, useChartConfig } from "./chartUtils";
-import { useDataContext } from "@/context/DataContext";
+import { useDataRefresh } from "@/hooks/useDataRefresh";
 import InfoBubble from "../InfoBubble";
 import { Card } from "../Card";
 import { useTimeframe } from "@/context/TimeframeContext";
@@ -62,7 +62,6 @@ export function BasicLineChart() {
     const chartWidth = SCREEN_WIDTH - (CHART_PADDING + 32);
 
     const db = useSQLiteContext();
-    const { refreshCount } = useDataContext();
     const { timeframe, timeframeDescription } = useTimeframe();
 
     const [chartData, setChartData] = useState<{
@@ -120,8 +119,7 @@ export function BasicLineChart() {
         }
     }), [colors]);
 
-    useEffect(() => {
-        const fetchData = async () => {
+    const fetchData = useCallback(async () => {
             setLoading(true);
             try {
                 const { start, end } = computeWindow(timeframe as Timeframe);
@@ -155,10 +153,10 @@ export function BasicLineChart() {
                 setChartData(null);
             }
             setLoading(false);
-        };
-
-        fetchData();
-    }, [db, refreshCount, timeframe, formatDateLabel]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframe; formatDateLabel is stable; setState identities are stable
+        }, [db, timeframe, formatDateLabel]);
+    // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe, formatDateLabel])).
+    useDataRefresh(fetchData, [db, timeframe, formatDateLabel]);
 
     // Get timeframe description for the chart
     const getTimerangeDescription = () => {

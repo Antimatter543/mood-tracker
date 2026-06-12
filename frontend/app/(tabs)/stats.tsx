@@ -1,9 +1,9 @@
-import React, { useMemo, useState, useCallback, useEffect } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Layout } from '@/components/PageContainer';
 import { EmptyState } from '@/components/EmptyState';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { TOTAL_ENTRIES } from '@/components/visualisations/queries';
 import SectionHeader from '@/components/SectionHeader';
 import StatSummaryCard from '@/components/visualisations/StatSummaryCard';
@@ -24,12 +24,15 @@ const StatisticsContent = () => {
   const { timeframe, setTimeframe, timeframeDescription } = useTimeframe();
   const colors = useThemeColors();
   const db = useSQLiteContext();
-  const { refreshCount } = useDataContext();
   // Whole-DB empty check. `null` = still loading (render nothing to avoid a
   // flash of empty charts before the count returns).
   const [hasEntries, setHasEntries] = useState<boolean | null>(null);
 
-  useEffect(() => {
+  // Focus-aware refetch: runs on every focus gain (so returning to this tab
+  // always reflects entries added on other tabs — no app reopen) AND re-runs
+  // while focused when refreshCount changes. The cleanup flips `active=false`
+  // on blur/unmount so a late query never sets state on a backgrounded screen.
+  const loadHasEntries = useCallback(() => {
     let active = true;
     db.getFirstAsync<{ count: number }>(TOTAL_ENTRIES)
       .then((row) => {
@@ -43,7 +46,8 @@ const StatisticsContent = () => {
     return () => {
       active = false;
     };
-  }, [db, refreshCount]);
+  }, [db]);
+  useDataRefresh(loadHasEntries, [db]);
   // Measure the sticky header instead of hardcoding paddingTop: 120 — the
   // header height varies with font scaling / description length.
   const [headerHeight, setHeaderHeight] = useState(DEFAULT_HEADER_HEIGHT);

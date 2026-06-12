@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { BarChart } from 'react-native-chart-kit';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { Card } from '@/components/Card';
 import { CHART_PADDING, SCREEN_WIDTH, useChartConfig } from './chartUtils';
 import InfoBubble from '../InfoBubble';
@@ -22,7 +22,6 @@ const DailyMoodChart = () => {
   const colors = useThemeColors();
   const chartConfig = useChartConfig();
   const db = useSQLiteContext();
-  const { refreshCount } = useDataContext();
   const { timeframe } = useTimeframe();
   const [pattern, setPattern] = useState<DowPatternData | null>(null);
 
@@ -92,8 +91,7 @@ const DailyMoodChart = () => {
     },
   }), [colors]);
 
-  useEffect(() => {
-    const fetchData = async () => {
+  const fetchData = useCallback(async () => {
       try {
         // Timeframe-scoped, parameterised local-time window (?start, ?end) —
         // replaces the previous all-time GROUP BY strftime query, which was the
@@ -106,10 +104,10 @@ const DailyMoodChart = () => {
         console.error('Error fetching daily mood data:', error);
         setPattern(null);
       }
-    };
-
-    fetchData();
-  }, [db, refreshCount, timeframe]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframe; setState identities are stable
+    }, [db, timeframe]);
+  // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe])).
+  useDataRefresh(fetchData, [db, timeframe]);
 
   if (!pattern) {
     return (
