@@ -66,6 +66,10 @@ cd frontend
 npm run check        # tsc --noEmit + lint + jest  (the pre-ship gate, light on CPU)
 npx jest             # tests (pure transforms, hooks, db layer all unit-tested)
 ```
+**Tests are systematic (Anti, 2026-06-13): every feature/fix ships WITH matching jest tests** — bugfix =>
+regression test, new behavior => new tests, prefer class-level invariant tests (e.g. validate the whole icon
+catalog, not one icon). The suite only grows. **Device/manual QA is BATCHED**: one consolidated Expo Go walk +
+one release-APK pass per multi-feature batch, never per individual fix (manual testing takes ages).
 **NEVER run a LOCAL native build** (`npx expo run:android`, `gradlew`, prebuild compiles). They peg the
 CPU to 100%+ and lag Anti's interactive machine (he is ON this box). **Builds go to EAS cloud only** ->
 `scripts/release.sh` (or `eas build`). This app also can't be relied on to build locally anyway.
