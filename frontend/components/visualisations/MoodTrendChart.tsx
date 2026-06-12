@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { Text, StyleSheet, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import { useThemeColors } from '@/styles/global';
 import { useSQLiteContext } from 'expo-sqlite';
 import { CHART_PADDING, SCREEN_WIDTH, useChartConfig, parseHexColor } from './chartUtils';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import InfoBubble from '../InfoBubble';
 import { Card } from '../Card';
 import { useTimeframe } from '@/context/TimeframeContext';
@@ -90,7 +90,6 @@ const MoodTrendChart = () => {
   const chartConfig = useChartConfig();
   const chartWidth = SCREEN_WIDTH - (CHART_PADDING + 32);
   const db = useSQLiteContext();
-  const { refreshCount } = useDataContext();
   const { timeframe } = useTimeframe();
 
   const [series, setSeries] = useState<{
@@ -157,8 +156,7 @@ const MoodTrendChart = () => {
     },
   }), [colors]);
 
-  useEffect(() => {
-    const fetchData = async () => {
+  const fetchData = useCallback(async () => {
       setLoading(true);
       try {
         const { start, end } = computeWindow(tf);
@@ -211,10 +209,10 @@ const MoodTrendChart = () => {
         setSeries(null);
       }
       setLoading(false);
-    };
-
-    fetchData();
-  }, [db, refreshCount, tf, formatDateLabel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + tf; formatDateLabel is stable; setState identities are stable
+    }, [db, tf, formatDateLabel]);
+  // Focus-aware refetch (replaces useEffect([db, refreshCount, tf, formatDateLabel])).
+  useDataRefresh(fetchData, [db, tf, formatDateLabel]);
 
   if (loading) {
     return (

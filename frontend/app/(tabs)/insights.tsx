@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Layout } from '@/components/PageContainer';
 import { Card } from '@/components/Card';
 import { ThemeColors, useThemeColors } from '@/styles/global';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { EmptyState } from '@/components/EmptyState';
 import {
     startOfLocalDay,
@@ -61,11 +61,9 @@ export default function InsightsScreen() {
     const colors = useThemeColors();
     const styles = useStyles(colors);
     const db = useSQLiteContext();
-    const { refreshCount } = useDataContext();
     const [data, setData] = useState<Insights | null>(null);
 
-    useEffect(() => {
-        const load = async () => {
+    const load = useCallback(async () => {
             try {
                 // All-time window: from the epoch up to the end of today (local).
                 const start = startOfLocalDay(new Date(0));
@@ -112,9 +110,11 @@ export default function InsightsScreen() {
                 console.error('Error building insights:', e);
                 setData(EMPTY);
             }
-        };
-        load();
-    }, [db, refreshCount]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
+        }, [db]);
+    // Focus-aware refetch (replaces useEffect([db, refreshCount])): always
+    // reloads when this tab regains focus AND live-updates while focused.
+    useDataRefresh(load, [db]);
 
     if (data && data.totalEntries === 0) {
         return (

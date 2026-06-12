@@ -1,13 +1,14 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useCallback, useState, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Svg, Rect, Text as SvgText } from 'react-native-svg';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
 import { buildHeatmapGrid, type HeatmapInput } from './transforms/heatmap';
 import { localDateString } from './transforms/dateHelpers';
+import { moodColor } from '@/components/timeline/moodColor';
 
 interface DayData {
     date: string;
@@ -17,7 +18,6 @@ interface DayData {
 const CustomHeatmap: React.FC = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
-    const { refreshCount } = useDataContext();
     const [moodData, setMoodData] = useState<DayData[]>([]);
     const scrollViewRef = useRef<ScrollView>(null);
 
@@ -50,27 +50,11 @@ const CustomHeatmap: React.FC = () => {
     const LEFT_PADDING = 30; // For day labels
     const TOP_PADDING = 20;  // For month labels
 
-    // Calculate colors based on mood value
-    const getMoodColor = (mood: number | null) => {
-        if (mood === null) return colors.overlays.tag;
-        
-        // Convert hex to rgba
-        const hexToRgba = (hex: string, opacity: number) => {
-            // Remove the hash if it exists
-            hex = hex.replace('#', '');
-            
-            // Parse the hex values
-            const r = parseInt(hex.substring(0, 2), 16);
-            const g = parseInt(hex.substring(2, 4), 16);
-            const b = parseInt(hex.substring(4, 6), 16);
-            
-            // Return the rgba value
-            return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-        };
-        
-        const intensity = mood / 10; // Normalize to 0-1
-        return hexToRgba(colors.accent, 0.2 + (intensity * 0.8)); // Min opacity 0.2, max 1.0
-    };
+    // Mood -> color via the shared canonical scale (see components/timeline/
+    // moodColor.ts) so the heatmap and the timeline render mood identically.
+    // null mood falls back to the muted tag tint.
+    const getMoodColor = (mood: number | null) =>
+        moodColor(mood, colors.accent, colors.overlays.tag);
 
     const getTextColor = (mood: number | null) => {
         if (mood === null) return colors.textSecondary;
@@ -78,8 +62,7 @@ const CustomHeatmap: React.FC = () => {
         return mood > 6 ? colors.text : colors.overlays.textSecondary;
     };
 
-    useEffect(() => {
-        const fetchData = async () => {
+    const fetchData = useCallback(async () => {
             try {
                 // End date is the user's LOCAL today (YYYY-MM-DD), computed in
                 // JS and passed as a param — NOT SQLite's UTC date('now'), which
@@ -140,10 +123,10 @@ const CustomHeatmap: React.FC = () => {
             } catch (error) {
                 console.error('Error fetching mood data:', error);
             }
-        };
-
-        fetchData();
-    }, [db, refreshCount]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
+        }, [db]);
+    // Focus-aware refetch (replaces useEffect([db, refreshCount])).
+    useDataRefresh(fetchData, [db]);
 
     const renderDayLabels = () => {
         // Day labels: Monday to Sunday in correct order

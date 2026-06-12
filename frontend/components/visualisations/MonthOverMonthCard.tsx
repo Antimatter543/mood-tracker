@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useThemeColors } from '@/styles/global';
 import { Card } from '@/components/Card';
 import { WINDOW_SUMMARY } from './queries';
@@ -30,7 +30,6 @@ const MONTH_NAMES = [
 const MonthOverMonthCard = () => {
   const colors = useThemeColors();
   const db = useSQLiteContext();
-  const { refreshCount } = useDataContext();
   const [data, setData] = useState<MonthOverMonthData | null>(null);
   const [labels, setLabels] = useState<{ current: string; previous: string }>({
     current: '',
@@ -105,8 +104,7 @@ const MonthOverMonthCard = () => {
     },
   }), [colors]);
 
-  useEffect(() => {
-    const fetchData = async () => {
+  const fetchData = useCallback(async () => {
       try {
         const now = new Date();
         const year = now.getFullYear();
@@ -148,10 +146,10 @@ const MonthOverMonthCard = () => {
         console.error('Error fetching month-over-month data:', error);
         setData(null);
       }
-    };
-
-    fetchData();
-  }, [db, refreshCount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
+    }, [db]);
+  // Focus-aware refetch (replaces useEffect([db, refreshCount])).
+  useDataRefresh(fetchData, [db]);
 
   if (!data) {
     return (

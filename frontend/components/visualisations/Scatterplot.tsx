@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Card } from '@/components/Card';
 import { useThemeColors } from '@/styles/global';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import InfoBubble from '../InfoBubble';
 import { MoodEntry } from '../types';
 import { bucketMoodHistogram, NUM_BUCKETS } from './transforms/scatter';
@@ -15,7 +15,6 @@ const PLOT_HEIGHT = 200;
 const MoodHistogram = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
-    const { refreshCount } = useDataContext();
     const { timeframe } = useTimeframe();
     const [buckets, setBuckets] = useState(Array(NUM_BUCKETS).fill(0));
     const [maxFrequency, setMaxFrequency] = useState(0);
@@ -120,8 +119,7 @@ const MoodHistogram = () => {
         },
     }), [colors]);
 
-    useEffect(() => {
-        const fetchMoodData = async () => {
+    const fetchMoodData = useCallback(async () => {
             try {
                 // Scope to the TimeframeSelector window. Boundaries are
                 // parameterised local-time UTC ISO strings — NOT the previous
@@ -141,10 +139,10 @@ const MoodHistogram = () => {
             } catch (error) {
                 console.error('Error fetching mood data:', error);
             }
-        };
-
-        fetchMoodData();
-    }, [db, refreshCount, timeframe]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframe; setState identities are stable
+        }, [db, timeframe]);
+    // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe])).
+    useDataRefresh(fetchMoodData, [db, timeframe]);
 
     const getBarHeight = (count: number) => {
         if (maxFrequency === 0) return 0;

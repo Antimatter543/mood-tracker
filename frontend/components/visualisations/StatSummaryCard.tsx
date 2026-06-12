@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
-import { useDataContext } from '@/context/DataContext';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { Card } from '@/components/Card';
 import { useTimeframe } from '@/context/TimeframeContext';
 import { WINDOW_SUMMARY, RECENT_ENTRY_DATES } from './queries';
@@ -25,7 +25,6 @@ const FALLING_COLOR = '#e57373';
 const StatSummaryCard: React.FC = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
-    const { refreshCount } = useDataContext();
     const { timeframe } = useTimeframe();
     const [summary, setSummary] = useState<StatSummaryData | null>(null);
 
@@ -77,8 +76,7 @@ const StatSummaryCard: React.FC = () => {
         [colors]
     );
 
-    useEffect(() => {
-        const fetchSummary = async () => {
+    const fetchSummary = useCallback(async () => {
             try {
                 const tf = timeframe as Timeframe;
                 const { start, end } = computeWindow(tf);
@@ -128,10 +126,10 @@ const StatSummaryCard: React.FC = () => {
                 console.error('Error building stat summary:', error);
                 setSummary(null);
             }
-        };
-
-        fetchSummary();
-    }, [db, refreshCount, timeframe]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframe; setState identities are stable
+        }, [db, timeframe]);
+    // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe])).
+    useDataRefresh(fetchSummary, [db, timeframe]);
 
     const trend = summary?.trendArrow ?? 'stable';
     const trendIcon: React.ComponentProps<typeof Feather>['name'] =

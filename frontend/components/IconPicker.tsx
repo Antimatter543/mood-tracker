@@ -5,21 +5,26 @@ import { OverlayModal } from './OverlayModal';
 import * as Feather from '@expo/vector-icons/Feather';
 import * as MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import * as FontAwesome6 from '@expo/vector-icons/MaterialCommunityIcons';
+// FontAwesome6 must resolve to the REAL FontAwesome6 module — it was previously
+// (mis)pointed at MaterialCommunityIcons, so the seeded "Okay Sleep" activity
+// (icon_family:'FontAwesome6', icon_name:'bed', persisted by migration V2) and
+// any user-picked FA6 icon rendered a fallback glyph. `bed` is a valid FA6 name.
+import * as FontAwesome6 from '@expo/vector-icons/FontAwesome6';
 
 // Define the icon category structure
-type IconInfo = {
+export type IconInfo = {
     name: string;
     family: IconFamilyType;
 };
 
-type IconCategory = {
+export type IconCategory = {
     name: string;
     icons: IconInfo[];
 };
 
-// Organize icons by category
-const ICON_CATEGORIES: IconCategory[] = [
+// Organize icons by category. Exported so __tests__/iconCatalog.test.ts can
+// assert every entry resolves to a real glyph (permanent invalid-icon guard).
+export const ICON_CATEGORIES: IconCategory[] = [
     {
         name: "Emotions & Mental State",
         icons: [
@@ -40,7 +45,7 @@ const ICON_CATEGORIES: IconCategory[] = [
 
             // Mental state
             { name: 'brain', family: 'MaterialCommunityIcons' },
-            { name: 'brain-freeze', family: 'MaterialCommunityIcons' },
+            { name: 'head-snowflake', family: 'MaterialCommunityIcons' },
             { name: 'head-sync', family: 'MaterialCommunityIcons' },
             { name: 'thought-bubble-outline', family: 'MaterialCommunityIcons' },
             { name: 'meditation', family: 'MaterialCommunityIcons' },
@@ -48,7 +53,7 @@ const ICON_CATEGORIES: IconCategory[] = [
 
             // Energy/Motivation
             { name: 'zap', family: 'Feather' },
-            { name: 'refresh', family: 'Feather' },
+            { name: 'refresh-cw', family: 'Feather' },
             { name: 'shield', family: 'Feather' },
             { name: 'lightning-bolt', family: 'MaterialCommunityIcons' },
             { name: 'alert-circle', family: 'Feather' },
@@ -78,7 +83,7 @@ const ICON_CATEGORIES: IconCategory[] = [
             { name: 'gamepad-variant', family: 'MaterialCommunityIcons' },
             { name: 'music', family: 'Feather' },
             { name: 'music-note', family: 'MaterialCommunityIcons' },
-            { name: 'guitar', family: 'MaterialCommunityIcons' },
+            { name: 'guitar-acoustic', family: 'MaterialCommunityIcons' },
             { name: 'piano', family: 'MaterialCommunityIcons' },
             { name: 'book', family: 'Feather' },
             { name: 'book-open-outline', family: 'MaterialCommunityIcons' },

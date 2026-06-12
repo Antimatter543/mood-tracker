@@ -1,46 +1,31 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
     View,
     Text,
     StyleSheet,
-    Pressable,
     SectionList,
     ActivityIndicator,
-    Image,
-    ScrollView,
-    Dimensions,
-    FlatList,
 } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
 import { useDataContext } from '@/context/DataContext';
-import { MoodEntry, Activity, EntryPhoto } from './types';
+import { useDataRefresh } from '@/hooks/useDataRefresh';
+import { MoodEntry } from './types';
 
-
-import Feather from '@expo/vector-icons/Feather';
-
-import { Card } from './Card';
-import { OverlayModal } from './OverlayModal';
 import { EntryFormData, EntryFormModal } from './forms/EntryForm';
 import { EmptyState } from './EmptyState';
+import { EntryCard } from './timeline/EntryCard';
+import { sectionKeyForDate, formatSectionTitle } from './timeline/dateHeader';
 import { getMediaByEntryIds } from '@/databases/entry-media';
 import { MEDIA_DIR, copyToMediaDir, deleteMediaFile } from '@/databases/mediaHelpers';
 
 const ITEMS_PER_PAGE = 20;
 
-// Types
+// Types — `key` is the stable local-day bucket; `title` is its humanized label.
 type Section = {
+    key: string;
     title: string;
     data: MoodEntry[];
-};
-
-
-type EntryCardProps = {
-    entry: MoodEntry;
-    onEdit: () => void;
-    onDelete: (id: number) => void;
-    styles: any;
-    colors: any;
 };
 
 const useThemedStyles = (colors: any) => {
@@ -53,409 +38,66 @@ const useThemedStyles = (colors: any) => {
             justifyContent: 'center',
             alignItems: 'center',
         },
-        cardCustom: {
-            padding: 16,
-            marginBottom: 8,
-            borderLeftWidth: 2,
-            borderLeftColor: colors.accent,
-        },
         loadingFooter: {
             paddingVertical: 20,
             alignItems: 'center',
         },
+        // Lightweight text section header — no card bubble. A subtle hairline
+        // rule + generous top margin separate date groups; the title is small,
+        // semibold and muted. A solid background so sticky headers don't show
+        // list rows bleeding through as they scroll under.
         sectionHeader: {
-            backgroundColor: colors.accentLight,
-            paddingVertical: 8,
-            paddingHorizontal: 16,
-            marginTop: 16,
+            backgroundColor: colors.background,
+            paddingTop: 24,
+            paddingBottom: 8,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: colors.border,
             marginBottom: 8,
-            borderRadius: 8,
         },
         sectionHeaderText: {
-            color: colors.text,
-            fontSize: 16,
+            color: colors.textSecondary,
+            fontSize: 13,
             fontWeight: '600',
-        },
-        cardHeader: {
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 12,  // A bit more space below header
-            paddingHorizontal: 4,  // Small horizontal padding
-        },
-        editButton: {
-            padding: 8,
-            borderRadius: 20,
-            backgroundColor: colors.overlays.tag,
-            minHeight: 44,
-            minWidth: 44,
-            alignItems: 'center',
-            justifyContent: 'center',
-        },
-        moodValue: {
-            color: colors.text,
-            fontSize: 18,
-            fontWeight: 'bold',
-        },
-        activitiesContainer: {
-            marginTop: 8,
-            marginBottom: 8,
-            paddingHorizontal: 4,  // Consistent padding
-        },
-        sectionTitle: {
-            color: colors.text,
-            fontSize: 14,
-            marginBottom: 4,
-            opacity: 0.8,
-        },
-        activitiesList: {
-            flexDirection: 'row',
-            flexWrap: 'wrap',
-            marginTop: 4,
-            gap: 8,
-        },
-        activityTag: {
-            backgroundColor: colors.overlays.tag,
-            paddingHorizontal: 12,
-            paddingVertical: 6,
-            borderRadius: 16,
-            borderWidth: 1,
-            borderColor: colors.overlays.tagBorder,
-        },
-        activityText: {
-            color: colors.text,
-            fontSize: 12,
-        },
-        notes: {
-            color: colors.text,
-            marginTop: 8,
-            fontStyle: 'italic',
-            paddingHorizontal: 4,  // Add some padding here too
-        },
-        date: {
-            color: colors.text,
-            fontSize: 12,
-            marginTop: 8,
-            opacity: 0.7,
-            paddingHorizontal: 4,  // Add some padding to prevent text from touching edges
-        },
-        modalContainer: {
-            flex: 1,
-            backgroundColor: colors.background,
-        },
-        modalHeader: {
-            paddingTop: 40,
-            paddingHorizontal: 20,
-            flexDirection: "row",
-            justifyContent: "flex-start",
-        },
-        closeButton: {
-            padding: 8,
-        },
-        modalContent: {
-            flex: 1,
-            alignItems: "center",
-            justifyContent: "center",
-            paddingHorizontal: 20,
-        },
-        modalTitle: {
-            color: colors.text,
-            fontSize: 24,
-            fontWeight: "bold",
-            marginBottom: 30,
-        },
-        continueButton: {
-            backgroundColor: colors.accent,
-            margin: 20,
-            padding: 15,
-            borderRadius: 25,
-            alignItems: 'center',
-            width: '100%',
-        },
-        continueButtonText: {
-            color: '#fff',
-            fontSize: 16,
-            fontWeight: 'bold',
-        },
-        label: {
-            color: colors.text,
-            fontSize: 16,
-            marginBottom: 8,
-            alignSelf: "flex-start",
-        },
-        noteInput: {
-            backgroundColor: colors.cardBackground,
-            borderRadius: 8,
-            padding: 12,
-            marginBottom: 16,
-            color: colors.text,
-            fontSize: 16,
-            width: "100%",
-            minHeight: 100,
-            textAlignVertical: "top",
-        },
-        buttonContainer: {
-            flexDirection: "row",
-            justifyContent: "space-between",
-            width: "100%",
-            marginTop: 20,
-        },
-        navigationButton: {
-            flex: 1,
-            padding: 15,
-            borderRadius: 25,
-            alignItems: "center",
-            marginHorizontal: 5,
-        },
-        backButton: {
-            backgroundColor: colors.overlays.tag,
-        },
-        submitButton: {
-            backgroundColor: colors.accent,
-        },
-        buttonText: {
-            color: colors.text,
-            fontSize: 16,
-            fontWeight: '600',
-        },
-        actionButton: {
-            padding: 8,
-            borderRadius: 20,
-            backgroundColor: colors.overlays.tag,
-            flexDirection: 'row',
-            gap: 8,  // This adds space between the buttons
-        },
-        deleteButton: {
-            backgroundColor: 'rgba(255, 68, 68, 0.2)', // Keep error color consistent
-            minHeight: 44,
-            minWidth: 44,
-            alignItems: 'center',
-            justifyContent: 'center',
-        },
-        photoStrip: {
-            flexDirection: 'row',
-            marginTop: 8,
-            paddingHorizontal: 4,
-        },
-        photoThumb: {
-            width: 64,
-            height: 64,
-            borderRadius: 6,
-            marginRight: 6,
+            letterSpacing: 0.3,
+            textTransform: 'uppercase',
         },
     }), [colors]);
 }
 
 // Helper Functions
-const groupEntriesByDate = (entries: MoodEntry[]): Section[] => {
+const groupEntriesByDate = (entries: MoodEntry[], now: Date = new Date()): Section[] => {
     const grouped = entries.reduce((acc: { [key: string]: MoodEntry[] }, entry) => {
-        const date = new Date(entry.date);
-        const dateKey = date.toLocaleDateString(undefined, {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        });
-
-        if (!acc[dateKey]) {
-            acc[dateKey] = [];
-        }
-        acc[dateKey].push(entry);
+        const key = sectionKeyForDate(entry.date);
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(entry);
         return acc;
     }, {});
 
-    return Object.entries(grouped).map(([title, data]) => ({
-        title,
-        data
+    return Object.entries(grouped).map(([key, data]) => ({
+        key,
+        title: formatSectionTitle(key, now),
+        data,
     }));
 };
-
-// Sub-Components
-const EntryCard: React.FC<EntryCardProps> = ({ entry, onEdit, onDelete, styles, colors }) => (
-    <Card style={styles.cardCustom}>
-        <View style={styles.cardHeader}>
-            <Text style={styles.moodValue}>Mood: {entry.mood}</Text>
-            <View style={styles.actionButton}>
-                <Pressable
-                    style={styles.editButton}
-                    onPress={onEdit}
-                    accessibilityRole="button"
-                    accessibilityLabel="Edit entry"
-                    hitSlop={8}
-                >
-                    <Feather name="pen-tool" color={colors.text} size={16} />
-                </Pressable>
-                <Pressable
-                    style={[styles.actionButton, styles.deleteButton]}
-                    onPress={() => onDelete(entry.id)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Delete entry"
-                    hitSlop={8}
-                >
-                    <Feather name="trash-2" color={colors.text} size={16} />
-                </Pressable>
-            </View>
-        </View>
-
-        <ActivitiesList activities={entry.activities} styles={styles} />
-        {entry.notes && <Text style={styles.notes}>Notes: {entry.notes}</Text>}
-        {entry.photos && entry.photos.length > 0 && (
-            <PhotoStrip photos={entry.photos} styles={styles} colors={colors} />
-        )}
-        <Text style={styles.date}>
-            {new Date(entry.date).toLocaleTimeString()}
-        </Text>
-    </Card>
-);
-
-const ActivitiesList: React.FC<{ activities: Activity[], styles: any }> = ({ activities, styles }) => {
-    if (activities.length === 0) return null;
-
-    return (
-        <View style={styles.activitiesContainer}>
-            <Text style={styles.sectionTitle}>Activities:</Text>
-            <View style={styles.activitiesList}>
-                {activities.map((activity: Activity, index: number) => (
-                    <View key={index} style={styles.activityTag}>
-                        <Text style={styles.activityText}>{activity.name}</Text>
-                    </View>
-                ))}
-            </View>
-        </View>
-    );
-};
-
-const { width: VIEWER_WIDTH, height: VIEWER_HEIGHT } = Dimensions.get('window');
-
-/**
- * Full-screen, swipeable photo viewer. Opens at `initialIndex` and pages
- * horizontally through the entry's photos. Used by PhotoStrip below.
- */
-const PhotoViewer: React.FC<{
-    visible: boolean;
-    photos: EntryPhoto[];
-    initialIndex: number;
-    onClose: () => void;
-}> = ({ visible, photos, initialIndex, onClose }) => {
-    return (
-        <OverlayModal visible={visible} onClose={onClose} fullScreen>
-            <View style={viewerStyles.overlay}>
-                <Pressable
-                    style={viewerStyles.closeButton}
-                    onPress={onClose}
-                    accessibilityRole="button"
-                    accessibilityLabel="Close photo viewer"
-                    hitSlop={16}
-                >
-                    <Feather name="x" size={28} color="#fff" />
-                </Pressable>
-                <FlatList
-                    data={photos}
-                    horizontal
-                    pagingEnabled
-                    showsHorizontalScrollIndicator={false}
-                    keyExtractor={(p) => String(p.id)}
-                    initialScrollIndex={Math.min(initialIndex, Math.max(photos.length - 1, 0))}
-                    getItemLayout={(_, index) => ({
-                        length: VIEWER_WIDTH,
-                        offset: VIEWER_WIDTH * index,
-                        index,
-                    })}
-                    renderItem={({ item }) => (
-                        <Image
-                            source={{ uri: item.file_path }}
-                            style={{ width: VIEWER_WIDTH, height: VIEWER_HEIGHT * 0.85 }}
-                            resizeMode="contain"
-                        />
-                    )}
-                />
-            </View>
-        </OverlayModal>
-    );
-};
-
-/**
- * Horizontal strip of entry thumbnails. Tapping a thumbnail opens the
- * full-screen PhotoViewer at that photo.
- */
-const PhotoStrip: React.FC<{ photos: EntryPhoto[]; styles: any; colors: any }> = ({
-    photos,
-    styles,
-    colors,
-}) => {
-    const [viewerVisible, setViewerVisible] = useState(false);
-    const [activeIndex, setActiveIndex] = useState(0);
-
-    if (!photos.length) return null;
-
-    return (
-        <>
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.photoStrip}
-            >
-                {photos.map((photo, index) => (
-                    <Pressable
-                        key={photo.id}
-                        onPress={() => {
-                            setActiveIndex(index);
-                            setViewerVisible(true);
-                        }}
-                        accessibilityRole="imagebutton"
-                        accessibilityLabel={`View photo ${index + 1}`}
-                    >
-                        <Image
-                            source={{ uri: photo.file_path }}
-                            style={[
-                                styles.photoThumb,
-                                { backgroundColor: colors.cardBackground },
-                            ]}
-                            resizeMode="cover"
-                        />
-                    </Pressable>
-                ))}
-            </ScrollView>
-            <PhotoViewer
-                visible={viewerVisible}
-                photos={photos}
-                initialIndex={activeIndex}
-                onClose={() => setViewerVisible(false)}
-            />
-        </>
-    );
-};
-
-const viewerStyles = StyleSheet.create({
-    overlay: {
-        // Explicit window dimensions instead of `flex: 1`: a transparent <Modal>
-        // root collapses to zero height on RN 0.76 Android new arch (Fabric).
-        // See components/forms/EntryForm.tsx for the full note (expo/expo#34470).
-        width: VIEWER_WIDTH,
-        height: VIEWER_HEIGHT,
-        backgroundColor: 'rgba(0,0,0,0.95)',
-        justifyContent: 'center',
-    },
-    closeButton: {
-        position: 'absolute',
-        top: 48,
-        right: 20,
-        zIndex: 10,
-        padding: 8,
-    },
-});
-
 
 // Main Component
 export function DatabaseViewer() {
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
     const db = useSQLiteContext();
-    const { refetchEntries, refreshCount } = useDataContext();
+    // refetchEntries bumps the global data version after writes here; the
+    // focus-aware useDataRefresh below consumes that bump (no direct refreshCount
+    // read needed — the hook reads it internally).
+    const { refetchEntries } = useDataContext();
 
     // State
     const [sections, setSections] = useState<Section[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    // True once the first load has resolved. Gates the full-screen spinner to
+    // the initial load only, so on-focus refetches don't flash a spinner over
+    // the already-rendered list. A ref (not state) — it's read inside the
+    // loader and must not trigger a re-render when it flips.
+    const hasLoadedOnce = useRef(false);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
     const [page, setPage] = useState(0);
@@ -468,12 +110,13 @@ export function DatabaseViewer() {
         try {
             const result = await db.getAllAsync<any>(`
                 WITH EntryData AS (
-                    SELECT 
+                    SELECT
                         e.id, e.mood, e.notes, e.date,
                         GROUP_CONCAT(a.id) as activity_ids,
                         GROUP_CONCAT(a.name) as activity_names,
                         GROUP_CONCAT(a.group_id) as activity_group_ids,
-                        GROUP_CONCAT(a.icon_name) as activity_icon_names
+                        GROUP_CONCAT(a.icon_name) as activity_icon_names,
+                        GROUP_CONCAT(a.icon_family) as activity_icon_families
                     FROM entries e
                     LEFT JOIN entry_activities ea ON e.id = ea.entry_id
                     LEFT JOIN activities a ON ea.activity_id = a.id
@@ -484,19 +127,34 @@ export function DatabaseViewer() {
                 SELECT * FROM EntryData
             `, [ITEMS_PER_PAGE, offset]);
 
-            const baseEntries: MoodEntry[] = result.map(row => ({
-                id: row.id,
-                mood: row.mood,
-                notes: row.notes,
-                date: row.date,
-                activities: row.activity_ids ? row.activity_ids.split(',').map((id: string, index: number) => ({
-                    id: parseInt(id),
-                    name: row.activity_names.split(',')[index],
-                    group_id: parseInt(row.activity_group_ids.split(',')[index]),
-                    icon_name: row.activity_icon_names.split(',')[index]
-                })) : [],
-                photos: [],
-            }));
+            const baseEntries: MoodEntry[] = result.map(row => {
+                // Each GROUP_CONCAT(...) is a comma-joined string of one value per
+                // joined activity, all in the SAME order (SQLite emits them in a
+                // single aggregate pass), so index `i` lines up across all of them.
+                // `icon_family` is added the same way as `icon_name`; it's a closed
+                // enum ('Feather' | 'MaterialCommunityIcons' | ... ), never contains
+                // a comma, so it adds no splitting fragility beyond the existing
+                // name split. A missing/blank family falls back to 'Feather' (the
+                // column's DB default); EntryCard's renderer also guards unknown
+                // families with a `circle` glyph.
+                const iconFamilies = row.activity_icon_families
+                    ? row.activity_icon_families.split(',')
+                    : [];
+                return {
+                    id: row.id,
+                    mood: row.mood,
+                    notes: row.notes,
+                    date: row.date,
+                    activities: row.activity_ids ? row.activity_ids.split(',').map((id: string, index: number) => ({
+                        id: parseInt(id),
+                        name: row.activity_names.split(',')[index],
+                        group_id: parseInt(row.activity_group_ids.split(',')[index]),
+                        icon_name: row.activity_icon_names.split(',')[index],
+                        icon_family: (iconFamilies[index] || 'Feather'),
+                    })) : [],
+                    photos: [],
+                };
+            });
 
             // Batch-load photos for the whole page in a single query (avoids
             // the N+1 the per-entry GROUP_CONCAT pattern would create if we
@@ -613,23 +271,28 @@ export function DatabaseViewer() {
         }
     };
 
-    // Effects
-    useEffect(() => {
-        const loadInitialData = async () => {
-            setIsLoading(true);
-            try {
-                const initialEntries = await fetchEntriesPage(0);
-                setSections(groupEntriesByDate(initialEntries));
-                setPage(0);
-                setHasMore(initialEntries.length === ITEMS_PER_PAGE);
-            } catch (error) {
-                console.error('Error loading initial data:', error);
-            }
-            setIsLoading(false);
-        };
-
-        loadInitialData();
-    }, [db, refreshCount]);
+    // Focus-aware reload (replaces useEffect([db, refreshCount])). Runs whenever
+    // the Timeline tab regains focus — so an entry added on another tab shows
+    // immediately, no app reopen — and re-runs while focused when refreshCount
+    // bumps (a write here). The full-screen spinner shows ONLY on the very first
+    // load; a refetch over an already-populated list keeps the stale list
+    // visible (no spinner flash) and swaps it for fresh data when the query
+    // resolves. `hasLoadedOnce` is a ref so toggling it never itself re-renders.
+    const loadInitialData = useCallback(async () => {
+        if (!hasLoadedOnce.current) setIsLoading(true);
+        try {
+            const initialEntries = await fetchEntriesPage(0);
+            setSections(groupEntriesByDate(initialEntries));
+            setPage(0);
+            setHasMore(initialEntries.length === ITEMS_PER_PAGE);
+        } catch (error) {
+            console.error('Error loading initial data:', error);
+        }
+        hasLoadedOnce.current = true;
+        setIsLoading(false);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchEntriesPage closes over `db`; setState identities are stable
+    }, [db]);
+    useDataRefresh(loadInitialData, [db]);
 
     const loadMoreData = async () => {
         if (isLoadingMore || !hasMore) return;
@@ -664,50 +327,51 @@ export function DatabaseViewer() {
                 setEditModalVisible(true);
             }}
             onDelete={handleDelete}
-            styles={styles}
             colors={colors}
         />
     );
 
     const renderSectionHeader = ({ section: { title } }: { section: Section }) => (
-        <Card style={styles.sectionHeader}>
+        <View style={styles.sectionHeader}>
             <Text style={styles.sectionHeaderText}>{title}</Text>
-        </Card>
+        </View>
     );
 
-    if (isLoading) {
-        return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={colors.accent} />
-            </View>
-        );
-    }
-
-
-    if (sections.length === 0) {
-        return <EmptyState />;
-    }
-
+    // EntryFormModal is rendered UNCONDITIONALLY below — never behind an early
+    // return. A focus refetch can flip `isLoading`, and if the edit form lived
+    // past an early return it would unmount mid-edit and destroy the user's
+    // draft. So the loading/empty/list states are chosen inline while the form
+    // stays mounted across all of them. The full-screen spinner shows only on
+    // the INITIAL load (isLoading && no sections yet) — a refetch over an
+    // existing list keeps the stale list visible until fresh data arrives.
     return (
         <>
-            <SectionList
-                sections={sections}
-                renderItem={renderItem}
-                renderSectionHeader={renderSectionHeader}
-                keyExtractor={item => item.id.toString()}
-                onEndReached={loadMoreData}
-                onEndReachedThreshold={0.5}
-                stickySectionHeadersEnabled={true}
-                maintainVisibleContentPosition={{
-                    minIndexForVisible: 0,
-                }}
-                ListFooterComponent={isLoadingMore ? (
-                    <View style={styles.loadingFooter}>
-                        <ActivityIndicator size="small" color={colors.accent} />
-                    </View>
-                ) : null}
-                contentContainerStyle={styles.container}
-            />
+            {isLoading && sections.length === 0 ? (
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={colors.accent} />
+                </View>
+            ) : sections.length === 0 ? (
+                <EmptyState />
+            ) : (
+                <SectionList
+                    sections={sections}
+                    renderItem={renderItem}
+                    renderSectionHeader={renderSectionHeader}
+                    keyExtractor={item => item.id.toString()}
+                    onEndReached={loadMoreData}
+                    onEndReachedThreshold={0.5}
+                    stickySectionHeadersEnabled={true}
+                    maintainVisibleContentPosition={{
+                        minIndexForVisible: 0,
+                    }}
+                    ListFooterComponent={isLoadingMore ? (
+                        <View style={styles.loadingFooter}>
+                            <ActivityIndicator size="small" color={colors.accent} />
+                        </View>
+                    ) : null}
+                    contentContainerStyle={styles.container}
+                />
+            )}
             <EntryFormModal
                 visible={editModalVisible}
                 onClose={() => setEditModalVisible(false)}
