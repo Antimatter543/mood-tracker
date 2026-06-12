@@ -2,41 +2,59 @@
 //
 // Visualisation SQL.
 //
-// TIMEZONE NOTE
-// -------------
-// Every query that previously used `date('now')` was UTC-anchored. For users
-// east of UTC (notably AU/NZ — UTC+10/+13), this caused entries logged late
-// in the local evening to appear on tomorrow's UTC date, dropping them out
-// of "today"/"this week" charts.
+// DOCTRINE — SQL NEVER day-buckets; JS owns day-keying
+// ----------------------------------------------------
+// Entries are stored as UTC ISO instants (see databases/dateHelpers.ts STORAGE
+// CONTRACT). These queries do exactly two things and nothing more:
+//   (a) RANGE-FILTER on the stored instant using parameterised UTC ISO bounds
+//       (`WHERE date BETWEEN ?start AND ?end`), where ?start/?end are computed
+//       in JS local time (startOfLocalDay / endOfLocalDay / computeWindow).
+//   (b) RETURN RAW INSTANTS (the stored `date` column), never a SQL-derived day.
 //
-// The fix: queries that compute a date window now accept `?start, ?end`
-// parameters. The React components compute the window in JS using local
-// time (see `transforms/dateHelpers.ts` and chart components) and pass the
-// boundaries in.
+// They MUST NOT call SQLite's `date()` / `strftime()` on a stored timestamp to
+// group or key it. SQLite's date() / strftime() operate in UTC, so any
+// stored-instant day-bucketing mis-attributes entries for users east/west of
+// UTC: a backdated entry normalised to LOCAL midnight is stored at the PREVIOUS
+// (or next) UTC day, and would bucket onto the wrong day. ALL "which local day
+// is this entry on" logic goes through `aggregateDailyAverages` /
+// `localDateString` (transforms/dailyAverages.ts) — one tested authority.
+//
+// This is enforced by a class-level invariant test (queriesNoDateBucketing
+// .test.ts) that scans every exported SQL string here for `date(date)` /
+// `strftime(... date ...)` and fails the build if one reappears.
 
 // -----------------------------------------------------------------------------
-// Per-day mood averages over a window.
+// Per-day mood averages over a window — RAW rows.
 //
-// `start` and `end` should be SQLite-comparable datetime strings like
-// "YYYY-MM-DD HH:MM:SS" (use `startOfLocalDay` / `endOfLocalDay`).
-//
-// Returns rows like: [{ date: "2025-01-15", avgMood: 7.5 }, ...] — but only
-// for days that actually have entries. Missing days must be filled in JS via
-// the relevant transform; the brittle recursive-CTE date-generator approach
-// is gone.
+// `start`/`end` are UTC ISO bounds (use startOfLocalDay / endOfLocalDay or
+// computeWindow). Returns one row per ENTRY (raw instant + mood); the caller
+// aggregates per local day via `aggregateDailyAverages`. Days with no entries
+// are filled in JS by the consuming transform.
 // -----------------------------------------------------------------------------
 export const WEEKLY_MOOD_AVERAGES = `
   SELECT
-    date(date) as date,
-    ROUND(AVG(mood), 1) as avgMood
+    date,
+    mood
   FROM entries
   WHERE date BETWEEN ? AND ?
-  GROUP BY date(date)
   ORDER BY date
 `;
 
 // Kept for backwards-compat / monthly view — same shape, same parameters.
 export const MONTHLY_MOOD_AVERAGES = WEEKLY_MOOD_AVERAGES;
+
+// -----------------------------------------------------------------------------
+// Home "Last 30 days" stats source — RAW rows.
+//
+// Replaces the inline `WITH DailyAverages AS (... GROUP BY date(date))` block
+// that lived in app/(tabs)/index.tsx (its bestDay was UTC-keyed). The caller
+// computes average / count / bestDay in JS from `aggregateDailyAverages` so the
+// "best day" is the right LOCAL day. Exported (not inline) so the no-bucketing
+// invariant test covers it too.
+//
+// Caller supplies `?start, ?end` (UTC ISO bounds).
+// -----------------------------------------------------------------------------
+export const MONTHLY_DAILY_AVERAGES = WEEKLY_MOOD_AVERAGES;
 
 // -----------------------------------------------------------------------------
 // All-time entry count. The single source of truth for "is the DB empty?" used
@@ -45,11 +63,12 @@ export const MONTHLY_MOOD_AVERAGES = WEEKLY_MOOD_AVERAGES;
 export const TOTAL_ENTRIES = `SELECT COUNT(*) as count FROM entries`;
 
 // -----------------------------------------------------------------------------
-// Raw mood points in a window (rarely used; kept for completeness).
+// Raw mood points in a window (rarely used; kept for completeness). Raw instant
+// + mood; day-keying (if any) is the caller's job.
 // -----------------------------------------------------------------------------
 export const MOOD_POINTS_IN_RANGE = `
   SELECT
-    date(date) as date,
+    date,
     mood
   FROM entries
   WHERE date BETWEEN ? AND ?
@@ -57,51 +76,48 @@ export const MOOD_POINTS_IN_RANGE = `
 `;
 
 // -----------------------------------------------------------------------------
-// Entry dates for streak computation.
+// Entry instants for streak computation — RAW instants.
 //
-// REPLACES the previous recursive-CTE streak SQL, which was timezone-broken
-// and impossible to unit-test. Now:
-//   1. Fetch distinct local-date strings in the last N days.
-//   2. Let JS compute the streak via `transforms/streak.ts`.
+// Was `SELECT DISTINCT date(date)`, which both UTC-keyed the day AND collapsed
+// to a day-string the caller could no longer re-key. Now returns the raw stored
+// instants; the caller maps them through `localDateString` and de-dupes in JS
+// before `currentStreak` (which already tolerates duplicates).
 //
 // Caller supplies `?start` (typically 60 days ago in local time).
 // -----------------------------------------------------------------------------
 export const RECENT_ENTRY_DATES = `
-  SELECT DISTINCT date(date) as date
+  SELECT date
   FROM entries
   WHERE date >= ?
   ORDER BY date DESC
 `;
 
 // -----------------------------------------------------------------------------
-// Day-of-week pattern over a window, with best/worst per DOW.
+// Day-of-week pattern over a window — RAW rows.
 //
-// strftime('%w', date) returns 0=Sun..6=Sat. Note: strftime treats the stored
-// datetime as UTC for the %w extraction (a known small leak for late-evening
-// entries near midnight in non-UTC zones). The window BOUNDARIES, however, are
-// parameterised local-time UTC ISO strings, so the SET of entries considered is
-// correct; only the DOW bucket can drift by one for borderline entries.
+// Was `strftime('%w', date)` (extracted the DOW in UTC — drifted by one for
+// late-evening entries near midnight in non-UTC zones). Now returns raw instant
+// + mood; the day-of-week is derived in JS from the LOCAL day (see
+// transforms/dayOfWeekPattern.ts), so the bucket is always the user's DOW.
 //
-// Caller supplies `?start, ?end` (use computeWindow from windowHelpers).
+// Caller supplies `?start, ?end` (use computeWindow).
 // -----------------------------------------------------------------------------
 export const DOW_MOOD_PATTERN = `
   SELECT
-    CAST(strftime('%w', date) AS INTEGER) as day_of_week,
-    ROUND(AVG(mood), 2) as avg_mood,
-    MAX(mood) as best_mood,
-    MIN(mood) as worst_mood,
-    COUNT(*) as entry_count
+    date,
+    mood
   FROM entries
   WHERE date BETWEEN ? AND ?
-  GROUP BY day_of_week
-  ORDER BY day_of_week
+  ORDER BY date
 `;
 
 // -----------------------------------------------------------------------------
 // Single-window scalar summary: average mood + entry count.
 //
 // Used by the KPI summary card (over the timeframe window) and the
-// month-over-month card (run twice, once per calendar month).
+// month-over-month card (run twice, once per calendar month). No day-bucketing
+// here — it's a window-wide scalar aggregate, so it's TZ-safe as long as the
+// ?start/?end bounds are local-derived (they are).
 //
 // Caller supplies `?start, ?end`.
 // -----------------------------------------------------------------------------
@@ -115,50 +131,34 @@ export const WINDOW_SUMMARY = `
 
 // -----------------------------------------------------------------------------
 // Activity correlation: avg mood on days an activity WAS logged vs days it was
-// NOT, per activity. This is the rigorous "with vs without" causal framing that
-// replaces the old delta-from-overall-mean approach.
+// NOT, per activity. RAW rows — day-keying happens in JS.
 //
-// Strategy:
-//   1. window_entries  — entries within the parameterised local-time window.
-//   2. day_avg         — one mood average per calendar day in the window.
-//   3. activity_days   — the set of days each activity appears on.
-//   4. For each activity, cross-join against every day in the window and split
-//      day_avg into "with" (day is in the activity's set) vs "without".
+// The previous version day-bucketed with `date(e.date)` inside the SQL (UTC).
+// Now SQL just joins each entry to its activity ids within the window and
+// returns one row per (entry instant, mood, activity_id|null). The transform
+// (activityCorrelation.ts) keys each entry to its LOCAL day, builds per-day
+// averages and the per-activity day sets, then does the with-vs-without split
+// and the >= MIN_SAMPLES gate. This keeps the rigorous "with vs without" causal
+// framing while fixing the day attribution.
 //
-// Boundaries are parameterised UTC ISO strings (?start, ?end), NOT date('now').
+// One row per entry×activity (activity_id repeats per activity on that entry),
+// plus one row per entry with activity_id = NULL is NOT emitted — entries with
+// no activities still need a day-average, so we LEFT JOIN and emit a single
+// NULL-activity row for activity-less entries. Dedup of (day, activity) and the
+// day-average are the transform's responsibility.
+//
+// Boundaries are parameterised UTC ISO strings (?start, ?end).
 // -----------------------------------------------------------------------------
 export const ACTIVITY_CORRELATION = `
-  WITH window_entries AS (
-    SELECT e.id, e.mood, e.date
-    FROM entries e
-    WHERE e.date BETWEEN ? AND ?
-  ),
-  activity_days AS (
-    SELECT DISTINCT
-      ea.activity_id,
-      date(e.date) as day
-    FROM entry_activities ea
-    JOIN window_entries e ON ea.entry_id = e.id
-  ),
-  day_avg AS (
-    SELECT
-      date(date) as day,
-      AVG(mood) as day_mood
-    FROM window_entries
-    GROUP BY date(date)
-  )
   SELECT
-    a.name as activity_name,
-    ROUND(AVG(CASE WHEN ad.activity_id IS NOT NULL THEN da.day_mood END), 2) as avg_with,
-    ROUND(AVG(CASE WHEN ad.activity_id IS NULL     THEN da.day_mood END), 2) as avg_without,
-    COUNT(CASE WHEN ad.activity_id IS NOT NULL THEN 1 END) as count_with,
-    COUNT(CASE WHEN ad.activity_id IS NULL     THEN 1 END) as count_without
-  FROM activities a
-  CROSS JOIN day_avg da
-  LEFT JOIN activity_days ad
-    ON da.day = ad.day
-    AND ad.activity_id = a.id
-  GROUP BY a.id, a.name
-  HAVING count_with >= 3
-  ORDER BY ABS(IFNULL(avg_with, 0) - IFNULL(avg_without, 0)) DESC
+    e.id AS entry_id,
+    e.date AS date,
+    e.mood AS mood,
+    ea.activity_id AS activity_id,
+    a.name AS activity_name
+  FROM entries e
+  LEFT JOIN entry_activities ea ON ea.entry_id = e.id
+  LEFT JOIN activities a ON a.id = ea.activity_id
+  WHERE e.date BETWEEN ? AND ?
+  ORDER BY e.date
 `;

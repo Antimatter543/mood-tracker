@@ -14,6 +14,8 @@ import {
     type MoodAvgRow,
     type Timeframe,
 } from "./transforms/weeklyMood";
+import { dailyAverageRows } from "./transforms/dailyAverages";
+import { WEEKLY_MOOD_AVERAGES } from "./queries";
 import {
     startOfLocalDay,
     endOfLocalDay,
@@ -46,15 +48,6 @@ const computeWindow = (timeframe: Timeframe): { start: string; end: string } => 
     }
 };
 
-const QUERY = `
-    SELECT
-        date(date) as date,
-        ROUND(AVG(mood), 1) as avgMood
-    FROM entries
-    WHERE date BETWEEN ? AND ?
-    GROUP BY date(date)
-    ORDER BY date
-`;
 
 export function BasicLineChart() {
     const colors = useThemeColors();
@@ -123,7 +116,12 @@ export function BasicLineChart() {
             setLoading(true);
             try {
                 const { start, end } = computeWindow(timeframe as Timeframe);
-                const rows = await db.getAllAsync<MoodAvgRow>(QUERY, [start, end]);
+                // Raw {date: instant, mood} rows -> per-LOCAL-day averages in JS.
+                const rawRows = await db.getAllAsync<{ date: string; mood: number }>(
+                    WEEKLY_MOOD_AVERAGES,
+                    [start, end],
+                );
+                const rows: MoodAvgRow[] = dailyAverageRows(rawRows);
 
                 const built = buildWeeklyMoodChartData(rows, timeframe as Timeframe);
                 if (built.isEmpty) {

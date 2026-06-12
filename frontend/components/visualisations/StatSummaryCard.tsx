@@ -16,6 +16,7 @@ import { startOfLocalDay, addDays, localDateString } from './transforms/dateHelp
 import { currentStreak, longestStreak } from './transforms/streak';
 import { computeMovingAverage } from './transforms/movingAverage';
 import { buildWeeklyMoodChartData, type MoodAvgRow } from './transforms/weeklyMood';
+import { dailyAverageRows } from './transforms/dailyAverages';
 import { WEEKLY_MOOD_AVERAGES } from './queries';
 import { buildStatSummary, type StatSummaryData } from './transforms/statSummary';
 
@@ -85,17 +86,28 @@ const StatSummaryCard: React.FC = () => {
                     addDays(localDateString(new Date()), -60)
                 );
 
-                const [windowRow, entryDateRows, dailyRows] = await Promise.all([
+                const [windowRow, entryDateRows, rawDailyRows] = await Promise.all([
                     db.getFirstAsync<{ avg_mood: number | null; entry_count: number }>(
                         WINDOW_SUMMARY,
                         [start, end]
                     ),
                     db.getAllAsync<{ date: string }>(RECENT_ENTRY_DATES, [streakStart]),
-                    db.getAllAsync<MoodAvgRow>(WEEKLY_MOOD_AVERAGES, [start, end]),
+                    db.getAllAsync<{ date: string; mood: number }>(
+                        WEEKLY_MOOD_AVERAGES,
+                        [start, end]
+                    ),
                 ]);
 
-                const entryDates = entryDateRows.map((r) => r.date);
+                // RECENT_ENTRY_DATES now returns raw instants -> map to LOCAL
+                // day strings + de-dupe before the streak (matches the rest of
+                // the app; currentStreak/longestStreak tolerate the order).
+                const entryDates = Array.from(
+                    new Set(entryDateRows.map((r) => localDateString(r.date)))
+                );
                 const today = localDateString(new Date());
+
+                // Per-LOCAL-day averages from the raw rows for the MA slope.
+                const dailyRows: MoodAvgRow[] = dailyAverageRows(rawDailyRows);
 
                 // Moving-average slope over the window's gap-filled daily avgs.
                 const built = buildWeeklyMoodChartData(dailyRows, tf);

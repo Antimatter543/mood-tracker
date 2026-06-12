@@ -18,6 +18,7 @@
   "jest": {
     "preset": "jest-expo",
     "setupFiles": [
+      "<rootDir>/jest.tz.js",
       "<rootDir>/jest.setup.ts"
     ],
     "moduleNameMapper": {

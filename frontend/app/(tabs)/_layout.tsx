@@ -12,6 +12,7 @@ import { SettingsProvider, useSettings } from "@/context/SettingsContext";
 import { initializeDatabase } from "@/databases/database";
 import { SQLiteProvider, useSQLiteContext } from "expo-sqlite";
 import { localDateString, startOfLocalDay } from "@/databases/dateHelpers";
+import { RECENT_ENTRY_DATES } from "@/components/visualisations/queries";
 import { currentStreak } from "@/components/visualisations/transforms/streak";
 import { scheduleOrSkipDailyReminder } from "@/lib/notifications";
 import { OverlayProvider } from "@/context/OverlayHost";
@@ -64,11 +65,14 @@ function NotificationReArm() {
             const since = startOfLocalDay(
                 new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
             );
+            // Raw instants (RECENT_ENTRY_DATES no longer day-buckets in SQL) ->
+            // map to LOCAL day strings + de-dupe in JS, so the streak/reminder
+            // logic keys days the same way the rest of the app does.
             const rows = await db.getAllAsync<{ date: string }>(
-                `SELECT DISTINCT date(date) as date FROM entries WHERE date >= ? ORDER BY date DESC`,
+                RECENT_ENTRY_DATES,
                 [since]
             );
-            const entryDates = rows.map(r => r.date);
+            const entryDates = Array.from(new Set(rows.map(r => localDateString(r.date))));
             const streak = currentStreak(entryDates, todayKey);
 
             await scheduleOrSkipDailyReminder({

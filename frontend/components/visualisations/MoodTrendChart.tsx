@@ -15,6 +15,7 @@ import {
   formatLabel,
   type MoodAvgRow,
 } from './transforms/weeklyMood';
+import { dailyAverageRows } from './transforms/dailyAverages';
 import { computeMovingAverage, type DayAvg } from './transforms/movingAverage';
 
 /**
@@ -160,7 +161,12 @@ const MoodTrendChart = () => {
       setLoading(true);
       try {
         const { start, end } = computeWindow(tf);
-        const rows = await db.getAllAsync<MoodAvgRow>(WEEKLY_MOOD_AVERAGES, [start, end]);
+        // Raw {date: instant, mood} rows -> per-LOCAL-day averages in JS.
+        const rawRows = await db.getAllAsync<{ date: string; mood: number }>(
+          WEEKLY_MOOD_AVERAGES,
+          [start, end],
+        );
+        const rows: MoodAvgRow[] = dailyAverageRows(rawRows);
 
         const built = buildWeeklyMoodChartData(rows, tf);
         if (built.isEmpty) {

@@ -8,8 +8,9 @@ import { Calendar } from 'react-native-calendars';
 import {
   buildCalendarMarkers,
   type MoodMarking,
-  type MoodMarkerRow,
 } from './transforms/calendarMarkers';
+import { dailyAverageRows } from './transforms/dailyAverages';
+import { WEEKLY_MOOD_AVERAGES } from './queries';
 import {
   startOfLocalDay,
   endOfLocalDay,
@@ -34,17 +35,15 @@ const MoodCalendar = () => {
         const startStr = startOfLocalDay(localDateString(firstDay));
         const endStr = endOfLocalDay(localDateString(lastDay));
 
-        const rows = await db.getAllAsync<MoodMarkerRow>(`
-          SELECT
-            date(date) as date,
-            ROUND(AVG(mood), 1) as avgMood
-          FROM entries
-          WHERE date BETWEEN ? AND ?
-          GROUP BY date(date)
-          ORDER BY date
-        `, [startStr, endStr]);
+        // Raw {date: instant, mood} rows -> per-LOCAL-day markers in JS, so a
+        // late-evening entry is marked on the user's calendar day, not the UTC
+        // one (the old SQL grouped via date(date) in UTC).
+        const rawRows = await db.getAllAsync<{ date: string; mood: number }>(
+          WEEKLY_MOOD_AVERAGES,
+          [startStr, endStr],
+        );
 
-        setMoodMarkers(buildCalendarMarkers(rows));
+        setMoodMarkers(buildCalendarMarkers(dailyAverageRows(rawRows)));
         setIsLoading(false);
       } catch (error) {
         console.error('Error loading mood calendar data:', error);

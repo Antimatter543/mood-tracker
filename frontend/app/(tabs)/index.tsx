@@ -6,10 +6,11 @@ import { Card } from '@/components/Card';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState, memo, useMemo } from 'react';
 import { LineChart } from 'react-native-chart-kit';
-import { WEEKLY_MOOD_AVERAGES, RECENT_ENTRY_DATES, TOTAL_ENTRIES } from '@/components/visualisations/queries';
+import { WEEKLY_MOOD_AVERAGES, MONTHLY_DAILY_AVERAGES, RECENT_ENTRY_DATES, TOTAL_ENTRIES } from '@/components/visualisations/queries';
 import { CHART_PADDING, interpolateData, isWeekEmpty, SCREEN_WIDTH, useChartConfig } from '@/components/visualisations/chartUtils';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { startOfLocalDay, endOfLocalDay, localDateString } from '@/databases/dateHelpers';
+import { dailyAverageMap, bestDayLocal } from '@/components/visualisations/transforms/dailyAverages';
 import { currentStreak } from '@/components/visualisations/transforms/streak';
 
 
@@ -447,10 +448,10 @@ export default function Home() {
 
                 const [
                     today,
-                    monthStats,
+                    monthRows,
                     activities,
                     weeklyRows,
-                    streakEntryDates,
+                    streakEntryRows,
                     totals,
                 ] = await Promise.all([
                     db.getFirstAsync<{ mood: number }>(
@@ -458,26 +459,12 @@ export default function Home() {
                         [todayStart, todayEnd]
                     ),
 
-                    db.getFirstAsync<{ average: number; count: number; bestDay: string }>(
-                        `
-                        WITH DailyAverages AS (
-                            SELECT date(date) as day, ROUND(AVG(mood), 1) as daily_avg
-                            FROM entries
-                            WHERE date BETWEEN ? AND ?
-                            GROUP BY date(date)
-                        )
-                        SELECT
-                            ROUND(AVG(mood), 1) as average,
-                            COUNT(*) as count,
-                            (
-                                SELECT day FROM DailyAverages
-                                WHERE daily_avg = (SELECT MAX(daily_avg) FROM DailyAverages)
-                                LIMIT 1
-                            ) as bestDay
-                        FROM entries
-                        WHERE date BETWEEN ? AND ?
-                        `,
-                        [monthStart, todayEnd, monthStart, todayEnd]
+                    // Raw {date: instant, mood} rows; average/count/bestDay are
+                    // computed in JS so "best day" is the right LOCAL day (the
+                    // old inline SQL keyed it with UTC date(date)).
+                    db.getAllAsync<{ date: string; mood: number }>(
+                        MONTHLY_DAILY_AVERAGES,
+                        [monthStart, todayEnd]
                     ),
 
                     db.getAllAsync<{ name: string; count: number }>(
@@ -494,7 +481,7 @@ export default function Home() {
                         [weekStart, todayEnd]
                     ),
 
-                    db.getAllAsync<{ date: string; avgMood: number | null }>(
+                    db.getAllAsync<{ date: string; mood: number }>(
                         WEEKLY_MOOD_AVERAGES,
                         [weekStart, todayEnd]
                     ),
@@ -510,29 +497,38 @@ export default function Home() {
                 setTodaysMood(today?.mood || null);
                 setTotalEntries(totals?.count ?? 0);
 
-                if (monthStats) {
+                // Last-30-days stats. average = mean over all entries in the
+                // window (1 dp), totalEntries = entry count, bestDay = local day
+                // with the highest daily average — all derived in JS.
+                if (monthRows.length > 0) {
+                    const sum = monthRows.reduce((s, r) => s + r.mood, 0);
                     setMonthlyStats({
-                        average: monthStats.average,
-                        totalEntries: monthStats.count,
-                        bestDay: monthStats.bestDay,
+                        average: Math.round((sum / monthRows.length) * 10) / 10,
+                        totalEntries: monthRows.length,
+                        bestDay: bestDayLocal(monthRows),
                     });
+                } else {
+                    setMonthlyStats({ average: 0, totalEntries: 0, bestDay: '' });
                 }
 
                 setRecentActivities(activities.map(a => a.name));
 
                 // Fill in the 7-day window (last 6 days + today, earliest first)
                 // with null for days that had no entries — same shape (and count)
-                // the chart's 7 labels expect.
-                const weeklyByDate: Record<string, number | null> = {};
-                for (const row of weeklyRows) weeklyByDate[row.date] = row.avgMood;
+                // the chart's 7 labels expect. Keys are local days from
+                // aggregateDailyAverages, so they match the local-day labels we
+                // build below by construction.
+                const weeklyByDay = dailyAverageMap(weeklyRows);
                 const weekly: (number | null)[] = [];
                 for (let i = 6; i >= 0; i--) {
                     const dStr = localDateString(new Date(now.getTime() - i * DAY_MS));
-                    weekly.push(weeklyByDate[dStr] ?? null);
+                    weekly.push(weeklyByDay.get(dStr) ?? null);
                 }
                 setWeeklyData(weekly);
 
-                setStreak(currentStreak(streakEntryDates.map(r => r.date), todayLocal));
+                // Map raw instants -> local day strings before the streak; the
+                // streak transform de-dupes internally so mapping alone is fine.
+                setStreak(currentStreak(streakEntryRows.map(r => localDateString(r.date)), todayLocal));
             } catch (error) {
                 console.error('Error fetching dashboard data:', error);
             }

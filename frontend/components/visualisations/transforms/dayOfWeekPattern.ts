@@ -4,16 +4,75 @@
 // best/worst-day callouts. Replaces the all-time dailyBar logic FOR THE STATS
 // SCREEN (the original buildDailyBarData stays for any other caller).
 //
-// Day-of-week convention from the SQL: strftime('%w') returns 0=Sun..6=Sat.
-// This transform re-orders to a Monday-first labels array to match the heatmap
-// convention used elsewhere on the stats screen.
+// Day-of-week convention: 0=Sun..6=Sat (the value JS `Date.getDay()` returns,
+// matching the old strftime('%w')). This transform re-orders to a Monday-first
+// labels array to match the heatmap convention used elsewhere on the stats
+// screen.
+//
+// DAY-KEYING: the DOW used to come from SQLite's `strftime('%w', date)`, which
+// extracts the weekday in UTC and so drifts by one for late-evening entries in
+// non-UTC zones. We now aggregate from RAW {date: instant, mood} rows here in
+// JS (`aggregateDowRows`), keying each entry to its LOCAL day-of-week via
+// `localDateString` — so the bucket is always the user's weekday.
+
+import { localDateString } from '@/databases/dateHelpers';
 
 export type DowRow = {
-    day_of_week: number; // 0=Sun..6=Sat (strftime %w)
+    day_of_week: number; // 0=Sun..6=Sat (JS getDay() / old strftime %w)
     avg_mood: number;
     entry_count: number;
     best_mood: number; // MAX(mood) for that DOW
     worst_mood: number; // MIN(mood)
+};
+
+/** A raw row straight from SQL: a stored UTC ISO instant + a numeric mood. */
+export type DowInstantRow = {
+    date: string; // UTC ISO instant
+    mood: number;
+};
+
+/**
+ * Aggregate raw per-entry rows into one DowRow per LOCAL day-of-week.
+ *
+ * Each entry is keyed to its local weekday: parse `localDateString(instant)` as
+ * local midnight and take `Date.getDay()` (0=Sun..6=Sat). Invalid instants /
+ * non-finite moods are skipped. Only weekdays that actually have entries are
+ * emitted; `buildDowPatternData` fills the rest with zeros.
+ */
+export const aggregateDowRows = (rows: DowInstantRow[]): DowRow[] => {
+    type Acc = { sum: number; count: number; best: number; worst: number };
+    const byDow = new Map<number, Acc>();
+
+    for (const row of rows ?? []) {
+        if (!row || typeof row.date !== 'string') continue;
+        if (typeof row.mood !== 'number' || !Number.isFinite(row.mood)) continue;
+        const t = new Date(row.date).getTime();
+        if (Number.isNaN(t)) continue;
+
+        // Key by the LOCAL weekday of the local day this entry belongs to.
+        const dow = new Date(`${localDateString(row.date)}T00:00:00`).getDay();
+        const acc = byDow.get(dow);
+        if (acc) {
+            acc.sum += row.mood;
+            acc.count += 1;
+            acc.best = Math.max(acc.best, row.mood);
+            acc.worst = Math.min(acc.worst, row.mood);
+        } else {
+            byDow.set(dow, { sum: row.mood, count: 1, best: row.mood, worst: row.mood });
+        }
+    }
+
+    const out: DowRow[] = [];
+    for (const [dow, { sum, count, best, worst }] of byDow) {
+        out.push({
+            day_of_week: dow,
+            avg_mood: Math.round((sum / count) * 100) / 100, // 2 dp, matches old SQL
+            entry_count: count,
+            best_mood: best,
+            worst_mood: worst,
+        });
+    }
+    return out;
 };
 
 export type DowPatternData = {
