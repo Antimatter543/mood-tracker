@@ -3,7 +3,7 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
-## [2.0.0] - 2026-07 (pending release — built on branch `upgrade/sdk-56`, ships after the 2026-07-01 build-quota reset)
+## [2.0.0] - 2026-06-12
 
 ### Changed
 - **Upgraded the app's foundation (Expo SDK 52 → 56, React Native 0.76 → 0.85).** This is an
