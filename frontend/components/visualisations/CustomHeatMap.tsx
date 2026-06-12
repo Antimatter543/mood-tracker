@@ -8,6 +8,7 @@ import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
 import { buildHeatmapGrid, type HeatmapInput } from './transforms/heatmap';
 import { localDateString } from './transforms/dateHelpers';
+import { moodColor } from '@/components/timeline/moodColor';
 
 interface DayData {
     date: string;
@@ -49,27 +50,11 @@ const CustomHeatmap: React.FC = () => {
     const LEFT_PADDING = 30; // For day labels
     const TOP_PADDING = 20;  // For month labels
 
-    // Calculate colors based on mood value
-    const getMoodColor = (mood: number | null) => {
-        if (mood === null) return colors.overlays.tag;
-        
-        // Convert hex to rgba
-        const hexToRgba = (hex: string, opacity: number) => {
-            // Remove the hash if it exists
-            hex = hex.replace('#', '');
-            
-            // Parse the hex values
-            const r = parseInt(hex.substring(0, 2), 16);
-            const g = parseInt(hex.substring(2, 4), 16);
-            const b = parseInt(hex.substring(4, 6), 16);
-            
-            // Return the rgba value
-            return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-        };
-        
-        const intensity = mood / 10; // Normalize to 0-1
-        return hexToRgba(colors.accent, 0.2 + (intensity * 0.8)); // Min opacity 0.2, max 1.0
-    };
+    // Mood -> color via the shared canonical scale (see components/timeline/
+    // moodColor.ts) so the heatmap and the timeline render mood identically.
+    // null mood falls back to the muted tag tint.
+    const getMoodColor = (mood: number | null) =>
+        moodColor(mood, colors.accent, colors.overlays.tag);
 
     const getTextColor = (mood: number | null) => {
         if (mood === null) return colors.textSecondary;
