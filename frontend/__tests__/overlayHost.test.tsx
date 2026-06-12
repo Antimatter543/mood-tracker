@@ -24,12 +24,18 @@ const overlayTexts = (root: TestRenderer.ReactTestRenderer): string[] =>
 
 describe('OverlayHost', () => {
     it('mounts content above children and removes it on unmount', () => {
-        const root = TestRenderer.create(
-            <OverlayProvider>
-                <CaptureApi />
-                <Text>app-content</Text>
-            </OverlayProvider>
-        );
+        // React 19's react-test-renderer commits the initial tree inside act();
+        // a bare create() leaves the renderer uncommitted (root inaccessible) and
+        // never runs the effect that captures the overlay api. Wrap the create.
+        let root!: TestRenderer.ReactTestRenderer;
+        act(() => {
+            root = TestRenderer.create(
+                <OverlayProvider>
+                    <CaptureApi />
+                    <Text>app-content</Text>
+                </OverlayProvider>
+            );
+        });
 
         // Nothing mounted yet.
         expect(overlayTexts(root)).toEqual(['app-content']);
@@ -49,11 +55,14 @@ describe('OverlayHost', () => {
     });
 
     it('stacks multiple overlays in mount order', () => {
-        const root = TestRenderer.create(
-            <OverlayProvider>
-                <CaptureApi />
-            </OverlayProvider>
-        );
+        let root!: TestRenderer.ReactTestRenderer;
+        act(() => {
+            root = TestRenderer.create(
+                <OverlayProvider>
+                    <CaptureApi />
+                </OverlayProvider>
+            );
+        });
 
         act(() => {
             api.mount(<Text>first</Text>);
@@ -65,11 +74,14 @@ describe('OverlayHost', () => {
     });
 
     it('update() swaps an overlay node in place without affecting siblings', () => {
-        const root = TestRenderer.create(
-            <OverlayProvider>
-                <CaptureApi />
-            </OverlayProvider>
-        );
+        let root!: TestRenderer.ReactTestRenderer;
+        act(() => {
+            root = TestRenderer.create(
+                <OverlayProvider>
+                    <CaptureApi />
+                </OverlayProvider>
+            );
+        });
 
         let a: ReturnType<typeof api.mount>;
         act(() => {
@@ -90,9 +102,13 @@ describe('OverlayHost', () => {
             useOverlay();
             return null;
         };
-        // react-test-renderer surfaces the thrown error from render.
-        expect(() => TestRenderer.create(<Bad />)).toThrow(
-            /useOverlay must be used within an <OverlayProvider>/
-        );
+        // react-test-renderer surfaces the thrown render error, but under React 19
+        // the throw propagates during the act()-flushed commit, so the create must
+        // run inside act() for expect(...).toThrow to observe it.
+        expect(() =>
+            act(() => {
+                TestRenderer.create(<Bad />);
+            })
+        ).toThrow(/useOverlay must be used within an <OverlayProvider>/);
     });
 });
