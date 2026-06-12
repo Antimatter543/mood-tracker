@@ -20,6 +20,26 @@
 > Release: https://github.com/Antimatter543/mood-tracker/releases/tag/v2.0.0. Endgame detail +
 > the per-check QA table: `frontend/docs/sdk56-endgame-notes.md`.
 
+## 2026-06-13: The Yoga shrink-wrap law has now bitten THREE times — treat every % / stretch child as suspect until its parent's width chain is verified
+**Mistake(s)**: (1) v2.1.0: OverlayModal's styleless `<Pressable>` shrink-wrapped → dialog `width:'94%'`
+rendered at ~49% (entry below). (2) v2.2.0: EntryPhotos' single-photo hero `Image width:'100%'` resolved
+against an unsized `<Pressable>` wrapper → ~40%-wide portrait box instead of full-width hero. (3) v2.2.0:
+EntryCard passed `flexDirection:'row'` via `Card`'s `style` prop — but `Card` styles its OUTER container
+and renders children inside its own inner `<View>` (column) → the in-flow 4px accent bar collapsed to a
+4px-TALL invisible sliver.
+**Rule**: Two laws, check both whenever a size "mysteriously" shrinks:
+- **%-width/stretch resolves against the DIRECT parent.** Any `width:'100%'`/percentage child inside a
+wrapper you didn't explicitly size (especially a bare `<Pressable>`/`<View>` between a flex parent and the
+sized child) → give the wrapper `alignSelf:'stretch'` or absolute-fill, or remove it. Grep candidates:
+`width: '100%'` and `%'` near `Pressable`.
+- **Shared wrapper components are composition-opaque.** `Card`-style components apply your `style` prop to
+their OUTER box while your children land in an INNER wrapper — layout styles (flexDirection, alignItems)
+passed through `style` never reach your children's real parent. Read the wrapper's source before styling
+through it; for edge-decorations (accent bars) prefer `position:'absolute'` + the wrapper's own
+`overflow:'hidden'` clipping.
+On-device screenshot is the only reliable verifier — all three shipped past tsc/jest and were caught by eyes.
+**Date**: 2026-06-13
+
 ## 2026-06-13: Data refresh must be FOCUS-aware, not just a refreshCount counter (frozen blurred tabs)
 **Mistake**: Every data-reading screen reloaded via `useEffect(() => load(), [db, refreshCount])`.
 Adding an entry bumped `refreshCount` but the timeline/stats stayed STALE until a full app reopen.
