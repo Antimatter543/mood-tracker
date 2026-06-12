@@ -1,4 +1,8 @@
-import * as FileSystem from 'expo-file-system';
+// expo-file-system's default export became the new class-based API at SDK 54.
+// The classic function API (getInfoAsync/copyAsync/makeDirectoryAsync/etc.) used
+// throughout this module lives at the `/legacy` entrypoint, available through
+// SDK 56. Migrating to the new File/Directory class API is post-upgrade cleanup.
+import * as FileSystem from 'expo-file-system/legacy';
 
 /**
  * File-storage helpers for entry photo attachments.
