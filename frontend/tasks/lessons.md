@@ -20,6 +20,27 @@
 > Release: https://github.com/Antimatter543/mood-tracker/releases/tag/v2.0.0. Endgame detail +
 > the per-check QA table: `frontend/docs/sdk56-endgame-notes.md`.
 
+## 2026-06-12: A Sortable.Grid chip can't ALSO host a long-press-to-edit — give edit its own door
+
+**Mistake**: After wrapping the activity chips in `react-native-sortables` `Sortable.Grid`
+(`dragActivationDelay={300}`), the chip's `Pressable onLongPress` (`delayLongPress={500}`) that
+opened the edit modal became UNREACHABLE on a real finger — the drag gesture activates at 300ms at
+the RNGH/worklet layer and cancels the Pressable long-press. Hold-duration can't discriminate
+edit-vs-drag on the same element: the shorter timer eats the other.
+
+**Rule**: On this grid, **drag owns reorder; editing gets a SEPARATE, explicit path** — the group
+"..." popover -> "Edit Activities" hub (`components/forms/ActivityReorder.tsx`), where each row taps
+to open `ActivityEditModal` (which already holds BOTH Update and Delete, so deletion stays
+reachable). Do NOT try to restore a chip long-press via `react-native-sortables`' `Sortable.Touchable`:
+it exists (`onTap/onDoubleTap/onLongPress/onTouchesDown/Up`, `failDistance` default 10, `gestureMode`
+default `exclusive`) and composes each gesture `simultaneousWithExternalGesture(itemDragGesture)`, so
+its `onLongPress` fires SIMULTANEOUSLY with the drag's own activation -> the edit modal pops mid-drag
+= worse than the original bug. `onTap` is the only clean one, but tap is already owned by
+toggle-selection on this grid. There is no grid-level `onItemPress`/stationary-hold-and-release
+callback. (v1.9.4 — re-check the dist/typescript types if the lib is bumped.)
+
+**Date**: 2026-06-12
+
 ## 2026-06-12: SDK-56 endgame device-QA gotchas (carries forward to every future on-device pass)
 
 **Mistake / friction encountered during the v2.0.0 endgame device QA, and how to avoid it:**

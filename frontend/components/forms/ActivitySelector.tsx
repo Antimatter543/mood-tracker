@@ -57,7 +57,6 @@ type ActivityItemProps = {
     activity: Activity;
     isSelected: boolean;
     onPress: () => void;
-    onLongPress: () => void;
 };
 
 type ActivityGroupSectionProps = {
@@ -66,7 +65,8 @@ type ActivityGroupSectionProps = {
     selectedActivities: number[];
     onSelectActivity: (id: number) => void;
     onAddActivity: () => void;
-    onLongPressActivity: (activity: Activity) => void;
+    /** Open the edit-activity modal for one activity (from the "Edit Activities" hub). */
+    onEditActivity: (activity: Activity) => void;
     onDeleteGroup: () => void;
     onReorderActivities: (activities: Activity[]) => void;
     /** Whether THIS group's "..." menu is the one currently open. */
@@ -301,15 +301,18 @@ export const renderActivityIcon = (
     );
 };
 
-const ActivityItem = ({ activity, isSelected, onPress, onLongPress }: ActivityItemProps) => {
+const ActivityItem = ({ activity, isSelected, onPress }: ActivityItemProps) => {
     const colors = useThemeColors();
     const styles = useStyles(colors);
 
+    // A plain tap toggles selection. A hold-and-drag is consumed by the
+    // enclosing Sortable.Grid to reorder (its drag long-press at 300ms would
+    // race and cancel any chip-level long-press), so editing now lives in the
+    // group "..." -> "Edit Activities" hub, NOT on a chip long-press. No
+    // onLongPress here: it could never fire under the drag gesture anyway.
     return (
         <Pressable
             onPress={onPress}
-            onLongPress={onLongPress}
-            delayLongPress={500}
             style={styles.activityWrapper}
         >
             <View style={[styles.circleButton, isSelected && styles.selectedCircle]}>
@@ -460,7 +463,7 @@ const ActivityGroupSection = ({
     selectedActivities,
     onSelectActivity,
     onAddActivity,
-    onLongPressActivity,
+    onEditActivity,
     onDeleteGroup,
     onReorderActivities,
     menuOpen,
@@ -491,10 +494,9 @@ const ActivityGroupSection = ({
                 activity={item}
                 isSelected={selectedActivities.includes(item.id)}
                 onPress={() => onSelectActivity(item.id)}
-                onLongPress={() => onLongPressActivity(item)}
             />
         ),
-        [selectedActivities, onSelectActivity, onLongPressActivity]
+        [selectedActivities, onSelectActivity]
     );
 
     const keyExtractor = useCallback((item: Activity) => String(item.id), []);
@@ -566,6 +568,7 @@ const ActivityGroupSection = ({
                     activities={activities}
                     onReorder={handleReorderComplete}
                     onClose={() => setIsReordering(false)}
+                    onEditActivity={onEditActivity}
                 />
             ) : (
                 // Hold-and-drag to reorder WITHIN the group. A normal tap still
@@ -612,9 +615,12 @@ const GroupActionMenu = ({
                 <Text style={styles.menuItemText}>Add Activity</Text>
             </Pressable>
 
+            {/* Opens the per-group activity-management hub (edit any activity +
+                reorder via arrows). Drag-to-reorder is on the main grid; this is
+                the door to EDITING, which the drag gesture would otherwise hide. */}
             <Pressable style={styles.menuItem} onPress={onReorderActivities}>
-                <MaterialIcons name="reorder" size={18} color={colors.text} />
-                <Text style={styles.menuItemText}>Reorder Activities</Text>
+                <MaterialIcons name="edit" size={18} color={colors.text} />
+                <Text style={styles.menuItemText}>Edit Activities</Text>
             </Pressable>
 
             <Pressable style={styles.menuItem} onPress={onDeleteGroup}>
@@ -808,7 +814,7 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
                             setCurrentGroupId(group.id);
                             setModals({ ...modals, addActivity: true });
                         }}
-                        onLongPressActivity={(activity) => {
+                        onEditActivity={(activity) => {
                             setSelectedActivity(activity);
                             setModals({ ...modals, edit: true });
                         }}
