@@ -1,39 +1,24 @@
 /**
- * @jest-environment node
- *
- * Unit tests for the useEntryDraft hook. We exercise the reducer surface
- * without mounting React — by calling the hook inside a tiny test renderer
- * we get access to the returned object and can dispatch sequenced operations
- * just like the form would.
+ * Unit tests for the useEntryDraft hook. We exercise the reducer surface via
+ * RNTL's renderHook: `result.current` always reflects the latest committed
+ * render, so we drive state changes inside act() and re-read result.current.
  */
-import { act, create } from 'react-test-renderer';
-import React from 'react';
+import { renderHook, act } from '@testing-library/react-native';
 import {
     useEntryDraft,
     validateDraft,
     EntryDraft,
-    UseEntryDraft,
 } from '@/components/forms/hooks/useEntryDraft';
 
-// Capture the hook's return value into a ref-style box so each test can poke
-// at it imperatively. Simpler than @testing-library/react-hooks (which isn't
-// installed here) and aligns with the existing react-test-renderer setup.
-function renderUseEntryDraft(init?: Parameters<typeof useEntryDraft>[0]) {
-    const box: { current: UseEntryDraft | null } = { current: null };
-    function Probe() {
-        box.current = useEntryDraft(init);
-        return null;
-    }
-    let tree: ReturnType<typeof create> | undefined;
-    act(() => {
-        tree = create(React.createElement(Probe));
-    });
+// Render the hook and expose the live result. RNTL's renderHook is async and
+// `result` is a ref whose `.current` updates after each act()-flushed render.
+async function renderUseEntryDraft(init?: Parameters<typeof useEntryDraft>[0]) {
+    const { result, unmount } = await renderHook(() => useEntryDraft(init));
     return {
-        get hook(): UseEntryDraft {
-            if (!box.current) throw new Error('hook not initialized');
-            return box.current;
+        get hook() {
+            return result.current;
         },
-        unmount: () => tree?.unmount(),
+        unmount,
     };
 }
 
@@ -88,17 +73,17 @@ describe('validateDraft (pure)', () => {
 });
 
 describe('useEntryDraft state machine', () => {
-    it('uses defaults when no init is provided', () => {
-        const { hook } = renderUseEntryDraft();
+    it('uses defaults when no init is provided', async () => {
+        const { hook } = await renderUseEntryDraft();
         expect(hook.draft.mood).toBe(5.0);
         expect(hook.draft.activities).toEqual([]);
         expect(hook.draft.notes).toBe('');
         expect(hook.draft.date).toBeInstanceOf(Date);
     });
 
-    it('seeds the draft from init values', () => {
+    it('seeds the draft from init values', async () => {
         const seedDate = new Date('2026-01-15T10:00:00Z');
-        const { hook } = renderUseEntryDraft({
+        const { hook } = await renderUseEntryDraft({
             mood: 7,
             activities: [1, 2],
             notes: 'felt great',
@@ -110,39 +95,39 @@ describe('useEntryDraft state machine', () => {
         expect(hook.draft.date.getTime()).toBe(seedDate.getTime());
     });
 
-    it('setMood updates only the mood field', () => {
-        const r = renderUseEntryDraft({ mood: 3, notes: 'keep' });
-        act(() => {
+    it('setMood updates only the mood field', async () => {
+        const r = await renderUseEntryDraft({ mood: 3, notes: 'keep' });
+        await act(async () => {
             r.hook.setMood(8.5);
         });
         expect(r.hook.draft.mood).toBe(8.5);
         expect(r.hook.draft.notes).toBe('keep');
     });
 
-    it('toggleActivity adds when missing, removes when present', () => {
-        const r = renderUseEntryDraft();
-        act(() => {
+    it('toggleActivity adds when missing, removes when present', async () => {
+        const r = await renderUseEntryDraft();
+        await act(async () => {
             r.hook.toggleActivity(42);
         });
         expect(r.hook.draft.activities).toEqual([42]);
-        act(() => {
+        await act(async () => {
             r.hook.toggleActivity(42);
         });
         expect(r.hook.draft.activities).toEqual([]);
     });
 
-    it('toggleActivity preserves order of existing entries', () => {
-        const r = renderUseEntryDraft({ activities: [1, 2, 3] });
-        act(() => {
+    it('toggleActivity preserves order of existing entries', async () => {
+        const r = await renderUseEntryDraft({ activities: [1, 2, 3] });
+        await act(async () => {
             r.hook.toggleActivity(2);
         });
         expect(r.hook.draft.activities).toEqual([1, 3]);
     });
 
-    it('setActivities replaces the list (defensive copy, not aliasing)', () => {
-        const r = renderUseEntryDraft();
+    it('setActivities replaces the list (defensive copy, not aliasing)', async () => {
+        const r = await renderUseEntryDraft();
         const external = [9, 10];
-        act(() => {
+        await act(async () => {
             r.hook.setActivities(external);
         });
         expect(r.hook.draft.activities).toEqual([9, 10]);
@@ -151,26 +136,26 @@ describe('useEntryDraft state machine', () => {
         expect(r.hook.draft.activities).toEqual([9, 10]);
     });
 
-    it('setDate updates the date field', () => {
-        const r = renderUseEntryDraft();
+    it('setDate updates the date field', async () => {
+        const r = await renderUseEntryDraft();
         const newDate = new Date('2026-06-01T00:00:00Z');
-        act(() => {
+        await act(async () => {
             r.hook.setDate(newDate);
         });
         expect(r.hook.draft.date.getTime()).toBe(newDate.getTime());
     });
 
-    it('setNotes updates the notes field', () => {
-        const r = renderUseEntryDraft();
-        act(() => {
+    it('setNotes updates the notes field', async () => {
+        const r = await renderUseEntryDraft();
+        await act(async () => {
             r.hook.setNotes('a new entry');
         });
         expect(r.hook.draft.notes).toBe('a new entry');
     });
 
-    it('reset clears state back to defaults', () => {
-        const r = renderUseEntryDraft({ mood: 9, notes: 'bla', activities: [1, 2] });
-        act(() => {
+    it('reset clears state back to defaults', async () => {
+        const r = await renderUseEntryDraft({ mood: 9, notes: 'bla', activities: [1, 2] });
+        await act(async () => {
             r.hook.reset();
         });
         expect(r.hook.draft.mood).toBe(5);
@@ -178,63 +163,63 @@ describe('useEntryDraft state machine', () => {
         expect(r.hook.draft.activities).toEqual([]);
     });
 
-    it('addPhoto appends a photo uri (and is idempotent on the same value)', () => {
-        const r = renderUseEntryDraft();
-        act(() => {
+    it('addPhoto appends a photo uri (and is idempotent on the same value)', async () => {
+        const r = await renderUseEntryDraft();
+        await act(async () => {
             r.hook.addPhoto('file:///shot.jpg');
         });
         expect(r.hook.draft.photos).toEqual(['file:///shot.jpg']);
-        act(() => {
+        await act(async () => {
             r.hook.addPhoto('file:///shot.jpg');
         });
         expect(r.hook.draft.photos).toEqual(['file:///shot.jpg']);
     });
 
-    it('removePhoto removes a photo uri and is a no-op when absent', () => {
-        const r = renderUseEntryDraft({ photos: ['file:///a.jpg', 'file:///b.jpg'] });
-        act(() => {
+    it('removePhoto removes a photo uri and is a no-op when absent', async () => {
+        const r = await renderUseEntryDraft({ photos: ['file:///a.jpg', 'file:///b.jpg'] });
+        await act(async () => {
             r.hook.removePhoto('file:///a.jpg');
         });
         expect(r.hook.draft.photos).toEqual(['file:///b.jpg']);
-        act(() => {
+        await act(async () => {
             r.hook.removePhoto('file:///missing.jpg');
         });
         expect(r.hook.draft.photos).toEqual(['file:///b.jpg']);
     });
 
-    it('seeds photos from init', () => {
-        const r = renderUseEntryDraft({ photos: ['file:///seed.jpg'] });
+    it('seeds photos from init', async () => {
+        const r = await renderUseEntryDraft({ photos: ['file:///seed.jpg'] });
         expect(r.hook.draft.photos).toEqual(['file:///seed.jpg']);
     });
 
-    it('reset clears photos back to empty', () => {
-        const r = renderUseEntryDraft({ photos: ['file:///x.jpg'] });
-        act(() => {
+    it('reset clears photos back to empty', async () => {
+        const r = await renderUseEntryDraft({ photos: ['file:///x.jpg'] });
+        await act(async () => {
             r.hook.reset();
         });
         expect(r.hook.draft.photos).toEqual([]);
     });
 
-    it('reset accepts new init values', () => {
-        const r = renderUseEntryDraft();
-        act(() => {
+    it('reset accepts new init values', async () => {
+        const r = await renderUseEntryDraft();
+        await act(async () => {
             r.hook.reset({ mood: 2, notes: 'rough day' });
         });
         expect(r.hook.draft.mood).toBe(2);
         expect(r.hook.draft.notes).toBe('rough day');
     });
 
-    it('isValid is true for a fresh draft, false after setting mood out of range', () => {
-        const r = renderUseEntryDraft();
+    it('isValid is true for a fresh draft, false after setting mood out of range', async () => {
+        const r = await renderUseEntryDraft();
         expect(r.hook.isValid).toBe(true);
-        act(() => {
+        await act(async () => {
             r.hook.setMood(15);
         });
         expect(r.hook.isValid).toBe(false);
     });
 
     it('submit invokes onSubmit with the current draft when valid', async () => {
-        const r = renderUseEntryDraft({ mood: 6, activities: [1], notes: 'ok' });
+        const r = await renderUseEntryDraft({ mood: 6, activities: [1], notes: 'ok' });
         const onSubmit = jest.fn().mockResolvedValue(undefined);
         let result: any;
         await act(async () => {
@@ -249,7 +234,7 @@ describe('useEntryDraft state machine', () => {
     });
 
     it('submit does NOT invoke onSubmit when the draft is invalid', async () => {
-        const r = renderUseEntryDraft({ mood: -5 });
+        const r = await renderUseEntryDraft({ mood: -5 });
         const onSubmit = jest.fn();
         let result: any;
         await act(async () => {
@@ -261,7 +246,7 @@ describe('useEntryDraft state machine', () => {
     });
 
     it('submit returns { ok: false, error } when onSubmit throws', async () => {
-        const r = renderUseEntryDraft();
+        const r = await renderUseEntryDraft();
         const onSubmit = jest.fn().mockRejectedValue(new Error('db is down'));
         let result: any;
         await act(async () => {

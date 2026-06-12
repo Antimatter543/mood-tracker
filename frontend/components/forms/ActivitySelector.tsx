@@ -623,11 +623,6 @@ export function ActivitySelector({ onSelectActivity, selectedActivities }: Activ
     const [newActivityName, setNewActivityName] = useState("");
     const [newGroupName, setNewGroupName] = useState("");
 
-    // Load both activities and groups on mount
-    React.useEffect(() => {
-        loadActivities();
-    }, []);
-
     const loadActivities = async () => {
         try {
             // Load groups first
@@ -643,6 +638,14 @@ export function ActivitySelector({ onSelectActivity, selectedActivities }: Activ
             console.error('Error loading activities and groups:', error);
         }
     };
+
+    // Load both activities and groups on mount. Declared after loadActivities so
+    // the reference is not a temporal-dead-zone access (react-hooks 7.x flags
+    // use-before-declaration even though the effect runs post-render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    React.useEffect(() => {
+        loadActivities();
+    }, []);
 
     const handleAddActivity = async (name: string, iconFamily: string, iconName: string) => {
         if (!name.trim() || !currentGroupId) return;

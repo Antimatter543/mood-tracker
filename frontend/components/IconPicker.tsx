@@ -204,7 +204,9 @@ export const IconPicker: React.FC<IconPickerProps> = ({
             // root portal (StyleSheet.absoluteFill), so it fills the window without
             // explicit Dimensions sizing. Add a top inset so the header clears the
             // status bar (the old native <Modal> gave it its own window inset).
-            ...StyleSheet.absoluteFillObject,
+            // RN 0.85 removed StyleSheet.absoluteFillObject (runtime + types);
+            // absoluteFill is now the spreadable absolute-position object.
+            ...StyleSheet.absoluteFill,
             backgroundColor: colors.background,
             paddingTop: 24,
         },

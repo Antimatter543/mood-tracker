@@ -3,6 +3,24 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.0.0] - 2026-07 (pending release — built on branch `upgrade/sdk-56`, ships after the 2026-07-01 build-quota reset)
+
+### Changed
+- **Upgraded the app's foundation (Expo SDK 52 → 56, React Native 0.76 → 0.85).** This is an
+  internal platform/tooling upgrade that keeps SoulSync current with security patches, the Android
+  toolchain, and the libraries it's built on. The supported Android version range is unchanged for
+  the devices SoulSync targets.
+- **No feature changes and no data changes.** Your entries, photos, and settings are untouched —
+  the on-device database and its migrations carry over exactly as before (verified via an
+  install-over-the-old-version data-survival test before release). Everything you could do in 1.2.x
+  you can still do; nothing was removed.
+
+### Internal (no user impact)
+- Dropped the bundled navigation library in favour of the router's built-in navigation (SDK 56).
+- Migrated the test suite off the deprecated React test renderer; all 348 tests pass on the new
+  stack. Animations, charts, notifications, and the in-app overlay dialogs were re-verified on the
+  new architecture.
+
 ## [1.2.3] - 2026-06-12
 
 ### Fixed
