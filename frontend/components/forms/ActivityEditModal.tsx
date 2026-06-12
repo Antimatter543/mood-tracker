@@ -147,11 +147,16 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
     const styles = StyleSheet.create({
         modalContent: {
             backgroundColor: colors.cardBackground,
-            width: '90%',
-            maxWidth: 400,
+            // Substantially larger than the old 90%/400 card — the edit dialog
+            // felt cramped. Wider + a comfortable maxHeight so the name field,
+            // icon row, and action buttons all have breathing room (and the body
+            // scrolls + stays keyboard-safe on small screens).
+            width: '94%',
+            maxWidth: 520,
+            maxHeight: '85%',
             borderRadius: 16,
-            padding: 20,
-            gap: 16,
+            padding: 24,
+            gap: 20,
         },
         modalHeader: {
             flexDirection: 'row',
