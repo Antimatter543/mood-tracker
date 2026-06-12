@@ -23,13 +23,28 @@ Gates: `npx tsc --noEmit` (0 err) + `npx jest` (>=348 green). No native builds. 
   `styles/global.ts` (dark #141418, light, cherry, midnight, forest).
 
 ## Steps
-- [ ] Item 1: `OverlayPopover` component + convert group "..." menu to it (measure-in-window + clamp).
-      Remove dead `menuOverlay` style + zIndex juggling. RNTL test for dismiss-on-outside-tap.
-- [ ] Item 2: enlarge Edit-activity modal (`ActivityEditModal` modalContent width ~94%/maxWidth 520,
-      maxHeight 85%) + give IconPicker grid flexible vertical room.
-- [ ] Item 3: rename `sceneContainerStyle` -> `sceneStyle`; keep SystemUI; wrap Tabs in themed flex:1 View.
-- [ ] Item 4: install `react-native-sortables@1.9.4` (exact), wrap per-group chip list in Sortable.Flex/Grid
-      with long-press activation; tap still toggles; persist via `updateActivityPositions` + reload.
+- [x] Item 1: `OverlayPopover` component + convert group "..." menu to it (measure-in-window + clamp).
+      Remove dead `menuOverlay` style + zIndex juggling. RNTL test for dismiss-on-outside-tap. (ebebb9e)
+- [x] Item 2: enlarge Edit-activity modal (94%/520/85%). IconPicker grid already full-screen+flexible,
+      no change needed there. (0c7598b)
+- [x] Item 3: rename `sceneContainerStyle` -> `sceneStyle` (confirmed dead via node_modules types +
+      screenOptions does NO excess-prop check, so tsc never caught it); keep SystemUI; wrap Tabs in
+      themed flex:1 View. (9097ee6)
+- [x] Item 4: installed `react-native-sortables@1.9.4` (exact); wrapped per-group chip list in
+      `Sortable.Grid` (columns=5, dragActivationDelay=300, fail-offset default 5 so tap/scroll don't
+      drag); tap still toggles via ActivityItem.onPress; onDragEnd -> onReorderActivities ->
+      updateActivityPositions + reload; scrollableRef threaded from EntryForm's Animated.ScrollView.
+
+## RISK for device QA
+- **Long-press collision (PRIMARY)**: drag now activates on long-press (300ms). The chip's existing
+  `onLongPress` -> edit-activity modal (500ms) will likely be SHADOWED by the drag gesture, so
+  hold-to-edit a single activity may stop working. Edit is otherwise only reachable via that long-press
+  (the "..." menu has Add/Reorder/Delete-group, not per-activity edit). If device QA confirms edit is
+  lost, options: gate drag behind the existing "Reorder Activities" mode, or add an explicit edit
+  affordance. InfoBubble copy ("Hold an activity to edit") may need updating.
+- **Nested ScrollViews**: ActivitySelector's own ScrollView is nested in EntryForm's ScrollView. Drag +
+  auto-scroll wired to the OUTER (form) ScrollView (the one that actually scrolls). Within-group grids
+  are small (1-3 rows) so auto-scroll is an edge nicety; the within-grid drag itself is the main path.
 
 ## Decisions made
 - Item 1: add a dedicated lightweight `OverlayPopover` (NOT reuse OverlayModal's centered dialog) — a popover
