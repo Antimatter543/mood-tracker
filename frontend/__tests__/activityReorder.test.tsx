@@ -99,4 +99,50 @@ describe('ActivityReorder — edit hub', () => {
         });
         expect(onEditActivity).not.toHaveBeenCalled();
     });
+
+    it('refreshes a renamed row when the activities prop changes (no remount)', async () => {
+        // Repro of the device-QA bug: after editing+Updating in the modal, the
+        // parent reloads and passes a fresh `activities` prop; the hub must show
+        // the new name in place (it used to keep its stale mount-time snapshot).
+        const { view } = await renderHub();
+        expect(view.getByText('Reading')).toBeTruthy();
+
+        const renamed: Activity = { ...act2, name: 'Reading Books' };
+        await act(async () => {
+            await view.rerender(
+                <ActivityReorder
+                    activities={[act1, renamed, act3]}
+                    onReorder={jest.fn()}
+                    onClose={jest.fn()}
+                    onEditActivity={jest.fn()}
+                />
+            );
+        });
+
+        expect(view.getByText('Reading Books')).toBeTruthy();
+        expect(view.queryByText('Reading')).toBeNull();
+        expect(view.getByLabelText('Edit Reading Books')).toBeTruthy();
+    });
+
+    it('drops a deleted row when the activities prop shrinks (no remount)', async () => {
+        // A Delete from the modal also reloads the parent -> fewer activities in
+        // the prop. The hub must drop that row in place.
+        const { view } = await renderHub();
+        expect(view.getByText('Coding')).toBeTruthy();
+
+        await act(async () => {
+            await view.rerender(
+                <ActivityReorder
+                    activities={[act1, act2]}
+                    onReorder={jest.fn()}
+                    onClose={jest.fn()}
+                    onEditActivity={jest.fn()}
+                />
+            );
+        });
+
+        expect(view.queryByText('Coding')).toBeNull();
+        expect(view.getByText('Running')).toBeTruthy();
+        expect(view.getByText('Reading')).toBeTruthy();
+    });
 });

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Activity } from '../types';
 import { useThemeColors } from '@/styles/global';
@@ -42,6 +42,27 @@ export const ActivityReorder = ({ activities, onReorder, onClose, onEditActivity
     const colors = useThemeColors();
     const styles = useStyles(colors);
     const [reorderedActivities, setReorderedActivities] = useState<Activity[]>([...activities]);
+
+    // A signature of the upstream activities (id + name + icon, in order). The
+    // local `reorderedActivities` is seeded from the prop ONCE at mount, so when an
+    // edit modal renames/re-icons or deletes an activity — which refreshes the
+    // `activities` prop via the parent's loadActivities() — this hub would keep
+    // showing its stale snapshot (the chips update, the hub list doesn't). Re-seed
+    // local state whenever that signature changes so renames/deletes (and a
+    // persisted arrow-reorder, which flows back through the same prop) refresh the
+    // rows in place. Keyed on content (not array identity) so an unrelated parent
+    // re-render doesn't clobber an in-progress arrow move before Save.
+    const activitiesSignature = activities
+        .map((a) => `${a.id}:${a.name}:${a.icon_family}/${a.icon_name}`)
+        .join('|');
+
+    // Prop-to-state sync (see note above). react-hooks 7.x's set-state-in-effect
+    // rule is downgraded to a warning project-wide; this is a deliberate, guarded
+    // re-seed on upstream-data change, not a render-loop.
+    useEffect(() => {
+        setReorderedActivities([...activities]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- re-seed only when the activities' CONTENT changes, tracked by activitiesSignature
+    }, [activitiesSignature]);
 
     const moveActivity = (index: number, direction: 'up' | 'down') => {
         if (

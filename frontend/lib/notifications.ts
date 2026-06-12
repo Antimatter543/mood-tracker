@@ -3,10 +3,18 @@
  *
  * Local notification system for SoulSync. 100% on-device — no cloud.
  *
- * IMPORTANT: expo-notifications is incompatible with Expo Go on Android
- * (SDK 52 / RN 0.76 new arch). Testing requires an expo-dev-client build:
- *   npx expo run:android
- * iOS Expo Go supports expo-notifications, but Android does not.
+ * IMPORTANT: expo-notifications' native module is STRIPPED from Expo Go on
+ * Android (since SDK 53). A bare top-level `import * as Notifications from
+ * 'expo-notifications'` THROWS at module-evaluation time inside Expo Go, and
+ * because this module is imported (transitively) by app/(tabs)/_layout.tsx, that
+ * throw aborts the route module's evaluation -> its default export is undefined
+ * -> expo-router reads `.ErrorBoundary` off undefined -> the WHOLE app
+ * white-screens on the splash. To keep the app bootable in Expo Go (the on-device
+ * iteration loop), the native module is loaded LAZILY through `getNotifications()`
+ * and every public function no-ops (or returns a sane default) when it is absent.
+ * On a real dev-client / release build the module is present and behaves exactly
+ * as before. (Mirrors the already-guarded `react-native-haptic-feedback`.)
+ * Full notification behaviour can only be verified on a dev-client/release build.
  *
  * Architecture:
  *   - All scheduling logic lives in pure/mockable functions so the
@@ -22,8 +30,35 @@
  * TODO(v2): weekly-recap — fire every Sunday 10:00 local with week stats.
  */
 
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+// Type-only import: erased at compile time, so it never pulls the native module
+// in at runtime (which would re-introduce the Expo-Go module-eval crash).
+import type * as NotificationsModule from 'expo-notifications';
+
+/**
+ * Lazily resolve the expo-notifications native module. Returns `null` when the
+ * module is unavailable (Expo Go on Android strips it), so callers degrade to a
+ * no-op instead of throwing at import. `require` is wrapped in try/catch because
+ * accessing the stripped module throws synchronously. Resolved once and cached.
+ */
+let cachedNotifications: typeof NotificationsModule | null | undefined;
+function getNotifications(): typeof NotificationsModule | null {
+  if (cachedNotifications !== undefined) return cachedNotifications;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy, guarded native require (see module header)
+    cachedNotifications = require('expo-notifications') as typeof NotificationsModule;
+  } catch {
+    cachedNotifications = null;
+    if (__DEV__) {
+      console.warn(
+        '[notifications] expo-notifications native module unavailable ' +
+          '(expected in Expo Go on Android) — reminders are no-ops here. ' +
+          'Use a dev-client/release build to test notifications.'
+      );
+    }
+  }
+  return cachedNotifications;
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -39,6 +74,8 @@ export const ANDROID_CHANNEL_ID = 'daily-reminder';
  */
 export async function ensureAndroidChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
+  const Notifications = getNotifications();
+  if (!Notifications) return; // no native module (Expo Go) — nothing to register
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
     name: 'Daily Reminder',
     importance: Notifications.AndroidImportance.DEFAULT,
@@ -57,6 +94,8 @@ export async function ensureAndroidChannel(): Promise<void> {
  * Do NOT call on cold boot.
  */
 export async function requestNotificationPermission(): Promise<boolean> {
+  const Notifications = getNotifications();
+  if (!Notifications) return false; // can't be granted where there's no module
   const { status: existing } = await Notifications.getPermissionsAsync();
   if (existing === 'granted') return true;
 
@@ -66,8 +105,11 @@ export async function requestNotificationPermission(): Promise<boolean> {
 
 /**
  * Returns the current permission status without prompting.
+ * Reports 'undetermined' when the native module is unavailable (Expo Go).
  */
 export async function getNotificationPermissionStatus(): Promise<string> {
+  const Notifications = getNotifications();
+  if (!Notifications) return 'undetermined';
   const { status } = await Notifications.getPermissionsAsync();
   return status;
 }
@@ -164,6 +206,9 @@ export async function rescheduleDailyReminder(
   minute: number,
   copy: { title: string; body: string }
 ): Promise<void> {
+  const Notifications = getNotifications();
+  if (!Notifications) return; // Expo Go (no native module) — nothing to schedule
+
   // Cancel previous so we never accumulate duplicates.
   await Notifications.cancelScheduledNotificationAsync(DAILY_REMINDER_IDENTIFIER);
 
@@ -187,6 +232,8 @@ export async function rescheduleDailyReminder(
  * Cancel the daily reminder and remove it from the schedule.
  */
 export async function cancelDailyReminder(): Promise<void> {
+  const Notifications = getNotifications();
+  if (!Notifications) return; // nothing was scheduled where there's no module
   await Notifications.cancelScheduledNotificationAsync(DAILY_REMINDER_IDENTIFIER);
 }
 

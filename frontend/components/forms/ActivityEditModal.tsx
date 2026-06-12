@@ -152,7 +152,7 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
             // icon row, and action buttons all have breathing room (and the body
             // scrolls + stays keyboard-safe on small screens).
             width: '94%',
-            maxWidth: 520,
+            maxWidth: 560,
             maxHeight: '85%',
             borderRadius: 16,
             padding: 24,
@@ -191,6 +191,11 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
         },
         button: {
             flex: 1,
+            // A floor so each action button never collapses narrower than its
+            // label, even if the row were ever cramped (the two labels are short;
+            // 96px comfortably fits "Delete"/"Update" at large font scale). Pairs
+            // with flex:1 to split the row evenly when there's room.
+            minWidth: 96,
             padding: 12,
             borderRadius: 8,
             alignItems: 'center',

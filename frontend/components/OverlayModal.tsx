@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { BackHandler, Pressable, StyleSheet } from 'react-native';
+import { BackHandler, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { useOverlay } from '@/context/OverlayHost';
@@ -95,23 +95,65 @@ const OverlayModalContent: React.FC<{
 
     return (
         <Animated.View entering={FadeIn.duration(150)} style={StyleSheet.absoluteFill}>
+            {/* Backdrop: a full-screen dimmed layer. A tap on it (outside the card)
+                closes the dialog, unless dismissOnBackdropPress is false. */}
             <Pressable
-                style={styles.backdrop}
+                style={[StyleSheet.absoluteFill, styles.backdrop]}
                 onPress={dismissOnBackdropPress ? onClose : undefined}
+            />
+            {/* Card layer, ABOVE the backdrop and pinned to the same full-screen
+                box (absoluteFill). It is `pointerEvents="box-none"`, so only the
+                card itself takes touches and every tap in the surrounding gutters
+                passes THROUGH to the backdrop below (preserving tap-outside-to-
+                close). `justifyContent/alignItems: center` positions the card.
+
+                Why a full-screen sibling instead of nesting the card inside the
+                backdrop Pressable: the card (`modalContent`) sizes itself in % (e.g.
+                `width: '94%'`). A %-width child only resolves against a parent with
+                a concrete width — and the previous structure wrapped the card in a
+                STYLELESS `<Pressable>` whose width was `auto`, so it shrink-wrapped
+                to the card and the `94%` resolved against that shrunken width,
+                collapsing the card to ~49% of the screen. This full-screen layer
+                gives the card's `%` the real screen width as its basis -> 94%. */}
+            <View
+                style={[StyleSheet.absoluteFill, styles.cardLayer]}
+                pointerEvents="box-none"
             >
-                {/* Inner Pressable becomes the touch responder so taps on the
-                    content don't trigger the backdrop's onPress. */}
-                <Pressable onPress={() => {}}>{children}</Pressable>
-            </Pressable>
+                {/* The inner no-op `<Pressable>` is the card's own touch responder,
+                    so a tap anywhere on the card (including its 24px padding) is
+                    swallowed and does NOT reach the backdrop's onClose. It is
+                    `alignSelf: 'stretch'` (full width) and centers the card, so it
+                    does NOT shrink-wrap — the card still resolves its `%` against the
+                    full screen width (94%). It only spans the card's HEIGHT, so taps
+                    in the top/bottom margins fall through to the backdrop and close;
+                    the X button and Android hardware-back are the always-available
+                    close affordances. */}
+                <Pressable style={styles.cardPress} onPress={() => {}}>
+                    {children}
+                </Pressable>
+            </View>
         </Animated.View>
     );
 };
 
 const styles = StyleSheet.create({
     backdrop: {
-        flex: 1,
+        // Full-screen dimmed, tappable layer (the close-on-outside-tap target).
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    },
+    // Full-screen layer that holds + centers the card. It sits above the backdrop
+    // and (via `pointerEvents="box-none"` on the element) is transparent to touches
+    // except over the card, so gutter taps reach the backdrop. Centering it here
+    // gives the card's percentage width the full screen as its basis.
+    cardLayer: {
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    },
+    // The card's touch responder. Full width (`alignSelf: 'stretch'`) so it does
+    // NOT shrink-wrap the card (which would collapse the card's `%` width); it only
+    // hugs the card's height and centers it. Swallows taps on the card.
+    cardPress: {
+        alignSelf: 'stretch',
+        alignItems: 'center',
     },
 });

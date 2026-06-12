@@ -20,6 +20,46 @@
 > Release: https://github.com/Antimatter543/mood-tracker/releases/tag/v2.0.0. Endgame detail +
 > the per-check QA table: `frontend/docs/sdk56-endgame-notes.md`.
 
+## 2026-06-12: OverlayModal dialog width collapse + Expo-Go boots crash on the notifications native import
+
+Two gotchas hit while fixing the Edit-Activity device-QA batch on `qol/v2.1.0`.
+
+**1) A %-width dialog card collapsed to ~49% because a STYLELESS `<Pressable>` shrink-wrapped it.**
+`components/OverlayModal.tsx` (dialog variant) used to render the centered card as
+`<Pressable backdrop flex:1 center><Pressable onPress={noop}>{children}</Pressable></Pressable>`.
+The inner no-op `<Pressable>` had NO style → `width: auto` → under the backdrop's `alignItems:
+'center'` it shrink-wraps to its content. A child card sized `width: '94%'` (ActivityEditModal's
+`modalContent`) then resolves that `94%` against the shrink-wrapped Pressable, not the screen — Yoga
+settles at a fixed point of ~49% of screen width (measured 530px on the 1080px Pixel). The buttons
+inside (`flex:1`) then truncated to "Delet"/"Updat". **Rule:** a `%`-width view must have an ancestor
+with a CONCRETE width as its basis; never let a styleless `auto`-width node sit between the centering
+container and a `%`-sized card. Fix that ships: split into a full-screen **backdrop** Pressable +
+a sibling full-screen **`box-none` card layer** (`justifyContent/alignItems:center`) so the card's
+`%` resolves against the real screen width (→94%); the no-op tap-swallow Pressable is
+`alignSelf:'stretch'` (full width, does NOT shrink-wrap) so card-padding taps are still swallowed
+while top/bottom-margin taps fall through to close. All 3 dialog consumers (ActivityEditModal 94%,
+Add/Group modals 90%) inherit the fix and each resolve their own declared %. **Verify card width
+on-device by isolating the DIALOG node** (y-extent ~199..966, width 800–1080) — the hub/Home cards
+behind the modal are 970px (`marginHorizontal`) and will mask the real modal node if you just grep
+the widest node.
+
+**2) The app WHITE-SCREENS at splash in Expo Go (Android) because `lib/notifications.ts` did a bare
+top-level `import * as Notifications from 'expo-notifications'`.** Expo Go strips expo-notifications'
+native module on Android (since SDK 53), so that import THROWS at module-eval. Because
+`app/(tabs)/_layout.tsx:16` imports `lib/notifications`, the throw aborts the ROUTE module's
+evaluation → its default export is undefined → expo-router crashes reading `.ErrorBoundary` off
+undefined → stuck on the splash, no UI. This is the real reason "Expo Go can't run this app" beyond
+the old SDK-mismatch note. **Fix:** load expo-notifications LAZILY via a guarded `getNotifications()`
+(try/catch `require`, cached, returns null when absent) and make every public fn no-op/default when
+null — mirrors the already-guarded `react-native-haptic-feedback`. On a dev-client/release build the
+module is present and behaves exactly as before (the v2.0.0 R8 notification-fire test still holds).
+After this, Go boots fully and the overlays drive via adb. The remaining LogBox warning in Go
+("push notifications… removed from Expo Go") is the caught warning — non-fatal. **Rule:** NEVER do a
+bare top-level import of an optional native module that Expo Go strips, anywhere in the route-module
+import graph — one such import white-screens the whole app. Guard it (lazy require + null no-op).
+
+**Date**: 2026-06-12
+
 ## 2026-06-12: A Sortable.Grid chip can't ALSO host a long-press-to-edit — give edit its own door
 
 **Mistake**: After wrapping the activity chips in `react-native-sortables` `Sortable.Grid`
