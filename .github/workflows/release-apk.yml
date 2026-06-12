@@ -1,0 +1,140 @@
+name: Release APK
+
+# Free, permanent CI lane that builds a SIGNED release APK for SoulSync (Expo CNG).
+# Exists because the EAS free-tier Android build quota is exhausted until 2026-07-01;
+# CI on a public repo is free. The CI keystore is the SAME cert EAS signs with
+# (parity-verified against the v1.2.2 release), so CI-built APKs update cleanly over
+# installed builds.
+#
+# Triggers:
+#   - push tag v*        -> build + create/update the GitHub Release for that tag.
+#   - workflow_dispatch  -> build ANY ref and upload the APK as a run artifact
+#                           (no release). Used for branch QA (e.g. the SDK-56 branch).
+#
+# Invariant preserved: git tag == app.json version == APK versionName ==
+#                      release tag == asset SoulSync-<version>.apk.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch/ref to build (workflow_dispatch only; defaults to the branch this is run from)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # On workflow_dispatch, honour the optional ref input; otherwise use the
+          # ref that triggered the run (the tag on push, the chosen branch on dispatch).
+          ref: ${{ github.event.inputs.ref != '' && github.event.inputs.ref || github.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          # The Expo/RN prebuild ships its own wrapper; don't fail on its checksum.
+          validate-wrappers: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Read app version
+        id: ver
+        run: echo "version=$(node -p "require('./app.json').expo.version")" >> "$GITHUB_OUTPUT"
+
+      - name: Prebuild (CNG -> generate android/)
+        # android/ is gitignored; this regenerates it with the config plugins applied
+        # (withReleaseAbis -> arm-only ABIs in gradle.properties; expo-build-properties
+        # -> R8 minify + resource shrink in the release build).
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Decode keystore
+        # The release signing keystore (parity-verified == EAS == v1.2.2). Written only
+        # to the runner temp dir, never the workspace.
+        run: echo "${{ secrets.SOULSYNC_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
+
+      - name: Build signed release APK
+        working-directory: frontend/android
+        env:
+          SOULSYNC_KEYSTORE_PASSWORD: ${{ secrets.SOULSYNC_KEYSTORE_PASSWORD }}
+          SOULSYNC_KEY_ALIAS: ${{ secrets.SOULSYNC_KEY_ALIAS }}
+          SOULSYNC_KEY_PASSWORD: ${{ secrets.SOULSYNC_KEY_PASSWORD }}
+        run: |
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/release.keystore" \
+            -Pandroid.injected.signing.store.password="$SOULSYNC_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$SOULSYNC_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$SOULSYNC_KEY_PASSWORD" \
+            --no-daemon
+
+      - name: Locate and rename APK
+        id: apk
+        run: |
+          SRC=$(find android/app/build/outputs/apk/release -name '*.apk' | head -1)
+          if [ -z "$SRC" ]; then echo "No release APK found" >&2; exit 1; fi
+          DEST="$RUNNER_TEMP/SoulSync-${{ steps.ver.outputs.version }}.apk"
+          cp "$SRC" "$DEST"
+          echo "path=$DEST" >> "$GITHUB_OUTPUT"
+          echo "name=SoulSync-${{ steps.ver.outputs.version }}.apk" >> "$GITHUB_OUTPUT"
+          ls -la "$DEST"
+
+      # --- workflow_dispatch: upload as a run artifact (no release) ---
+      - name: Upload APK artifact (dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+
+      # --- tag push: create or update the GitHub Release, idempotently ---
+      - name: Publish GitHub Release (tag)
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          APK_PATH: ${{ steps.apk.outputs.path }}
+          APK_NAME: ${{ steps.apk.outputs.name }}
+        run: |
+          # Idempotent: if scripts/release.sh (or a rerun) already created the release,
+          # just upload/replace the asset; otherwise create it with auto notes.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK_PATH#$APK_NAME" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "$APK_PATH#$APK_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "SoulSync ${TAG#v}" \
+              --target "$GITHUB_SHA" \
+              --generate-notes
+          fi

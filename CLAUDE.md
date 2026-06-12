@@ -9,24 +9,54 @@ expo-router (SDK-56 forked react-navigation internally — no `@react-navigation
 
 Public repo: `Antimatter543/mood-tracker` (Anti's). Releases: GitHub Releases (APK).
 
-## Releasing & Versioning — DETERMINISTIC, one command
+## Releasing & Versioning — DETERMINISTIC
 
 **Single source of truth: `frontend/app.json` `expo.version`** (semver). Everything else is derived.
 
 - `android.versionCode` + iOS `buildNumber` are **DERIVED, never hand-edited**:
   `MAJOR*10000 + MINOR*100 + PATCH` (e.g. `1.2.1` -> `10201`). `scripts/bump-version.js` computes them.
 - `eas.json` uses `appVersionSource: "local"` — the version lives in the repo, NOT hidden EAS server state.
-- **To release, run ONE command** (from `frontend/`):
-  ```bash
-  scripts/release.sh patch     # bug fixes / polish   (1.2.1 -> 1.2.2)
-  scripts/release.sh minor     # new features         (1.2.x -> 1.3.0)
-  scripts/release.sh major     # breaking / big       (1.x.x -> 2.0.0)
-  ```
-  It does: tsc+jest gates -> bump -> commit `release: vX.Y.Z` -> `git tag` -> EAS preview build
-  -> download APK -> `gh release` (auto changelog from commits since last tag) -> push.
 - **Invariant:** `git tag == app.json version == APK versionName == GitHub release tag == asset (SoulSync-<version>.apk)`.
-- **DON'T**: hand-edit `versionCode`; `--clobber` an existing release's asset to "update" it (cut a new patch
-  instead so the version visibly moves); build/release outside `scripts/release.sh`.
+
+### Two build lanes — both produce the SAME signed APK (cert parity verified)
+
+**Lane A — GitHub Actions CI (`.github/workflows/release-apk.yml`). FREE + permanent — the default.**
+The EAS free-tier Android build quota is exhausted until **2026-07-01**; CI on this public repo is free and
+unlimited. Used to ship v1.2.3 (2026-06-12).
+  - **Cut a release** = replicate `release.sh`'s bump steps MINUS the EAS build, then push the tag:
+    ```bash
+    cd frontend
+    npx tsc --noEmit && npx jest --silent          # the real gate (what release.sh runs; NOT `npm run check`*)
+    VERSION="$(node scripts/bump-version.js patch)" # patch|minor|major
+    git add app.json && git commit -m "release: v$VERSION" && git tag "v$VERSION"
+    git push origin main --tags                     # the tag push fires the CI lane
+    ```
+    CI then: `npm ci` -> `npx expo prebuild --platform android` (CNG; applies `withReleaseAbis` arm-only +
+    R8/shrink) -> `gradlew assembleRelease` signed via `-Pandroid.injected.signing.*` from the repo-secret
+    keystore -> renames to `SoulSync-<version>.apk` -> creates the GitHub Release (idempotent:
+    `gh release view||create` then `upload --clobber`). Watch: `gh run watch <id> -R Antimatter543/mood-tracker`.
+  - ***`npm run check` also runs `expo lint`, which has ONE pre-existing non-blocking error**
+    (`'__dirname' is not defined` in the Node build script `scripts/bump-version.js` — eslint-config-expo 8
+    doesn't treat `scripts/*.js` as node env). `release.sh` gates on `tsc + jest` ONLY, so it does not block a
+    release. (The `upgrade/sdk-56` branch carries the `.eslintrc.js` node-env override that fixes it.)
+  - **Branch QA builds** (build any ref, NO release): `gh workflow run release-apk.yml
+    -R Antimatter543/mood-tracker --ref <branch>` (or `-f ref=<branch>`). Uploads the APK as a **run
+    artifact**. This replaces the SDK-56 runbook's EAS preview-build step.
+
+**Lane B — EAS via `scripts/release.sh` (quota-bound until 2026-07-01).** The canonical one-command path once
+quota is back: `scripts/release.sh patch|minor|major` does tsc+jest -> bump -> commit -> tag -> EAS preview
+build -> download -> `gh release` (auto changelog) -> push. Same signed output.
+
+- **Keystore custody** (the app's PERMANENT signing identity — losing it = can never update the app):
+  (1) **EAS** (`eas credentials -p android`, account `@astraedus`, slug `soulsync-mood`), (2) **GitHub repo
+  secrets** on `Antimatter543/mood-tracker`: `SOULSYNC_KEYSTORE_BASE64`, `SOULSYNC_KEYSTORE_PASSWORD`,
+  `SOULSYNC_KEY_ALIAS`, `SOULSYNC_KEY_PASSWORD`, (3) **Bitwarden** secure note "SoulSync Android release
+  keystore". Cert SHA-256 (must match EVERY release):
+  `DB:32:8A:E9:F4:88:16:44:BE:0D:40:30:21:2E:2E:65:09:38:78:F3:5E:71:9D:9D:62:E2:9B:06:3C:4E:02:AB`.
+  Verify an APK with `apksigner verify --print-certs <apk>` (these APKs are v2/v3-signed only, so
+  `keytool -printcert -jarfile` prints NOTHING — `apksigner` is authoritative).
+- **DON'T**: hand-edit `versionCode`; `--clobber` a release's asset to "update" it (cut a new patch so the
+  version visibly moves); build/release outside the two lanes; EVER write the keystore into the repo tree.
 - Full doc: `frontend/docs/RELEASING.md`.
 
 ## Build / test / gates
