@@ -5,6 +5,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { Card } from '@/components/Card';
+import { StatTile } from '@/components/StatTile';
 import { useTimeframe } from '@/context/TimeframeContext';
 import { WINDOW_SUMMARY, RECENT_ENTRY_DATES } from './queries';
 import {
@@ -42,36 +43,12 @@ const StatSummaryCard: React.FC = () => {
                     flexDirection: 'row',
                     flexWrap: 'wrap',
                 },
+                // Per-tile width wrapper — the 2x2 grid cell. The StatTile
+                // primitive fills it; padding here breathes the tiles apart.
                 tile: {
                     width: '50%',
                     paddingVertical: 12,
                     paddingHorizontal: 4,
-                },
-                tileInner: {
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 10,
-                },
-                iconWrap: {
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    backgroundColor: colors.accentLight,
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                },
-                textCol: {
-                    flex: 1,
-                },
-                value: {
-                    fontSize: 18,
-                    fontWeight: '700',
-                    color: colors.text,
-                },
-                label: {
-                    fontSize: 12,
-                    color: colors.textSecondary,
-                    marginTop: 2,
                 },
             }),
         [colors]
@@ -200,29 +177,12 @@ const StatSummaryCard: React.FC = () => {
             <View style={styles.grid}>
                 {tiles.map((tile) => (
                     <View key={tile.label} style={styles.tile}>
-                        <View style={styles.tileInner}>
-                            <View style={styles.iconWrap}>
-                                <Feather
-                                    name={tile.icon}
-                                    size={18}
-                                    color={tile.color ?? colors.accent}
-                                />
-                            </View>
-                            <View style={styles.textCol}>
-                                <Text
-                                    style={[
-                                        styles.value,
-                                        tile.color ? { color: tile.color } : null,
-                                    ]}
-                                    numberOfLines={1}
-                                >
-                                    {tile.value}
-                                </Text>
-                                <Text style={styles.label} numberOfLines={1}>
-                                    {tile.label}
-                                </Text>
-                            </View>
-                        </View>
+                        <StatTile
+                            icon={tile.icon}
+                            value={tile.value}
+                            label={tile.label}
+                            color={tile.color}
+                        />
                     </View>
                 ))}
             </View>
