@@ -26,6 +26,7 @@ import { DatePicker } from './DatePicker';
 import { useSettings } from '@/context/SettingsContext';
 import { useOverlay } from '@/context/OverlayHost';
 import { useEntryDraft, EntryDraft } from './hooks/useEntryDraft';
+import { selectPhotosToAdd } from './photoSelection';
 
 const MAX_PHOTOS = 5;
 
@@ -73,20 +74,43 @@ const PhotoAttachments = ({
 
         setLoading(true);
         try {
-            const result =
-                source === 'camera'
-                    ? await ImagePicker.launchCameraAsync({
-                          mediaTypes: ['images'],
-                          quality: 0.8,
-                      })
-                    : await ImagePicker.launchImageLibraryAsync({
-                          mediaTypes: ['images'],
-                          quality: 0.8,
-                          allowsMultipleSelection: false,
-                      });
+            if (source === 'camera') {
+                // Camera is single-shot.
+                const result = await ImagePicker.launchCameraAsync({
+                    mediaTypes: ['images'],
+                    quality: 0.8,
+                });
+                if (!result.canceled && result.assets?.[0]) {
+                    onAdd(result.assets[0].uri);
+                }
+                return;
+            }
 
-            if (!result.canceled && result.assets?.[0]) {
-                onAdd(result.assets[0].uri);
+            // Library: allow multi-select, hinting the picker to cap at the
+            // remaining slots. selectionLimit is best-effort on some Android
+            // pickers, so selectPhotosToAdd enforces the real cap in code.
+            const remaining = MAX_PHOTOS - photos.length;
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                quality: 0.8,
+                allowsMultipleSelection: true,
+                selectionLimit: remaining,
+            });
+
+            if (result.canceled || !result.assets?.length) return;
+
+            const { toAdd, limitHit } = selectPhotosToAdd(
+                photos,
+                result.assets.map((a) => a.uri),
+                MAX_PHOTOS,
+            );
+            toAdd.forEach(onAdd);
+
+            if (limitHit) {
+                Alert.alert(
+                    'Limit reached',
+                    `Only the first ${toAdd.length} added — you can attach up to ${MAX_PHOTOS} photos.`,
+                );
             }
         } finally {
             setLoading(false);
