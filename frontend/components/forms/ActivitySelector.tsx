@@ -7,11 +7,11 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 
 import React, { useMemo, useState, useRef } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Activity, ActivityGroup } from "../types";
 import { ActivityEditModal } from "./ActivityEditModal";
 import { ICON_FAMILIES, IconFamilyType, IconPicker } from "../IconPicker";
+import { OverlayModal } from "../OverlayModal";
 import ActivityReorder from "./ActivityReorder";
 
 import { 
@@ -182,12 +182,6 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
         color: '#ff6b6b',
     },
     // Keep other modal and input styles the same
-    modalContainer: {
-        flex: 1,
-        backgroundColor: "rgba(0, 0, 0, 0.5)",
-        justifyContent: "center",
-        alignItems: "center",
-    },
     modalContent: {
         backgroundColor: colors.cardBackground,
         width: "90%",
@@ -373,11 +367,7 @@ const AddActivityModal = ({ visible, onClose, onAdd, groupName }: AddActivityMod
     };
 
     return (
-        <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
-            {/* Modal renders outside the app-root GestureHandlerRootView; wrap so
-                its inputs/buttons receive touches. See tasks/lessons.md. */}
-            <GestureHandlerRootView style={{ flex: 1 }}>
-            <View style={styles.modalContainer}>
+        <OverlayModal visible={visible} onClose={onClose}>
                 <View style={styles.modalContent}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Add New {groupName} Activity</Text>
@@ -421,9 +411,7 @@ const AddActivityModal = ({ visible, onClose, onAdd, groupName }: AddActivityMod
                         currentIcon={selectedIconName}
                     />
                 </View>
-            </View>
-            </GestureHandlerRootView>
-        </Modal>
+        </OverlayModal>
     );
 };
 
@@ -438,11 +426,7 @@ const AddGroupModal = ({ visible, onClose, onAdd, error }: AddGroupModalProps) =
     };
 
     return (
-        <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
-            {/* Modal renders outside the app-root GestureHandlerRootView; wrap so
-                its input/button receive touches. See tasks/lessons.md. */}
-            <GestureHandlerRootView style={{ flex: 1 }}>
-            <View style={styles.modalContainer}>
+        <OverlayModal visible={visible} onClose={onClose}>
                 <View style={styles.modalContent}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Create New Activity Group</Text>
@@ -463,9 +447,7 @@ const AddGroupModal = ({ visible, onClose, onAdd, error }: AddGroupModalProps) =
                         <Text style={styles.submitButtonText}>Create Group</Text>
                     </Pressable>
                 </View>
-            </View>
-            </GestureHandlerRootView>
-        </Modal>
+        </OverlayModal>
     );
 };
 

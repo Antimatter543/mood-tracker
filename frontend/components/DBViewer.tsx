@@ -8,11 +8,9 @@ import {
     ActivityIndicator,
     Image,
     ScrollView,
-    Modal,
     Dimensions,
     FlatList,
 } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
 import { useDataContext } from '@/context/DataContext';
@@ -22,6 +20,7 @@ import { MoodEntry, Activity, EntryPhoto } from './types';
 import Feather from '@expo/vector-icons/Feather';
 
 import { Card } from './Card';
+import { OverlayModal } from './OverlayModal';
 import { EntryFormData, EntryFormModal } from './forms/EntryForm';
 import { EmptyState } from './EmptyState';
 import { getMediaByEntryIds } from '@/databases/entry-media';
@@ -339,10 +338,7 @@ const PhotoViewer: React.FC<{
     onClose: () => void;
 }> = ({ visible, photos, initialIndex, onClose }) => {
     return (
-        <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-            {/* Modal renders outside the app-root GestureHandlerRootView; wrap so
-                the photo FlatList can pan/swipe. See tasks/lessons.md. */}
-            <GestureHandlerRootView style={{ flex: 1 }}>
+        <OverlayModal visible={visible} onClose={onClose} fullScreen>
             <View style={viewerStyles.overlay}>
                 <Pressable
                     style={viewerStyles.closeButton}
@@ -374,8 +370,7 @@ const PhotoViewer: React.FC<{
                     )}
                 />
             </View>
-            </GestureHandlerRootView>
-        </Modal>
+        </OverlayModal>
     );
 };
 

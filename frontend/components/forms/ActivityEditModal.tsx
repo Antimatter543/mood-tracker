@@ -1,7 +1,6 @@
 // ActivityEditModal.tsx
 import React, { useEffect, useState } from 'react';
-import { Modal, View, Text, TextInput, Pressable, StyleSheet, Alert, Dimensions } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { View, Text, TextInput, Pressable, StyleSheet, Alert } from 'react-native';
 import { useThemeColors } from '@/styles/global';
 import { SQLiteDatabase } from 'expo-sqlite';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -10,11 +9,7 @@ import { updateActivity, deleteActivity } from "@/databases/database";
 import { Activity } from '../types';
 import { useDataContext } from '@/context/DataContext';
 import { ICON_FAMILIES, IconFamilyType, IconPicker } from '../IconPicker';
-
-// Transparent <Modal> roots collapse to zero height on RN 0.76 Android new arch
-// (Fabric) when sized with `flex: 1`. Size the overlay to the window explicitly.
-// See components/forms/EntryForm.tsx for the full note (expo/expo#34470).
-const WINDOW = Dimensions.get('window');
+import { OverlayModal } from '../OverlayModal';
 
 type ActivityEditModalProps = {
     visible: boolean;
@@ -147,13 +142,6 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
     };
 
     const styles = StyleSheet.create({
-        modalContainer: {
-            width: WINDOW.width,
-            height: WINDOW.height,
-            backgroundColor: 'rgba(0, 0, 0, 0.5)',
-            justifyContent: 'center',
-            alignItems: 'center',
-        },
         modalContent: {
             backgroundColor: colors.cardBackground,
             width: '90%',
@@ -237,16 +225,7 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
     });
 
     return (
-        <Modal
-            animationType="fade"
-            transparent={true}
-            visible={visible}
-            onRequestClose={onClose}
-        >
-            {/* Modal renders outside the app-root GestureHandlerRootView; wrap
-                its content so its controls receive touches. See tasks/lessons.md. */}
-            <GestureHandlerRootView style={{ flex: 1 }}>
-            <View style={styles.modalContainer}>
+        <OverlayModal visible={visible} onClose={onClose}>
                 <View style={styles.modalContent}>
                     <View style={styles.modalHeader}>
                         <Text style={styles.title}>Edit Activity</Text>
@@ -310,8 +289,6 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
                         </Pressable>
                     </View>
                 </View>
-            </View>
-            </GestureHandlerRootView>
-        </Modal>
+        </OverlayModal>
     );
 };

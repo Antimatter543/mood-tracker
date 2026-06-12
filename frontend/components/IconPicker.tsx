@@ -1,17 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, Modal, Pressable, ScrollView, StyleSheet, TextInput, Dimensions } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { View, Text, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
 import { useThemeColors } from '@/styles/global';
+import { OverlayModal } from './OverlayModal';
 import * as Feather from '@expo/vector-icons/Feather';
 import * as MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import * as MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import * as FontAwesome6 from '@expo/vector-icons/MaterialCommunityIcons';
-
-
-// Opaque (non-transparent) modal gets a measured native window, so it's far less
-// prone to the Fabric flex-collapse than the transparent modals — but size the
-// root explicitly too for consistency/safety on RN 0.76 Android new arch.
-const WINDOW = Dimensions.get('window');
 
 // Define the icon category structure
 type IconInfo = {
@@ -206,9 +200,13 @@ export const IconPicker: React.FC<IconPickerProps> = ({
     
     const styles = StyleSheet.create({
         modalContainer: {
-            width: WINDOW.width,
-            height: WINDOW.height,
+            // Full-window opaque panel; OverlayModal fullScreen renders it via the
+            // root portal (StyleSheet.absoluteFill), so it fills the window without
+            // explicit Dimensions sizing. Add a top inset so the header clears the
+            // status bar (the old native <Modal> gave it its own window inset).
+            ...StyleSheet.absoluteFillObject,
             backgroundColor: colors.background,
+            paddingTop: 24,
         },
         header: {
             flexDirection: 'row',
@@ -450,15 +448,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({
         setCustomEmoji(emoji);
     };
     return (
-        <Modal
-            visible={visible}
-            animationType="slide"
-            onRequestClose={onClose}
-        >
-            {/* Modal renders outside the app-root GestureHandlerRootView; wrap
-                its content so its scroll lists and buttons receive touches.
-                See tasks/lessons.md. */}
-            <GestureHandlerRootView style={{ flex: 1 }}>
+        <OverlayModal visible={visible} onClose={onClose} fullScreen>
             <View style={styles.modalContainer}>
                 <View style={styles.header}>
                     <Text style={styles.title}>Select Icon</Text>
@@ -597,7 +587,6 @@ export const IconPicker: React.FC<IconPickerProps> = ({
                     )}
                 </ScrollView>
             </View>
-            </GestureHandlerRootView>
-        </Modal>
+        </OverlayModal>
     );
 };
