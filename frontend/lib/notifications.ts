@@ -31,9 +31,21 @@
  */
 
 import { Platform } from 'react-native';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 // Type-only import: erased at compile time, so it never pulls the native module
 // in at runtime (which would re-introduce the Expo-Go module-eval crash).
 import type * as NotificationsModule from 'expo-notifications';
+
+/**
+ * True in Expo Go on Android, where expo-notifications' native module is
+ * STRIPPED (SDK 53+). `Constants.executionEnvironment === 'storeClient'`
+ * identifies the Expo Go client; standalone/bare (real dev-client + release
+ * builds) report 'standalone'/'bare' and keep the full require path. iOS Expo
+ * Go is unaffected by the Android strip, so we scope the skip to Android.
+ */
+const isExpoGoAndroid = (): boolean =>
+  Platform.OS === 'android' &&
+  Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
 /**
  * Lazily resolve the expo-notifications native module. Returns `null` when the
@@ -46,23 +58,48 @@ let cachedNotifications: typeof NotificationsModule | null | undefined;
 // already short-circuits repeat requires, but this flag makes the once-only
 // guarantee explicit and survives even if cachedNotifications were ever reset.
 let warnedUnavailable = false;
+/**
+ * Emit the once-per-runtime "unavailable in Expo Go" notice (console.WARN, never
+ * console.error — see below) and return null. Shared by the pre-require Expo-Go
+ * skip and the require-threw fallback.
+ */
+function markUnavailable(): null {
+  cachedNotifications = null;
+  // ONE concise console.warn — never console.error. The module being absent in
+  // Expo Go is expected, not an error; logging it as console.error made LogBox
+  // render a full-screen "Uncaught Error" on every app boot in Go, disrupting
+  // on-device QA. warn keeps it a quiet, dismissible notice.
+  if (__DEV__ && !warnedUnavailable) {
+    warnedUnavailable = true;
+    console.warn(
+      '[notifications] expo-notifications unavailable in this runtime (Expo Go) — reminders disabled'
+    );
+  }
+  return cachedNotifications;
+}
+
 function getNotifications(): typeof NotificationsModule | null {
   if (cachedNotifications !== undefined) return cachedNotifications;
+
+  // In Expo Go on Android the native module is stripped and `require(
+  // 'expo-notifications')` does not merely return undefined — the module's own
+  // factory console.errors/THROWS during evaluation, which LogBox surfaces as an
+  // ERROR-level entry that our try/catch can't suppress (the error is emitted
+  // INSIDE the module init, before control returns to us). Worse, Metro re-runs a
+  // factory that previously threw on each fresh require attempt across reloads.
+  // So we never require it in Expo Go at all — detect the client up front and
+  // skip straight to the no-op path.
+  if (isExpoGoAndroid()) {
+    return markUnavailable();
+  }
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy, guarded native require (see module header)
     cachedNotifications = require('expo-notifications') as typeof NotificationsModule;
   } catch {
-    cachedNotifications = null;
-    // ONE concise console.warn — never console.error. The require throwing in
-    // Expo Go is expected, not an error; logging it as console.error made
-    // LogBox render a full-screen "Uncaught Error" on every app boot in Go,
-    // disrupting on-device QA. warn keeps it a quiet, dismissible notice.
-    if (__DEV__ && !warnedUnavailable) {
-      warnedUnavailable = true;
-      console.warn(
-        '[notifications] expo-notifications unavailable in this runtime (Expo Go) — reminders disabled'
-      );
-    }
+    // Defensive fallback: any OTHER runtime where the require throws still
+    // degrades rather than crashing.
+    return markUnavailable();
   }
   return cachedNotifications;
 }

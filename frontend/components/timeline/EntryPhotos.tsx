@@ -130,6 +130,12 @@ const styles = StyleSheet.create({
         borderRadius: 10,
         marginRight: 8,
     },
+    // The Pressable wrapper must stretch to the card body width, otherwise it
+    // shrink-wraps the image's intrinsic size and the hero `width:'100%'`
+    // resolves against that collapsed box (a portrait photo renders ~40% wide).
+    heroWrap: {
+        alignSelf: 'stretch',
+    },
     hero: {
         marginTop: 12,
         width: '100%',
@@ -163,6 +169,7 @@ export const EntryPhotos: React.FC<{ photos: EntryPhoto[]; colors: ThemeColors }
         <>
             {layout.kind === 'single' ? (
                 <Pressable
+                    style={styles.heroWrap}
                     onPress={() => open(0)}
                     accessibilityRole="imagebutton"
                     accessibilityLabel="View photo 1"

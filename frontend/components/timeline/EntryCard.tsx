@@ -27,17 +27,26 @@ const useStyles = (colors: ThemeColors) =>
         () =>
             StyleSheet.create({
                 card: {
-                    padding: 0, // inner padding handled by `body` so the accent bar runs full height
+                    padding: 0, // padding handled by `body`; the bar overlays the left edge
                     marginBottom: 12,
-                    flexDirection: 'row',
                 },
+                // Absolutely positioned at the card's left edge so it spans the
+                // FULL card height regardless of Card's internal child wrapper
+                // (Card wraps children in its own View, so a flexDirection:'row'
+                // on the card style never reaches these children — an in-flow bar
+                // collapsed to an invisible top sliver). Card has overflow:'hidden'
+                // + borderRadius:24, so the bar's corners are clipped to the card's
+                // rounded shape automatically.
                 accentBar: {
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
                     width: 4,
-                    alignSelf: 'stretch',
                 },
                 body: {
-                    flex: 1,
                     padding: 16,
+                    paddingLeft: 20, // 16 + the 4px accent bar so text clears it
                 },
                 headerRow: {
                     flexDirection: 'row',
