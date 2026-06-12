@@ -20,6 +20,67 @@
 > Release: https://github.com/Antimatter543/mood-tracker/releases/tag/v2.0.0. Endgame detail +
 > the per-check QA table: `frontend/docs/sdk56-endgame-notes.md`.
 
+## 2026-06-12: OverlayModal dialog width collapse + Expo-Go boots crash on the notifications native import
+
+Two gotchas hit while fixing the Edit-Activity device-QA batch on `qol/v2.1.0`.
+
+**1) A %-width dialog card collapsed to ~49% because a STYLELESS `<Pressable>` shrink-wrapped it.**
+`components/OverlayModal.tsx` (dialog variant) used to render the centered card as
+`<Pressable backdrop flex:1 center><Pressable onPress={noop}>{children}</Pressable></Pressable>`.
+The inner no-op `<Pressable>` had NO style → `width: auto` → under the backdrop's `alignItems:
+'center'` it shrink-wraps to its content. A child card sized `width: '94%'` (ActivityEditModal's
+`modalContent`) then resolves that `94%` against the shrink-wrapped Pressable, not the screen — Yoga
+settles at a fixed point of ~49% of screen width (measured 530px on the 1080px Pixel). The buttons
+inside (`flex:1`) then truncated to "Delet"/"Updat". **Rule:** a `%`-width view must have an ancestor
+with a CONCRETE width as its basis; never let a styleless `auto`-width node sit between the centering
+container and a `%`-sized card. Fix that ships: split into a full-screen **backdrop** Pressable +
+a sibling full-screen **`box-none` card layer** (`justifyContent/alignItems:center`) so the card's
+`%` resolves against the real screen width (→94%); the no-op tap-swallow Pressable is
+`alignSelf:'stretch'` (full width, does NOT shrink-wrap) so card-padding taps are still swallowed
+while top/bottom-margin taps fall through to close. All 3 dialog consumers (ActivityEditModal 94%,
+Add/Group modals 90%) inherit the fix and each resolve their own declared %. **Verify card width
+on-device by isolating the DIALOG node** (y-extent ~199..966, width 800–1080) — the hub/Home cards
+behind the modal are 970px (`marginHorizontal`) and will mask the real modal node if you just grep
+the widest node.
+
+**2) The app WHITE-SCREENS at splash in Expo Go (Android) because `lib/notifications.ts` did a bare
+top-level `import * as Notifications from 'expo-notifications'`.** Expo Go strips expo-notifications'
+native module on Android (since SDK 53), so that import THROWS at module-eval. Because
+`app/(tabs)/_layout.tsx:16` imports `lib/notifications`, the throw aborts the ROUTE module's
+evaluation → its default export is undefined → expo-router crashes reading `.ErrorBoundary` off
+undefined → stuck on the splash, no UI. This is the real reason "Expo Go can't run this app" beyond
+the old SDK-mismatch note. **Fix:** load expo-notifications LAZILY via a guarded `getNotifications()`
+(try/catch `require`, cached, returns null when absent) and make every public fn no-op/default when
+null — mirrors the already-guarded `react-native-haptic-feedback`. On a dev-client/release build the
+module is present and behaves exactly as before (the v2.0.0 R8 notification-fire test still holds).
+After this, Go boots fully and the overlays drive via adb. The remaining LogBox warning in Go
+("push notifications… removed from Expo Go") is the caught warning — non-fatal. **Rule:** NEVER do a
+bare top-level import of an optional native module that Expo Go strips, anywhere in the route-module
+import graph — one such import white-screens the whole app. Guard it (lazy require + null no-op).
+
+**Date**: 2026-06-12
+
+## 2026-06-12: A Sortable.Grid chip can't ALSO host a long-press-to-edit — give edit its own door
+
+**Mistake**: After wrapping the activity chips in `react-native-sortables` `Sortable.Grid`
+(`dragActivationDelay={300}`), the chip's `Pressable onLongPress` (`delayLongPress={500}`) that
+opened the edit modal became UNREACHABLE on a real finger — the drag gesture activates at 300ms at
+the RNGH/worklet layer and cancels the Pressable long-press. Hold-duration can't discriminate
+edit-vs-drag on the same element: the shorter timer eats the other.
+
+**Rule**: On this grid, **drag owns reorder; editing gets a SEPARATE, explicit path** — the group
+"..." popover -> "Edit Activities" hub (`components/forms/ActivityReorder.tsx`), where each row taps
+to open `ActivityEditModal` (which already holds BOTH Update and Delete, so deletion stays
+reachable). Do NOT try to restore a chip long-press via `react-native-sortables`' `Sortable.Touchable`:
+it exists (`onTap/onDoubleTap/onLongPress/onTouchesDown/Up`, `failDistance` default 10, `gestureMode`
+default `exclusive`) and composes each gesture `simultaneousWithExternalGesture(itemDragGesture)`, so
+its `onLongPress` fires SIMULTANEOUSLY with the drag's own activation -> the edit modal pops mid-drag
+= worse than the original bug. `onTap` is the only clean one, but tap is already owned by
+toggle-selection on this grid. There is no grid-level `onItemPress`/stationary-hold-and-release
+callback. (v1.9.4 — re-check the dist/typescript types if the lib is bumped.)
+
+**Date**: 2026-06-12
+
 ## 2026-06-12: SDK-56 endgame device-QA gotchas (carries forward to every future on-device pass)
 
 **Mistake / friction encountered during the v2.0.0 endgame device QA, and how to avoid it:**

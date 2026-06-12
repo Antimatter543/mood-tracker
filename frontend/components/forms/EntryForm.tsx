@@ -12,7 +12,8 @@ import {
     ActivityIndicator,
     BackHandler,
 } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, { FadeIn, useAnimatedRef } from 'react-native-reanimated';
+import type { AnimatedRef } from 'react-native-reanimated';
 import * as ImagePicker from 'expo-image-picker';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -228,6 +229,7 @@ const DetailsStep = ({
     onBack,
     onSubmit,
     submitDisabled,
+    scrollableRef,
 }: {
     activities: number[];
     notes: string;
@@ -239,6 +241,7 @@ const DetailsStep = ({
     onBack: () => void;
     onSubmit: () => void;
     submitDisabled?: boolean;
+    scrollableRef?: AnimatedRef<Animated.ScrollView>;
 }) => {
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
@@ -249,6 +252,7 @@ const DetailsStep = ({
             <ActivitySelector
                 onSelectActivity={onToggleActivity}
                 selectedActivities={activities}
+                scrollableRef={scrollableRef}
             />
 
             <Text style={styles.label}>Notes:</Text>
@@ -397,6 +401,10 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     } = useEntryDraft(initialData);
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
+    // Animated ref to the form's scroll container, threaded into the activity
+    // drag-reorder grid so it can auto-scroll the form while a chip is dragged
+    // near an edge (react-native-sortables scrollableRef).
+    const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
     const handleSubmit = async () => {
         // submit() runs validation again before invoking onSubmit, so we never
@@ -406,7 +414,8 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     };
 
     return (
-        <ScrollView
+        <Animated.ScrollView
+            ref={scrollRef}
             style={styles.scroll}
             contentContainerStyle={styles.contentContainer}
             keyboardShouldPersistTaps="handled"
@@ -433,9 +442,10 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                     onBack={() => setCurrentStep(1)}
                     onSubmit={handleSubmit}
                     submitDisabled={!isValid}
+                    scrollableRef={scrollRef}
                 />
             )}
-        </ScrollView>
+        </Animated.ScrollView>
     );
 };
 

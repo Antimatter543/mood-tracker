@@ -4,7 +4,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useCallback, useState, useMemo, useEffect, useRef } from "react";
-import { AppState, AppStateStatus } from "react-native";
+import { AppState, AppStateStatus, View } from "react-native";
 import * as SystemUI from "expo-system-ui";
 import { DataProvider } from "../../context/DataContext";
 import { useThemeColors } from "@/styles/global";
@@ -129,9 +129,14 @@ function TabNavigator() {
 
             
         },
-        // Screen container behind every tab — paint it the theme background so
-        // no white shows around the floating tab bar or under short screens.
-        sceneContainerStyle: {
+        // Style of the view wrapping each tab's screen content — paint it the
+        // theme background so no white shows around the floating tab bar or under
+        // short screens. NOTE: react-navigation v7 (embedded in expo-router v6 /
+        // SDK 56) RENAMED this option from `sceneContainerStyle` to `sceneStyle`
+        // (see node_modules/expo-router/.../bottom-tabs/types.d.ts). The old name
+        // was silently dead after the SDK-56 upgrade, which is what let Android's
+        // default white window peek through the tab bar's rounded corners.
+        sceneStyle: {
             backgroundColor: colors.background,
         },
         // Tab bar styling — floating rounded feel
@@ -154,7 +159,11 @@ function TabNavigator() {
         tabBarInactiveTintColor: colors.overlays.textSecondary,
     }), [colors]);
     return (
-
+        // Belt-and-braces with sceneStyle + SystemUI: a flex:1 themed backdrop
+        // behind the whole navigator guarantees the area framing the floating,
+        // rounded-top tab bar is the theme background on every theme, never the
+        // default white window.
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
         <Tabs screenOptions={screenOptions}>
             <Tabs.Screen name="index" options={{
                 title: 'Home',
@@ -202,6 +211,7 @@ function TabNavigator() {
 
             }} />
         </Tabs>
+        </View>
     )
 
 }

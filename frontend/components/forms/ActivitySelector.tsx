@@ -6,12 +6,16 @@ import Feather from "@expo/vector-icons/Feather";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 
-import React, { useMemo, useState, useRef } from "react";
+import React, { useMemo, useState, useRef, useCallback } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import type { AnimatedRef } from "react-native-reanimated";
+import type Animated from "react-native-reanimated";
+import Sortable, { type SortableGridDragEndParams } from "react-native-sortables";
 import { Activity, ActivityGroup } from "../types";
 import { ActivityEditModal } from "./ActivityEditModal";
 import { ICON_FAMILIES, IconFamilyType, IconPicker } from "../IconPicker";
 import { OverlayModal } from "../OverlayModal";
+import { OverlayPopover, PopoverAnchor } from "../OverlayPopover";
 import ActivityReorder from "./ActivityReorder";
 
 import { 
@@ -26,6 +30,13 @@ import {
 type ActivitySelectorProps = {
     onSelectActivity: (activityId: number) => void;
     selectedActivities: number[];
+    /**
+     * Animated ref to the enclosing scroll container (the entry form's
+     * ScrollView). When provided, the drag-to-reorder grid auto-scrolls the form
+     * while a chip is dragged near an edge. Optional so the selector still works
+     * standalone (no scroll integration).
+     */
+    scrollableRef?: AnimatedRef<Animated.ScrollView>;
 };
 
 type AddActivityModalProps = {
@@ -46,7 +57,6 @@ type ActivityItemProps = {
     activity: Activity;
     isSelected: boolean;
     onPress: () => void;
-    onLongPress: () => void;
 };
 
 type ActivityGroupSectionProps = {
@@ -55,19 +65,26 @@ type ActivityGroupSectionProps = {
     selectedActivities: number[];
     onSelectActivity: (id: number) => void;
     onAddActivity: () => void;
-    onLongPressActivity: (activity: Activity) => void;
+    /** Open the edit-activity modal for one activity (from the "Edit Activities" hub). */
+    onEditActivity: (activity: Activity) => void;
     onDeleteGroup: () => void;
     onReorderActivities: (activities: Activity[]) => void;
+    /** Whether THIS group's "..." menu is the one currently open. */
+    menuOpen: boolean;
+    /** Open this group's menu, anchored to the measured "..." button. */
+    onOpenMenu: (anchor: PopoverAnchor) => void;
+    /** Close any open menu. */
+    onCloseMenu: () => void;
+    /** Enclosing scroll container for the drag grid's auto-scroll (optional). */
+    scrollableRef?: AnimatedRef<Animated.ScrollView>;
 };
 
-// Add a new type for the dropdown menu
+// Action menu rendered as the CONTENT of an anchored OverlayPopover (the popover
+// owns positioning + dismiss-on-outside-tap, so this is just the card body).
 type GroupActionMenuProps = {
-    visible: boolean;
-    onClose: () => void;
     onAddActivity: () => void;
     onDeleteGroup: () => void;
     onReorderActivities: () => void;
-    position: { x: number, y: number };
 };
 
 const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
@@ -84,19 +101,8 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
         gap: 24,
     },
 
-    menuOverlay: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'transparent',
-        zIndex: 1,
-    },
-
     groupContainer: {
         gap: 12,
-        position:'relative',
     },
     groupHeader: {
         flexDirection: "row",
@@ -115,20 +121,17 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
         borderRadius: 20,
         backgroundColor: colors.overlays.tag,
     },
-    // Styles for the circular activity layout
-    activitiesList: {
-        flexDirection: "row",
-        flexWrap: "wrap",
+    // Drag-reorder grid container (react-native-sortables lays out the 5-column
+    // grid itself; this just adds the horizontal inset the old wrap-list had).
+    sortableGrid: {
         paddingHorizontal: 12,
-        gap: 8,
-        justifyContent: 'center', // Center the activities horizontally
     },
     activityWrapper: {
-        width: '18%',  // Changed from 70 to 20% to fit 5 items per row
+        // The chip fills its grid cell; the grid's `columns={5}` sizes the cell.
+        width: '100%',
         alignItems: 'center',
         gap: 4,
         marginBottom: 4,
-        // paddingHorizontal: 2,  // Added small padding to prevent text overlap
     },
 
     circleButton: {
@@ -152,9 +155,8 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
         backgroundColor: colors.accent,
         borderColor: colors.accent,
     },
-    // Dropdown menu styles
+    // Dropdown menu card body (positioning is handled by OverlayPopover).
     menuContainer: {
-        position: 'absolute',
         backgroundColor: colors.cardBackground,
         borderRadius: 8,
         padding: 4,
@@ -163,7 +165,6 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
         shadowOpacity: 0.25,
         shadowRadius: 3.84,
         elevation: 5,
-        zIndex: 2,
         borderWidth: 1,
         borderColor: colors.border,
     },
@@ -300,15 +301,18 @@ export const renderActivityIcon = (
     );
 };
 
-const ActivityItem = ({ activity, isSelected, onPress, onLongPress }: ActivityItemProps) => {
+const ActivityItem = ({ activity, isSelected, onPress }: ActivityItemProps) => {
     const colors = useThemeColors();
     const styles = useStyles(colors);
 
+    // A plain tap toggles selection. A hold-and-drag is consumed by the
+    // enclosing Sortable.Grid to reorder (its drag long-press at 300ms would
+    // race and cancel any chip-level long-press), so editing now lives in the
+    // group "..." -> "Edit Activities" hub, NOT on a chip long-press. No
+    // onLongPress here: it could never fire under the drag gesture anyway.
     return (
         <Pressable
             onPress={onPress}
-            onLongPress={onLongPress}
-            delayLongPress={500}
             style={styles.activityWrapper}
         >
             <View style={[styles.circleButton, isSelected && styles.selectedCircle]}>
@@ -453,26 +457,63 @@ const AddGroupModal = ({ visible, onClose, onAdd, error }: AddGroupModalProps) =
 
 
 // Update the ActivityGroupSection component
-const ActivityGroupSection = ({ 
-    group, 
-    activities, 
-    selectedActivities, 
-    onSelectActivity, 
+const ActivityGroupSection = ({
+    group,
+    activities,
+    selectedActivities,
+    onSelectActivity,
     onAddActivity,
-    onLongPressActivity,
+    onEditActivity,
     onDeleteGroup,
-    onReorderActivities
+    onReorderActivities,
+    menuOpen,
+    onOpenMenu,
+    onCloseMenu,
+    scrollableRef,
 }: ActivityGroupSectionProps) => {
     const colors = useThemeColors();
     const styles = useStyles(colors);
-    const [menuVisible, setMenuVisible] = useState(false);
-    const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
     const [isReordering, setIsReordering] = useState(false);
+    const [anchor, setAnchor] = useState<PopoverAnchor>({ x: 0, y: 0, width: 0, height: 0 });
     const menuButtonRef = useRef<View>(null);
 
+    // Persist a drag-reorder. react-native-sortables hands back the fully
+    // reordered `data` array; the existing bulk-position helper (via
+    // onReorderActivities -> updateActivityPositions) reassigns contiguous
+    // 1-indexed positions and reloads, so the new order sticks.
+    const handleDragEnd = useCallback(
+        ({ data }: SortableGridDragEndParams<Activity>) => {
+            onReorderActivities(data);
+        },
+        [onReorderActivities]
+    );
+
+    const renderActivity = useCallback(
+        ({ item }: { item: Activity }) => (
+            <ActivityItem
+                activity={item}
+                isSelected={selectedActivities.includes(item.id)}
+                onPress={() => onSelectActivity(item.id)}
+            />
+        ),
+        [selectedActivities, onSelectActivity]
+    );
+
+    const keyExtractor = useCallback((item: Activity) => String(item.id), []);
+
     const handleMenuPress = () => {
-        // Simplified approach - just show the menu without trying to position it precisely
-        setMenuVisible(true);
+        // Measure the "..." button in window coords so the popover can anchor to
+        // it, then ask the parent to open THIS group's menu (closing any other).
+        const node = menuButtonRef.current;
+        if (!node) {
+            onOpenMenu({ x: 0, y: 0, width: 0, height: 0 });
+            return;
+        }
+        node.measureInWindow((x, y, width, height) => {
+            const a = { x, y, width, height };
+            setAnchor(a);
+            onOpenMenu(a);
+        });
     };
 
     const handleReorderActivities = () => {
@@ -486,118 +527,103 @@ const ActivityGroupSection = ({
 
     return (
         <View style={styles.groupContainer}>
-            {/* Overlay to capture clicks outside the menu */}
-            {menuVisible && (
-                <Pressable 
-                    style={styles.menuOverlay}
-                    onPress={() => setMenuVisible(false)}
-                />
-            )}
-            
             <View style={styles.groupHeader}>
                 <Text style={styles.groupTitle}>{group.name}</Text>
-                <View style={{ position: 'relative', zIndex: menuVisible ? 2 : 1 }}>
-                    <Pressable 
-                        ref={menuButtonRef}
-                        style={styles.groupActionButton} 
-                        onPress={handleMenuPress}
-                    >
-                        <MaterialIcons name="more-vert" color={colors.text} size={20} />
-                    </Pressable>
-                    
-                    {menuVisible && (
-                        <GroupActionMenu 
-                            visible={menuVisible}
-                            onClose={() => setMenuVisible(false)}
-                            onAddActivity={onAddActivity}
-                            onDeleteGroup={onDeleteGroup}
-                            onReorderActivities={handleReorderActivities}
-                            position={menuPosition}
-                        />
-                    )}
-                </View>
+                <Pressable
+                    ref={menuButtonRef}
+                    style={styles.groupActionButton}
+                    onPress={handleMenuPress}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${group.name} group options`}
+                >
+                    <MaterialIcons name="more-vert" color={colors.text} size={20} />
+                </Pressable>
             </View>
-            
+
+            {/* Anchored popover: a tap anywhere outside the card dismisses it. */}
+            <OverlayPopover
+                visible={menuOpen}
+                onClose={onCloseMenu}
+                anchor={anchor}
+                width={200}
+            >
+                <GroupActionMenu
+                    onAddActivity={() => {
+                        onCloseMenu();
+                        onAddActivity();
+                    }}
+                    onReorderActivities={() => {
+                        onCloseMenu();
+                        handleReorderActivities();
+                    }}
+                    onDeleteGroup={() => {
+                        onCloseMenu();
+                        onDeleteGroup();
+                    }}
+                />
+            </OverlayPopover>
+
             {isReordering ? (
-                <ActivityReorder 
+                <ActivityReorder
                     activities={activities}
                     onReorder={handleReorderComplete}
                     onClose={() => setIsReordering(false)}
+                    onEditActivity={onEditActivity}
                 />
             ) : (
-                <View style={styles.activitiesList}>
-                    {activities.map((activity) => (
-                        <ActivityItem
-                            key={activity.id}
-                            activity={activity}
-                            isSelected={selectedActivities.includes(activity.id)}
-                            onPress={() => onSelectActivity(activity.id)}
-                            onLongPress={() => onLongPressActivity(activity)}
-                        />
-                    ))}
+                // Hold-and-drag to reorder WITHIN the group. A normal tap still
+                // toggles selection (drag only activates after the long-press
+                // delay; a tap or a scroll-intent move under the fail-offset
+                // never starts a drag). On drop, onDragEnd persists the new
+                // order. Cross-group drag is out of scope (each group is its own
+                // independent grid). The grid auto-scrolls the enclosing form
+                // ScrollView (scrollableRef) when a chip nears an edge.
+                <View style={styles.sortableGrid}>
+                    <Sortable.Grid
+                        data={activities}
+                        renderItem={renderActivity}
+                        keyExtractor={keyExtractor}
+                        columns={5}
+                        rowGap={8}
+                        columnGap={8}
+                        onDragEnd={handleDragEnd}
+                        dragActivationDelay={300}
+                        scrollableRef={scrollableRef}
+                        autoScrollEnabled={!!scrollableRef}
+                    />
                 </View>
             )}
         </View>
     );
 };
 
-// Update the GroupActionMenu component
-const GroupActionMenu = ({ 
-    visible, 
-    onClose, 
-    onAddActivity, 
-    onDeleteGroup, 
+// GroupActionMenu — the card body of the anchored popover. The popover owns
+// positioning + dismiss-on-outside-tap; each handler here is pre-wired by the
+// caller to close the menu before running the action.
+const GroupActionMenu = ({
+    onAddActivity,
+    onDeleteGroup,
     onReorderActivities,
-    position 
 }: GroupActionMenuProps) => {
     const colors = useThemeColors();
     const styles = useStyles(colors);
 
-    if (!visible) return null;
-
     return (
-        <View 
-            style={[
-                styles.menuContainer, 
-                { 
-                    position: 'absolute',
-                    top: 40,
-                    right: 0,
-                    zIndex: 2,
-                    width: 200,
-                    elevation: 5, // Android elevation
-                }
-            ]}
-        >
-            <Pressable 
-                style={styles.menuItem} 
-                onPress={() => {
-                    onClose();
-                    onAddActivity();
-                }}
-            >
+        <View style={styles.menuContainer}>
+            <Pressable style={styles.menuItem} onPress={onAddActivity}>
                 <MaterialIcons name="add" size={18} color={colors.text} />
                 <Text style={styles.menuItemText}>Add Activity</Text>
             </Pressable>
-            
-            <Pressable 
-                style={styles.menuItem} 
-                onPress={() => {
-                    onClose();
-                    onReorderActivities();
-                }}
-            >
-                <MaterialIcons name="reorder" size={18} color={colors.text} />
-                <Text style={styles.menuItemText}>Reorder Activities</Text>
+
+            {/* Opens the per-group activity-management hub (edit any activity +
+                reorder via arrows). Drag-to-reorder is on the main grid; this is
+                the door to EDITING, which the drag gesture would otherwise hide. */}
+            <Pressable style={styles.menuItem} onPress={onReorderActivities}>
+                <MaterialIcons name="edit" size={18} color={colors.text} />
+                <Text style={styles.menuItemText}>Edit Activities</Text>
             </Pressable>
-            
-            <Pressable 
-                style={styles.menuItem} 
-                onPress={() => {
-                    onClose();
-                    onDeleteGroup();
-                }}
-            >
+
+            <Pressable style={styles.menuItem} onPress={onDeleteGroup}>
                 <MaterialIcons name="delete" size={18} color="#ff6b6b" />
                 <Text style={[styles.menuItemText, styles.menuItemDanger]}>Delete Group</Text>
             </Pressable>
@@ -605,7 +631,7 @@ const GroupActionMenu = ({
     );
 };
 
-export function ActivitySelector({ onSelectActivity, selectedActivities }: ActivitySelectorProps) {
+export function ActivitySelector({ onSelectActivity, selectedActivities, scrollableRef }: ActivitySelectorProps) {
     const colors = useThemeColors();
     const styles = useStyles(colors);
     const db = SQLite.useSQLiteContext();
@@ -622,6 +648,11 @@ export function ActivitySelector({ onSelectActivity, selectedActivities }: Activ
     const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
     const [newActivityName, setNewActivityName] = useState("");
     const [newGroupName, setNewGroupName] = useState("");
+    // Which group's "..." menu is open (only one at a time — opening another
+    // group's menu replaces it). null = none open.
+    const [openMenuGroupId, setOpenMenuGroupId] = useState<number | null>(null);
+
+    const closeMenu = useCallback(() => setOpenMenuGroupId(null), []);
 
     const loadActivities = async () => {
         try {
@@ -783,7 +814,7 @@ export function ActivitySelector({ onSelectActivity, selectedActivities }: Activ
                             setCurrentGroupId(group.id);
                             setModals({ ...modals, addActivity: true });
                         }}
-                        onLongPressActivity={(activity) => {
+                        onEditActivity={(activity) => {
                             setSelectedActivity(activity);
                             setModals({ ...modals, edit: true });
                         }}
@@ -793,6 +824,10 @@ export function ActivitySelector({ onSelectActivity, selectedActivities }: Activ
                         onReorderActivities={(activities) => {
                             handleReorderActivities(activities);
                         }}
+                        menuOpen={openMenuGroupId === group.id}
+                        onOpenMenu={() => setOpenMenuGroupId(group.id)}
+                        onCloseMenu={closeMenu}
+                        scrollableRef={scrollableRef}
                     />
                 ))}
 
