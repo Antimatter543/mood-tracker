@@ -14,6 +14,7 @@ import { SQLiteProvider, useSQLiteContext } from "expo-sqlite";
 import { localDateString, startOfLocalDay } from "@/databases/dateHelpers";
 import { currentStreak } from "@/components/visualisations/transforms/streak";
 import { scheduleOrSkipDailyReminder } from "@/lib/notifications";
+import { OverlayProvider } from "@/context/OverlayHost";
 
 export default function RootLayout() {
     const [refreshCount, setRefreshCount] = useState(0);
@@ -28,8 +29,15 @@ export default function RootLayout() {
         <SQLiteProvider databaseName='moodTracker.db' onInit={initializeDatabase}>
             <DataProvider value={{ refetchEntries, refreshCount }}>
                 <SettingsProvider>
-                    <NotificationReArm />
-                    <TabNavigator />
+                    {/* OverlayProvider hosts our in-tree native-<Modal> replacement.
+                        It MUST sit inside SQLite/Data/Settings so the overlays it
+                        mounts (entry form, settings dropdown) can read those
+                        contexts, and its overlay slots render after <Tabs> so they
+                        paint above the floating tab bar. See context/OverlayHost.tsx. */}
+                    <OverlayProvider>
+                        <NotificationReArm />
+                        <TabNavigator />
+                    </OverlayProvider>
                 </SettingsProvider>
             </DataProvider>
         </SQLiteProvider>
