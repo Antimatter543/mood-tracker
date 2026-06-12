@@ -4,8 +4,9 @@ Privacy-first mood tracker. 100% local (SQLite + on-device files), no account, n
 App code lives under `frontend/`. Expo SDK 56, React Native 0.85, new architecture (Fabric — now
 unconditional; the legacy arch + `newArchEnabled` field were removed from RN at SDK 55),
 expo-router (SDK-56 forked react-navigation internally — no `@react-navigation/*` deps), TypeScript
-6 strict. (Upgraded 52→56 on branch `upgrade/sdk-56`, 2026-06-12 — see
-`frontend/docs/sdk56-hop4-notes.md`. Release of v2.0.0 is gated on the 2026-07-01 EAS quota reset.)
+6 strict. (Upgraded 52→56 and **shipped as v2.0.0 on 2026-06-12** via the GitHub Actions CI lane —
+device-QA'd on the Pixel 3, data-survival update-path verified. See `frontend/docs/sdk56-hop4-notes.md`
++ `frontend/docs/sdk56-endgame-notes.md`.)
 
 Public repo: `Antimatter543/mood-tracker` (Anti's). Releases: GitHub Releases (APK).
 

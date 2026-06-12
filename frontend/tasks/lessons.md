@@ -8,6 +8,65 @@
 > until 2026-07-01, so we built on CI instead (see "GitHub Actions release lane" below). The repo
 > invariant held throughout (tag == app.json 1.2.3 == APK versionName 1.2.3 == release asset).
 
+> **v2.0.0 SHIPPED (2026-06-12)** — the Expo **SDK 52→56** platform upgrade (RN 0.76→0.85, React
+> 19.2.3, TS 6.0, Reanimated 4, RTR→RNTL, react-navigation deps dropped). Built+released on the SAME
+> free CI lane (tag push → signed `SoulSync-2.0.0.apk` → GitHub Release). Full device QA on the Pixel
+> 3 passed: cert parity `db328ae9…c4e02ab`, **data-survival update-path verified TWICE** (`adb install
+> -r` SDK-56 over v1.2.3, then v2.0.0 over that — both `Success`, zero data loss, 3 entries intact
+> through the whole chain), **chart-kit renders fine on RN 0.85/new-arch** (the one open risk — line +
+> bar + heatmap + distribution all draw; gifted-charts swap NOT needed), all 5 themes + edge-to-edge
+> clean (corner pixels = theme bg, not white), **expo-notifications 56.0.17 fires on the R8 build**
+> (notification rendered in the shade; receiver class + channel + alarm all survive minification).
+> Release: https://github.com/Antimatter543/mood-tracker/releases/tag/v2.0.0. Endgame detail +
+> the per-check QA table: `frontend/docs/sdk56-endgame-notes.md`.
+
+## 2026-06-12: SDK-56 endgame device-QA gotchas (carries forward to every future on-device pass)
+
+**Mistake / friction encountered during the v2.0.0 endgame device QA, and how to avoid it:**
+
+1. **uiautomator dump coords are DEVICE resolution (1080×2160), NOT the downscaled screenshot.**
+   The `adb exec-out screencap` PNG is ~500px wide; tapping at screenshot coords misses. ALWAYS get
+   tap targets from `uiautomator dump` bounds (e.g. the FAB "Add mood entry" is at device-center
+   ~(937,1841) on Home, not the ~(432,791) the screenshot suggests). The floating-tab-bar centers are
+   at **y≈2011** (Home 108 / Stats 324 / Timeline 540 / Insights 756 / Settings 972). The FAB y SHIFTS
+   per screen (1841 on Home, 1709 on the activity step) — re-dump, don't reuse a stale y.
+
+2. **The Settings layout SHIFTS when a non-System theme is selected** (the "Dark Theme" toggle row is
+   hidden with the note "The Dark Theme toggle is hidden because you've selected a specific theme"),
+   so the App-Theme select value moves from y≈1002 (System Default) up to y≈790 (explicit theme).
+   Re-dump after every theme change before tapping. The 5 themes drive cleanly via the overlay theme
+   picker (System Default / Light / Dark / Cherry Blossom / Midnight Blue / Forest → Close).
+
+3. **The native Android TimePickerDialog (Reminder Time) is hostile to synthetic `adb input text`** —
+   keyboard-entry mode kept dismissing the dialog. The reliable path is the **analog clock face**:
+   tap PM → tap the hour number on the ring → it auto-advances to minute mode → tap the minute tick →
+   tap OK. (Clock numbers + minute ticks are at fixed ring positions; get them from the dump.) `adb`
+   CANNOT set the system clock on this production device (`adbd cannot run as root in production
+   builds`), so you cannot fast-forward to a scheduled time — instead set the reminder a few minutes
+   ahead of the real device clock and wait (the wait is fine).
+
+4. **Notification R8-survival has FOUR independent proofs** (use them; don't rely only on the visual):
+   `adb shell dumpsys package … | grep Receiver` shows
+   `expo.modules.notifications.service.NotificationsService` un-obfuscated (class not stripped);
+   `dumpsys notification | grep <pkg>` shows the `daily-reminder` `NotificationChannel` (color
+   `0xff4caf50`); `dumpsys alarm | grep <pkg>` shows the scheduled `RTC_WAKEUP`; and after firing, a
+   live `NotificationRecord` with `tag=soulsync-daily-reminder`. All four present = R8 didn't strip it.
+
+5. **Maestro `soulsync-tour.yaml` is BRITTLE on a cold start** — its `assertVisible "Good
+   (morning|afternoon|evening)"` raced the JS bundle render and FAILED on a healthy app (the failure
+   screenshot showed a fully-rendered Home; a manual dump confirmed "Good afternoon"). It was ALSO
+   written for the seeded-50-entries dev build (photo-picker beats don't apply to a release APK). So:
+   treat a single Maestro greeting-assert failure as a flow-timing artifact, confirm via `uiautomator
+   dump` before calling it a regression. (Cleanup TODO: add a wait/retry before the greeting assert,
+   and make the photo beats `optional`.) Manual adb-driven QA covered every beat the tour would.
+
+**Rule**: On-device QA for this app = drive overlays via `uiautomator dump`-derived DEVICE coords
+(re-dump per screen, layouts shift); verify notifications via the 4 dumpsys signals not just the
+shade; set reminder times via the clock FACE not keyboard entry; and don't trust a lone Maestro
+greeting-assert failure — verify against a dump. The data-safety gate is the `adb install -r` (NO
+uninstall) update-path test — `Success` + entries visible on Home/Timeline/Stats = migrations
+survived. **Date**: 2026-06-12
+
 ## 2026-06-12: GitHub Actions release lane — free, EAS-quota-free signed APK builds
 
 **Context**: `.github/workflows/release-apk.yml` builds a SIGNED release APK on a tag push (-> GitHub
