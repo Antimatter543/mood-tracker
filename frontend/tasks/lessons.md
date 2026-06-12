@@ -1,5 +1,14 @@
 # SoulSync — Project Lessons
 
+> **PENDING RELEASE (2026-06-12)**: the modal-touch fix below is merged to `main`
+> + fully dev-client-verified, but is **NOT yet shipped as an APK** — EAS free
+> Android build quota is exhausted until **2026-07-01**. To release: run
+> `scripts/release.sh patch` from `frontend/` after that date (it will cut v1.2.3,
+> build on EAS, GitHub-release, and push). The local v1.2.3 tag was intentionally
+> unwound so the repo invariant (tag == app.json == APK == release asset) stays
+> intact; app.json is back at 1.2.2 until a real APK exists. Do the final
+> release-APK on-device re-verification then.
+
 ## Native `<Modal>` touch dispatch is BROKEN on Fabric — use in-tree overlays; old "synthetic-taps-can't-drive-modals = not a bug" doctrine was WRONG (2026-06-12)
 
 **Doctrine reversal (this supersedes every "Synthetic touch CANNOT drive an open
