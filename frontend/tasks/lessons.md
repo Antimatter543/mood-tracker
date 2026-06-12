@@ -61,6 +61,53 @@ build step now). Keystore lives in EAS + GitHub repo secrets + Bitwarden; verify
 
 **Date**: 2026-06-12
 
+## SDK 52→56 upgrade — TS6, RN 0.85, RNTL 14, react-navigation drop (2026-06-12, branch `upgrade/sdk-56`)
+
+Full hop-4 notes + the July-1 release runbook: `frontend/docs/sdk56-hop4-notes.md`. The durable
+gotchas a future session WILL hit:
+
+1. **TypeScript 6.0 dropped `@types/*` auto-discovery.** TS6's `types` defaults to `[]` (was: include
+   all `node_modules/@types`). Without an explicit list, every test loses `describe`/`it`/`expect`/
+   `jest` (TS2708/TS2593). The fix lives in `tsconfig.json`: `"types": ["jest", "node", "react"]` —
+   **load-bearing, do not remove**; add any new ambient-global `@types/*` package to it or tsc won't
+   see it. Expo's own types come via `include`, not this array.
+
+2. **RN 0.85 removed `StyleSheet.absoluteFillObject`** (runtime AND types — only `absoluteFill`
+   remains, and it IS the spreadable object now). `...StyleSheet.absoluteFillObject` silently spreads
+   `undefined` on 0.85 (a real latent bug, not just a type error). Use `...StyleSheet.absoluteFill`.
+   Grep for `absoluteFillObject` before assuming it's gone everywhere (was only in IconPicker).
+
+3. **SDK 56 forked react-navigation into expo-router.** doctor 56 FAILS if `@react-navigation/*` are
+   direct deps. They were dropped (our source had zero `@react-navigation` imports incl. hidden
+   DarkTheme/ThemeProvider/NavigationContainer cases; expo-router 56 uses internal `standard-navigation`).
+   Run `npx expo-codemod sdk-56-expo-router-react-navigation-replace .` first (it was a 0-file no-op
+   for us). `@types/react-test-renderer` is now transitive via react-native-gesture-handler — harmless.
+
+4. **react-test-renderer → @testing-library/react-native (RNTL 14).** RTR + @types removed; RNTL 14 +
+   `test-renderer@^1.2.0` (a peer, list it explicitly) added. RNTL 14 is ASYNC: `render()`/
+   `renderHook()` return Promises; `act`/`rerender`/`unmount` are async. `renderHook().result` is a
+   ref → `result.current`. For tree queries use `screen.container.queryAll(n => n.type === 'Text')`
+   (string type names, NOT the component; and `container` not `root` — root misses descendants). A
+   render error is a REJECTED promise: `await expect(render(<Bad/>)).rejects.toThrow(...)`. Only 3
+   files ever used a renderer (overlayHost, useEntryDraft, useMoodScale); the other 29 suites don't.
+
+5. **eslint-config-expo 56 bundles react-hooks 7.x (React Compiler rules) as ERRORS.**
+   `react-hooks/immutability` (Reanimated `.value =`; hook-capture test helpers) and
+   `react-hooks/set-state-in-effect` (prop-to-state sync; async mount data loads) fire on correct
+   code. We don't compile with React Compiler → both **downgraded to `warn` in `.eslintrc.js`** (keeps
+   the "0 errors" gate). Also there: a `node` env override for `scripts/`+`plugins/` `.js` (config-expo
+   56 stopped assuming node env → `__dirname` no-undef). Flat-config migration still deferred.
+
+6. **babel-preset-expo 56 STILL auto-injects `react-native-worklets/plugin`** (logic moved to
+   `node_modules/babel-preset-expo/build/configs/expo.js:109` from `build/index.js` at 55). **NEVER
+   create a babel.config.js** — and never add `react-native-reanimated/plugin`.
+
+7. **EOVERRIDE on `--fix` every React bump.** `--fix` writes `dependencies` then aborts before
+   devDeps+lockfile. Escape hatch: set the printed devDep targets + bump the `overrides` block
+   manually, then `rm -rf node_modules package-lock.json && npm install` (node v24.14 / npm 11.9).
+   overrides is now react/react-dom **19.2.3**. expo-notifications locked at **56.0.17** (≥56.0.11 R8
+   proguard floor — we minify; the notification-fire device test confirms it at runtime).
+
 ## Native `<Modal>` touch dispatch is BROKEN on Fabric — use in-tree overlays; old "synthetic-taps-can't-drive-modals = not a bug" doctrine was WRONG (2026-06-12)
 
 **Doctrine reversal (this supersedes every "Synthetic touch CANNOT drive an open

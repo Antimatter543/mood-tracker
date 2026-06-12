@@ -1,11 +1,11 @@
 import { createMockDatabase } from 'expo-sqlite';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
 jest.mock('expo-sqlite');
 jest.mock('expo-document-picker');
-jest.mock('expo-file-system');
+jest.mock('expo-file-system/legacy');
 jest.mock('expo-sharing');
 jest.mock('react-native', () => ({
   Platform: { OS: 'ios' },

@@ -37,7 +37,10 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
     );
     const [selectedIconName, setSelectedIconName] = useState(activity?.icon_name || 'circle');
 
-    // Update state when activity changes or modal becomes visible
+    // Update state when activity changes or modal becomes visible. Deliberate
+    // prop-to-state sync (re-seed the editable fields when a different activity
+    // is opened); guarded, runs only on prop change. (react-hooks 7.x's
+    // set-state-in-effect rule is downgraded to a warning project-wide.)
     useEffect(() => {
         if (activity && visible) {
             setActivityName(activity.name);
@@ -46,7 +49,7 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
         }
     }, [activity, visible]);
 
-    // Reset state when modal closes
+    // Reset error when modal closes (prop-to-state sync; see note above).
     useEffect(() => {
         if (!visible) {
             setError('');

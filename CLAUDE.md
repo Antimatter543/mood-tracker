@@ -1,8 +1,11 @@
 # SoulSync (mood-tracker) — Project Guide
 
 Privacy-first mood tracker. 100% local (SQLite + on-device files), no account, no cloud, no tracking.
-App code lives under `frontend/`. Expo SDK 52, React Native 0.76, `newArchEnabled: true` (Fabric),
-expo-router v4, TypeScript strict.
+App code lives under `frontend/`. Expo SDK 56, React Native 0.85, new architecture (Fabric — now
+unconditional; the legacy arch + `newArchEnabled` field were removed from RN at SDK 55),
+expo-router (SDK-56 forked react-navigation internally — no `@react-navigation/*` deps), TypeScript
+6 strict. (Upgraded 52→56 on branch `upgrade/sdk-56`, 2026-06-12 — see
+`frontend/docs/sdk56-hop4-notes.md`. Release of v2.0.0 is gated on the 2026-07-01 EAS quota reset.)
 
 Public repo: `Antimatter543/mood-tracker` (Anti's). Releases: GitHub Releases (APK).
 
@@ -74,8 +77,10 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
 - Pixel 3 at `192.168.1.68:5555`, app `com.raeduslabs.soulsync`, **device PIN `1337`**
   (unlock: `adb shell input keyevent KEYCODE_WAKEUP && adb shell input swipe 540 1600 540 300 && adb shell input text 1337 && adb shell input keyevent 66`).
 - **How to get a build on the device:** EAS only (`scripts/release.sh` or `eas build`), then `adb install`.
-  Do NOT local-build to iterate (see Build section). Expo Go also does NOT work here (device Expo Go is SDK 56,
-  project is SDK 52). For JS-only changes, `eas update` to an existing dev client avoids a native rebuild.
+  Do NOT local-build to iterate (see Build section). The project now MATCHES the device's Expo Go (both
+  SDK 56), but the dev-client (`expo-dev-client`) remains the canonical iteration path here — overlays /
+  native modules / the R8 release shape are only faithfully exercised on a dev-client or EAS build.
+  For JS-only changes, `eas update` to an existing dev client avoids a native rebuild.
 - **NO native `<Modal>` in this app (since v1.2.3) — use in-tree overlays.** Native `<Modal>` on RN 0.76
   Fabric routes into a second native window whose touch dispatch is broken (every in-modal control dead to a
   REAL finger, not just to automation). All modal-like UI now renders through `context/OverlayHost.tsx`

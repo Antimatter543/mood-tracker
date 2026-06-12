@@ -1,6 +1,10 @@
 import { DatabaseResult } from '@/components/types';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+// SDK 54 moved the classic function API (readAsStringAsync/writeAsStringAsync/
+// copyAsync/StorageAccessFramework/EncodingType) to `expo-file-system/legacy`.
+// The default export is now the File/Directory class API; switching to it is
+// post-upgrade cleanup. `/legacy` is available through SDK 56.
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { SQLiteDatabase } from 'expo-sqlite';
 

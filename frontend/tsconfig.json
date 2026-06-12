@@ -2,6 +2,15 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // TS 6.0 no longer auto-discovers node_modules/@types ("types" now defaults
+    // to []). List the ambient global type packages this project relies on so
+    // jest globals (describe/it/expect/jest) and node globals resolve. Expo's
+    // own types (expo-env.d.ts) come in via "include", not here.
+    "types": [
+      "jest",
+      "node",
+      "react"
+    ],
     "paths": {
       "@/*": [
         "./*"
