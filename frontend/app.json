@@ -2,7 +2,7 @@
   "expo": {
     "name": "Soulsync",
     "slug": "soulsync-mood",
-    "version": "1.2.2",
+    "version": "1.2.3",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
@@ -10,11 +10,11 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "10202"
+      "buildNumber": "10203"
     },
     "android": {
       "package": "com.raeduslabs.soulsync",
-      "versionCode": 10202,
+      "versionCode": 10203,
       "permissions": [
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.SCHEDULE_EXACT_ALARM"
