@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { BackHandler, Pressable, StyleSheet } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
@@ -35,21 +35,37 @@ export const OverlayModal: React.FC<{
     fullScreen?: boolean;
 }> = ({ visible, onClose, children, dismissOnBackdropPress = true, fullScreen = false }) => {
     const { mount } = useOverlay();
+    const handleRef = useRef<ReturnType<typeof mount> | null>(null);
+
+    const content = (
+        <OverlayModalContent
+            onClose={onClose}
+            dismissOnBackdropPress={dismissOnBackdropPress}
+            fullScreen={fullScreen}
+        >
+            {children}
+        </OverlayModalContent>
+    );
+
+    // Mount/unmount strictly on `visible`; refresh content in place otherwise, so a
+    // parent re-render (new children / onClose identity) doesn't tear down and
+    // remount the dialog (which would drop its internal state + restart the fade).
+    useEffect(() => {
+        if (!visible) return;
+        const handle = mount(content);
+        handleRef.current = handle;
+        return () => {
+            handle.unmount();
+            handleRef.current = null;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- mount on visibility only; content refreshed below
+    }, [visible, mount]);
 
     useEffect(() => {
         if (!visible) return;
-
-        const handle = mount(
-            <OverlayModalContent
-                onClose={onClose}
-                dismissOnBackdropPress={dismissOnBackdropPress}
-                fullScreen={fullScreen}
-            >
-                {children}
-            </OverlayModalContent>
-        );
-        return () => handle.unmount();
-    }, [visible, mount, onClose, children, dismissOnBackdropPress, fullScreen]);
+        handleRef.current?.update(content);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- `content` rebuilt each render from these
+    }, [visible, onClose, children, dismissOnBackdropPress, fullScreen]);
 
     return null;
 };

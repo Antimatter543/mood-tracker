@@ -1,5 +1,5 @@
 // EntryForm.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -350,23 +350,28 @@ export const EntryFormModal: React.FC<{
     onSubmit: (data: EntryFormData) => Promise<void>;
 }> = ({ visible, onClose, initialData, onSubmit }) => {
     const { mount } = useOverlay();
+    const handleRef = useRef<ReturnType<typeof mount> | null>(null);
 
-    // Mount the overlay while `visible`; unmount on hide/unmount. Re-running on
-    // every prop change keeps the mounted content fresh (theme, initialData,
-    // callbacks) — the handle's update() swaps the node in place without
-    // tearing the overlay down.
+    // Mount/unmount strictly on `visible` so the overlay (and the form's draft/step
+    // state inside it) is NOT torn down when an unrelated parent re-render gives
+    // onClose/onSubmit a new identity.
     useEffect(() => {
         if (!visible) return;
+        const handle = mount(<EntryFormOverlay onClose={onClose} initialData={initialData} onSubmit={onSubmit} />);
+        handleRef.current = handle;
+        return () => {
+            handle.unmount();
+            handleRef.current = null;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- mount on visibility only; content refreshed by the effect below
+    }, [visible, mount]);
 
-        const handle = mount(
-            <EntryFormOverlay
-                onClose={onClose}
-                initialData={initialData}
-                onSubmit={onSubmit}
-            />
-        );
-        return () => handle.unmount();
-    }, [visible, mount, onClose, initialData, onSubmit]);
+    // Refresh the live overlay content in place when props change (e.g. theme via
+    // useThemeColors re-render, new initialData) without remounting.
+    useEffect(() => {
+        if (!visible) return;
+        handleRef.current?.update(<EntryFormOverlay onClose={onClose} initialData={initialData} onSubmit={onSubmit} />);
+    }, [visible, onClose, initialData, onSubmit]);
 
     return null;
 };

@@ -1,5 +1,61 @@
 # SoulSync — Project Lessons
 
+## Native `<Modal>` touch dispatch is BROKEN on Fabric — use in-tree overlays; old "synthetic-taps-can't-drive-modals = not a bug" doctrine was WRONG (2026-06-12)
+
+**Doctrine reversal (this supersedes every "Synthetic touch CANNOT drive an open
+`<Modal>`" / "real finger only" / "not a bug, automation wall" note below — those
+are now WRONG and kept only for history).** Anti (real finger) reported the FAB
+"add mood" picker as dead TWICE, including after the v1.2.2 GestureHandlerRootView
+"fix". A real finger failing identically to synthetic input proves the modal's
+touch dispatch is genuinely broken — it was never merely "un-automatable".
+
+**Root cause**: A native `<Modal>` (transparent or opaque) on RN 0.76 Android new
+arch (Fabric, `newArchEnabled: true`) renders into a SECOND native window with its
+own React/Fabric root. The JS touch dispatcher for that window's root only ever
+receives DOWN, never UP/CANCEL (`Got DOWN touch before receiving UP or CANCEL from
+last gesture`), so every control inside the modal — ScrollView, Pressable, FlatList
+— is inert to a REAL finger. Fixed in later RN versions we can't reach on SDK 52.
+GestureHandlerRootView does NOT fix it (the problem is the window boundary, not the
+gesture root).
+
+**The fix (shipped v1.2.3)**: stop using native `<Modal>` entirely. Render
+modal-like content as an IN-TREE, full-window overlay that stays in the SINGLE
+Fabric root, so touch routing never crosses a window boundary.
+- `context/OverlayHost.tsx` — `OverlayProvider` + `useOverlay()`. Mounts content as
+  the LAST child of the layout view (paints above the floating tab bar).
+- `components/OverlayModal.tsx` — drop-in `<Modal>` replacement (centered-dialog
+  variant + `fullScreen` variant) with dimmed backdrop, tap-outside-to-close,
+  Android hardware-back (`BackHandler`), and a Reanimated `FadeIn`.
+- `EntryFormModal` (EntryForm.tsx) renders through the host directly. SettingRow's
+  theme dropdown, ActivityEditModal, ActivitySelector add/group, IconPicker, and
+  DBViewer's photo viewer all use `OverlayModal`. Public APIs unchanged.
+
+**CRITICAL placement rule**: `OverlayProvider` MUST sit INSIDE the
+SQLite/Data/Settings providers (it lives in `app/(tabs)/_layout.tsx` wrapping
+`TabNavigator`), NOT at the root `app/_layout.tsx`. Overlay content consumes those
+contexts (`useSQLiteContext`, `useSettings`, `useDataContext`); a root-level host is
+above them and redboxes `useSQLiteContext must be used within a <SQLiteProvider>`
+the moment overlay content touches the DB (caught on-device advancing the form to
+step 2 — ActivitySelector). It still renders above the tab bar because its slots
+mount after `<Tabs>` in the same parent.
+
+**QA REVERSAL — synthetic input CAN drive these overlays.** Because there is no
+second native window, `mCurrentFocus` stays `MainActivity` when an overlay is open,
+uiautomator READS the overlay tree, and `adb input swipe`/`tap` DRIVE it. Verified
+the whole bug on-device synthetically: FAB -> swipe picker (`Selected: 5`->`10`->`6`,
+the exact dead interaction) -> Continue -> activity step -> Submit -> Home shows the
+entry; nested IconPicker 3 overlays deep scrolls + selects. So Maestro/adb full-flow
+QA of these forms is now valid — the "verify modal interactions with a real finger
+only" rule is DEAD. (A native `<Modal>`, if one is ever reintroduced, would still be
+un-drivable — but don't reintroduce one; use the overlay.)
+
+**Rule**: NEVER add a native `<Modal>` (from `react-native`) to this app. Use
+`OverlayModal` (dialog/fullScreen) or render through `useOverlay()` directly. New
+overlay content that needs DB/settings is automatically fine since the host is inside
+those providers. Verify on-device with adb/Maestro — synthetic input now works.
+
+**Date**: 2026-06-12
+
 ## Empty-state early return BELOW its hooks -> "Rendered more hooks" crash (2026-06-08)
 
 **Mistake**: While adding the Home weekly-chart empty placeholder, the
@@ -150,7 +206,7 @@ not referenced in JSX — only `viewerStyles.overlay` is used. Left untouched.
 **If you add a new `<Modal transparent>`**: size its root view to the window, don't
 use `flex: 1`.
 
-## GestureHandlerRootView added app-root + per-modal (2026-06-08) — touch fix UNVERIFIABLE via ADB
+## [SUPERSEDED 2026-06-12 — native Modal removed; see top lesson] GestureHandlerRootView added app-root + per-modal (2026-06-08) — touch fix UNVERIFIABLE via ADB
 
 **Context**: A REAL-finger user report said the "add mood" modal is fully dead (no scroll,
 no Continue, nothing tappable). The app had NO `GestureHandlerRootView` anywhere even though
@@ -188,7 +244,7 @@ treat "adb tap didn't advance the step" as evidence the fix failed.
 
 **Date**: 2026-06-08
 
-## Synthetic touch CANNOT drive an open `<Modal>` on RN 0.76 new arch (2026-06-07)
+## [SUPERSEDED 2026-06-12 — native Modal removed, overlays ARE synthetically drivable; see top lesson] Synthetic touch CANNOT drive an open `<Modal>` on RN 0.76 new arch (2026-06-07)
 
 While verifying the modal fix on-device, neither `adb input tap`/`swipe`/`motionevent`
 NOR Maestro/uiautomator could drive any control INSIDE an open `<Modal>` (Continue,

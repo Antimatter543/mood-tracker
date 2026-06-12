@@ -46,10 +46,16 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
 - **How to get a build on the device:** EAS only (`scripts/release.sh` or `eas build`), then `adb install`.
   Do NOT local-build to iterate (see Build section). Expo Go also does NOT work here (device Expo Go is SDK 56,
   project is SDK 52). For JS-only changes, `eas update` to an existing dev client avoids a native rebuild.
-- **Synthetic taps (adb/Maestro) CANNOT drive controls inside this app's `<Modal>`** (the UP event is lost
-  across the modal's second React root). The modal *renders* fine and tabs/FAB outside it are tappable, but
-  in-modal taps/scrolls can ONLY be confirmed by a real finger. Don't conclude a modal-interaction fix works
-  or fails from adb input alone.
+- **NO native `<Modal>` in this app (since v1.2.3) — use in-tree overlays.** Native `<Modal>` on RN 0.76
+  Fabric routes into a second native window whose touch dispatch is broken (every in-modal control dead to a
+  REAL finger, not just to automation). All modal-like UI now renders through `context/OverlayHost.tsx`
+  (`OverlayProvider` / `useOverlay`) via `components/OverlayModal.tsx` (dialog + `fullScreen` variants).
+  `OverlayProvider` lives in `app/(tabs)/_layout.tsx` INSIDE the SQLite/Data/Settings providers (overlay
+  content reads those contexts) — never move it to the root layout. **NEVER reintroduce `react-native` `Modal`.**
+- **Synthetic taps (adb/Maestro) DO drive the overlays** — no second window, so `mCurrentFocus` stays
+  `MainActivity`, uiautomator reads the overlay tree, and `adb input tap`/`swipe` work inside the form,
+  dropdowns, and nested pickers. The old "modal interactions are real-finger-only" rule is DEAD; full-flow
+  adb/Maestro QA of the entry form + dropdowns is valid. (See frontend/tasks/lessons.md top entry.)
 - **Use Maestro, not blind adb taps** (`~/.maestro/bin/maestro`; flows in `frontend/.maestro/`). RN/Fabric does
   NOT expose tab-bar labels or react-navigation text to uiautomator, so:
   - Tap tabs by **point**: `point: X%, 89%` (Home 10 / Stats 30 / Timeline 50 / Insights 70 / Settings 90).
@@ -61,12 +67,11 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
 - Seed test data: Settings has a `__DEV__`-only "Generate 50 Sample Entries" button (dev build only).
 
 ## Hard-won gotchas (see frontend/tasks/lessons.md for detail)
-- **New-arch transparent `<Modal>` renders BLANK on Android** (Fabric flex-collapse): the modal host gets
-  zero height so `flex:1` content collapses. Fix = give modal content explicit `Dimensions.get('window')`
-  height (already applied to all modals). Don't reintroduce `flex:1` as the modal root.
-- **Synthetic taps can't drive controls INSIDE an open RN-new-arch modal** (DOWN without UP). The modal renders
-  fine; you just can't automate taps within it. Verify modal *rendering* via screenshot; a real finger is needed
-  to drive the picker/Continue. Not a bug.
+- **NEVER use `react-native` `<Modal>` here (removed v1.2.3).** It opens a second native window with broken
+  touch dispatch on RN 0.76 Fabric — in-modal controls are dead to a real finger. Use the in-tree overlay
+  (`OverlayModal` / `useOverlay`, see On-device QA section). This replaced BOTH the old "Fabric flex-collapse
+  blank modal" and "synthetic taps can't drive the modal" gotchas — the overlay has neither problem (it
+  renders full-window via `StyleSheet.absoluteFill` and IS synthetically drivable).
 - **Empty-database is a real code path** — a fresh install has zero entries. Date/aggregate logic must not throw
   on empty data (a heatmap `MIN(date)=NULL` once white-screened Stats). Test empty AND the empty->first-entry
   transition (a hooks-ordering bug crashed exactly there).
