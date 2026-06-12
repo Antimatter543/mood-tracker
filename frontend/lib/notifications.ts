@@ -42,6 +42,10 @@ import type * as NotificationsModule from 'expo-notifications';
  * accessing the stripped module throws synchronously. Resolved once and cached.
  */
 let cachedNotifications: typeof NotificationsModule | null | undefined;
+// Logs the "unavailable" notice at most ONCE per JS runtime. The cache above
+// already short-circuits repeat requires, but this flag makes the once-only
+// guarantee explicit and survives even if cachedNotifications were ever reset.
+let warnedUnavailable = false;
 function getNotifications(): typeof NotificationsModule | null {
   if (cachedNotifications !== undefined) return cachedNotifications;
   try {
@@ -49,11 +53,14 @@ function getNotifications(): typeof NotificationsModule | null {
     cachedNotifications = require('expo-notifications') as typeof NotificationsModule;
   } catch {
     cachedNotifications = null;
-    if (__DEV__) {
+    // ONE concise console.warn — never console.error. The require throwing in
+    // Expo Go is expected, not an error; logging it as console.error made
+    // LogBox render a full-screen "Uncaught Error" on every app boot in Go,
+    // disrupting on-device QA. warn keeps it a quiet, dismissible notice.
+    if (__DEV__ && !warnedUnavailable) {
+      warnedUnavailable = true;
       console.warn(
-        '[notifications] expo-notifications native module unavailable ' +
-          '(expected in Expo Go on Android) — reminders are no-ops here. ' +
-          'Use a dev-client/release build to test notifications.'
+        '[notifications] expo-notifications unavailable in this runtime (Expo Go) — reminders disabled'
       );
     }
   }
