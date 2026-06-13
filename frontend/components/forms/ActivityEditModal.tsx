@@ -8,7 +8,8 @@ import Feather from '@expo/vector-icons/Feather';
 import { updateActivity, deleteActivity } from "@/databases/database";
 import { Activity } from '../types';
 import { useDataContext } from '@/context/DataContext';
-import { ICON_FAMILIES, IconFamilyType, IconPicker } from '../IconPicker';
+import { IconPicker } from '../IconPicker';
+import { ICON_FAMILIES, IconFamilyType } from '../iconRegistry';
 import { OverlayModal } from '../OverlayModal';
 
 type ActivityEditModalProps = {

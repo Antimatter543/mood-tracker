@@ -11,24 +11,11 @@
  * The glyphmaps are the authoritative source the @expo/vector-icons components
  * validate against at runtime.
  */
-// IconPicker pulls OverlayModal -> react-native-reanimated, which initializes
-// the native worklets runtime at import (unavailable under jest). We only read
-// the exported catalog constants, never render, so shim the reanimated surface
-// (same pattern as activityReorder.test.tsx / overlayPopover.test.tsx).
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const entering = { duration: () => entering };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
-        },
-        FadeIn: entering,
-    };
-});
-
-import { ICON_CATEGORIES, ICON_FAMILIES, type IconFamilyType } from '@/components/IconPicker';
+// The catalog + family map live in the UI-free `iconRegistry` (no OverlayModal /
+// reanimated import), so this test reads them directly — no reanimated shim
+// needed. (Importing them via `@/components/IconPicker` would re-pull the picker
+// UI -> OverlayModal -> reanimated, which throws at import under jest.)
+import { ICON_CATEGORIES, ICON_FAMILIES, type IconFamilyType } from '@/components/iconRegistry';
 import { initialActivities } from '@/components/seedData';
 
 import FeatherGlyphs from '@expo/vector-icons/build/vendor/react-native-vector-icons/glyphmaps/Feather.json';

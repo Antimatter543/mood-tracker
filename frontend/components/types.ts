@@ -2,7 +2,7 @@
 
 // Base Types
 
-import { IconFamilyType } from "./IconPicker";
+import { IconFamilyType } from "./iconRegistry";
 
 
 // Activity table 
