@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useMemo } from 'react';
+import { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { BarChart } from 'react-native-chart-kit';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -12,7 +12,8 @@ import { DOW_MOOD_PATTERN } from './queries';
 import { computeWindow, type Timeframe } from './transforms/windowHelpers';
 import {
   buildDowPatternData,
-  type DowRow,
+  aggregateDowRows,
+  type DowInstantRow,
   type DowPatternData,
 } from './transforms/dayOfWeekPattern';
 
@@ -97,9 +98,11 @@ const DailyMoodChart = () => {
         // replaces the previous all-time GROUP BY strftime query, which was the
         // only chart on the screen that ignored the TimeframeSelector.
         const { start, end } = computeWindow(timeframe as Timeframe);
-        const rows = await db.getAllAsync<DowRow>(DOW_MOOD_PATTERN, [start, end]);
+        // Raw {date: instant, mood} rows -> per-LOCAL-weekday aggregation in JS
+        // (the old strftime('%w') extracted the weekday in UTC and drifted).
+        const rawRows = await db.getAllAsync<DowInstantRow>(DOW_MOOD_PATTERN, [start, end]);
         // Monday-first to match the heatmap convention used on this screen.
-        setPattern(buildDowPatternData(rows, 1));
+        setPattern(buildDowPatternData(aggregateDowRows(rawRows), 1));
       } catch (error) {
         console.error('Error fetching daily mood data:', error);
         setPattern(null);

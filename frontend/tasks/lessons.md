@@ -20,6 +20,93 @@
 > Release: https://github.com/Antimatter543/mood-tracker/releases/tag/v2.0.0. Endgame detail +
 > the per-check QA table: `frontend/docs/sdk56-endgame-notes.md`.
 
+## 2026-06-13: Keep icon/data registries UI-free so lightweight consumers (+ their tests) don't transitively import reanimated
+**Mistake/friction**: The icon catalog + family map + icon types lived INSIDE `IconPicker.tsx`,
+which imports `OverlayModal` -> `react-native-reanimated`. Reanimated initialises the native
+worklets runtime at module-eval, which THROWS under jest. So every lightweight consumer that
+only needed the family map (ActivityRow, the new shared `activityIcon`, ActivityReorder,
+`components/types`) transitively pulled reanimated, and any test importing them had to
+`jest.mock('react-native-reanimated', ...)` — and when one suite forgot the shim, it poisoned
+OTHER suites running in the same worker (iconCatalog passed alone but failed when a sibling
+unmocked-reanimated suite ran first). Symptom: `new WorkletsErrorConstructor ... NativeWorklets`
+at an import line, intermittent based on suite order.
+**Rule**: Data + registries (catalogs, family->component maps, types, pure config) belong in a
+UI-FREE module (`components/iconRegistry.ts`) with ZERO modal/reanimated/animation imports. The
+heavy UI component (the picker) re-exports them for back-compat, but lightweight renderers and
+tests import from the registry directly — no reanimated in their graph, no per-test shim. The
+single shared glyph renderer is `components/activityIcon.tsx` (`ActivityIcon`, takes
+`iconName`+`iconFamily` strings, not a full Activity), used by Timeline + Home so mood/activity
+glyphs map identically app-wide. General principle: a module's import graph is part of its API —
+a "just a constant" import that drags a native runtime into jest is a layering bug; fix the
+layering, don't paper it with mocks.
+**Date**: 2026-06-13
+
+## 2026-06-13: Custom SVG charts > chart-kit — measure width via onLayout, put path math in a tested pure transform
+**Context**: Replaced react-native-chart-kit's `LineChart` on Home with our own
+`components/visualisations/MoodWeekChart.tsx` (react-native-svg, already a direct dep). chart-kit
+was the unpolished piece (cramped y-axis, bezier overshoot beyond the data range, clipped end
+dots, red dots for interpolated points reading as "error days"). Durable patterns for the next
+chart we build:
+- **Width via `onLayout` measurement, NOT `SCREEN_WIDTH - padding` guessing.** The measured
+  card-content width is theme/orientation robust and never clips end dots. Gate the SVG render on
+  `width > 0` (mirrors ActivityCorrelationChart). In jest the `onLayout` never auto-fires, so a
+  width-gated chart renders nothing until you `await act(async () => fireEvent(node,'layout',{
+  nativeEvent:{layout:{width,height,x,y}}}))` — give the wrap a `testID` to target it.
+- **ALL path math in a pure transform** (`transforms/chartGeometry.ts`, zero React/svg imports)
+  so it's exhaustively jest-tested: mapping orientation (mood 0->bottom, 10->top), even index
+  spread, the **no-overshoot invariant** (every path y within the real-points y-range — straight
+  segments guarantee this; a sampling test proves it), and the edge shapes (empty / single point
+  / all-same / leading+trailing null / interior gap / all null / NaN-as-missing / degenerate
+  dims never NaN). The SVG component is then a thin renderer.
+- **Missing data must read as ABSENCE, never alarm**: real points = solid dots colored by the
+  canonical `moodColor` ramp (consistent with timeline/heatmap); missing days get NO dot and the
+  line is DASHED across an interior gap (not a red dot). Reuse `moodColor.ts` for chart dot color
+  so mood color is one authority app-wide.
+- Straight segments (not bezier) for the line — they CANNOT overshoot and read clean/systematic.
+  Scope was Home only; Stats/Insights still use chart-kit (a later batch), but MoodWeekChart is
+  built reusable so they can adopt it.
+- **Shared "Overview" tile primitive** `components/StatTile.tsx` (36px accent chip + 18/700 value
+  + 12 muted label) now backs BOTH the Stats StatSummaryCard grid and Home's monthly-overview —
+  one systematic component, not two hand-rolled grids. (NEEDS on-device QA: see below.)
+**Date**: 2026-06-13
+
+## 2026-06-13: SQL must NEVER day-bucket a stored timestamp — JS owns day-keying via localDateString; pin jest to a non-UTC TZ
+**Mistake**: Entries store as UTC ISO instants (correct), and the DatePicker normalises a
+backdated entry to LOCAL midnight (correct: Thursday 00:00 AEST = Wednesday 14:00 UTC). But the
+visualisation SQL bucketed days with `date(date)` / `GROUP BY date(date)` / `strftime('%w', date)`,
+and SQLite's `date()`/`strftime()` run in UTC. So for ANY UTC+N user, every entry between local
+00:00 and local N:00 — which includes EVERY backdated entry — mis-bucketed to the PREVIOUS day:
+the Home chart's green dot landed a day early, the streak dropped (Anti: "streak says 1 instead of
+2"), and the heatmap/calendar/insights all mis-placed it. The bug was INVISIBLE to 416 passing
+tests because (a) the SQL strings never EXECUTE under jest, and (b) jest ran in the machine's TZ
+with no pin — almost always UTC, where local==UTC and the bug can't reproduce.
+**Rule** (DOCTRINE — enforced by `__tests__/queriesNoDateBucketing.test.ts`, a class-level
+invariant): SQL does exactly two things — (a) RANGE-FILTER on the stored instant with
+parameterised UTC ISO bounds (`WHERE date BETWEEN ?start AND ?end`, bounds from
+`startOfLocalDay`/`endOfLocalDay`/`computeWindow` in JS), and (b) return the RAW `date` instant.
+SQL must NEVER call `date()`/`strftime()` on a stored timestamp to group/key/extract-DOW. ALL "which
+local day is this entry on" logic goes through `localDateString` — wrapped by the ONE transform
+`components/visualisations/transforms/dailyAverages.ts` (`aggregateDailyAverages` / `dailyAverageRows`
+/ `dailyAverageMap` / `bestDayLocal`). Day-of-week is derived in JS too (`aggregateDowRows`), and
+activity-correlation day-keying (`aggregateActivityCorrelation`). Do NOT "fix" this with SQLite's
+`'localtime'` modifier — it works on-device but is untestable under jest and creates a SECOND TZ
+authority. The invariant test scans every exported SQL string in queries.ts + every visualisation
+source file (comments stripped, JS `new Date(` excluded) for `date(date)` / `strftime(...date...)`
+and fails the build if one reappears — so move any inline screen SQL into queries.ts as a named
+export (did this for Home's monthStats -> `MONTHLY_DAILY_AVERAGES` and `_layout`'s reminder feed ->
+`RECENT_ENTRY_DATES`) so the invariant covers it.
+**Testing rule (load-bearing)**: jest is pinned to a non-UTC TZ via `jest.tz.js`
+(`process.env.TZ='Australia/Brisbane'`, UTC+10 no DST) as the FIRST entry in package.json
+`jest.setupFiles` (before jest.setup.ts, so TZ is set before any Date is touched).
+`__tests__/timezonePin.test.ts` asserts the offset is -600 so the pin can't silently drop. Any new
+TZ-sensitive logic gets a regression test that would FAIL under UTC keying (proven here by a
+temporary revert: flipping `aggregateDailyAverages` back to `toISOString().slice(0,10)` made 13
+assertions fail). The reported bug's exact regression lives in
+`__tests__/timezoneDayKeying.regression.test.ts`. Construct local-day instants with
+`new Date(2026, 5, 11).toISOString()` (NOT a UTC ISO literal) so the local-vs-UTC distinction is
+real under the pin. The READ CONTRACT in `databases/dateHelpers.ts` documents the doctrine.
+**Date**: 2026-06-13
+
 ## 2026-06-13: The Yoga shrink-wrap law has now bitten THREE times — treat every % / stretch child as suspect until its parent's width chain is verified
 **Mistake(s)**: (1) v2.1.0: OverlayModal's styleless `<Pressable>` shrink-wrapped → dialog `width:'94%'`
 rendered at ~49% (entry below). (2) v2.2.0: EntryPhotos' single-photo hero `Image width:'100%'` resolved

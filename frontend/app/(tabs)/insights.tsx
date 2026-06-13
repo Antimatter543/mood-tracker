@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -19,10 +19,15 @@ import {
     ACTIVITY_CORRELATION,
 } from '@/components/visualisations/queries';
 import { currentStreak, longestStreak } from '@/components/visualisations/transforms/streak';
-import { buildDowPatternData, type DowRow } from '@/components/visualisations/transforms/dayOfWeekPattern';
+import {
+    buildDowPatternData,
+    aggregateDowRows,
+    type DowInstantRow,
+} from '@/components/visualisations/transforms/dayOfWeekPattern';
 import {
     computeActivityCorrelation,
-    type ActivityCorrelationRow,
+    aggregateActivityCorrelation,
+    type ActivityCorrelationRawRow,
 } from '@/components/visualisations/transforms/activityCorrelation';
 
 /**
@@ -70,19 +75,25 @@ export default function InsightsScreen() {
                 const end = endOfLocalDay(new Date());
                 const today = localDateString(new Date());
 
-                const [summary, dowRows, dateRows, activityRows] = await Promise.all([
+                const [summary, dowRawRows, dateRows, activityRawRows] = await Promise.all([
                     db.getFirstAsync<{ avg_mood: number | null; entry_count: number }>(
                         WINDOW_SUMMARY,
                         [start, end]
                     ),
-                    db.getAllAsync<DowRow>(DOW_MOOD_PATTERN, [start, end]),
+                    db.getAllAsync<DowInstantRow>(DOW_MOOD_PATTERN, [start, end]),
                     db.getAllAsync<{ date: string }>(RECENT_ENTRY_DATES, [start]),
-                    db.getAllAsync<ActivityCorrelationRow>(ACTIVITY_CORRELATION, [start, end]),
+                    db.getAllAsync<ActivityCorrelationRawRow>(ACTIVITY_CORRELATION, [start, end]),
                 ]);
 
-                const dates = dateRows.map((r) => r.date);
-                const dow = buildDowPatternData(dowRows);
-                const corr = computeActivityCorrelation(activityRows);
+                // All three sources now return RAW instants/rows; day-keying
+                // happens in JS (localDateString / aggregate*) — see queries.ts.
+                const dates = Array.from(
+                    new Set(dateRows.map((r) => localDateString(r.date)))
+                );
+                const dow = buildDowPatternData(aggregateDowRows(dowRawRows));
+                const corr = computeActivityCorrelation(
+                    aggregateActivityCorrelation(activityRawRows)
+                );
                 // Most uplifting activity = largest positive, meaningful delta.
                 const positives = corr.meaningful
                     .filter((m) => m.delta > 0)

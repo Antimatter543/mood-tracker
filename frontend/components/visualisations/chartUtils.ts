@@ -2,6 +2,7 @@
 import { useThemeColors } from '@/styles/global';
 import { useMemo } from 'react';
 import { Dimensions } from 'react-native';
+import { localDateString } from '@/databases/dateHelpers';
 
 export const CHART_PADDING = 48; // 16px container padding × 2 sides + safe margin
 export const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -85,12 +86,16 @@ export const alternativeConfigs = {
     }
 };
 
-// Keep existing utility functions
+// The last 7 LOCAL days (today + the 6 before it), oldest first, as
+// "YYYY-MM-DD". Keyed via localDateString — NOT `toISOString().split('T')[0]`,
+// which returns the UTC day and would name the wrong day for users east/west of
+// UTC near local midnight (the same day-keying bug class fixed across the
+// visualisations). Day-keying in this app always goes through localDateString.
 export const getLast7Days = () =>
     [...Array(7)].map((_, i) => {
         const d = new Date();
         d.setDate(d.getDate() - i);
-        return d.toISOString().split('T')[0];
+        return localDateString(d);
     }).reverse();
 
 export const formatDayLabel = (date: string) =>

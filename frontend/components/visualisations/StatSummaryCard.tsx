@@ -5,6 +5,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { Card } from '@/components/Card';
+import { StatTile } from '@/components/StatTile';
 import { useTimeframe } from '@/context/TimeframeContext';
 import { WINDOW_SUMMARY, RECENT_ENTRY_DATES } from './queries';
 import {
@@ -16,6 +17,7 @@ import { startOfLocalDay, addDays, localDateString } from './transforms/dateHelp
 import { currentStreak, longestStreak } from './transforms/streak';
 import { computeMovingAverage } from './transforms/movingAverage';
 import { buildWeeklyMoodChartData, type MoodAvgRow } from './transforms/weeklyMood';
+import { dailyAverageRows } from './transforms/dailyAverages';
 import { WEEKLY_MOOD_AVERAGES } from './queries';
 import { buildStatSummary, type StatSummaryData } from './transforms/statSummary';
 
@@ -41,36 +43,12 @@ const StatSummaryCard: React.FC = () => {
                     flexDirection: 'row',
                     flexWrap: 'wrap',
                 },
+                // Per-tile width wrapper — the 2x2 grid cell. The StatTile
+                // primitive fills it; padding here breathes the tiles apart.
                 tile: {
                     width: '50%',
                     paddingVertical: 12,
                     paddingHorizontal: 4,
-                },
-                tileInner: {
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 10,
-                },
-                iconWrap: {
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    backgroundColor: colors.accentLight,
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                },
-                textCol: {
-                    flex: 1,
-                },
-                value: {
-                    fontSize: 18,
-                    fontWeight: '700',
-                    color: colors.text,
-                },
-                label: {
-                    fontSize: 12,
-                    color: colors.textSecondary,
-                    marginTop: 2,
                 },
             }),
         [colors]
@@ -85,17 +63,28 @@ const StatSummaryCard: React.FC = () => {
                     addDays(localDateString(new Date()), -60)
                 );
 
-                const [windowRow, entryDateRows, dailyRows] = await Promise.all([
+                const [windowRow, entryDateRows, rawDailyRows] = await Promise.all([
                     db.getFirstAsync<{ avg_mood: number | null; entry_count: number }>(
                         WINDOW_SUMMARY,
                         [start, end]
                     ),
                     db.getAllAsync<{ date: string }>(RECENT_ENTRY_DATES, [streakStart]),
-                    db.getAllAsync<MoodAvgRow>(WEEKLY_MOOD_AVERAGES, [start, end]),
+                    db.getAllAsync<{ date: string; mood: number }>(
+                        WEEKLY_MOOD_AVERAGES,
+                        [start, end]
+                    ),
                 ]);
 
-                const entryDates = entryDateRows.map((r) => r.date);
+                // RECENT_ENTRY_DATES now returns raw instants -> map to LOCAL
+                // day strings + de-dupe before the streak (matches the rest of
+                // the app; currentStreak/longestStreak tolerate the order).
+                const entryDates = Array.from(
+                    new Set(entryDateRows.map((r) => localDateString(r.date)))
+                );
                 const today = localDateString(new Date());
+
+                // Per-LOCAL-day averages from the raw rows for the MA slope.
+                const dailyRows: MoodAvgRow[] = dailyAverageRows(rawDailyRows);
 
                 // Moving-average slope over the window's gap-filled daily avgs.
                 const built = buildWeeklyMoodChartData(dailyRows, tf);
@@ -188,29 +177,12 @@ const StatSummaryCard: React.FC = () => {
             <View style={styles.grid}>
                 {tiles.map((tile) => (
                     <View key={tile.label} style={styles.tile}>
-                        <View style={styles.tileInner}>
-                            <View style={styles.iconWrap}>
-                                <Feather
-                                    name={tile.icon}
-                                    size={18}
-                                    color={tile.color ?? colors.accent}
-                                />
-                            </View>
-                            <View style={styles.textCol}>
-                                <Text
-                                    style={[
-                                        styles.value,
-                                        tile.color ? { color: tile.color } : null,
-                                    ]}
-                                    numberOfLines={1}
-                                >
-                                    {tile.value}
-                                </Text>
-                                <Text style={styles.label} numberOfLines={1}>
-                                    {tile.label}
-                                </Text>
-                            </View>
-                        </View>
+                        <StatTile
+                            icon={tile.icon}
+                            value={tile.value}
+                            label={tile.label}
+                            color={tile.color}
+                        />
                     </View>
                 ))}
             </View>

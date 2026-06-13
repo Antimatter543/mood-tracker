@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useMemo } from 'react';
+import { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Svg, Rect } from 'react-native-svg';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -11,7 +11,8 @@ import { ACTIVITY_CORRELATION } from './queries';
 import { computeWindow, type Timeframe } from './transforms/windowHelpers';
 import {
   computeActivityCorrelation,
-  type ActivityCorrelationRow,
+  aggregateActivityCorrelation,
+  type ActivityCorrelationRawRow,
   type ActivityCorrelationResult,
 } from './transforms/activityCorrelation';
 
@@ -98,11 +99,15 @@ const ActivityCorrelationChart = () => {
         // Parameterised local-time window (?start, ?end) — NOT the UTC-anchored
         // timeframeCondition string the old delta-from-mean chart used.
         const { start, end } = computeWindow(timeframe as Timeframe);
-        const rows = await db.getAllAsync<ActivityCorrelationRow>(
+        // Raw joined rows (one per entry×activity) -> day-key + with/without
+        // split in JS (the old SQL keyed days with date(e.date) in UTC).
+        const rawRows = await db.getAllAsync<ActivityCorrelationRawRow>(
           ACTIVITY_CORRELATION,
           [start, end],
         );
-        const { meaningful: m } = computeActivityCorrelation(rows);
+        const { meaningful: m } = computeActivityCorrelation(
+          aggregateActivityCorrelation(rawRows),
+        );
         setMeaningful(m);
       } catch (error) {
         console.error('Error fetching activity correlation:', error);

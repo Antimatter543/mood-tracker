@@ -15,9 +15,11 @@ import Feather from '@expo/vector-icons/Feather';
 
 import { useMemo } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import Constants from 'expo-constants';
 import { SettingsSection, RemindersSection } from "@/components/SettingRow";
 import { runMigrations } from "@/databases/migrations";
 import { DataManagementSection } from "@/components/DataManagementSection";
+import { versionLine, copyrightLine } from "@/lib/versionInfo";
 
 // Support Section
 const SupportSection = () => {
@@ -185,8 +187,8 @@ function Setting() {
             {__DEV__ && <DangerZoneSection db={db} refetchEntries={refetchEntries} />}
 
             <View style={styles.versionInfo}>
-                <Text style={styles.versionText}>Version 1.0.0</Text>
-                <Text style={styles.versionText}>© 2025 Raedus Labs. All rights reserved.</Text>
+                <Text style={styles.versionText}>{versionLine(Constants.expoConfig?.version)}</Text>
+                <Text style={styles.versionText}>{copyrightLine(new Date().getFullYear())}</Text>
                 <Text style={styles.versionText}> Have feedback? Email us at hello@raeduslabs.com! </Text>
 
             </View>

@@ -1,10 +1,10 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Activity } from '../types';
 import { useThemeColors } from '@/styles/global';
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import Feather from "@expo/vector-icons/Feather";
-import { ICON_FAMILIES } from '../IconPicker';
+import { ICON_FAMILIES } from '../iconRegistry';
 
 type ReorderActivitiesProps = {
     activities: Activity[];

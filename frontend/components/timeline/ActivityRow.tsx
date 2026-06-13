@@ -1,35 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import Feather from '@expo/vector-icons/Feather';
 import { Activity } from '../types';
-import { ICON_FAMILIES, IconFamilyType } from '../IconPicker';
+import { ActivityIcon } from '../activityIcon';
 import { ThemeColors } from '@/styles/global';
-
-/**
- * One activity rendered as a compact [icon + name] chip-less unit. Mirrors the
- * canonical render path used across the forms (ActivityReorder /
- * ActivitySelector): Emoji family -> the name as Text; otherwise the family's
- * vector component, with a `circle` fallback for an unknown/missing family. No
- * border, no pill — the icon + muted label carry it.
- */
-const ActivityIconGlyph: React.FC<{
-    activity: Activity;
-    color: string;
-    size?: number;
-}> = ({ activity, color, size = 14 }) => {
-    if (activity.icon_family === 'Emoji') {
-        return (
-            <Text style={{ fontSize: size, lineHeight: size + 2 }}>
-                {activity.icon_name}
-            </Text>
-        );
-    }
-    const IconComponent = ICON_FAMILIES[activity.icon_family as IconFamilyType]?.component;
-    if (!IconComponent) {
-        return <Feather name="circle" size={size} color={color} />;
-    }
-    return <IconComponent.default name={activity.icon_name as any} size={size} color={color} />;
-};
 
 const styles = StyleSheet.create({
     row: {
@@ -66,7 +39,11 @@ export const ActivityRow: React.FC<{
         <View style={styles.row}>
             {activities.map((activity, index) => (
                 <View key={`${activity.id}-${index}`} style={styles.item}>
-                    <ActivityIconGlyph activity={activity} color={colors.textSecondary} />
+                    <ActivityIcon
+                        iconName={activity.icon_name}
+                        iconFamily={activity.icon_family}
+                        color={colors.textSecondary}
+                    />
                     <Text style={[styles.name, { color: colors.textSecondary }]}>
                         {activity.name}
                     </Text>

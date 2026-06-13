@@ -1,16 +1,27 @@
 import { View, Text, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useThemeColors } from '@/styles/global';
+import Feather from '@expo/vector-icons/Feather';
+import { useThemeColors, ThemeColors } from '@/styles/global';
 import { Layout } from '../../components/PageContainer';
 import { Card } from '@/components/Card';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState, memo, useMemo } from 'react';
-import { LineChart } from 'react-native-chart-kit';
-import { WEEKLY_MOOD_AVERAGES, RECENT_ENTRY_DATES, TOTAL_ENTRIES } from '@/components/visualisations/queries';
-import { CHART_PADDING, interpolateData, isWeekEmpty, SCREEN_WIDTH, useChartConfig } from '@/components/visualisations/chartUtils';
+import { WEEKLY_MOOD_AVERAGES, MONTHLY_DAILY_AVERAGES, RECENT_ENTRY_DATES, TOTAL_ENTRIES } from '@/components/visualisations/queries';
+import { isWeekEmpty } from '@/components/visualisations/chartUtils';
+import { MoodWeekChart } from '@/components/visualisations/MoodWeekChart';
+import { StatTile } from '@/components/StatTile';
+import { ActivityIcon } from '@/components/activityIcon';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { startOfLocalDay, endOfLocalDay, localDateString } from '@/databases/dateHelpers';
+import { dailyAverageMap, bestDayLocal } from '@/components/visualisations/transforms/dailyAverages';
 import { currentStreak } from '@/components/visualisations/transforms/streak';
+
+/** A top-activity row for the "Recent activities" card — name + its real icon. */
+type RecentActivity = {
+    name: string;
+    icon_name: string;
+    icon_family: string;
+};
 
 
 // Simple date formatting helper
@@ -97,9 +108,12 @@ const TodaysMoodCard = memo(function TodaysMoodCard({
                 <MoodIcon mood={mood} />
             </View>
             {streak > 0 && (
-                <View style={[styles.streakContainer, { backgroundColor: colors.accentLight }]}>
+                // De-bubbled: an inline zap icon + text in the accent color,
+                // matching the Overview streak-tile language (no background pill).
+                <View style={styles.streakRow}>
+                    <Feather name="zap" size={14} color={colors.accent} />
                     <Text style={styles.streakText}>
-                        {streak} day streak
+                        {streak}-day streak
                     </Text>
                 </View>
             )}
@@ -107,91 +121,54 @@ const TodaysMoodCard = memo(function TodaysMoodCard({
     );
 });
 
-// Weekly Chart Card Component
+// Weekly Chart Card Component — our own systematic SVG chart (MoodWeekChart),
+// replacing react-native-chart-kit's LineChart on Home.
 const WeeklyChartCard = memo(function WeeklyChartCard({ data }: { data: (number | null)[] }) {
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
-    const chartConfig = useChartConfig();
-    const chartWidth = SCREEN_WIDTH - (CHART_PADDING + 32);
-    const weekEmpty = isWeekEmpty(data);
 
-    // NOTE: all hooks must run on every render (Rules of Hooks). The empty-week
-    // early return lives BELOW these `useMemo`s — never above them — so the hook
-    // count stays constant whether or not the week has data. The interpolation
-    // is cheap and harmless on an empty week (its result is simply unused).
-    const { data: interpolatedData, nullIndices } = useMemo(() =>
-        interpolateData(data.length > 0 ? data : [0, 0, 0, 0, 0, 0, 0])
-        , [data]);
+    // The last 7 LOCAL day-name labels (oldest first), aligned to the 7 data
+    // slots `fetchData` produced (today + the prior 6, earliest first).
+    // NOTE (Rules of Hooks, lessons.md 2026-06-08): this hook runs on EVERY
+    // render — the empty-week early return below sits BELOW it so the hook count
+    // is constant whether or not the week has data.
+    const labels = useMemo(() => {
+        const out: string[] = [];
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            out.push(d.toLocaleDateString('en-US', { weekday: 'short' }));
+        }
+        return out;
+    }, []);
 
-    const chartData = useMemo(() => {
-        const getPast7Days = () => {
-            const dates = [];
-            for (let i = 6; i >= 0; i--) {
-                const date = new Date();
-                date.setDate(date.getDate() - i);
-                dates.push(date.toISOString());
-            }
-            return dates;
-        };
-        const formatToDayName = (dateStr: string) =>
-            new Date(dateStr).toLocaleDateString('en-US', { weekday: 'short' });
-
-        return {
-            labels: getPast7Days().map(formatToDayName),
-            datasets: [{ data: interpolatedData, withDots: true }],
-        };
-    }, [interpolatedData]);
-
-    // An empty week (no entries in the last 7 days) would otherwise render as a
-    // flat zero line with red interpolated dots — it reads as an error. Show a
-    // calm placeholder inside the same card instead.
-    if (weekEmpty) {
+    // An empty week (no entries in the last 7 days) would render as a flat line
+    // with nothing to plot — show the same calm placeholder inside the card.
+    if (isWeekEmpty(data)) {
         return (
             <Card>
+                <Text style={styles.cardTitle}>Past 7 days</Text>
                 <View style={styles.weekEmpty}>
                     <Ionicons name="analytics-outline" size={32} color={colors.textSecondary} />
                     <Text style={styles.weekEmptyText}>
                         Log your mood to start seeing your week
                     </Text>
                 </View>
-                <Text style={styles.subtitle}>Past 7 days</Text>
             </Card>
         );
     }
 
     return (
         <Card>
-            <View style={styles.chartContainer}>
-                <LineChart
-                    data={chartData}
-                    width={chartWidth}
-                    height={120}
-                    chartConfig={chartConfig}
-                    bezier
-                    withInnerLines={false}
-                    withOuterLines={false}
-                    withHorizontalLabels={true}
-                    withVerticalLabels={true}
-                    withDots={true}
-                    getDotColor={(value, index) => {
-                        if (nullIndices.includes(index)) {
-                            return '#e74c3c'; // Red for interpolated points
-                        }
-                        return colors.accent;
-                    }}
-                    fromZero={true}
-                    yAxisInterval={2}
-                    xLabelsOffset={-10}
-                    yAxisSuffix=""
-                    style={styles.chart}
-                />
-            </View>
-            <Text style={styles.subtitle}>Past 7 days</Text>
+            <Text style={styles.cardTitle}>Past 7 days</Text>
+            <MoodWeekChart data={data} labels={labels} height={130} />
         </Card>
     );
 });
 
-// Monthly Overview Card Component
+// Monthly Overview Card Component — the "Overview" idiom (open StatTiles, no
+// box-inside-box). Three stats in the proven 2x2 grid (Avg / Total / Best Day),
+// the fourth cell intentionally empty.
 const MonthlyOverviewCard = memo(function MonthlyOverviewCard({ stats }: {
     stats: {
         average: number;
@@ -199,27 +176,30 @@ const MonthlyOverviewCard = memo(function MonthlyOverviewCard({ stats }: {
         bestDay: string;
     }
 }) {
-    const colors = useThemeColors();
-    const styles = useThemedStyles(colors);
+    const styles = useThemedStyles(useThemeColors());
 
-    const displayAverage = stats.average !== null ? stats.average.toFixed(1) : '--';
+    const displayAverage = stats.average ? `${stats.average.toFixed(1)} / 10` : '-- / 10';
+    const bestDay = stats.bestDay ? formatDate(stats.bestDay).short : '--';
+
+    const tiles: {
+        icon: React.ComponentProps<typeof Feather>['name'];
+        value: string;
+        label: string;
+    }[] = [
+        { icon: 'activity', value: displayAverage, label: 'Average mood' },
+        { icon: 'edit-3', value: `${stats.totalEntries}`, label: 'Total entries' },
+        { icon: 'award', value: bestDay, label: 'Best day' },
+    ];
 
     return (
         <Card>
-            <Text style={styles.subtitle}>Last 30 days</Text>
-            <View style={styles.statsGrid}>
-                <View style={[styles.statItem, { backgroundColor: colors.accentLight }]}>
-                    <Text style={styles.statLabel}>Average Mood</Text>
-                    <Text style={styles.statValue}>{displayAverage}</Text>
-                </View>
-                <View style={[styles.statItem, { backgroundColor: colors.accentLight }]}>
-                    <Text style={styles.statLabel}>Total Entries</Text>
-                    <Text style={styles.statValue}>{stats.totalEntries}</Text>
-                </View>
-                <View style={[styles.statItem, { backgroundColor: colors.accentLight }]}>
-                    <Text style={styles.statLabel}>Best Day</Text>
-                    <Text style={styles.statValue}>{formatDate(stats.bestDay).short}</Text>
-                </View>
+            <Text style={styles.cardTitle}>Last 30 days</Text>
+            <View style={styles.tileGrid}>
+                {tiles.map((tile) => (
+                    <View key={tile.label} style={styles.tileCell}>
+                        <StatTile icon={tile.icon} value={tile.value} label={tile.label} />
+                    </View>
+                ))}
             </View>
         </Card>
     );
@@ -246,18 +226,33 @@ const FirstEntryNudge = memo(function FirstEntryNudge() {
     );
 });
 
-// Recent Activities Card Component
-const RecentActivitiesCard = memo(function RecentActivitiesCard({ activities }: { activities: string[] }) {
+// Recent Activities Card Component — de-bubbled: each activity is an icon (in a
+// small accent chip, matching the Overview tile chips) + its name, wrapping. The
+// real icon is rendered via the shared ActivityIcon mapping (icon_name +
+// icon_family come from the extended top-activities query).
+const RecentActivitiesCard = memo(function RecentActivitiesCard({ activities }: { activities: RecentActivity[] }) {
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
 
+    if (activities.length === 0) return null;
+
     return (
         <Card>
-            <Text style={styles.subtitle}>Recent activities</Text>
+            <Text style={styles.cardTitle}>Recent activities</Text>
             <View style={styles.activitiesContainer}>
                 {activities.map((activity, index) => (
-                    <View key={index} style={styles.activityTag}>
-                        <Text style={styles.activityText}>{activity}</Text>
+                    <View key={`${activity.name}-${index}`} style={styles.activityUnit}>
+                        <View style={styles.activityChip}>
+                            <ActivityIcon
+                                iconName={activity.icon_name}
+                                iconFamily={activity.icon_family}
+                                color={colors.accent}
+                                size={15}
+                            />
+                        </View>
+                        <Text style={styles.activityText} numberOfLines={1}>
+                            {activity.name}
+                        </Text>
                     </View>
                 ))}
             </View>
@@ -266,7 +261,7 @@ const RecentActivitiesCard = memo(function RecentActivitiesCard({ activities }: 
 });
 
 // Themed styles hook
-const useThemedStyles = (colors: any) => {
+const useThemedStyles = (colors: ThemeColors) => {
     return useMemo(() => StyleSheet.create({
         container: {
             width: '100%',
@@ -274,18 +269,21 @@ const useThemedStyles = (colors: any) => {
             flexGrow: 0,
         },
         greeting: {
-            fontSize: 18,
-            fontWeight: '600',
-            color: colors.textSecondary,
-            marginBottom: 12,
+            fontSize: 26,
+            fontWeight: '700',
+            color: colors.text,
+            letterSpacing: -0.5,
+            marginBottom: 16,
             marginLeft: 2,
         },
-        subtitle: {
-            fontSize: 12,
+        // The ONE section-title convention: sits ABOVE the card's content (the
+        // Overview card's "title" style). Replaces the old `subtitle` that was
+        // used inconsistently above AND below content.
+        cardTitle: {
+            fontSize: 18,
             fontWeight: '600',
-            color: colors.textSecondary,
-            marginBottom: 8,
-            letterSpacing: 0.3,
+            color: colors.text,
+            marginBottom: 16,
         },
         heroCard: {
             marginBottom: 24,
@@ -317,15 +315,22 @@ const useThemedStyles = (colors: any) => {
             fontSize: 16,
             color: colors.textSecondary,
         },
-        chartContainer: {
+        // De-bubbled streak: inline zap icon + accent text, no background pill.
+        streakRow: {
+            flexDirection: 'row',
             alignItems: 'center',
-            width: '100%',
+            gap: 6,
+            marginTop: 12,
         },
-        // Calm in-card placeholder shown when the week has no entries (replaces
-        // the red-dotted flat line). Matches the chart's ~120px height so the
-        // card doesn't jump when the first entry lands.
+        streakText: {
+            color: colors.accent,
+            fontSize: 14,
+            fontWeight: '600',
+        },
+        // Calm in-card placeholder shown when the week has no entries. ~130px to
+        // match the chart height so the card doesn't jump when the first entry lands.
         weekEmpty: {
-            height: 120,
+            height: 130,
             alignItems: 'center',
             justifyContent: 'center',
             gap: 10,
@@ -355,61 +360,41 @@ const useThemedStyles = (colors: any) => {
             color: colors.text,
             fontWeight: '500',
         },
-        chart: {
-            borderRadius: 16,
-            paddingRight: 0,
-        },
-        statsGrid: {
+        // Overview 2x2 tile grid (mirrors StatSummaryCard) — open StatTiles, no
+        // box-inside-box. Each cell is 50% width; the StatTile fills it.
+        tileGrid: {
             flexDirection: 'row',
-            justifyContent: 'space-between',
-            gap: 8,
+            flexWrap: 'wrap',
         },
-        statItem: {
-            alignItems: 'flex-start',
-            flex: 1,
-            paddingVertical: 10,
-            paddingHorizontal: 12,
-            borderRadius: 16,
+        tileCell: {
+            width: '50%',
+            paddingVertical: 12,
+            paddingHorizontal: 4,
         },
-        statLabel: {
-            fontSize: 12,
-            color: colors.textSecondary,
-            marginBottom: 4,
-            textTransform: 'uppercase',
-            letterSpacing: 0.5,
-        },
-        statValue: {
-            fontSize: 24,
-            fontWeight: '800',
-            color: colors.text,
-            letterSpacing: -0.5,
-        },
+        // Recent activities: wrapping [icon-chip + name] units, no pill bubbles.
         activitiesContainer: {
             flexDirection: 'row',
             flexWrap: 'wrap',
+            rowGap: 14,
+            columnGap: 16,
+        },
+        activityUnit: {
+            flexDirection: 'row',
+            alignItems: 'center',
             gap: 8,
         },
-        activityTag: {
-            backgroundColor: colors.overlays.tag,
-            paddingHorizontal: 12,
-            paddingVertical: 6,
-            borderRadius: 16,
+        activityChip: {
+            width: 30,
+            height: 30,
+            borderRadius: 15,
+            backgroundColor: colors.accentLight,
+            alignItems: 'center',
+            justifyContent: 'center',
         },
         activityText: {
             color: colors.text,
             fontSize: 14,
-        },
-        streakContainer: {
-            marginTop: 10,
-            paddingVertical: 6,
-            paddingHorizontal: 14,
-            borderRadius: 12,
-            alignSelf: 'flex-start',
-        },
-        streakText: {
-            color: colors.accent,
-            fontSize: 14,
-            fontWeight: '600',
+            fontWeight: '500',
         },
     }), [colors]);
 };
@@ -424,7 +409,7 @@ export default function Home() {
         totalEntries: 0,
         bestDay: ''
     });
-    const [recentActivities, setRecentActivities] = useState<string[]>([]);
+    const [recentActivities, setRecentActivities] = useState<RecentActivity[]>([]);
     const [weeklyData, setWeeklyData] = useState<(number | null)[]>([]);
     const [streak, setStreak] = useState<number>(0);
     // All-time entry count — drives the brand-new-user first-entry nudge.
@@ -447,10 +432,10 @@ export default function Home() {
 
                 const [
                     today,
-                    monthStats,
+                    monthRows,
                     activities,
                     weeklyRows,
-                    streakEntryDates,
+                    streakEntryRows,
                     totals,
                 ] = await Promise.all([
                     db.getFirstAsync<{ mood: number }>(
@@ -458,43 +443,34 @@ export default function Home() {
                         [todayStart, todayEnd]
                     ),
 
-                    db.getFirstAsync<{ average: number; count: number; bestDay: string }>(
-                        `
-                        WITH DailyAverages AS (
-                            SELECT date(date) as day, ROUND(AVG(mood), 1) as daily_avg
-                            FROM entries
-                            WHERE date BETWEEN ? AND ?
-                            GROUP BY date(date)
-                        )
-                        SELECT
-                            ROUND(AVG(mood), 1) as average,
-                            COUNT(*) as count,
-                            (
-                                SELECT day FROM DailyAverages
-                                WHERE daily_avg = (SELECT MAX(daily_avg) FROM DailyAverages)
-                                LIMIT 1
-                            ) as bestDay
-                        FROM entries
-                        WHERE date BETWEEN ? AND ?
-                        `,
-                        [monthStart, todayEnd, monthStart, todayEnd]
+                    // Raw {date: instant, mood} rows; average/count/bestDay are
+                    // computed in JS so "best day" is the right LOCAL day (the
+                    // old inline SQL keyed it with UTC date(date)).
+                    db.getAllAsync<{ date: string; mood: number }>(
+                        MONTHLY_DAILY_AVERAGES,
+                        [monthStart, todayEnd]
                     ),
 
-                    db.getAllAsync<{ name: string; count: number }>(
+                    db.getAllAsync<{
+                        name: string;
+                        icon_name: string;
+                        icon_family: string;
+                        count: number;
+                    }>(
                         `
-                        SELECT a.name, COUNT(*) as count
+                        SELECT a.name, a.icon_name, a.icon_family, COUNT(*) as count
                         FROM activities a
                         JOIN entry_activities ea ON ea.activity_id = a.id
                         JOIN entries e ON e.id = ea.entry_id
                         WHERE e.date BETWEEN ? AND ?
-                        GROUP BY a.name
+                        GROUP BY a.id
                         ORDER BY count DESC
                         LIMIT 7
                         `,
                         [weekStart, todayEnd]
                     ),
 
-                    db.getAllAsync<{ date: string; avgMood: number | null }>(
+                    db.getAllAsync<{ date: string; mood: number }>(
                         WEEKLY_MOOD_AVERAGES,
                         [weekStart, todayEnd]
                     ),
@@ -510,29 +486,44 @@ export default function Home() {
                 setTodaysMood(today?.mood || null);
                 setTotalEntries(totals?.count ?? 0);
 
-                if (monthStats) {
+                // Last-30-days stats. average = mean over all entries in the
+                // window (1 dp), totalEntries = entry count, bestDay = local day
+                // with the highest daily average — all derived in JS.
+                if (monthRows.length > 0) {
+                    const sum = monthRows.reduce((s, r) => s + r.mood, 0);
                     setMonthlyStats({
-                        average: monthStats.average,
-                        totalEntries: monthStats.count,
-                        bestDay: monthStats.bestDay,
+                        average: Math.round((sum / monthRows.length) * 10) / 10,
+                        totalEntries: monthRows.length,
+                        bestDay: bestDayLocal(monthRows),
                     });
+                } else {
+                    setMonthlyStats({ average: 0, totalEntries: 0, bestDay: '' });
                 }
 
-                setRecentActivities(activities.map(a => a.name));
+                setRecentActivities(
+                    activities.map((a) => ({
+                        name: a.name,
+                        icon_name: a.icon_name,
+                        icon_family: a.icon_family,
+                    }))
+                );
 
                 // Fill in the 7-day window (last 6 days + today, earliest first)
                 // with null for days that had no entries — same shape (and count)
-                // the chart's 7 labels expect.
-                const weeklyByDate: Record<string, number | null> = {};
-                for (const row of weeklyRows) weeklyByDate[row.date] = row.avgMood;
+                // the chart's 7 labels expect. Keys are local days from
+                // aggregateDailyAverages, so they match the local-day labels we
+                // build below by construction.
+                const weeklyByDay = dailyAverageMap(weeklyRows);
                 const weekly: (number | null)[] = [];
                 for (let i = 6; i >= 0; i--) {
                     const dStr = localDateString(new Date(now.getTime() - i * DAY_MS));
-                    weekly.push(weeklyByDate[dStr] ?? null);
+                    weekly.push(weeklyByDay.get(dStr) ?? null);
                 }
                 setWeeklyData(weekly);
 
-                setStreak(currentStreak(streakEntryDates.map(r => r.date), todayLocal));
+                // Map raw instants -> local day strings before the streak; the
+                // streak transform de-dupes internally so mapping alone is fine.
+                setStreak(currentStreak(streakEntryRows.map(r => localDateString(r.date)), todayLocal));
             } catch (error) {
                 console.error('Error fetching dashboard data:', error);
             }

@@ -6,14 +6,27 @@
  * `new Date().toISOString()` returns and what SQLite's `CURRENT_TIMESTAMP`
  * approximates.
  *
- * READ CONTRACT: When you need to bucket entries by "day", you MUST compute
- * day boundaries in the *user's local timezone* and convert to UTC for the
- * SQL query — never rely on SQLite's `date('now')` or `date(entries.date)`
- * because those use UTC and will misattribute entries near midnight.
+ * READ CONTRACT — SQL NEVER day-buckets; JS owns day-keying:
+ *   1. RANGE-FILTER entries in SQL using parameterised UTC ISO bounds computed
+ *      here in JS (`startOfLocalDay` / `endOfLocalDay`): `WHERE date BETWEEN
+ *      ?start AND ?end`. The SET of entries in a window is thus correct.
+ *   2. To bucket those entries by "day" (grouping, keying, day-of-week), NEVER
+ *      use SQLite's `date()` / `strftime()` on the stored timestamp — those run
+ *      in UTC and misattribute entries for any user east/west of UTC. Instead
+ *      return the RAW stored instant from SQL and key it in JS via
+ *      `localDateString` (or `aggregateDailyAverages` in
+ *      components/visualisations/transforms/dailyAverages.ts, which wraps it).
+ *      `localDateString` is the ONE day-keying authority in the app.
+ *
+ * Why this matters: a backdated entry is normalised to LOCAL midnight (e.g.
+ * Thursday 00:00 in AEST/UTC+10 = Wednesday 14:00 UTC). SQLite's `date()` would
+ * bucket it onto WEDNESDAY; `localDateString` correctly keys it to THURSDAY.
+ * The same backdated-entry case is what made the bug invisible in tests until
+ * the suite was pinned to a non-UTC timezone (see jest.tz.js).
  *
  * Example: an entry at 2025-05-19T01:30:00Z is on May 19th in UTC but on
  * May 18th in PST (UTC-8). `startOfLocalDay` / `endOfLocalDay` give you the
- * right UTC range for "May 18th in PST".
+ * right UTC range for "May 18th in PST"; `localDateString` keys it to May 18th.
  *
  * All functions here are pure and side-effect-free so they can be safely
  * imported into any worker (e.g. the visualisation worker) without pulling

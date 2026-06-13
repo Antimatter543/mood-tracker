@@ -7,6 +7,7 @@ import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
 import { buildHeatmapGrid, type HeatmapInput } from './transforms/heatmap';
+import { aggregateDailyAverages } from './transforms/dailyAverages';
 import { localDateString } from './transforms/dateHelpers';
 import { moodColor } from '@/components/timeline/moodColor';
 
@@ -64,58 +65,49 @@ const CustomHeatmap: React.FC = () => {
 
     const fetchData = useCallback(async () => {
             try {
-                // End date is the user's LOCAL today (YYYY-MM-DD), computed in
-                // JS and passed as a param — NOT SQLite's UTC date('now'), which
-                // would drop today's grid cell for users east of UTC after their
-                // local midnight.
+                // End date is the user's LOCAL today (YYYY-MM-DD).
                 const endDate = localDateString(new Date());
 
-                // Fetch all mood data without limit
-                const results = await db.getAllAsync<{ date: string; avg_mood: number | null }>(`
-                    WITH all_entries AS (
-                        SELECT date(date) as date
-                        FROM entries
-                        GROUP BY date(date)
-                    ),
-                    date_range AS (
-                        SELECT
-                            date(
-                                (SELECT MIN(date) FROM all_entries),
-                                '-${EXTRA_MONTHS} months'
-                            ) as start_date,
-                            ? as end_date
-                    ),
-                    all_dates AS (
-                        WITH RECURSIVE dates(date) AS (
-                            SELECT start_date FROM date_range
-                            UNION ALL
-                            SELECT date(date, '+1 day')
-                            FROM dates
-                            WHERE date < (SELECT end_date FROM date_range)
-                        )
-                        SELECT date FROM dates
-                    )
-                    SELECT
-                        all_dates.date,
-                        ROUND(AVG(entries.mood), 1) as avg_mood
-                    FROM all_dates
-                    LEFT JOIN entries ON date(entries.date) = all_dates.date
-                    GROUP BY all_dates.date
-                    ORDER BY all_dates.date
-                `, [endDate]);
-
-                // On an empty `entries` table, MIN(date) is NULL so the query
-                // returns a single row with date: null. Drop any falsy/invalid
-                // date rows before they reach buildHeatmapGrid, which would
-                // otherwise throw RangeError on `new Date(null)`.
-                setMoodData(
-                    results
-                        .filter(row => row.date)
-                        .map(row => ({
-                            date: row.date,
-                            mood: row.avg_mood
-                        }))
+                // Fetch ALL raw entries (heatmap is all-time) as {date: instant,
+                // mood}. Day-keying happens in JS via aggregateDailyAverages —
+                // SQL never day-buckets (the old recursive-CTE query joined on
+                // `date(entries.date)` in UTC, mis-placing late-evening entries).
+                const rawRows = await db.getAllAsync<{ date: string; mood: number }>(
+                    `SELECT date, mood FROM entries ORDER BY date`,
                 );
+
+                const daily = aggregateDailyAverages(rawRows);
+
+                // Empty DB -> nothing to plot (buildHeatmapGrid handles []).
+                if (daily.length === 0) {
+                    setMoodData([]);
+                    return;
+                }
+
+                // Per-local-day populated cells, capped at today so a future-
+                // dated entry doesn't stretch the grid past now.
+                const days: { date: string; mood: number | null }[] = daily
+                    .filter((d) => d.day <= endDate)
+                    .map((d) => ({ date: d.day, mood: d.avg }));
+
+                if (days.length === 0) {
+                    setMoodData([]);
+                    return;
+                }
+
+                // Preserve the old "show EXTRA_MONTHS before the earliest data"
+                // lead-in: prepend an empty boundary day so the grid extends back
+                // a month (buildHeatmapGrid gap-fills the days in between as
+                // null). Use local calendar-month arithmetic.
+                const earliest = days[0].date;
+                const [ey, em, ed] = earliest.split('-').map(Number);
+                const leadIn = new Date(ey, em - 1 - EXTRA_MONTHS, ed);
+                const leadInDay = localDateString(leadIn);
+                if (leadInDay < earliest) {
+                    days.unshift({ date: leadInDay, mood: null });
+                }
+
+                setMoodData(days);
                 // Scrolling to the newest (rightmost) data is handled by the
                 // ScrollView's onContentSizeChange — a timeout-based scrollToEnd
                 // races the SVG layout and often fires before content has width,
