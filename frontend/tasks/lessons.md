@@ -40,41 +40,56 @@ The tab-bar style math lives in the UI-free `lib/tabBarStyle.ts` (`buildTabBarSt
 jest-testable without importing the route module (which drags expo-router's untranspilable ESM
 `standard-navigation` into jest — importing `app/(tabs)/_layout.tsx` in a test FAILS).
 
-**Gotcha 2 — `KeyboardAvoidingView behavior='padding'` CLOBBERS a static `paddingBottom` set on the
-SAME element.** RN's KAV 'padding' case renders `style={StyleSheet.compose(style, {paddingBottom:
-<keyboardHeight>})}` (`node_modules/react-native/Libraries/Components/Keyboard/KeyboardAvoidingView.js`),
-so a `paddingBottom: insets.bottom` you put on the KAV is OVERWRITTEN with the dynamic keyboard
-height (0 when no keyboard). Symptom: the safe-area bottom inset silently disappears. **Rule**: put a
-static safe-area `paddingBottom` on an INNER wrapper View, NOT on the KAV — keyboard padding and
-nav-bar inset then COMPOSE on separate nodes instead of one clobbering the other. (Caught by a render
-test asserting `paddingBottom === 48`; it would otherwise have shipped reading 0.)
+**Gotcha 2 — keyboard occlusion under edge-to-edge took THREE attempts; the trap was the height SOURCE,
+not the padding architecture.** This is the load-bearing lesson — read it before touching keyboard code.
 
-**Gotcha 2 — `KeyboardAvoidingView behavior={undefined}` on Android edge-to-edge is a NO-OP; you must
-consume the IME inset in JS yourself.** [DISPROVEN-BY-DEVICE, corrected v2.3.1 — the Expo docs' claim
-"just mounting the KAV is enough on Android" is EMPIRICALLY FALSE on our release-shape APK.] First
-attempt followed Expo's guide (docs.expo.dev/guides/keyboard-handling): KAV with
-`behavior={Platform.OS === 'ios' ? 'padding' : undefined}`. It passed jest + Expo Go but FAILED on the
-release APK (Pixel 3, Android 12, edge-to-edge, 3-button nav, `decorFitsSystemWindows=false`): the
-focused Notes EditText stayed at its no-keyboard bounds [55,1435][1025,1710] — fully BEHIND the keyboard
-(top at y=1224) — and the form's ScrollView stayed full-height [0,179][1080,2028] with the keyboard up,
-so there was nothing to scroll. Root cause: under enforced edge-to-edge `adjustResize` no longer resizes
-the window, and a KAV with `behavior=undefined` does nothing (and even an ACTIVE KAV would only resize
-the container — it won't PAN a ScrollView to the focused field). `softwareKeyboardLayoutMode: "resize"`
-in app.json is necessary-but-insufficient for the same reason.
+- **Attempt 1 (FAILED on release APK): `KeyboardAvoidingView`.** Followed Expo's guide
+  (docs.expo.dev/guides/keyboard-handling): KAV with `behavior={Platform.OS === 'ios' ? 'padding' : undefined}`.
+  Passed jest + Expo Go, FAILED on the release APK (Pixel 3, Android 12, edge-to-edge, 3-button nav,
+  `decorFitsSystemWindows=false`): the Notes EditText stayed at its no-keyboard bounds [55,1435][1025,1710],
+  fully BEHIND the keyboard; the ScrollView stayed full-height with the keyboard up. Under enforced
+  edge-to-edge `adjustResize` no longer resizes the window, so a KAV with `behavior=undefined` is a NO-OP
+  (and even an ACTIVE KAV only resizes the container — it won't PAN a ScrollView to the focused field).
+  `softwareKeyboardLayoutMode: "resize"` in app.json is necessary-but-insufficient for the same reason.
+  (Also note: KAV's 'padding' case does `StyleSheet.compose(style, {paddingBottom: <kbHeight>})`, so a
+  static `paddingBottom` set on the KAV itself gets CLOBBERED — keep static padding on an inner View.)
+- **Attempt 2 (FAILED, identical bounds): right architecture, DEAD height source.** Replaced the KAV with
+  the correct deterministic structure — pad the scroll container's `contentContainer.paddingBottom +=
+  keyboardHeight` (gives physical scroll RANGE; without it content fits the window exactly so there's
+  nothing to scroll) + `scrollToEnd` on Notes focus — BUT fed it `keyboardHeight` from RN's JS
+  `Keyboard.addListener('keyboardDidShow')`. **That source returns 0 under Android edge-to-edge**: RN
+  derives the Android keyboard height from the window-RESIZE delta, and the window never resizes under
+  edge-to-edge, so the event reports height 0. Padding by 0 = zero movement (corroborated: the centered
+  activity dialog padded by an "804px" keyboard barely moved). The padding/scroll architecture was 100%
+  correct; only the number flowing into it was dead.
+- **Attempt 3 (the fix): keep the architecture, swap the height SOURCE to `useAnimatedKeyboard`.** The
+  correct edge-to-edge height source is Android's native `WindowInsetsAnimation` callback, which
+  reanimated 4.3.1 (ALREADY a dep, bundled in Expo Go → no new native dep, dev loop intact) exposes via
+  `useAnimatedKeyboard()`. It returns `{ height: SharedValue<number>, state: SharedValue<KeyboardState> }`
+  on the UI thread. `hooks/useKeyboardHeight.ts` now wraps it and bridges height→JS state via
+  `useAnimatedReaction(() => Math.round(keyboard.height.value), (cur,prev)=>{ if(cur!==prev) runOnJS(setHeight)(cur); })`,
+  so EVERY existing consumer (EntryForm contentContainer padding, OverlayModal card-layer / fullScreen
+  padding, the Notes scrollToEnd-on-focus + keyboard-rise effect) keeps consuming a plain number,
+  unchanged. (Hook is `@deprecated` in favour of `react-native-keyboard-controller` — a native module not
+  in Expo Go — so the built-in hook is the correct in-budget choice.)
+- **CRITICAL edge-to-edge options (prescribed, NOT guessed)** — the native math in
+  `node_modules/react-native-reanimated/android/.../keyboard/Keyboard.java updateHeight`:
+  `keyboardHeight = ime.bottom - (isNavigationBarTranslucent ? 0 : systemBar.bottom)`. Our app is
+  UNCONDITIONAL edge-to-edge (both system bars drawn behind), so pass **BOTH** translucent flags `true`:
+  `useAnimatedKeyboard({ isStatusBarTranslucentAndroid: true, isNavigationBarTranslucentAndroid: true })`.
+  `true` → the FULL keyboard height from the screen bottom (~804 on the Pixel 3, exactly what we pad by);
+  `false` → the nav-bar inset (~48dp) is wrongly SUBTRACTED, under-reporting the height. (Docs:
+  translucent=true → margin 0; status-bar-translucent=true → top margin 0.)
 
-**The empirically-correct fix (v2.3.1) — deterministic JS, NO KAV, NO native dep:**
-1. `hooks/useKeyboardHeight.ts` — track keyboard height via `Keyboard.addListener('keyboardDidShow'/'keyboardDidHide')` (the `Will*` events are iOS-only; Android only fires `Did*`). `endCoordinates.height`.
-2. Pad the scrollable container by the keyboard height so there is physical scroll RANGE above the
-   keyboard (the missing piece — with content fitting the window exactly, there was nowhere to scroll):
-   entry form ScrollView `contentContainerStyle.paddingBottom += keyboardHeight`; OverlayModal dialog
-   card-layer `paddingBottom: keyboardHeight` (shrinks the `justifyContent:center` region so the centered
-   card re-centers ABOVE the keyboard); fullScreen inner wrapper `paddingBottom: insets.bottom + keyboardHeight`.
-3. Scroll the focused field into view: entry-form Notes is the LAST input, so `scrollRef.current?.scrollToEnd({animated:true})` on its `onFocus` AND in a `useEffect` when `keyboardHeight>0` on the details step
-   (rAF first so the new padding is laid out before scrolling). The shared `OverlayModal` covers the
-   activity-name dialogs + IconPicker (top-anchored inputs rarely occluded; the padding still gives range).
-Do NOT add `react-native-keyboard-controller` (native module, not in Expo Go → breaks the Pixel dev loop).
+**Rule**: For keyboard-over-input on an edge-to-edge Expo app, do NOT use `KeyboardAvoidingView` or RN's
+`Keyboard` JS events (both dead on Android edge-to-edge). Get the height from reanimated
+`useAnimatedKeyboard` with BOTH `*TranslucentAndroid` flags `true`, pad the scroll container's
+contentContainer by it (real scroll range), and scrollToEnd / scroll-the-field-into-view on focus +
+keyboard-rise. Do NOT add `react-native-keyboard-controller` (native, not in Expo Go → breaks the dev loop).
 **Verify keyboard behavior on the RELEASE-shape APK, NEVER Go/jest** — Expo Go's host app has a different
-`windowSoftInputMode` and jest has no live keyboard, so BOTH gave a false PASS on the broken KAV version.
+`windowSoftInputMode` and jest has no live keyboard, so BOTH gave a false PASS on the two broken versions.
+A live on-screen `kb:<height>` debug readout (gated by a `DEBUG_KB` const) makes the next QA decisive:
+`kb:0` = source still dead, `kb:~300-800` + field lifts = ship.
 
 **Demo data for release builds (no `__DEV__` seed button)**: `scripts/make-demo-data.js`
 (`node scripts/make-demo-data.js > /tmp/x.json`) emits SoulSync export-format v2 JSON loadable via

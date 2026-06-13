@@ -134,6 +134,16 @@ describe('EntryForm — keyboard handling (deterministic)', () => {
         expect(scrollPadding(withKb)).toBe(basePad + 804);
     });
 
+    it('renders the DEBUG_KB readout reflecting the live keyboard height', async () => {
+        // The temporary on-screen `kb:<n>` readout (insurance for the device QA)
+        // must surface the live height so a release-APK `kb:0` is unmistakable.
+        mockKeyboardHeight.mockReturnValue(804);
+        const view = await render(
+            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
+        );
+        expect(view.getByText('kb:804')).toBeTruthy();
+    });
+
     it('scrolls to the end when the keyboard opens on the details step', async () => {
         // Start on details with keyboard hidden.
         const view = await render(
