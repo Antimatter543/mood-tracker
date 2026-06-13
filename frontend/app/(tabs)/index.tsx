@@ -113,7 +113,7 @@ const TodaysMoodCard = memo(function TodaysMoodCard({
                 <View style={styles.streakRow}>
                     <Feather name="zap" size={14} color={colors.accent} />
                     <Text style={styles.streakText}>
-                        {streak} day{streak === 1 ? '' : 's'} streak
+                        {streak}-day streak
                     </Text>
                 </View>
             )}
