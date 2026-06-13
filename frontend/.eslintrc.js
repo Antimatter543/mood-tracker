@@ -25,5 +25,15 @@ module.exports = {
       files: ['scripts/**/*.js', 'plugins/**/*.js', '*.config.js'],
       env: { node: true },
     },
+    {
+      // Jest tests that live alongside the CommonJS scripts (e.g. the
+      // demo-data generator's round-trip test). The scripts override above gives
+      // them the node env; they ALSO need the jest globals (describe/it/expect)
+      // — eslint-config-expo only injects those for its default test glob, not
+      // for files matched by our scripts override. Declare both here. (Ordered
+      // after the scripts override so it wins for these files.)
+      files: ['scripts/**/__tests__/**/*.js', 'scripts/**/*.test.js'],
+      env: { node: true, jest: true },
+    },
   ],
 };

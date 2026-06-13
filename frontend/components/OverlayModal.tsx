@@ -1,8 +1,10 @@
 import React, { useEffect, useRef } from 'react';
 import { BackHandler, Pressable, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { useOverlay } from '@/context/OverlayHost';
+import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
 
 /**
  * Drop-in replacement for a transparent, centered `<Modal>` (dialog style).
@@ -76,6 +78,15 @@ const OverlayModalContent: React.FC<{
     fullScreen: boolean;
     children: React.ReactNode;
 }> = ({ onClose, dismissOnBackdropPress, fullScreen, children }) => {
+    const insets = useSafeAreaInsets();
+    // Live keyboard height (0 when hidden). Under enforced edge-to-edge
+    // (SDK 56 / RN 0.85 / targetSdk 36), Android's adjustResize no longer
+    // resizes the window and a KeyboardAvoidingView with behavior=undefined is a
+    // no-op (verified on the release APK). So we consume the IME inset in JS:
+    // pad the container by the keyboard height so a centered dialog lifts above
+    // the keyboard / a full-screen panel gains scroll range. See useKeyboardHeight.
+    const keyboardHeight = useKeyboardHeight();
+
     useEffect(() => {
         const sub = BackHandler.addEventListener('hardwareBackPress', () => {
             onClose();
@@ -86,9 +97,18 @@ const OverlayModalContent: React.FC<{
 
     if (fullScreen) {
         // Edge-to-edge panel: children fill the window, no backdrop / centering.
+        // The inner wrapper pads its bottom by the safe-area inset (so footers
+        // clear the nav bar) PLUS the keyboard height (so any TextInput inside —
+        // e.g. IconPicker's search / custom-emoji fields — gains room to scroll
+        // above the keyboard).
         return (
             <Animated.View entering={FadeIn.duration(150)} style={StyleSheet.absoluteFill}>
-                {children}
+                <View
+                    testID="overlay-fullscreen-inner"
+                    style={[styles.flexFill, { paddingBottom: insets.bottom + keyboardHeight }]}
+                >
+                    {children}
+                </View>
             </Animated.View>
         );
     }
@@ -114,9 +134,18 @@ const OverlayModalContent: React.FC<{
                 STYLELESS `<Pressable>` whose width was `auto`, so it shrink-wrapped
                 to the card and the `94%` resolved against that shrunken width,
                 collapsing the card to ~49% of the screen. This full-screen layer
-                gives the card's `%` the real screen width as its basis -> 94%. */}
+                gives the card's `%` the real screen width as its basis -> 94%.
+
+                `paddingBottom: keyboardHeight` lifts the centered dialog above the
+                keyboard when a TextInput in it focuses (e.g. the activity-name
+                field in ActivityEditModal / Add-Activity / Add-Group): the bottom
+                padding shrinks the centering region, so the card re-centers in the
+                space ABOVE the keyboard and its input + buttons stay visible. This
+                replaces a KeyboardAvoidingView, which is a no-op on Android under
+                edge-to-edge. `box-none` keeps gutter taps falling to the backdrop. */}
             <View
-                style={[StyleSheet.absoluteFill, styles.cardLayer]}
+                testID="overlay-card-layer"
+                style={[StyleSheet.absoluteFill, styles.cardLayer, { paddingBottom: keyboardHeight }]}
                 pointerEvents="box-none"
             >
                 {/* The inner no-op `<Pressable>` is the card's own touch responder,
@@ -155,5 +184,11 @@ const styles = StyleSheet.create({
     cardPress: {
         alignSelf: 'stretch',
         alignItems: 'center',
+    },
+    // Fill-the-window wrapper for the fullScreen variant. `flex: 1` covers the
+    // window so the child panel fills it; its paddingBottom (safe-area inset +
+    // keyboard height) is applied inline at the call site.
+    flexFill: {
+        flex: 1,
     },
 });

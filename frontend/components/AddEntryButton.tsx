@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { StyleSheet, Pressable } from 'react-native';
 import Animated, {
     useAnimatedStyle,
@@ -6,6 +6,7 @@ import Animated, {
     withSpring,
 } from 'react-native-reanimated';
 import Feather from '@expo/vector-icons/Feather';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import { useDataContext } from '@/context/DataContext';
@@ -16,9 +17,14 @@ import { EntryFormData, EntryFormModal } from './forms/EntryForm';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
+// Gap between the FAB and the bottom safe-area edge, matching the original 24px
+// float above a zero-inset bottom.
+const FAB_BOTTOM_GAP = 24;
+
 export function AddEntryButton() {
     const colors = useThemeColors();
-    const styles = useThemedStyles(colors);
+    const insets = useSafeAreaInsets();
+    const styles = useThemedStyles(colors, insets.bottom);
     const db = SQLite.useSQLiteContext();
     const [modalVisible, setModalVisible] = useState(false);
     const { refetchEntries } = useDataContext();
@@ -85,13 +91,16 @@ export function AddEntryButton() {
     );
 }
 
-const useThemedStyles = (colors: ThemeColors) => {
+const useThemedStyles = (colors: ThemeColors, insetBottom: number) => {
     return useMemo(
         () =>
             StyleSheet.create({
                 floatingButton: {
                     position: 'absolute',
-                    bottom: 24,
+                    // Float above the system-nav area (3-button ≈ 48dp, gesture
+                    // ≈ 24dp, 0 on no-inset displays) so the FAB never overlaps
+                    // the Android nav buttons / gesture pill.
+                    bottom: FAB_BOTTOM_GAP + insetBottom,
                     zIndex: 1000,
                     backgroundColor: colors.accent,
                     width: 56,
@@ -107,6 +116,6 @@ const useThemedStyles = (colors: ThemeColors) => {
                     elevation: colors.elevation.elevation + 2,
                 },
             }),
-        [colors]
+        [colors, insetBottom]
     );
 };

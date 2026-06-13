@@ -20,6 +20,94 @@
 > Release: https://github.com/Antimatter543/mood-tracker/releases/tag/v2.0.0. Endgame detail +
 > the per-check QA table: `frontend/docs/sdk56-endgame-notes.md`.
 
+## 2026-06-13: Edge-to-edge bottom safe-area + keyboard — two non-obvious gotchas (v2.3.1)
+**Context**: This app is unconditionally edge-to-edge (Expo SDK 56 / RN 0.85 / targetSdk 36).
+Owner reported (a) the app "doesn't respect the bottom of the phone" (tab bar flush UNDER the
+Android nav buttons; FAB overlapping them) and (b) the keyboard covered the entry-form notes input.
+
+**Gotcha 1 — a FIXED `tabBarStyle.height` SUPPRESSES react-navigation's bottom-inset padding.**
+expo-router's BottomTabBar (`node_modules/expo-router/.../bottom-tabs/views/BottomTabBar.js`
+`getTabBarHeight`) normally adds `insets.bottom` to its DEFAULT height + paddingBottom — BUT it
+short-circuits: `const customHeight = 'height' in flattenedStyle ? flattenedStyle.height : undefined;
+if (customHeight != null) return customHeight;`. So our fixed `height: 64` returned verbatim, the
+`+ insets.bottom` was bypassed, and on a 3-button-nav Pixel (inset ≈ 48dp) the bar sat flush under
+the nav buttons. **Rule**: when you OVERRIDE the tab bar `height`, you OWN the inset — compute
+`height = BASE + insets.bottom` AND `paddingBottom = BASE_PAD + insets.bottom` (so the icon/label
+band keeps its visual height and the bar only GROWS downward into the system-nav region). Same for
+the FAB (`bottom = GAP + insets.bottom`) and any absolute bottom-anchored element. NEVER hardcode the
+inset (3-button ≈ 48dp, gesture ≈ 24dp, 0 on no-inset displays) — read `useSafeAreaInsets().bottom`.
+The tab-bar style math lives in the UI-free `lib/tabBarStyle.ts` (`buildTabBarStyle`) so it's
+jest-testable without importing the route module (which drags expo-router's untranspilable ESM
+`standard-navigation` into jest — importing `app/(tabs)/_layout.tsx` in a test FAILS).
+
+**Gotcha 2 — keyboard occlusion under edge-to-edge took THREE attempts; the trap was the height SOURCE,
+not the padding architecture.** This is the load-bearing lesson — read it before touching keyboard code.
+
+- **Attempt 1 (FAILED on release APK): `KeyboardAvoidingView`.** Followed Expo's guide
+  (docs.expo.dev/guides/keyboard-handling): KAV with `behavior={Platform.OS === 'ios' ? 'padding' : undefined}`.
+  Passed jest + Expo Go, FAILED on the release APK (Pixel 3, Android 12, edge-to-edge, 3-button nav,
+  `decorFitsSystemWindows=false`): the Notes EditText stayed at its no-keyboard bounds [55,1435][1025,1710],
+  fully BEHIND the keyboard; the ScrollView stayed full-height with the keyboard up. Under enforced
+  edge-to-edge `adjustResize` no longer resizes the window, so a KAV with `behavior=undefined` is a NO-OP
+  (and even an ACTIVE KAV only resizes the container — it won't PAN a ScrollView to the focused field).
+  `softwareKeyboardLayoutMode: "resize"` in app.json is necessary-but-insufficient for the same reason.
+  (Also note: KAV's 'padding' case does `StyleSheet.compose(style, {paddingBottom: <kbHeight>})`, so a
+  static `paddingBottom` set on the KAV itself gets CLOBBERED — keep static padding on an inner View.)
+- **Attempt 2 (FAILED, identical bounds): right architecture, DEAD height source.** Replaced the KAV with
+  the correct deterministic structure — pad the scroll container's `contentContainer.paddingBottom +=
+  keyboardHeight` (gives physical scroll RANGE; without it content fits the window exactly so there's
+  nothing to scroll) + `scrollToEnd` on Notes focus — BUT fed it `keyboardHeight` from RN's JS
+  `Keyboard.addListener('keyboardDidShow')`. **That source returns 0 under Android edge-to-edge**: RN
+  derives the Android keyboard height from the window-RESIZE delta, and the window never resizes under
+  edge-to-edge, so the event reports height 0. Padding by 0 = zero movement (corroborated: the centered
+  activity dialog padded by an "804px" keyboard barely moved). The padding/scroll architecture was 100%
+  correct; only the number flowing into it was dead.
+- **Attempt 3 (the fix): keep the architecture, swap the height SOURCE to `useAnimatedKeyboard`.** The
+  correct edge-to-edge height source is Android's native `WindowInsetsAnimation` callback, which
+  reanimated 4.3.1 (ALREADY a dep, bundled in Expo Go → no new native dep, dev loop intact) exposes via
+  `useAnimatedKeyboard()`. It returns `{ height: SharedValue<number>, state: SharedValue<KeyboardState> }`
+  on the UI thread. `hooks/useKeyboardHeight.ts` now wraps it and bridges height→JS state via
+  `useAnimatedReaction(() => Math.round(keyboard.height.value), (cur,prev)=>{ if(cur!==prev) runOnJS(setHeight)(cur); })`,
+  so EVERY existing consumer (EntryForm contentContainer padding, OverlayModal card-layer / fullScreen
+  padding, the Notes scrollToEnd-on-focus + keyboard-rise effect) keeps consuming a plain number,
+  unchanged. (Hook is `@deprecated` in favour of `react-native-keyboard-controller` — a native module not
+  in Expo Go — so the built-in hook is the correct in-budget choice.)
+- **CRITICAL edge-to-edge options (prescribed, NOT guessed)** — the native math in
+  `node_modules/react-native-reanimated/android/.../keyboard/Keyboard.java updateHeight`:
+  `keyboardHeight = ime.bottom - (isNavigationBarTranslucent ? 0 : systemBar.bottom)`. Our app is
+  UNCONDITIONAL edge-to-edge (both system bars drawn behind), so pass **BOTH** translucent flags `true`:
+  `useAnimatedKeyboard({ isStatusBarTranslucentAndroid: true, isNavigationBarTranslucentAndroid: true })`.
+  `true` → the FULL keyboard height from the screen bottom (~804 on the Pixel 3, exactly what we pad by);
+  `false` → the nav-bar inset (~48dp) is wrongly SUBTRACTED, under-reporting the height. (Docs:
+  translucent=true → margin 0; status-bar-translucent=true → top margin 0.)
+
+**Rule**: For keyboard-over-input on an edge-to-edge Expo app, do NOT use `KeyboardAvoidingView` or RN's
+`Keyboard` JS events (both dead on Android edge-to-edge). Get the height from reanimated
+`useAnimatedKeyboard` with BOTH `*TranslucentAndroid` flags `true`, pad the scroll container's
+contentContainer by it (real scroll range), and scrollToEnd / scroll-the-field-into-view on focus +
+keyboard-rise. Do NOT add `react-native-keyboard-controller` (native, not in Expo Go → breaks the dev loop).
+**Verify keyboard behavior on the RELEASE-shape APK, NEVER Go/jest** — Expo Go's host app has a different
+`windowSoftInputMode` and jest has no live keyboard, so BOTH gave a false PASS on the two broken versions.
+A live on-screen `kb:<height>` debug readout (gated by a `DEBUG_KB` const) makes the next QA decisive:
+`kb:0` = source still dead, `kb:~300-800` + field lifts = ship.
+
+**Demo data for release builds (no `__DEV__` seed button)**: `scripts/make-demo-data.js`
+(`node scripts/make-demo-data.js > /tmp/x.json`) emits SoulSync export-format v2 JSON loadable via
+Settings → Import Data on ANY build. Generation is a pure exported `generateDemoData({today,days,seed})`
+(mulberry32 PRNG → reproducible); CLI is a thin wrapper. Round-trip test feeds the output through the
+REAL `importDatabaseData` over a mock DB. Key schema facts: importer requires `{version, data}`; entries
+upsert via `INSERT OR REPLACE INTO entries (id,mood,notes,date)`; activities reference comma-joined
+`activity_ids` mapped to seeded rows by `(name, group_id)` — so include the default activities/groups
+(mirrored from `components/seedData.ts`, AUTOINCREMENT ids 1..N in group order). Dates pinned to LOCAL
+NOON so the local-day key (`localDateString`) is timezone-robust. Photos OMITTED (export carries
+file-path refs only, broken on a new device).
+
+**On-device verification deferred to QA** (jest has no live keyboard / real insets): the v2.3.1 KEYBOARD
+re-fix MUST be re-verified on the release APK — focus Notes → field + typed text visible above the
+keyboard, form scrolls with the keyboard up, same for the activity-name edit field. (Task 1 bottom insets
++ Task 3 demo data already PASSED release-APK QA; only the keyboard re-fix is outstanding.)
+**Date**: 2026-06-13
+
 ## 2026-06-13: Keep icon/data registries UI-free so lightweight consumers (+ their tests) don't transitively import reanimated
 **Mistake/friction**: The icon catalog + family map + icon types lived INSIDE `IconPicker.tsx`,
 which imports `OverlayModal` -> `react-native-reanimated`. Reanimated initialises the native
