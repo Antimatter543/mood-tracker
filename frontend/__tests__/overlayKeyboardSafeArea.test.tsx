@@ -1,21 +1,21 @@
 /**
  * OverlayModal keyboard + bottom-inset tests.
  *
- * Task 2: every overlay that hosts a TextInput must keep the focused input above
- * the keyboard. The systematic solution is a KeyboardAvoidingView built into
- * BOTH OverlayModal variants (dialog + fullScreen), so ActivityEditModal /
- * Add-Activity / Add-Group (dialog) and IconPicker (fullScreen) all inherit it.
+ * The empirical failure: under enforced edge-to-edge (SDK 56 / RN 0.85 /
+ * targetSdk 36) a KeyboardAvoidingView with behavior=undefined is a no-op on
+ * Android, so a focused TextInput stayed behind the keyboard. The fix consumes
+ * the IME inset in JS — useKeyboardHeight feeds a paddingBottom that lifts the
+ * centered dialog (and gives the fullScreen panel scroll range).
  *
- * Task 1: the fullScreen variant pads its bottom by the safe-area inset so
- * footers/action rows clear the Android nav bar.
+ * Task 1 (still holds): the fullScreen variant also pads by the safe-area inset
+ * so footers clear the Android nav bar.
  *
- * The actual keyboard-occlusion BEHAVIOR is only verifiable on-device (jest has
- * no live keyboard). These tests assert the WIRING the device behavior depends
- * on: a KeyboardAvoidingView is present, its `behavior` is the Expo-sanctioned
- * per-platform value, and the fullScreen avoider carries the bottom inset.
+ * Real occlusion is release-APK only; these assert the WIRING it depends on:
+ * the card layer / fullScreen inner carry paddingBottom == (inset +) keyboard
+ * height, and that it tracks the live keyboard height.
  */
 import React from 'react';
-import { Platform, Text, StyleSheet } from 'react-native';
+import { Text, StyleSheet } from 'react-native';
 import { render } from '@testing-library/react-native';
 
 // Non-zero bottom inset (3-button nav) so the fullScreen padding is assertable.
@@ -23,9 +23,14 @@ jest.mock('react-native-safe-area-context', () => ({
     useSafeAreaInsets: () => ({ top: 0, bottom: 48, left: 0, right: 0 }),
 }));
 
+// Mock the keyboard-height hook so we can assert the padding math without a
+// real keyboard. Default 300; tests override per-case via mockReturnValue.
+const mockKeyboardHeight = jest.fn(() => 300);
+jest.mock('@/hooks/useKeyboardHeight', () => ({
+    useKeyboardHeight: () => mockKeyboardHeight(),
+}));
+
 // OverlayModal imports reanimated (worklets runtime is unavailable under jest).
-// Shim exactly the surface it uses (Animated.View + FadeIn.duration), same as
-// activityReorder.test.tsx / overlayPopover.test.tsx.
 jest.mock('react-native-reanimated', () => {
     const ReactLocal = require('react');
     const { View } = require('react-native');
@@ -40,72 +45,71 @@ jest.mock('react-native-reanimated', () => {
 });
 
 import { OverlayProvider } from '@/context/OverlayHost';
-import { OverlayModal, keyboardBehavior } from '@/components/OverlayModal';
+import { OverlayModal } from '@/components/OverlayModal';
 
 function renderOverlay(node: React.ReactElement) {
     return render(<OverlayProvider>{node}</OverlayProvider>);
 }
 
-// The KeyboardAvoidingView renders to a host View carrying its testID; that
-// host node is what we assert presence + style on. (container.queryAll only
-// exposes HOST nodes, not composite instances, so we target the testID rather
-// than the KAV component type. The per-platform `behavior` value is covered by
-// the keyboardBehavior() unit tests below — the components feed it that value.)
 const flatStyle = (node: any) => StyleSheet.flatten(node?.props?.style) || {};
 
-describe('OverlayModal — keyboard avoidance wiring', () => {
-    it('dialog variant wraps content in a KeyboardAvoidingView', async () => {
+afterEach(() => mockKeyboardHeight.mockReturnValue(300));
+
+describe('OverlayModal — keyboard avoidance (deterministic JS inset)', () => {
+    it('dialog variant pads the card layer by the keyboard height (lifts the centered card)', async () => {
+        mockKeyboardHeight.mockReturnValue(804);
         const view = await renderOverlay(
             <OverlayModal visible onClose={() => {}}>
                 <Text>dialog-body</Text>
             </OverlayModal>
         );
-        expect(view.getByTestId('overlay-kav-dialog')).toBeTruthy();
+        const layer = view.getByTestId('overlay-card-layer');
+        expect(flatStyle(layer).paddingBottom).toBe(804);
         expect(view.getByText('dialog-body')).toBeTruthy();
     });
 
-    it('fullScreen variant wraps content in a KeyboardAvoidingView AND pads the bottom inset', async () => {
+    it('dialog card layer padding is 0 when the keyboard is hidden (no-op)', async () => {
+        mockKeyboardHeight.mockReturnValue(0);
+        const view = await renderOverlay(
+            <OverlayModal visible onClose={() => {}}>
+                <Text>dialog-body</Text>
+            </OverlayModal>
+        );
+        expect(flatStyle(view.getByTestId('overlay-card-layer')).paddingBottom).toBe(0);
+    });
+
+    it('fullScreen variant pads by safe-area inset PLUS keyboard height', async () => {
+        mockKeyboardHeight.mockReturnValue(804);
         const view = await renderOverlay(
             <OverlayModal visible onClose={() => {}} fullScreen>
                 <Text>fullscreen-body</Text>
             </OverlayModal>
         );
-        const kav = view.getByTestId('overlay-kav-fullscreen');
-        // The fullScreen avoider must carry paddingBottom == insets.bottom (48)
-        // so footers/action rows clear the Android nav bar.
-        expect(flatStyle(kav).paddingBottom).toBe(48);
+        const inner = view.getByTestId('overlay-fullscreen-inner');
+        // 48 (nav-bar inset) + 804 (keyboard) so footers clear the nav bar AND
+        // inputs gain scroll range above the keyboard.
+        expect(flatStyle(inner).paddingBottom).toBe(48 + 804);
         expect(view.getByText('fullscreen-body')).toBeTruthy();
     });
 
-    it('renders nothing when not visible (no avoider, no leak)', async () => {
+    it('fullScreen padding is just the safe-area inset when keyboard hidden', async () => {
+        mockKeyboardHeight.mockReturnValue(0);
+        const view = await renderOverlay(
+            <OverlayModal visible onClose={() => {}} fullScreen>
+                <Text>fullscreen-body</Text>
+            </OverlayModal>
+        );
+        expect(flatStyle(view.getByTestId('overlay-fullscreen-inner')).paddingBottom).toBe(48);
+    });
+
+    it('renders nothing when not visible (no leak)', async () => {
         const view = await renderOverlay(
             <OverlayModal visible={false} onClose={() => {}}>
                 <Text>hidden-body</Text>
             </OverlayModal>
         );
-        expect(view.queryByTestId('overlay-kav-dialog')).toBeNull();
-        expect(view.queryByTestId('overlay-kav-fullscreen')).toBeNull();
+        expect(view.queryByTestId('overlay-card-layer')).toBeNull();
+        expect(view.queryByTestId('overlay-fullscreen-inner')).toBeNull();
         expect(view.queryByText('hidden-body')).toBeNull();
-    });
-});
-
-describe('keyboardBehavior — per-platform (Expo-sanctioned)', () => {
-    // Flip Platform.OS directly (it's a plain data property, not a getter) and
-    // restore it. We avoid jest.resetModules + deep Platform module mocking —
-    // that fights jest-expo's setup, which re-requires expo modules that read
-    // Platform at import.
-    const realOS = Platform.OS;
-    afterEach(() => {
-        (Platform as { OS: string }).OS = realOS;
-    });
-
-    it("is 'padding' on iOS", () => {
-        (Platform as { OS: string }).OS = 'ios';
-        expect(keyboardBehavior()).toBe('padding');
-    });
-
-    it('is undefined on Android (just mounting the KAV avoids the keyboard under edge-to-edge)', () => {
-        (Platform as { OS: string }).OS = 'android';
-        expect(keyboardBehavior()).toBeUndefined();
     });
 });

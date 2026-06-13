@@ -49,16 +49,32 @@ static safe-area `paddingBottom` on an INNER wrapper View, NOT on the KAV — ke
 nav-bar inset then COMPOSE on separate nodes instead of one clobbering the other. (Caught by a render
 test asserting `paddingBottom === 48`; it would otherwise have shipped reading 0.)
 
-**Keyboard approach (RTFM'd, do NOT add a native dep)**: Expo's official guide
-(docs.expo.dev/guides/keyboard-handling) prescribes `KeyboardAvoidingView` with
-`behavior={Platform.OS === 'ios' ? 'padding' : undefined}` — on Android under RN 0.84+ edge-to-edge,
-just MOUNTING the KAV keeps the focused input visible (keyboard frame events drive it). Built into the
-shared `OverlayModal` (both dialog + fullScreen variants) so EVERY overlay TextInput (entry-form notes,
-activity name fields, IconPicker search/emoji) inherits it systematically — `keyboardBehavior()` is one
-exported helper. The entry form mounts via `useOverlay().mount` directly (not OverlayModal), so its
-`EntryFormOverlay` wraps the form ScrollView in its OWN KAV importing the same helper. `softwareKeyboardLayoutMode: "resize"` in app.json is necessary-but-insufficient under edge-to-edge
-(adjustResize no longer resizes the window) — the app must consume IME insets itself, which the KAV does.
+**Gotcha 2 — `KeyboardAvoidingView behavior={undefined}` on Android edge-to-edge is a NO-OP; you must
+consume the IME inset in JS yourself.** [DISPROVEN-BY-DEVICE, corrected v2.3.1 — the Expo docs' claim
+"just mounting the KAV is enough on Android" is EMPIRICALLY FALSE on our release-shape APK.] First
+attempt followed Expo's guide (docs.expo.dev/guides/keyboard-handling): KAV with
+`behavior={Platform.OS === 'ios' ? 'padding' : undefined}`. It passed jest + Expo Go but FAILED on the
+release APK (Pixel 3, Android 12, edge-to-edge, 3-button nav, `decorFitsSystemWindows=false`): the
+focused Notes EditText stayed at its no-keyboard bounds [55,1435][1025,1710] — fully BEHIND the keyboard
+(top at y=1224) — and the form's ScrollView stayed full-height [0,179][1080,2028] with the keyboard up,
+so there was nothing to scroll. Root cause: under enforced edge-to-edge `adjustResize` no longer resizes
+the window, and a KAV with `behavior=undefined` does nothing (and even an ACTIVE KAV would only resize
+the container — it won't PAN a ScrollView to the focused field). `softwareKeyboardLayoutMode: "resize"`
+in app.json is necessary-but-insufficient for the same reason.
+
+**The empirically-correct fix (v2.3.1) — deterministic JS, NO KAV, NO native dep:**
+1. `hooks/useKeyboardHeight.ts` — track keyboard height via `Keyboard.addListener('keyboardDidShow'/'keyboardDidHide')` (the `Will*` events are iOS-only; Android only fires `Did*`). `endCoordinates.height`.
+2. Pad the scrollable container by the keyboard height so there is physical scroll RANGE above the
+   keyboard (the missing piece — with content fitting the window exactly, there was nowhere to scroll):
+   entry form ScrollView `contentContainerStyle.paddingBottom += keyboardHeight`; OverlayModal dialog
+   card-layer `paddingBottom: keyboardHeight` (shrinks the `justifyContent:center` region so the centered
+   card re-centers ABOVE the keyboard); fullScreen inner wrapper `paddingBottom: insets.bottom + keyboardHeight`.
+3. Scroll the focused field into view: entry-form Notes is the LAST input, so `scrollRef.current?.scrollToEnd({animated:true})` on its `onFocus` AND in a `useEffect` when `keyboardHeight>0` on the details step
+   (rAF first so the new padding is laid out before scrolling). The shared `OverlayModal` covers the
+   activity-name dialogs + IconPicker (top-anchored inputs rarely occluded; the padding still gives range).
 Do NOT add `react-native-keyboard-controller` (native module, not in Expo Go → breaks the Pixel dev loop).
+**Verify keyboard behavior on the RELEASE-shape APK, NEVER Go/jest** — Expo Go's host app has a different
+`windowSoftInputMode` and jest has no live keyboard, so BOTH gave a false PASS on the broken KAV version.
 
 **Demo data for release builds (no `__DEV__` seed button)**: `scripts/make-demo-data.js`
 (`node scripts/make-demo-data.js > /tmp/x.json`) emits SoulSync export-format v2 JSON loadable via
@@ -71,9 +87,10 @@ upsert via `INSERT OR REPLACE INTO entries (id,mood,notes,date)`; activities ref
 NOON so the local-day key (`localDateString`) is timezone-robust. Photos OMITTED (export carries
 file-path refs only, broken on a new device).
 
-**On-device verification deferred to QA** (jest has no live keyboard / real insets): keyboard occlusion
-on focus, the form staying scrollable while the keyboard is up, the tab bar/FAB clearing the Pixel 3's
-3-button nav, and IconPicker/dialog footers clearing the nav bar — all need the Pixel.
+**On-device verification deferred to QA** (jest has no live keyboard / real insets): the v2.3.1 KEYBOARD
+re-fix MUST be re-verified on the release APK — focus Notes → field + typed text visible above the
+keyboard, form scrolls with the keyboard up, same for the activity-name edit field. (Task 1 bottom insets
++ Task 3 demo data already PASSED release-APK QA; only the keyboard re-fix is outstanding.)
 **Date**: 2026-06-13
 
 ## 2026-06-13: Keep icon/data registries UI-free so lightweight consumers (+ their tests) don't transitively import reanimated

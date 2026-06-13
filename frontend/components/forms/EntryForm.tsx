@@ -1,5 +1,5 @@
 // EntryForm.tsx
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
     View,
     Text,
@@ -8,7 +8,6 @@ import {
     TextInput,
     Image,
     ScrollView,
-    KeyboardAvoidingView,
     Alert,
     ActivityIndicator,
     BackHandler,
@@ -26,7 +25,7 @@ import InfoBubble from '../InfoBubble';
 import { DatePicker } from './DatePicker';
 import { useSettings } from '@/context/SettingsContext';
 import { useOverlay } from '@/context/OverlayHost';
-import { keyboardBehavior } from '../OverlayModal';
+import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
 import { useEntryDraft, EntryDraft } from './hooks/useEntryDraft';
 import { selectPhotosToAdd } from './photoSelection';
 
@@ -250,6 +249,7 @@ const DetailsStep = ({
     photos,
     onToggleActivity,
     onNotesChange,
+    onNotesFocus,
     onAddPhoto,
     onRemovePhoto,
     onBack,
@@ -262,6 +262,8 @@ const DetailsStep = ({
     photos: string[];
     onToggleActivity: (activityId: number) => void;
     onNotesChange: (notes: string) => void;
+    /** Fired when the Notes input focuses — the form scrolls it above the keyboard. */
+    onNotesFocus?: () => void;
     onAddPhoto: (uri: string) => void;
     onRemovePhoto: (uri: string) => void;
     onBack: () => void;
@@ -286,6 +288,7 @@ const DetailsStep = ({
                 style={styles.noteInput}
                 value={notes}
                 onChangeText={onNotesChange}
+                onFocus={onNotesFocus}
                 placeholder="How are you feeling?"
                 placeholderTextColor={colors.textSecondary}
                 multiline
@@ -361,25 +364,18 @@ const EntryFormOverlay: React.FC<{
                 />
             </View>
 
-            {/* Keep the focused TextInput (the notes field on step 2, or any
-                future input) visible above the on-screen keyboard. The overlay
-                lives in the single Fabric root (NOT a native <Modal>'s second
-                window), so a KeyboardAvoidingView around the form's ScrollView
-                works on the same window. behavior is per-platform via
-                keyboardBehavior(): 'padding' on iOS, undefined on Android (the
-                Expo-sanctioned edge-to-edge approach — the keyboard frame events
-                shrink the avoider so the notes input + Submit stay on screen and
-                the whole form stays scrollable while the keyboard is up). */}
-            <KeyboardAvoidingView
-                style={styles.formAvoider}
-                behavior={keyboardBehavior()}
-            >
-                <EntryForm
-                    initialData={initialData}
-                    onSubmit={onSubmit}
-                    onCancel={onClose}
-                />
-            </KeyboardAvoidingView>
+            {/* The entry form's own ScrollView handles keeping the focused input
+                above the keyboard (it pads its content by the keyboard height and
+                scrolls the Notes field into view). A KeyboardAvoidingView is NOT
+                used here: under enforced edge-to-edge (SDK 56 / RN 0.85 /
+                targetSdk 36) `behavior=undefined` is a no-op on Android and even
+                an active KAV won't pan a ScrollView to the focused field — see
+                EntryForm + useKeyboardHeight + tasks/lessons.md. */}
+            <EntryForm
+                initialData={initialData}
+                onSubmit={onSubmit}
+                onCancel={onClose}
+            />
         </Animated.View>
     );
 };
@@ -440,10 +436,17 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         submit,
     } = useEntryDraft(initialData);
     const colors = useThemeColors();
+    // Live keyboard height (0 when hidden). Padding the scroll content by it
+    // gives the physical scroll RANGE that adjustResize no longer provides under
+    // edge-to-edge — without it the content fits the window exactly and there's
+    // nothing to scroll, so the keyboard sits on top of the Notes field.
+    const keyboardHeight = useKeyboardHeight();
     const styles = useThemedStyles(colors);
     // Animated ref to the form's scroll container, threaded into the activity
     // drag-reorder grid so it can auto-scroll the form while a chip is dragged
-    // near an edge (react-native-sortables scrollableRef).
+    // near an edge (react-native-sortables scrollableRef). Its `.current` also
+    // exposes the ScrollView's scrollToEnd, used to lift the Notes field above
+    // the keyboard.
     const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
     const handleSubmit = async () => {
@@ -453,11 +456,36 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         await submit(onSubmit);
     };
 
+    // Scroll the bottom of the form (Notes + photos + Submit) into view above
+    // the keyboard. Notes is the last input, so scrollToEnd reliably brings it
+    // (and the Submit button) into the now-padded scrollable region.
+    const scrollToBottom = useCallback(() => {
+        // rAF so the contentContainer's keyboard padding (applied on the same
+        // keyboardDidShow that we react to) is laid out before we scroll.
+        requestAnimationFrame(() => {
+            scrollRef.current?.scrollToEnd({ animated: true });
+        });
+    }, [scrollRef]);
+
+    // When the keyboard opens while on the details step, scroll to the bottom so
+    // the focused Notes field clears it. (onFocus also triggers this for instant
+    // feedback the moment the field is tapped, before the keyboard finishes.)
+    useEffect(() => {
+        if (keyboardHeight > 0 && currentStep === 2) {
+            scrollToBottom();
+        }
+    }, [keyboardHeight, currentStep, scrollToBottom]);
+
     return (
         <Animated.ScrollView
             ref={scrollRef}
             style={styles.scroll}
-            contentContainerStyle={styles.contentContainer}
+            contentContainerStyle={[
+                styles.contentContainer,
+                // Extra bottom room == keyboard height so the last field can sit
+                // above the keyboard. 0 when hidden (no-op).
+                { paddingBottom: styles.contentContainer.paddingBottom + keyboardHeight },
+            ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator
         >
@@ -477,6 +505,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                     photos={draft.photos}
                     onToggleActivity={toggleActivity}
                     onNotesChange={setNotes}
+                    onNotesFocus={scrollToBottom}
                     onAddPhoto={addPhoto}
                     onRemovePhoto={removePhoto}
                     onBack={() => setCurrentStep(1)}
@@ -508,12 +537,6 @@ const useThemedStyles = (colors: ThemeColors) =>
         },
         closeButton: {
             padding: 8,
-        },
-        // Wraps the form's ScrollView so it shrinks when the keyboard opens,
-        // keeping the focused input on screen. flex:1 fills the overlay below the
-        // header.
-        formAvoider: {
-            flex: 1,
         },
         scroll: {
             flex: 1,

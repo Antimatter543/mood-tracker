@@ -1,16 +1,10 @@
 import React, { useEffect, useRef } from 'react';
-import {
-    BackHandler,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    StyleSheet,
-    View,
-} from 'react-native';
+import { BackHandler, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { useOverlay } from '@/context/OverlayHost';
+import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
 
 /**
  * Drop-in replacement for a transparent, centered `<Modal>` (dialog style).
@@ -85,6 +79,13 @@ const OverlayModalContent: React.FC<{
     children: React.ReactNode;
 }> = ({ onClose, dismissOnBackdropPress, fullScreen, children }) => {
     const insets = useSafeAreaInsets();
+    // Live keyboard height (0 when hidden). Under enforced edge-to-edge
+    // (SDK 56 / RN 0.85 / targetSdk 36), Android's adjustResize no longer
+    // resizes the window and a KeyboardAvoidingView with behavior=undefined is a
+    // no-op (verified on the release APK). So we consume the IME inset in JS:
+    // pad the container by the keyboard height so a centered dialog lifts above
+    // the keyboard / a full-screen panel gains scroll range. See useKeyboardHeight.
+    const keyboardHeight = useKeyboardHeight();
 
     useEffect(() => {
         const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -96,24 +97,18 @@ const OverlayModalContent: React.FC<{
 
     if (fullScreen) {
         // Edge-to-edge panel: children fill the window, no backdrop / centering.
-        // The KeyboardAvoidingView keeps any TextInput inside (e.g. IconPicker's
-        // search / custom-emoji fields) above the on-screen keyboard. The
-        // safe-area bottom padding lives on an INNER wrapper, NOT on the KAV —
-        // KAV's 'padding' behavior does `StyleSheet.compose(style, {paddingBottom:
-        // <keyboardHeight>})`, which would CLOBBER a paddingBottom set on the KAV
-        // itself (RN/Libraries/Components/Keyboard/KeyboardAvoidingView 'padding'
-        // case). Keeping them on separate nodes lets the keyboard padding and the
-        // nav-bar inset compose instead of one overriding the other.
+        // The inner wrapper pads its bottom by the safe-area inset (so footers
+        // clear the nav bar) PLUS the keyboard height (so any TextInput inside —
+        // e.g. IconPicker's search / custom-emoji fields — gains room to scroll
+        // above the keyboard).
         return (
             <Animated.View entering={FadeIn.duration(150)} style={StyleSheet.absoluteFill}>
-                <KeyboardAvoidingView style={styles.flexFill} behavior={keyboardBehavior()}>
-                    <View
-                        testID="overlay-kav-fullscreen"
-                        style={[styles.flexFill, { paddingBottom: insets.bottom }]}
-                    >
-                        {children}
-                    </View>
-                </KeyboardAvoidingView>
+                <View
+                    testID="overlay-fullscreen-inner"
+                    style={[styles.flexFill, { paddingBottom: insets.bottom + keyboardHeight }]}
+                >
+                    {children}
+                </View>
             </Animated.View>
         );
     }
@@ -141,15 +136,16 @@ const OverlayModalContent: React.FC<{
                 collapsing the card to ~49% of the screen. This full-screen layer
                 gives the card's `%` the real screen width as its basis -> 94%.
 
-                The KeyboardAvoidingView around the card layer lifts the centered
-                dialog above the keyboard when a TextInput in it focuses (e.g. the
-                activity-name field in ActivityEditModal / Add-Activity / Add-Group),
-                so the input + its action buttons stay visible. `box-none` on the
-                avoider keeps gutter taps falling through to the backdrop. */}
-            <KeyboardAvoidingView
-                testID="overlay-kav-dialog"
-                style={[StyleSheet.absoluteFill, styles.cardLayer]}
-                behavior={keyboardBehavior()}
+                `paddingBottom: keyboardHeight` lifts the centered dialog above the
+                keyboard when a TextInput in it focuses (e.g. the activity-name
+                field in ActivityEditModal / Add-Activity / Add-Group): the bottom
+                padding shrinks the centering region, so the card re-centers in the
+                space ABOVE the keyboard and its input + buttons stay visible. This
+                replaces a KeyboardAvoidingView, which is a no-op on Android under
+                edge-to-edge. `box-none` keeps gutter taps falling to the backdrop. */}
+            <View
+                testID="overlay-card-layer"
+                style={[StyleSheet.absoluteFill, styles.cardLayer, { paddingBottom: keyboardHeight }]}
                 pointerEvents="box-none"
             >
                 {/* The inner no-op `<Pressable>` is the card's own touch responder,
@@ -164,28 +160,10 @@ const OverlayModalContent: React.FC<{
                 <Pressable style={styles.cardPress} onPress={() => {}}>
                     {children}
                 </Pressable>
-            </KeyboardAvoidingView>
+            </View>
         </Animated.View>
     );
 };
-
-/**
- * Per-platform KeyboardAvoidingView behavior, following Expo's official keyboard
- * guidance (docs.expo.dev/guides/keyboard-handling): `'padding'` on iOS, and
- * `undefined` on Android — under React Native 0.84+ / Expo SDK 56 enforced
- * edge-to-edge, just MOUNTING a KeyboardAvoidingView is enough to keep the
- * focused input visible on Android (the keyboard frame events drive its bottom
- * inset). We deliberately avoid `react-native-keyboard-controller` (a native
- * dependency that isn't bundled in Expo Go) — RN's built-in component is the
- * sanctioned approach and keeps the Expo Go dev loop intact.
- *
- * Exported so every overlay that hosts a TextInput resolves keyboard behavior
- * the SAME way (the entry form mounts via the overlay host directly, not through
- * OverlayModal, so it imports this rather than re-deriving the rule).
- */
-export function keyboardBehavior(): 'padding' | undefined {
-    return Platform.OS === 'ios' ? 'padding' : undefined;
-}
 
 const styles = StyleSheet.create({
     backdrop: {
@@ -207,11 +185,9 @@ const styles = StyleSheet.create({
         alignSelf: 'stretch',
         alignItems: 'center',
     },
-    // Fill-the-parent for the fullScreen variant's KeyboardAvoidingView AND its
-    // inner padding wrapper: `flex: 1` lets the KAV shrink when the keyboard
-    // rises (Android) without an explicit height, and the inner View (which adds
-    // the safe-area bottom padding — kept OFF the KAV so its 'padding' behavior
-    // can't clobber it) still covers the window so the child panel fills it.
+    // Fill-the-window wrapper for the fullScreen variant. `flex: 1` covers the
+    // window so the child panel fills it; its paddingBottom (safe-area inset +
+    // keyboard height) is applied inline at the call site.
     flexFill: {
         flex: 1,
     },
