@@ -8,7 +8,6 @@
  * we mock the module explicitly to return a non-zero bottom (mirrors a real
  * Pixel 3 in 3-button mode).
  */
-import React from 'react';
 import { render } from '@testing-library/react-native';
 import type { RenderResult } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
