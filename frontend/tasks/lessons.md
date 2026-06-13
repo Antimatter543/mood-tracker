@@ -20,6 +20,56 @@
 > Release: https://github.com/Antimatter543/mood-tracker/releases/tag/v2.0.0. Endgame detail +
 > the per-check QA table: `frontend/docs/sdk56-endgame-notes.md`.
 
+## 2026-06-13: Keep icon/data registries UI-free so lightweight consumers (+ their tests) don't transitively import reanimated
+**Mistake/friction**: The icon catalog + family map + icon types lived INSIDE `IconPicker.tsx`,
+which imports `OverlayModal` -> `react-native-reanimated`. Reanimated initialises the native
+worklets runtime at module-eval, which THROWS under jest. So every lightweight consumer that
+only needed the family map (ActivityRow, the new shared `activityIcon`, ActivityReorder,
+`components/types`) transitively pulled reanimated, and any test importing them had to
+`jest.mock('react-native-reanimated', ...)` — and when one suite forgot the shim, it poisoned
+OTHER suites running in the same worker (iconCatalog passed alone but failed when a sibling
+unmocked-reanimated suite ran first). Symptom: `new WorkletsErrorConstructor ... NativeWorklets`
+at an import line, intermittent based on suite order.
+**Rule**: Data + registries (catalogs, family->component maps, types, pure config) belong in a
+UI-FREE module (`components/iconRegistry.ts`) with ZERO modal/reanimated/animation imports. The
+heavy UI component (the picker) re-exports them for back-compat, but lightweight renderers and
+tests import from the registry directly — no reanimated in their graph, no per-test shim. The
+single shared glyph renderer is `components/activityIcon.tsx` (`ActivityIcon`, takes
+`iconName`+`iconFamily` strings, not a full Activity), used by Timeline + Home so mood/activity
+glyphs map identically app-wide. General principle: a module's import graph is part of its API —
+a "just a constant" import that drags a native runtime into jest is a layering bug; fix the
+layering, don't paper it with mocks.
+**Date**: 2026-06-13
+
+## 2026-06-13: Custom SVG charts > chart-kit — measure width via onLayout, put path math in a tested pure transform
+**Context**: Replaced react-native-chart-kit's `LineChart` on Home with our own
+`components/visualisations/MoodWeekChart.tsx` (react-native-svg, already a direct dep). chart-kit
+was the unpolished piece (cramped y-axis, bezier overshoot beyond the data range, clipped end
+dots, red dots for interpolated points reading as "error days"). Durable patterns for the next
+chart we build:
+- **Width via `onLayout` measurement, NOT `SCREEN_WIDTH - padding` guessing.** The measured
+  card-content width is theme/orientation robust and never clips end dots. Gate the SVG render on
+  `width > 0` (mirrors ActivityCorrelationChart). In jest the `onLayout` never auto-fires, so a
+  width-gated chart renders nothing until you `await act(async () => fireEvent(node,'layout',{
+  nativeEvent:{layout:{width,height,x,y}}}))` — give the wrap a `testID` to target it.
+- **ALL path math in a pure transform** (`transforms/chartGeometry.ts`, zero React/svg imports)
+  so it's exhaustively jest-tested: mapping orientation (mood 0->bottom, 10->top), even index
+  spread, the **no-overshoot invariant** (every path y within the real-points y-range — straight
+  segments guarantee this; a sampling test proves it), and the edge shapes (empty / single point
+  / all-same / leading+trailing null / interior gap / all null / NaN-as-missing / degenerate
+  dims never NaN). The SVG component is then a thin renderer.
+- **Missing data must read as ABSENCE, never alarm**: real points = solid dots colored by the
+  canonical `moodColor` ramp (consistent with timeline/heatmap); missing days get NO dot and the
+  line is DASHED across an interior gap (not a red dot). Reuse `moodColor.ts` for chart dot color
+  so mood color is one authority app-wide.
+- Straight segments (not bezier) for the line — they CANNOT overshoot and read clean/systematic.
+  Scope was Home only; Stats/Insights still use chart-kit (a later batch), but MoodWeekChart is
+  built reusable so they can adopt it.
+- **Shared "Overview" tile primitive** `components/StatTile.tsx` (36px accent chip + 18/700 value
+  + 12 muted label) now backs BOTH the Stats StatSummaryCard grid and Home's monthly-overview —
+  one systematic component, not two hand-rolled grids. (NEEDS on-device QA: see below.)
+**Date**: 2026-06-13
+
 ## 2026-06-13: SQL must NEVER day-bucket a stored timestamp — JS owns day-keying via localDateString; pin jest to a non-UTC TZ
 **Mistake**: Entries store as UTC ISO instants (correct), and the DatePicker normalises a
 backdated entry to LOCAL midnight (correct: Thursday 00:00 AEST = Wednesday 14:00 UTC). But the
