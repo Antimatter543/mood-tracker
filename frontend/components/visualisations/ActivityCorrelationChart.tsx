@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useMemo } from 'react';
+import { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Svg, Rect } from 'react-native-svg';
 import { useSQLiteContext } from 'expo-sqlite';

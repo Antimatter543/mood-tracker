@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Text, StyleSheet, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import { useThemeColors } from '@/styles/global';

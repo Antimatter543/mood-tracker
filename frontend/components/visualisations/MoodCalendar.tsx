@@ -2,7 +2,7 @@ import { Card } from '@/components/Card';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useThemeColors } from '@/styles/global';
 import { useSQLiteContext } from 'expo-sqlite';
-import React, { useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Text } from 'react-native';
 import { Calendar } from 'react-native-calendars';
 import {
