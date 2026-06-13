@@ -16,7 +16,6 @@
  * Real occlusion is release-APK only (jest has no live keyboard / no native
  * WindowInsets) — goes to the device QA pass.
  */
-import React from 'react';
 import { Text } from 'react-native';
 import { render, act } from '@testing-library/react-native';
 
@@ -53,7 +52,7 @@ const heightText = (screen: any): string =>
         .find((c: any) => typeof c === 'string' && c.startsWith('h=')) ?? '';
 
 // Simulate the UI-thread height changing, then the reaction firing on JS.
-async function setKeyboardHeight(screen: any, h: number) {
+async function setKeyboardHeight(h: number) {
     const prev = keyboardSV.height.value;
     keyboardSV.height.value = h;
     await act(async () => {
@@ -86,21 +85,21 @@ describe('useKeyboardHeight (useAnimatedKeyboard-backed)', () => {
 
     it('reports the native keyboard height when it opens', async () => {
         const screen = await render(<Probe />);
-        await setKeyboardHeight(screen, 804);
+        await setKeyboardHeight(804);
         expect(heightText(screen)).toBe('h=804');
     });
 
     it('resets to 0 when the keyboard closes', async () => {
         const screen = await render(<Probe />);
-        await setKeyboardHeight(screen, 804);
+        await setKeyboardHeight(804);
         expect(heightText(screen)).toBe('h=804');
-        await setKeyboardHeight(screen, 0);
+        await setKeyboardHeight(0);
         expect(heightText(screen)).toBe('h=0');
     });
 
     it('rounds the shared-value height to an integer', async () => {
         const screen = await render(<Probe />);
-        await setKeyboardHeight(screen, 803.6);
+        await setKeyboardHeight(803.6);
         // The reaction prepares Math.round(value) -> 804.
         expect(heightText(screen)).toBe('h=804');
     });

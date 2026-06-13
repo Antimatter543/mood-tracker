@@ -21,9 +21,12 @@ import {
  * The correct height SOURCE under edge-to-edge is Android's native
  * WindowInsetsAnimation callback, which reanimated exposes via
  * `useAnimatedKeyboard` (already a dependency — reanimated 4.3.1 — and bundled in
- * Expo Go, so NO new native dep / the dev loop is preserved). It is marked
- * @deprecated in favour of `react-native-keyboard-controller`, but that's a native
- * module not in Expo Go; the built-in hook is the correct in-budget choice here.
+ * Expo Go, so NO new native dep / the dev loop is preserved). Reanimated flags it
+ * as soft-deprecated in favour of `react-native-keyboard-controller` (a native
+ * module NOT in Expo Go) — but the built-in hook is the correct in-budget choice
+ * here, and it still works. (Note: do NOT write the literal at-deprecated tag in
+ * this comment — TS's JSDoc parser would treat it as a real tag and mark this hook
+ * + every consumer deprecated.)
  *
  * EDGE-TO-EDGE OPTIONS (prescribed by the docs + the native math, NOT guessed):
  * `Keyboard.updateHeight` (reanimated android/.../keyboard/Keyboard.java) computes
