@@ -8,6 +8,7 @@ import {
     TextInput,
     Image,
     ScrollView,
+    KeyboardAvoidingView,
     Alert,
     ActivityIndicator,
     BackHandler,
@@ -25,6 +26,7 @@ import InfoBubble from '../InfoBubble';
 import { DatePicker } from './DatePicker';
 import { useSettings } from '@/context/SettingsContext';
 import { useOverlay } from '@/context/OverlayHost';
+import { keyboardBehavior } from '../OverlayModal';
 import { useEntryDraft, EntryDraft } from './hooks/useEntryDraft';
 import { selectPhotosToAdd } from './photoSelection';
 
@@ -359,11 +361,25 @@ const EntryFormOverlay: React.FC<{
                 />
             </View>
 
-            <EntryForm
-                initialData={initialData}
-                onSubmit={onSubmit}
-                onCancel={onClose}
-            />
+            {/* Keep the focused TextInput (the notes field on step 2, or any
+                future input) visible above the on-screen keyboard. The overlay
+                lives in the single Fabric root (NOT a native <Modal>'s second
+                window), so a KeyboardAvoidingView around the form's ScrollView
+                works on the same window. behavior is per-platform via
+                keyboardBehavior(): 'padding' on iOS, undefined on Android (the
+                Expo-sanctioned edge-to-edge approach — the keyboard frame events
+                shrink the avoider so the notes input + Submit stay on screen and
+                the whole form stays scrollable while the keyboard is up). */}
+            <KeyboardAvoidingView
+                style={styles.formAvoider}
+                behavior={keyboardBehavior()}
+            >
+                <EntryForm
+                    initialData={initialData}
+                    onSubmit={onSubmit}
+                    onCancel={onClose}
+                />
+            </KeyboardAvoidingView>
         </Animated.View>
     );
 };
@@ -492,6 +508,12 @@ const useThemedStyles = (colors: ThemeColors) =>
         },
         closeButton: {
             padding: 8,
+        },
+        // Wraps the form's ScrollView so it shrinks when the keyboard opens,
+        // keeping the focused input on screen. flex:1 fills the overlay below the
+        // header.
+        formAvoider: {
+            flex: 1,
         },
         scroll: {
             flex: 1,

@@ -40,8 +40,13 @@ const useThemedStyles = (colors: ThemeColors, insetTop: number, insetBottom: num
                 scrollContent: {
                     padding: 20,
                     flexGrow: 1,
-                    // Pad the bottom past the FAB so the last item is reachable
-                    // above the floating button + the bottom safe area.
+                    // Pad the bottom past the FAB so the last item scrolls fully
+                    // into view above the floating button. The FAB floats at
+                    // (FAB_BOTTOM_GAP + insetBottom) and is ~56px tall, so this
+                    // 100 + insetBottom clearance tracks the FAB as it rises with
+                    // the bottom safe-area inset. (The tab-bar height itself is
+                    // already excluded from the scene by react-navigation, so we
+                    // only clear the FAB here.)
                     paddingBottom: 100 + insetBottom,
                 },
                 fullHeightContent: {

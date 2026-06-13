@@ -20,6 +20,62 @@
 > Release: https://github.com/Antimatter543/mood-tracker/releases/tag/v2.0.0. Endgame detail +
 > the per-check QA table: `frontend/docs/sdk56-endgame-notes.md`.
 
+## 2026-06-13: Edge-to-edge bottom safe-area + keyboard — two non-obvious gotchas (v2.3.1)
+**Context**: This app is unconditionally edge-to-edge (Expo SDK 56 / RN 0.85 / targetSdk 36).
+Owner reported (a) the app "doesn't respect the bottom of the phone" (tab bar flush UNDER the
+Android nav buttons; FAB overlapping them) and (b) the keyboard covered the entry-form notes input.
+
+**Gotcha 1 — a FIXED `tabBarStyle.height` SUPPRESSES react-navigation's bottom-inset padding.**
+expo-router's BottomTabBar (`node_modules/expo-router/.../bottom-tabs/views/BottomTabBar.js`
+`getTabBarHeight`) normally adds `insets.bottom` to its DEFAULT height + paddingBottom — BUT it
+short-circuits: `const customHeight = 'height' in flattenedStyle ? flattenedStyle.height : undefined;
+if (customHeight != null) return customHeight;`. So our fixed `height: 64` returned verbatim, the
+`+ insets.bottom` was bypassed, and on a 3-button-nav Pixel (inset ≈ 48dp) the bar sat flush under
+the nav buttons. **Rule**: when you OVERRIDE the tab bar `height`, you OWN the inset — compute
+`height = BASE + insets.bottom` AND `paddingBottom = BASE_PAD + insets.bottom` (so the icon/label
+band keeps its visual height and the bar only GROWS downward into the system-nav region). Same for
+the FAB (`bottom = GAP + insets.bottom`) and any absolute bottom-anchored element. NEVER hardcode the
+inset (3-button ≈ 48dp, gesture ≈ 24dp, 0 on no-inset displays) — read `useSafeAreaInsets().bottom`.
+The tab-bar style math lives in the UI-free `lib/tabBarStyle.ts` (`buildTabBarStyle`) so it's
+jest-testable without importing the route module (which drags expo-router's untranspilable ESM
+`standard-navigation` into jest — importing `app/(tabs)/_layout.tsx` in a test FAILS).
+
+**Gotcha 2 — `KeyboardAvoidingView behavior='padding'` CLOBBERS a static `paddingBottom` set on the
+SAME element.** RN's KAV 'padding' case renders `style={StyleSheet.compose(style, {paddingBottom:
+<keyboardHeight>})}` (`node_modules/react-native/Libraries/Components/Keyboard/KeyboardAvoidingView.js`),
+so a `paddingBottom: insets.bottom` you put on the KAV is OVERWRITTEN with the dynamic keyboard
+height (0 when no keyboard). Symptom: the safe-area bottom inset silently disappears. **Rule**: put a
+static safe-area `paddingBottom` on an INNER wrapper View, NOT on the KAV — keyboard padding and
+nav-bar inset then COMPOSE on separate nodes instead of one clobbering the other. (Caught by a render
+test asserting `paddingBottom === 48`; it would otherwise have shipped reading 0.)
+
+**Keyboard approach (RTFM'd, do NOT add a native dep)**: Expo's official guide
+(docs.expo.dev/guides/keyboard-handling) prescribes `KeyboardAvoidingView` with
+`behavior={Platform.OS === 'ios' ? 'padding' : undefined}` — on Android under RN 0.84+ edge-to-edge,
+just MOUNTING the KAV keeps the focused input visible (keyboard frame events drive it). Built into the
+shared `OverlayModal` (both dialog + fullScreen variants) so EVERY overlay TextInput (entry-form notes,
+activity name fields, IconPicker search/emoji) inherits it systematically — `keyboardBehavior()` is one
+exported helper. The entry form mounts via `useOverlay().mount` directly (not OverlayModal), so its
+`EntryFormOverlay` wraps the form ScrollView in its OWN KAV importing the same helper. `softwareKeyboardLayoutMode: "resize"` in app.json is necessary-but-insufficient under edge-to-edge
+(adjustResize no longer resizes the window) — the app must consume IME insets itself, which the KAV does.
+Do NOT add `react-native-keyboard-controller` (native module, not in Expo Go → breaks the Pixel dev loop).
+
+**Demo data for release builds (no `__DEV__` seed button)**: `scripts/make-demo-data.js`
+(`node scripts/make-demo-data.js > /tmp/x.json`) emits SoulSync export-format v2 JSON loadable via
+Settings → Import Data on ANY build. Generation is a pure exported `generateDemoData({today,days,seed})`
+(mulberry32 PRNG → reproducible); CLI is a thin wrapper. Round-trip test feeds the output through the
+REAL `importDatabaseData` over a mock DB. Key schema facts: importer requires `{version, data}`; entries
+upsert via `INSERT OR REPLACE INTO entries (id,mood,notes,date)`; activities reference comma-joined
+`activity_ids` mapped to seeded rows by `(name, group_id)` — so include the default activities/groups
+(mirrored from `components/seedData.ts`, AUTOINCREMENT ids 1..N in group order). Dates pinned to LOCAL
+NOON so the local-day key (`localDateString`) is timezone-robust. Photos OMITTED (export carries
+file-path refs only, broken on a new device).
+
+**On-device verification deferred to QA** (jest has no live keyboard / real insets): keyboard occlusion
+on focus, the form staying scrollable while the keyboard is up, the tab bar/FAB clearing the Pixel 3's
+3-button nav, and IconPicker/dialog footers clearing the nav bar — all need the Pixel.
+**Date**: 2026-06-13
+
 ## 2026-06-13: Keep icon/data registries UI-free so lightweight consumers (+ their tests) don't transitively import reanimated
 **Mistake/friction**: The icon catalog + family map + icon types lived INSIDE `IconPicker.tsx`,
 which imports `OverlayModal` -> `react-native-reanimated`. Reanimated initialises the native

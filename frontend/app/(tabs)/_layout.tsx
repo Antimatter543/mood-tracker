@@ -5,6 +5,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useCallback, useState, useMemo, useEffect, useRef } from "react";
 import { AppState, AppStateStatus, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as SystemUI from "expo-system-ui";
 import { DataProvider } from "../../context/DataContext";
 import { useThemeColors } from "@/styles/global";
@@ -16,6 +17,7 @@ import { RECENT_ENTRY_DATES } from "@/components/visualisations/queries";
 import { currentStreak } from "@/components/visualisations/transforms/streak";
 import { scheduleOrSkipDailyReminder } from "@/lib/notifications";
 import { OverlayProvider } from "@/context/OverlayHost";
+import { buildTabBarStyle } from "@/lib/tabBarStyle";
 
 export default function RootLayout() {
     const [refreshCount, setRefreshCount] = useState(0);
@@ -107,6 +109,7 @@ function NotificationReArm() {
 
 function TabNavigator() {
     const colors = useThemeColors(); // Now this will work because it's inside SettingsProvider
+    const insets = useSafeAreaInsets();
 
     // Paint the native window root background to the theme background. Without
     // this, Android's default window background (white) peeks through around the
@@ -143,25 +146,13 @@ function TabNavigator() {
         sceneStyle: {
             backgroundColor: colors.background,
         },
-        // Tab bar styling — floating rounded feel
-        tabBarStyle: {
-            backgroundColor: colors.secondaryBackground,
-            borderTopWidth: 0,
-            borderTopLeftRadius: 20,
-            borderTopRightRadius: 20,
-            paddingBottom: 8,
-            paddingTop: 4,
-            height: 64,
-            // Shadow above the tab bar
-            shadowColor: '#000000',
-            shadowOffset: { width: 0, height: -2 },
-            shadowOpacity: colors.isDark ? 0.3 : 0.08,
-            shadowRadius: 8,
-            elevation: 8,
-        },
+        // Tab bar styling — floating rounded feel, grown by the bottom safe-area
+        // inset so labels/icons clear the Android nav buttons (see
+        // buildTabBarStyle for the full rationale).
+        tabBarStyle: buildTabBarStyle(colors, insets.bottom),
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.overlays.textSecondary,
-    }), [colors]);
+    }), [colors, insets.bottom]);
     return (
         // Belt-and-braces with sceneStyle + SystemUI: a flex:1 themed backdrop
         // behind the whole navigator guarantees the area framing the floating,
