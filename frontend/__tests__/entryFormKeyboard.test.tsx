@@ -13,7 +13,6 @@
  * contentContainer paddingBottom grows by the keyboard height, and focusing
  * Notes calls scrollToEnd on the ScrollView ref.
  */
-import React from 'react';
 import { render, fireEvent, act } from '@testing-library/react-native';
 
 // ── keyboard height: mockable so we can assert the padding math ──────────────

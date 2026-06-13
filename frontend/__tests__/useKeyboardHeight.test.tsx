@@ -7,7 +7,6 @@
  * a keyboardDidHide resets it to 0. (Real occlusion behavior is release-APK only
  * — this proves the height plumbing the padding/scroll math depends on.)
  */
-import React from 'react';
 import { Keyboard, Text } from 'react-native';
 import { render, act } from '@testing-library/react-native';
 
