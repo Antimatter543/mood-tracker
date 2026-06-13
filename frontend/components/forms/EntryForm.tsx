@@ -31,12 +31,6 @@ import { selectPhotosToAdd } from './photoSelection';
 
 const MAX_PHOTOS = 5;
 
-// TEMPORARY (v2.3.1 keyboard QA): show the live keyboard height in a corner of
-// the entry form so the next release-APK QA is DECISIVE — if it reads `kb:0` the
-// height source is STILL dead; `kb:~300-800` + the field lifting = ship it. Flip
-// to false (one line) once QA confirms, then remove on the follow-up.
-const DEBUG_KB = true;
-
 /**
  * Inline photo-attachment affordance for the entry form. Offers camera +
  * library, requests the matching permission on tap, and renders a horizontal
@@ -483,54 +477,44 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     }, [keyboardHeight, currentStep, scrollToBottom]);
 
     return (
-        <View style={styles.scroll}>
-            <Animated.ScrollView
-                ref={scrollRef}
-                style={styles.scroll}
-                contentContainerStyle={[
-                    styles.contentContainer,
-                    // Extra bottom room == keyboard height so the last field can sit
-                    // above the keyboard. 0 when hidden (no-op).
-                    { paddingBottom: styles.contentContainer.paddingBottom + keyboardHeight },
-                ]}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator
-            >
-                {currentStep === 1 ? (
-                    <MoodStep
-                        value={draft.mood}
-                        onChange={setMood}
-                        onContinue={() => setCurrentStep(2)}
-                        date={draft.date}
-                        onDateChange={setDate}
-                        moodError={validation.errors.mood}
-                    />
-                ) : (
-                    <DetailsStep
-                        activities={draft.activities}
-                        notes={draft.notes}
-                        photos={draft.photos}
-                        onToggleActivity={toggleActivity}
-                        onNotesChange={setNotes}
-                        onNotesFocus={scrollToBottom}
-                        onAddPhoto={addPhoto}
-                        onRemovePhoto={removePhoto}
-                        onBack={() => setCurrentStep(1)}
-                        onSubmit={handleSubmit}
-                        submitDisabled={!isValid}
-                        scrollableRef={scrollRef}
-                    />
-                )}
-            </Animated.ScrollView>
-
-            {/* TEMPORARY keyboard-QA readout (DEBUG_KB). Fixed in the corner so it
-                doesn't scroll. kb:0 on the release APK = height source still dead. */}
-            {DEBUG_KB ? (
-                <Text style={styles.debugKb} accessibilityLabel="keyboard-height-debug">
-                    kb:{keyboardHeight}
-                </Text>
-            ) : null}
-        </View>
+        <Animated.ScrollView
+            ref={scrollRef}
+            style={styles.scroll}
+            contentContainerStyle={[
+                styles.contentContainer,
+                // Extra bottom room == keyboard height so the last field can sit
+                // above the keyboard. 0 when hidden (no-op).
+                { paddingBottom: styles.contentContainer.paddingBottom + keyboardHeight },
+            ]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+        >
+            {currentStep === 1 ? (
+                <MoodStep
+                    value={draft.mood}
+                    onChange={setMood}
+                    onContinue={() => setCurrentStep(2)}
+                    date={draft.date}
+                    onDateChange={setDate}
+                    moodError={validation.errors.mood}
+                />
+            ) : (
+                <DetailsStep
+                    activities={draft.activities}
+                    notes={draft.notes}
+                    photos={draft.photos}
+                    onToggleActivity={toggleActivity}
+                    onNotesChange={setNotes}
+                    onNotesFocus={scrollToBottom}
+                    onAddPhoto={addPhoto}
+                    onRemovePhoto={removePhoto}
+                    onBack={() => setCurrentStep(1)}
+                    onSubmit={handleSubmit}
+                    submitDisabled={!isValid}
+                    scrollableRef={scrollRef}
+                />
+            )}
+        </Animated.ScrollView>
     );
 };
 
@@ -556,20 +540,6 @@ const useThemedStyles = (colors: ThemeColors) =>
         },
         scroll: {
             flex: 1,
-        },
-        // TEMPORARY (DEBUG_KB) — live keyboard-height readout pinned top-right.
-        debugKb: {
-            position: 'absolute',
-            top: 4,
-            right: 8,
-            color: colors.accent,
-            backgroundColor: 'rgba(0,0,0,0.6)',
-            fontSize: 12,
-            fontWeight: '700',
-            paddingHorizontal: 6,
-            paddingVertical: 2,
-            borderRadius: 6,
-            zIndex: 9999,
         },
         contentContainer: {
             // flexGrow (not flex) so the content stays vertically centred when it
