@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Activity } from '../types';
 import { useThemeColors } from '@/styles/global';

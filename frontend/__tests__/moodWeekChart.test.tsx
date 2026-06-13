@@ -11,7 +11,6 @@
  * type name from the JSON tree (Circle/Path), which is enough to assert "a dot
  * per real point" without depending on svg internals.
  */
-import React from 'react';
 import { render, fireEvent, act } from '@testing-library/react-native';
 
 jest.mock('@/styles/global', () => {
