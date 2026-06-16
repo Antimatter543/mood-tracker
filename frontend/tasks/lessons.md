@@ -1,5 +1,16 @@
 # SoulSync — Project Lessons
 
+## 2026-06-16: Local `node_modules` is missing test-only deps — judge the GATE by DELTA, not absolute pass
+**Context**: A clean v2.3.1 working tree already produces **26 `tsc` errors** and **17 jest suites that
+"fail to run"** locally. Every one is a missing-module error (`@testing-library/react-native`,
+`expo-file-system/legacy`, `react-native-sortables`) — i.e. the local install lacks some dev/legacy deps;
+they resolve in CI (`release-apk.yml` / `release.sh` do a full `npm ci`). The actual unit tests all PASS.
+**Rule**: Don't panic at the 26 tsc errors / 17 failing suites — they are a pre-existing ENV gap. Gate your
+change by the DELTA: stash your edits, capture the baseline `tsc` error count + `jest` "Tests: N passed" line,
+then confirm (a) zero new tsc errors mention YOUR files and (b) the jest pass count only grew. Run your own
+suite directly (`npx jest <yourSuite>`) to prove your tests are green.
+**Date**: 2026-06-16
+
 > **v1.2.3 SHIPPED (2026-06-12)** via a NEW free GitHub Actions CI lane (the modal->overlay
 > touch fix). Release: https://github.com/Antimatter543/mood-tracker/releases/tag/v1.2.3 —
 > signed `SoulSync-1.2.3.apk`, cert-parity == v1.2.2 (verified), update-path tested on the Pixel

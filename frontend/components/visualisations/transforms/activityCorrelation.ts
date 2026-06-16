@@ -182,3 +182,96 @@ export const computeActivityCorrelation = (
         meaningful: items.filter((i) => i.isMeaningful),
     };
 };
+
+// ---------------------------------------------------------------------------
+// View selection: top-N positive / top-N negative, with per-activity exclusion.
+//
+// These are the pure transforms that back the chart's "show top 5 best/worst by
+// default, expand to see all, and exclude an activity so the next-strongest
+// fills its slot" behavior. They are deliberately framework-free so the chart
+// component is a thin renderer over them and the logic is fully unit-tested.
+// ---------------------------------------------------------------------------
+
+/** Default number of items shown per side (positive / negative) when collapsed. */
+export const DEFAULT_TOP_N = 5;
+
+export type CorrelationView = {
+    /** delta >= 0, sorted by delta DESC (strongest lift first). */
+    positive: ActivityCorrelationResult[];
+    /** delta < 0, sorted by delta ASC (most draining first). */
+    negative: ActivityCorrelationResult[];
+    /** How many items were hidden purely by the collapse slice (0 when expanded). */
+    hiddenByCollapse: number;
+};
+
+export type SelectCorrelationViewOptions = {
+    /** Activity names to exclude entirely (filtered out before splitting). */
+    excluded?: Iterable<string>;
+    /** When true, return all items per side and hiddenByCollapse = 0. */
+    expanded?: boolean;
+    /** Items shown per side when collapsed. Defaults to DEFAULT_TOP_N. */
+    topN?: number;
+};
+
+/**
+ * Split meaningful correlations into positive / negative buckets, after removing
+ * any excluded activities (so the next-strongest fills the vacated slot), then
+ * optionally collapse each bucket to the top N.
+ *
+ *  - Exclusion happens FIRST, so excluded items never occupy a top-N slot.
+ *  - delta >= 0 -> positive (matches the chart's `delta >= 0` color convention,
+ *    so a delta of exactly 0 lands in positive, never lost between buckets).
+ *  - positive sorted by delta DESC, negative by delta ASC (most draining first).
+ *  - expanded -> full buckets, hiddenByCollapse 0; collapsed -> sliced to topN,
+ *    hiddenByCollapse = total items dropped by the slice across both sides.
+ */
+export const selectCorrelationView = (
+    meaningful: ActivityCorrelationResult[],
+    opts: SelectCorrelationViewOptions = {}
+): CorrelationView => {
+    const { excluded, expanded = false, topN = DEFAULT_TOP_N } = opts;
+    const excludedSet = new Set<string>(excluded ?? []);
+
+    const visible = meaningful.filter((i) => !excludedSet.has(i.activity_name));
+
+    const positiveAll = visible
+        .filter((i) => i.delta >= 0)
+        .sort((a, b) => b.delta - a.delta);
+    const negativeAll = visible
+        .filter((i) => i.delta < 0)
+        .sort((a, b) => a.delta - b.delta);
+
+    if (expanded) {
+        return { positive: positiveAll, negative: negativeAll, hiddenByCollapse: 0 };
+    }
+
+    const positive = positiveAll.slice(0, topN);
+    const negative = negativeAll.slice(0, topN);
+    const hiddenByCollapse =
+        positiveAll.length - positive.length + (negativeAll.length - negative.length);
+
+    return { positive, negative, hiddenByCollapse };
+};
+
+/**
+ * Parse the persisted excluded-activities setting (a JSON string array of names)
+ * tolerantly: empty / null / corrupt / non-array / non-string members all yield
+ * `[]`. Never throws — it gates rendering, so a bad value must degrade to "nothing
+ * excluded" rather than crash the chart.
+ */
+export const parseExcludedActivities = (
+    raw: string | null | undefined
+): string[] => {
+    if (typeof raw !== 'string' || raw.trim() === '') return [];
+    try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter((v): v is string => typeof v === 'string');
+    } catch {
+        return [];
+    }
+};
+
+/** Serialize excluded activity names to a JSON string array, de-duplicated. */
+export const serializeExcludedActivities = (names: Iterable<string>): string =>
+    JSON.stringify([...new Set(names)]);
