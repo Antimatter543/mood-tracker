@@ -11,6 +11,7 @@ import MoodTrendChart from '@/components/visualisations/MoodTrendChart';
 import DailyMoodChart from '@/components/visualisations/DailyMoodBar';
 import MoodHistogram from '@/components/visualisations/Scatterplot';
 import CustomHeatmap from '@/components/visualisations/CustomHeatMap';
+import TimeOfDayChart from '@/components/visualisations/TimeOfDayChart';
 import ActivityCorrelationChart from '@/components/visualisations/ActivityCorrelationChart';
 import MonthOverMonthCard from '@/components/visualisations/MonthOverMonthCard';
 import TimeframeSelector from '@/components/TimeframeSelector';
@@ -146,6 +147,7 @@ const StatisticsContent = () => {
           {/* SECTION 2 — PATTERNS */}
           <SectionHeader label="Patterns" />
           <DailyMoodChart />
+          <TimeOfDayChart />
           <MoodHistogram />
           <CustomHeatmap />
 

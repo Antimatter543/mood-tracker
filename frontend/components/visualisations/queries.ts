@@ -112,6 +112,26 @@ export const DOW_MOOD_PATTERN = `
 `;
 
 // -----------------------------------------------------------------------------
+// Time-of-day pattern over a window — RAW rows.
+//
+// Returns raw instant + mood; the part-of-day bucket (Morning/Afternoon/Evening/
+// Night) and the per-LOCAL-day intraday-swing grouping are derived in JS from the
+// LOCAL hour/day of each instant (see transforms/timeOfDay.ts). SQL never extracts
+// the hour or day here — doing so would key it in UTC and mis-bucket entries for
+// users east/west of UTC.
+//
+// Caller supplies `?start, ?end` (use computeWindow).
+// -----------------------------------------------------------------------------
+export const TIME_OF_DAY_PATTERN = `
+  SELECT
+    date,
+    mood
+  FROM entries
+  WHERE date BETWEEN ? AND ?
+  ORDER BY date
+`;
+
+// -----------------------------------------------------------------------------
 // Single-window scalar summary: average mood + entry count.
 //
 // Used by the KPI summary card (over the timeframe window) and the

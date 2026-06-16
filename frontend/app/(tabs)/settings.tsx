@@ -191,6 +191,15 @@ function Setting() {
                 <Text style={styles.versionText}>{copyrightLine(new Date().getFullYear())}</Text>
                 <Text style={styles.versionText}> Have feedback? Email us at hello@raeduslabs.com! </Text>
 
+                <Pressable
+                    style={({ pressed }) => [styles.githubLink, pressed && styles.buttonPressed]}
+                    onPress={() => Linking.openURL('https://github.com/Antimatter543/mood-tracker')}
+                    accessibilityRole="link"
+                    accessibilityLabel="View SoulSync source code on GitHub"
+                >
+                    <Feather name="github" color={colors.textSecondary} size={16} />
+                    <Text style={styles.githubLinkText}>View source on GitHub</Text>
+                </Pressable>
             </View>
         </View>
     );
@@ -298,6 +307,16 @@ const useThemedStyles = (colors: any) => {
             alignItems: 'center',
         },
         versionText: {
+            color: colors.textSecondary,
+            fontSize: 14,
+        },
+        githubLink: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            marginTop: 10,
+        },
+        githubLinkText: {
             color: colors.textSecondary,
             fontSize: 14,
         },
