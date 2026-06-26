@@ -206,6 +206,25 @@ describe('getMoodEntries — additional', () => {
     expect(result).toHaveLength(2);
     expect(result[0].activities).toHaveLength(1);
     expect(result[1].activities).toHaveLength(2);
+
+    // The READ path must NOT open any transaction — the SELECT + per-entry
+    // sub-reads run as plain awaited queries directly on the connection. Wrapping
+    // them in withExclusiveTransactionAsync held the exclusive lock across ~510
+    // serialized queries for a 255-entry DB and blanked Timeline (~3.2s block).
+    expect(db.withTransactionAsync).not.toHaveBeenCalled();
+    expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
+    // The reads went straight through getAllAsync.
+    expect(db.getAllAsync).toHaveBeenCalled();
+  });
+
+  it('reads without any transaction wrapper on the empty-DB path too', async () => {
+    const db = createMockDatabase();
+    db.getAllAsync.mockResolvedValue([]); // no entries
+
+    const result = await getMoodEntries(db as any);
+    expect(result).toEqual([]);
+    expect(db.withTransactionAsync).not.toHaveBeenCalled();
+    expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
   });
 });
 

@@ -82,7 +82,9 @@ describe('addMoodEntry', () => {
 describe('getMoodEntries', () => {
   it('returns empty array on error', async () => {
     const db = createMockDatabase();
-    db.withExclusiveTransactionAsync.mockRejectedValue(new Error('DB error'));
+    // getMoodEntries is a READ with NO transaction wrapper, so the error must
+    // come from the query itself, not from a (now-absent) transaction.
+    db.getAllAsync.mockRejectedValue(new Error('DB error'));
 
     const result = await getMoodEntries(db as any);
     expect(result).toEqual([]);

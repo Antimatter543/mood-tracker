@@ -151,39 +151,41 @@ export async function addMoodEntry(
  */
 export async function getMoodEntries(db: SQLiteDatabase): Promise<MoodEntry[]> {
   try {
-    let entriesWithActivities: MoodEntry[] = [];
+    // NO transaction here — this is a READ. Wrapping the SELECT + the per-entry
+    // Promise.all of sub-reads in withExclusiveTransactionAsync held the shared
+    // connection's EXCLUSIVE lock for the entire walk: with ~255 entries that's
+    // ~510 serialized queries, a ~3.2s main-thread block (Choreographer "Skipped
+    // ~191 frames!") during which Timeline could blank under a rapid tab burst —
+    // and a read-side BEGIN is itself a collision vector. A consistent snapshot
+    // isn't needed for a timeline list (the focus-driven refresh re-reads anyway),
+    // and plain awaited queries serialize on the single connection fine. WRITES
+    // stay EXCLUSIVE (addMoodEntry etc.) — that's the actual Home-blank fix.
+    const rawEntries = await db.getAllAsync<Omit<MoodEntry, 'activities' | 'photos'>>(
+      'SELECT * FROM entries ORDER BY date DESC'
+    );
 
-    // EXCLUSIVE transaction so this multi-statement read is a consistent
-    // snapshot and cannot interleave with a concurrent write on the shared
-    // connection (see addMoodEntry for the full rationale).
-    await db.withExclusiveTransactionAsync(async () => {
-      const rawEntries = await db.getAllAsync<Omit<MoodEntry, 'activities' | 'photos'>>(
-        'SELECT * FROM entries ORDER BY date DESC'
-      );
+    const entriesWithActivities = await Promise.all(
+      rawEntries.map(async (entry) => {
+        const activities = await db.getAllAsync<Activity>(
+          `
+            SELECT a.id, a.name, a.group_id, a.icon_name
+            FROM activities a
+            JOIN entry_activities ea ON ea.activity_id = a.id
+            WHERE ea.entry_id = ?
+            ORDER BY a.group_id, a.name
+          `,
+          [entry.id]
+        );
 
-      entriesWithActivities = await Promise.all(
-        rawEntries.map(async (entry) => {
-          const activities = await db.getAllAsync<Activity>(
-            `
-              SELECT a.id, a.name, a.group_id, a.icon_name
-              FROM activities a
-              JOIN entry_activities ea ON ea.activity_id = a.id
-              WHERE ea.entry_id = ?
-              ORDER BY a.group_id, a.name
-            `,
-            [entry.id]
-          );
+        const photos = await getEntryMedia(db, entry.id);
 
-          const photos = await getEntryMedia(db, entry.id);
-
-          return {
-            ...entry,
-            activities,
-            photos,
-          };
-        })
-      );
-    });
+        return {
+          ...entry,
+          activities,
+          photos,
+        };
+      })
+    );
 
     return entriesWithActivities;
   } catch (error) {
