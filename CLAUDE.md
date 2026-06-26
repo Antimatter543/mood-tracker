@@ -60,6 +60,44 @@ build -> download -> `gh release` (auto changelog) -> push. Same signed output.
   version visibly moves); build/release outside the two lanes; EVER write the keystore into the repo tree.
 - Full doc: `frontend/docs/RELEASING.md`.
 
+### Releasing → Google Play (automated, local push)
+
+**Standing default so Play never drifts behind GitHub:** after cutting a release (tag → CI builds the AAB),
+push it to Play review with ONE local command:
+```bash
+scripts/publish-to-play.sh                 # stage v<app.json> as a production DRAFT (no users affected) — verify
+STATUS=inProgress ROLLOUT=0.2 scripts/publish-to-play.sh   # staged, halt-able rollout to 20%
+STATUS=completed  ROLLOUT=1.0 scripts/publish-to-play.sh   # full rollout once confident
+```
+The script (ported from Nudge) resolves the version from `frontend/app.json`, downloads the CI-built signed
+AAB from the latest successful `release-apk.yml` **run artifact** `SoulSync-<version>.aab` (SoulSync's CI
+uploads the AAB as a run artifact, NOT a GitHub Release asset — so `SOURCE=run` is the default; the `.apk`
+is the release asset, the `.aab` is not), runs `gplay preflight` (offline secret/compliance scan), then
+`gplay release` to the chosen track. Notes auto-extract from a `## [x.y.z]` section of `frontend/CHANGELOG.md`
+(Play caps notes at 500 chars/locale). Verify against source of truth: `gplay status --package com.raeduslabs.soulsyncapp --pretty`.
+
+- **Already-uploaded guard (don't re-upload a versionCode):** Play rejects re-uploading an AAB whose
+  versionCode already exists. The script detects when the resolved versionCode is already on the track and,
+  by default, **prints a promote-or-bump message and exits 0** (never re-uploads, never crashes). To take an
+  existing draft live instead, `PROMOTE=1 STATUS=… ROLLOUT=… scripts/publish-to-play.sh` promotes it via the
+  edits→tracks-update→commit flow. *(As of 2026-06-27, v2.3.4 / versionCode 20304 is staged as a production
+  DRAFT — a default run correctly detects it and exits without re-uploading.)*
+- **The ONLY remaining manual Play gate is the one-time content-rating IARC questionnaire** (no androidpublisher
+  API → done once in the Play Console). Until the Console store-setup checklist (content rating / data safety /
+  pricing) is complete, the app is a "draft app" and `--status completed` is rejected — `--status draft` (the
+  default) stages the release; it goes live only after those gates clear.
+
+**Why local, not CI (open-source security):** `Antimatter543/mood-tracker` is PUBLIC, so we **never** put the
+Google Play API credential in GitHub Actions — a malicious PR or compromised action could exfiltrate it. CI
+only ever holds the **upload key** (`SOULSYNC_KEYSTORE_*` repo secrets); because SoulSync is enrolled in **Play
+App Signing**, the upload key ≠ the real app-signing key (Google holds that), so a leaked upload key is
+**rotatable in Play Console without bricking installed users**. The powerful `gplay` **admin** service-account
+key stays on the laptop only (`ops/credentials/gcp/gplay-admin-sa.json`, chmod 600, gitignored, OUTSIDE this
+repo). `gplay` runs LOCALLY → zero new cloud secret. (100%-hands-off upgrade path, **optional, NOT built**:
+create a **dedicated least-privilege** "Release manager" Play service account — this app only, never the account
+admin key — store it as a GitHub secret, and add a CI upload step. Only then is CI-side Play upload acceptable.)
+Ref: `~/ops/references/play-console-cli.md`.
+
 ## Build / test / gates
 ```bash
 cd frontend

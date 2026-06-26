@@ -1,3 +1,19 @@
 __pycache__
 frontend/coverage/
 .claude/worktrees/
+
+# Secrets / signing material — NEVER commit (this is a PUBLIC repo).
+# The Play API service-account key + keystore live OUTSIDE this repo; these
+# patterns are defense-in-depth so a stray copy can never be staged here.
+*-sa.json
+*.keystore
+*.jks
+*.pem
+*.p12
+credentials/
+keystore.properties
+
+# Build artifacts pulled by scripts/publish-to-play.sh (downloads go to mktemp,
+# but guard the tree against any stray copy of the signed bundle/APK).
+*.aab
+*.apk
