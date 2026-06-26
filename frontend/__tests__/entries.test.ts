@@ -49,11 +49,27 @@ describe('addMoodEntry — additional validation', () => {
 
   it('returns failure on transaction throw', async () => {
     const db = createMockDatabase();
-    db.withTransactionAsync.mockRejectedValue(new Error('disk full'));
+    db.withExclusiveTransactionAsync.mockRejectedValue(new Error('disk full'));
 
     const result = await addMoodEntry(db as any, 5, [1], 'note');
     expect(result.success).toBe(false);
     expect(result.message).toContain('Error');
+  });
+
+  // Regression for the "Home cards vanish after adding a mood, fixed only by a
+  // restart" bug: addMoodEntry must take an EXCLUSIVE lock so it can't interleave
+  // with the focus-driven Home refresh reads on the shared connection. (The
+  // class-level guard lives in exclusiveTransactions.test.ts; this pins the
+  // single most important call site at the behavioral level.)
+  it('opens an EXCLUSIVE transaction, never the non-exclusive variant', async () => {
+    const db = createMockDatabase();
+    db.getAllAsync.mockResolvedValue([]);
+    db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
+
+    await addMoodEntry(db as any, 5, [1, 2], 'note');
+
+    expect(db.withExclusiveTransactionAsync).toHaveBeenCalledTimes(1);
+    expect(db.withTransactionAsync).not.toHaveBeenCalled();
   });
 
   it('inserts a link row for every valid activity', async () => {
@@ -110,7 +126,7 @@ describe('addMoodEntry — additional validation', () => {
     // If filterValidActivityIds ran *outside* the txn, getAllAsync would
     // still be called. If it runs inside, getAllAsync should NOT be called.
     const db = createMockDatabase();
-    db.withTransactionAsync.mockImplementation(async () => {
+    db.withExclusiveTransactionAsync.mockImplementation(async () => {
       // do not run the callback — simulates txn rolling back immediately
     });
 

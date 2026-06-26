@@ -161,7 +161,7 @@ describe('deleteActivity — additional', () => {
   it('returns failure on DB throw inside transaction', async () => {
     const db = createMockDatabase();
     db.getFirstAsync.mockResolvedValue({ group_id: 1, position: 1 });
-    db.withTransactionAsync.mockRejectedValue(new Error('txn failed'));
+    db.withExclusiveTransactionAsync.mockRejectedValue(new Error('txn failed'));
 
     const result = await deleteActivity(db as any, 1);
     expect(result.success).toBe(false);
@@ -190,7 +190,7 @@ describe('updateActivityPositions', () => {
 
   it('returns failure when the transaction throws', async () => {
     const db = createMockDatabase();
-    db.withTransactionAsync.mockRejectedValue(new Error('txn boom'));
+    db.withExclusiveTransactionAsync.mockRejectedValue(new Error('txn boom'));
 
     const result = await updateActivityPositions(db as any, []);
     expect(result.success).toBe(false);

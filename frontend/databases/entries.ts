@@ -92,7 +92,17 @@ export async function addMoodEntry(
       }
     }
 
-    await db.withTransactionAsync(async () => {
+    // EXCLUSIVE transaction (not the non-exclusive `withTransactionAsync`):
+    // `withTransactionAsync` does NOT take an exclusive lock — per the
+    // expo-sqlite docs, "any query that runs while the transaction is active
+    // will be included in the transaction, including statements outside the
+    // scope function." On our single shared connection, the focus-driven Home
+    // refresh fires ~6 concurrent reads; a non-exclusive write here could
+    // interleave with them and leave the connection in a bad in-memory state
+    // (reads come back empty → Home cards revert to their empty state until
+    // the app is reopened). The exclusive lock serializes the connection for
+    // the callback duration. Same drop-in shape as lifecycle.ts resetDatabase.
+    await db.withExclusiveTransactionAsync(async () => {
       // Filter inside the transaction so concurrent activity deletes can't
       // produce dangling FK references.
       const validActivityIds = await filterValidActivityIds(db, activityIds);
@@ -143,7 +153,10 @@ export async function getMoodEntries(db: SQLiteDatabase): Promise<MoodEntry[]> {
   try {
     let entriesWithActivities: MoodEntry[] = [];
 
-    await db.withTransactionAsync(async () => {
+    // EXCLUSIVE transaction so this multi-statement read is a consistent
+    // snapshot and cannot interleave with a concurrent write on the shared
+    // connection (see addMoodEntry for the full rationale).
+    await db.withExclusiveTransactionAsync(async () => {
       const rawEntries = await db.getAllAsync<Omit<MoodEntry, 'activities' | 'photos'>>(
         'SELECT * FROM entries ORDER BY date DESC'
       );

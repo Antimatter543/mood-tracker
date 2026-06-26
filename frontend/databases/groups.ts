@@ -83,7 +83,11 @@ export async function deleteActivityGroup(
       };
     }
 
-    await db.withTransactionAsync(async () => {
+    // EXCLUSIVE (not `withTransactionAsync`, which takes NO exclusive lock):
+    // the cascading group delete must not interleave with a concurrent read on
+    // the focus-driven refresh and leave the shared connection mid-cascade. See
+    // databases/entries.ts addMoodEntry for the full why.
+    await db.withExclusiveTransactionAsync(async () => {
       // CASCADE handles activities + entry_activities.
       await db.runAsync('DELETE FROM activity_groups WHERE id = ?', [groupId]);
     });

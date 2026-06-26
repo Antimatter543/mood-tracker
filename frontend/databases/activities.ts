@@ -166,7 +166,12 @@ export async function deleteActivity(
       };
     }
 
-    await db.withTransactionAsync(async () => {
+    // EXCLUSIVE (not `withTransactionAsync`, which takes NO exclusive lock on
+    // the shared connection): a concurrent read on the focus-driven refresh
+    // must not interleave with this DELETE + position compaction and observe a
+    // half-applied state. See databases/entries.ts addMoodEntry for the full
+    // why; lifecycle.ts resetDatabase uses the same drop-in.
+    await db.withExclusiveTransactionAsync(async () => {
       // CASCADE removes entry_activities rows.
       await db.runAsync('DELETE FROM activities WHERE id = ?', [activityId]);
 
@@ -204,7 +209,9 @@ export async function updateActivityPositions(
   activities: Activity[]
 ): Promise<DatabaseResult> {
   try {
-    await db.withTransactionAsync(async () => {
+    // EXCLUSIVE so the whole reorder lands atomically against concurrent reads
+    // on the shared connection (see entries.ts addMoodEntry for the why).
+    await db.withExclusiveTransactionAsync(async () => {
       for (let i = 0; i < activities.length; i++) {
         const activity = activities[i];
         await db.runAsync(

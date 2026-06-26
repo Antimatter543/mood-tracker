@@ -229,7 +229,12 @@ export function DatabaseViewer() {
                 addedPaths.push(await copyToMediaDir(uri));
             }
 
-            await db.withTransactionAsync(async () => {
+            // EXCLUSIVE (not `withTransactionAsync`, which takes NO exclusive
+            // lock): editing an entry triggers the same focus-driven refresh as
+            // adding one, so this multi-table write must not interleave with the
+            // concurrent reads on the shared connection. See entries.ts
+            // addMoodEntry for the full why.
+            await db.withExclusiveTransactionAsync(async () => {
                 await db.runAsync(
                     `UPDATE entries SET mood = ?, notes = ?, date = ? WHERE id = ?`,
                     [formData.mood, formData.notes, formData.date.toISOString(), currentEntry.id]

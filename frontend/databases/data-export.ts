@@ -208,8 +208,11 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
         };
       }
   
-      // Import the data into the database
-      await db.withTransactionAsync(async () => {
+      // Import the data into the database. EXCLUSIVE (not the non-exclusive
+      // `withTransactionAsync`): a large multi-table import must not interleave
+      // with a concurrent read on the shared connection and leave it in a bad
+      // in-memory state. See databases/entries.ts addMoodEntry for the full why.
+      await db.withExclusiveTransactionAsync(async () => {
         // Step 1: Import activity groups first (needed for foreign key constraints)
         if (importData.data.activityGroups && Array.isArray(importData.data.activityGroups)) {
           // Keep track of original group IDs to handle activities correctly

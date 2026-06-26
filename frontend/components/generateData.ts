@@ -112,7 +112,9 @@ export async function seedMoodEntries(
       };
     }
 
-    await db.withTransactionAsync(async () => {
+    // EXCLUSIVE for consistency with the rest of the DB layer (dev-only seed
+    // path; the shared connection can still be read by a screen mid-seed).
+    await db.withExclusiveTransactionAsync(async () => {
       for (let i = 0; i < numberOfEntries; i++) {
         const entry = generateMoodEntry();
         
@@ -153,7 +155,8 @@ export async function seedMoodEntries(
 // Helper function to clear all entries (useful for testing)
 export async function clearAllEntries(db: SQLiteDatabase): Promise<DatabaseResult> {
   try {
-    await db.withTransactionAsync(async () => {
+    // EXCLUSIVE for consistency with the rest of the DB layer (dev/test-only).
+    await db.withExclusiveTransactionAsync(async () => {
       // Delete from entry_activities first due to foreign key constraints
       await db.runAsync('DELETE FROM entry_activities');
       await db.runAsync('DELETE FROM entries');

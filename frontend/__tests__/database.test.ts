@@ -52,7 +52,7 @@ describe('addMoodEntry', () => {
     expect(result.success).toBe(false);
   });
 
-  it('uses transaction for valid entry', async () => {
+  it('uses an EXCLUSIVE transaction for a valid entry', async () => {
     const db = createMockDatabase();
     // getAllAsync is used by filterValidActivityIds
     db.getAllAsync.mockResolvedValue([]);
@@ -60,7 +60,11 @@ describe('addMoodEntry', () => {
 
     const result = await addMoodEntry(db as any, 5, [], 'test note');
     expect(result.success).toBe(true);
-    expect(db.withTransactionAsync).toHaveBeenCalled();
+    // Must be the EXCLUSIVE variant — the non-exclusive withTransactionAsync
+    // can interleave with the focus-driven Home refresh reads on the shared
+    // connection and blank the dashboard until restart.
+    expect(db.withExclusiveTransactionAsync).toHaveBeenCalled();
+    expect(db.withTransactionAsync).not.toHaveBeenCalled();
   });
 
   it('filters invalid activity IDs', async () => {
@@ -78,7 +82,7 @@ describe('addMoodEntry', () => {
 describe('getMoodEntries', () => {
   it('returns empty array on error', async () => {
     const db = createMockDatabase();
-    db.withTransactionAsync.mockRejectedValue(new Error('DB error'));
+    db.withExclusiveTransactionAsync.mockRejectedValue(new Error('DB error'));
 
     const result = await getMoodEntries(db as any);
     expect(result).toEqual([]);
@@ -121,12 +125,13 @@ describe('deleteActivity', () => {
     expect(result.message).toContain('not found');
   });
 
-  it('uses transaction for deletion', async () => {
+  it('uses an EXCLUSIVE transaction for deletion', async () => {
     const db = createMockDatabase();
     db.getFirstAsync.mockResolvedValue({ group_id: 1, position: 2 });
 
     await deleteActivity(db as any, 1);
-    expect(db.withTransactionAsync).toHaveBeenCalled();
+    expect(db.withExclusiveTransactionAsync).toHaveBeenCalled();
+    expect(db.withTransactionAsync).not.toHaveBeenCalled();
   });
 });
 

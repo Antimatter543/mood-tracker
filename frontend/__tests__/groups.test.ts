@@ -53,7 +53,7 @@ describe('deleteActivityGroup', () => {
   it('returns failure when transaction throws', async () => {
     const db = createMockDatabase();
     db.getFirstAsync.mockResolvedValue({ id: 1 });
-    db.withTransactionAsync.mockRejectedValue(new Error('cascade failed'));
+    db.withExclusiveTransactionAsync.mockRejectedValue(new Error('cascade failed'));
 
     const result = await deleteActivityGroup(db as any, 1);
     expect(result.success).toBe(false);
