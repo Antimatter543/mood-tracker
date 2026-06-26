@@ -109,6 +109,41 @@ jobs:
           echo "name=SoulSync-${{ steps.ver.outputs.version }}.apk" >> "$GITHUB_OUTPUT"
           ls -la "$DEST"
 
+      # --- AAB (Android App Bundle) for the Play Store. Same signed keystore
+      #     (upload key); always produced as a run artifact (an .aab is not
+      #     directly installable, so it is NOT attached to the GitHub Release). ---
+      - name: Build signed release AAB
+        working-directory: frontend/android
+        env:
+          SOULSYNC_KEYSTORE_PASSWORD: ${{ secrets.SOULSYNC_KEYSTORE_PASSWORD }}
+          SOULSYNC_KEY_ALIAS: ${{ secrets.SOULSYNC_KEY_ALIAS }}
+          SOULSYNC_KEY_PASSWORD: ${{ secrets.SOULSYNC_KEY_PASSWORD }}
+        run: |
+          ./gradlew bundleRelease \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/release.keystore" \
+            -Pandroid.injected.signing.store.password="$SOULSYNC_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$SOULSYNC_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$SOULSYNC_KEY_PASSWORD" \
+            --no-daemon
+
+      - name: Locate and rename AAB
+        id: aab
+        run: |
+          SRC=$(find android/app/build/outputs/bundle/release -name '*.aab' | head -1)
+          if [ -z "$SRC" ]; then echo "No release AAB found" >&2; exit 1; fi
+          DEST="$RUNNER_TEMP/SoulSync-${{ steps.ver.outputs.version }}.aab"
+          cp "$SRC" "$DEST"
+          echo "path=$DEST" >> "$GITHUB_OUTPUT"
+          echo "name=SoulSync-${{ steps.ver.outputs.version }}.aab" >> "$GITHUB_OUTPUT"
+          ls -la "$DEST"
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.aab.outputs.name }}
+          path: ${{ steps.aab.outputs.path }}
+          if-no-files-found: error
+
       # --- workflow_dispatch: upload as a run artifact (no release) ---
       - name: Upload APK artifact (dispatch)
         if: github.event_name == 'workflow_dispatch'
