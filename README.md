@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white" alt="TypeScript"/>
-  <img src="https://img.shields.io/badge/Expo_SDK-52-000020?logo=expo&logoColor=white" alt="Expo SDK 52"/>
-  <img src="https://img.shields.io/badge/React_Native-0.76-61DAFB?logo=react&logoColor=black" alt="React Native"/>
+  <img src="https://img.shields.io/badge/TypeScript_6-strict-3178C6?logo=typescript&logoColor=white" alt="TypeScript"/>
+  <img src="https://img.shields.io/badge/Expo_SDK-56-000020?logo=expo&logoColor=white" alt="Expo SDK 56"/>
+  <img src="https://img.shields.io/badge/React_Native-0.85-61DAFB?logo=react&logoColor=black" alt="React Native"/>
   <img src="https://img.shields.io/badge/platform-iOS_%7C_Android-lightgrey?logo=apple&logoColor=white" alt="Platform"/>
 </p>
 <p align="center">
-  <img src="https://img.shields.io/badge/tests-333_passing-brightgreen?logo=vitest&logoColor=white" alt="Tests"/>
+  <img src="https://img.shields.io/badge/tests-603_passing-brightgreen?logo=vitest&logoColor=white" alt="Tests"/>
   <img src="https://img.shields.io/badge/privacy-100%25_local-22c55e?logo=shield&logoColor=white" alt="Privacy"/>
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License"/>
 </p>
@@ -66,7 +66,11 @@
   <img src="frontend/assets/images/screenshot-settings.png" alt="Settings" width="24%"/>
 </p>
 
-## Quick Start
+## Install
+
+**Android:** grab the latest signed APK from the [GitHub Releases page](https://github.com/Antimatter543/mood-tracker/releases/latest) and sideload it. Nothing else to set up, no account, no sign-in.
+
+## Build from source
 
 ```bash
 git clone https://github.com/Antimatter543/mood-tracker.git
@@ -74,24 +78,19 @@ cd mood-tracker/frontend && npm install
 npx expo start
 ```
 
-Scan the QR code with [Expo Go](https://expo.dev/go), or press `a` / `i` for emulator.
-
-> **Daily reminders and photo attachments use native modules** (`expo-notifications`, `expo-image-picker`) that are not available in Expo Go on Android. For the full experience run a dev-client build:
-> ```bash
-> npx expo run:android   # or run:ios
-> ```
-> **Production builds** use [EAS Build](https://docs.expo.dev/build/introduction/). Update the `projectId` in `app.json` after forking.
+Scan the QR code with [Expo Go](https://expo.dev/go), or press `a` / `i` for an emulator. The app is plain CNG with no custom native modules, so Expo Go runs it faithfully (new architecture, gesture-handler, reanimated, and SQLite all bundled or pure-JS). Release builds are produced in the cloud via [EAS Build](https://docs.expo.dev/build/introduction/) and GitHub Actions CI; update the `projectId` in `app.json` after forking.
 
 ## Tech Stack
 
 | Layer | Technology |
 |:------|:-----------|
-| Framework | [React Native](https://reactnative.dev/) + [Expo](https://expo.dev/) (SDK 52) |
+| Framework | [React Native](https://reactnative.dev/) 0.85 + [Expo](https://expo.dev/) (SDK 56), new architecture (Fabric) |
 | Routing | [Expo Router](https://docs.expo.dev/router/introduction/) (file-based) |
+| Animation | [Reanimated](https://docs.swmansion.com/react-native-reanimated/) 4 |
 | Database | [SQLite](https://docs.expo.dev/versions/latest/sdk/sqlite/) (local, on-device) |
 | Charts | [react-native-chart-kit](https://github.com/indiespirit/react-native-chart-kit) |
 | Calendar | [react-native-calendars](https://github.com/wix/react-native-calendars) |
-| Language | TypeScript (strict mode) |
+| Language | [TypeScript 6](https://www.typescriptlang.org/) (strict mode) |
 
 <details>
 <summary><strong>Project Structure</strong></summary>
@@ -129,8 +128,8 @@ frontend/
 
 | Metric | Status |
 |:-------|:-------|
-| Test suites | 31 passing |
-| Tests | **333 passing** |
+| Test suites | 65 passing |
+| Tests | **603 passing** |
 | TypeScript | `strict: true`, `tsc --noEmit` clean |
 | Lint | `expo lint` zero errors |
 | Pre-commit | `npm run check` (typecheck + lint + tests) |
@@ -158,7 +157,6 @@ Migrations run automatically on app launch via `databases/migrations.ts`.
 ## Roadmap & Known Issues
 
 **Known Issues**
-- Daily reminders require a dev/EAS build on Android (expo-notifications is not supported in Expo Go on Android SDK 52)
 - Settings loader shows indefinite spinner if SQLite load fails (needs timeout/fallback)
 
 **Planned**
