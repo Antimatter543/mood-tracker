@@ -304,7 +304,7 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
 
               for (const entry of importData.data.entries) {
                 // Upsert entry (merge, don't destroy)
-                const result = await db.runAsync(
+                await db.runAsync(
                   'INSERT OR REPLACE INTO entries (id, mood, notes, date) VALUES (?, ?, ?, ?)',
                   [entry.id, entry.mood, entry.notes, entry.date]
                 );
