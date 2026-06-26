@@ -161,6 +161,12 @@ const StatisticsContent = () => {
   );
 };
 
+// expo-router screen-level error boundary: a render throw in Stats (e.g. the
+// historical empty-db heatmap RangeError) shows a recoverable "Try again"
+// fallback instead of white-screening until restart. See
+// components/ScreenErrorFallback.tsx.
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorFallback';
+
 export default function Stats() {
   return (
     <TimeframeProvider>

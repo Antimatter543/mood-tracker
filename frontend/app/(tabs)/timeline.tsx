@@ -20,6 +20,11 @@ const useStyles = (colors: ReturnType<typeof useThemeColors>) =>
         [colors]
     );
 
+// expo-router screen-level error boundary: a render throw in Timeline shows a
+// recoverable "Try again" fallback instead of white-screening until restart.
+// See components/ScreenErrorFallback.tsx.
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorFallback';
+
 export default function Timeline() {
     const colors = useThemeColors();
     const styles = useStyles(colors);

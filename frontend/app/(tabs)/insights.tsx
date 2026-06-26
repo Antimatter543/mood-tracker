@@ -62,6 +62,11 @@ const EMPTY: Insights = {
     topActivity: null,
 };
 
+// expo-router screen-level error boundary: a render throw in Insights shows a
+// recoverable "Try again" fallback instead of white-screening until restart.
+// See components/ScreenErrorFallback.tsx.
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorFallback';
+
 export default function InsightsScreen() {
     const colors = useThemeColors();
     const styles = useStyles(colors);

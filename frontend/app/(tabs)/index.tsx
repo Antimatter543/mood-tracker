@@ -12,9 +12,24 @@ import { MoodWeekChart } from '@/components/visualisations/MoodWeekChart';
 import { StatTile } from '@/components/StatTile';
 import { ActivityIcon } from '@/components/activityIcon';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
+import { useLatestRun } from '@/hooks/useLatestRun';
 import { startOfLocalDay, endOfLocalDay, localDateString } from '@/databases/dateHelpers';
 import { dailyAverageMap, bestDayLocal } from '@/components/visualisations/transforms/dailyAverages';
 import { currentStreak } from '@/components/visualisations/transforms/streak';
+
+// Screen-level error boundary (expo-router convention): re-exporting a symbol
+// named `ErrorBoundary` makes expo-router wrap THIS screen in
+// <Try catch={ErrorBoundary}>. If a render throws inside Home (the project's
+// recurring "render throw -> white screen, restart-only fix" class — empty-db
+// heatmap RangeError, "Rendered more hooks"), the user gets a recoverable inline
+// fallback with a "Try again" button instead of the whole screen blanking until
+// an app restart. Attached at the SCREEN (not the (tabs) layout) on purpose: the
+// Try wraps the route's own component, so the boundary renders INSIDE the
+// SettingsProvider (in the layout) and can safely read the theme; a layout-level
+// boundary would render outside that provider and crash the fallback itself.
+// Home is where the reported bug manifests; the other data screens re-export the
+// same boundary too. See components/ScreenErrorFallback.tsx.
+export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorFallback';
 
 /** A top-activity row for the "Recent activities" card — name + its real icon. */
 type RecentActivity = {
@@ -414,8 +429,13 @@ export default function Home() {
     const [streak, setStreak] = useState<number>(0);
     // All-time entry count — drives the brand-new-user first-entry nudge.
     const [totalEntries, setTotalEntries] = useState<number>(0);
+    // Run-sequence latch: useDataRefresh ignores fetchData's returned Promise, so
+    // overlapping invocations (rapid focus changes / refreshCount bumps) can
+    // resolve out of order and clobber state. Only the most recent run commits.
+    const { begin: beginFetch, isLatest: isLatestFetch } = useLatestRun();
 
     const fetchData = useCallback(async () => {
+            const runId = beginFetch();
             try {
                 // All windows are computed in the user's local timezone and
                 // passed to SQL as UTC ISO bounds. Storing entries as UTC ISO
@@ -483,6 +503,11 @@ export default function Home() {
                     db.getFirstAsync<{ count: number }>(TOTAL_ENTRIES),
                 ]);
 
+                // A newer fetchData started while these reads were in flight —
+                // drop this run's (now stale) results so it can't overwrite the
+                // newer one's state out of order.
+                if (!isLatestFetch(runId)) return;
+
                 setTodaysMood(today?.mood || null);
                 setTotalEntries(totals?.count ?? 0);
 
@@ -527,7 +552,7 @@ export default function Home() {
             } catch (error) {
                 console.error('Error fetching dashboard data:', error);
             }
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- queries read only db; setState identities are stable
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- queries read only db; setState + latch (beginFetch/isLatestFetch) identities are stable
         }, [db]);
     // Focus-aware refetch (replaces useEffect([db, refreshCount])): the Home
     // dashboard always reflects the latest data when the tab regains focus
