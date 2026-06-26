@@ -1,5 +1,23 @@
 # SoulSync — Project Lessons
 
+## 2026-06-26: Home blanked after adding a mood (only an app restart fixed it) -- non-exclusive SQLite transactions race the focus-refresh
+
+**Mistake**: Every runtime WRITE path used expo-sqlite's `db.withTransactionAsync(...)`, which is NON-exclusive: per the official docs, any async query that runs while the transaction is active is swept into it, and on the single shared connection a write's BEGIN/COMMIT can interleave with the focus-driven reads that fire on every `refetchEntries()`. After adding a mood, Home's reads came back empty and the cards reverted to their empty-states ("all the homepage things disappear"), stuck until the app reopened the DB (a fresh process == clean connection -- which is why the bug was data-NON-deterministic and only a restart cleared it). `lifecycle.ts:155` already used the safe `withExclusiveTransactionAsync` but the add/edit paths did not. There was also NO error boundary anywhere, so any render-throw white-screens a whole screen until restart (3 prior incidents in this file).
+
+**Rule**:
+1. Runtime WRITES (`addMoodEntry`, activities delete/reorder, groups delete, data-export import, DBViewer edit, generateData) MUST use `db.withExclusiveTransactionAsync`. Enforced by `__tests__/exclusiveTransactions.test.ts` (class-level invariant: no non-exclusive `withTransactionAsync(` in the runtime db modules; each write module opens >=1 exclusive txn). Proven in both revert directions.
+2. READS get NO transaction. Over-applying exclusive to a READ (`getMoodEntries`: `SELECT *` plus a per-entry `Promise.all` of sub-reads) held the exclusive lock across ~510 serialized queries on a 255-entry DB = a ~3.2s main-thread block (`Choreographer: Skipped 191 frames!`). A list read needs neither exclusivity nor a transaction; the focus-refresh re-reads anyway.
+3. Every data screen exports a recoverable `ErrorBoundary` (`components/ScreenErrorFallback.tsx`, "Try again" -> `retry`) so a render-throw is recoverable inline, not blank-until-restart. Attach at SCREEN level (inside `SettingsProvider`) -- a layout-level boundary renders OUTSIDE its own providers and crashes on `useThemeColors()`.
+4. Async loaders consumed by `useDataRefresh` need an out-of-order guard (`hooks/useLatestRun.ts`) so a slow stale reload can't clobber fresh data (applied to Home `fetchData`).
+
+**Verified**: v2.3.4 release APK on the Pixel 3 (data survived the v2.3.1 -> v2.3.4 `adb install -r` update path), Home never blanks across adds + tab-switch stress + background/foreground.
+
+**OPEN follow-ups (NOT fixed in v2.3.4)**:
+- **Timeline can blank under aggressive rapid tab-switching** with a large entry count. Separate + PRE-EXISTING (Timeline renders `DBViewer`, whose `fetchEntriesPage` / `loadInitialData` is a plain paginated read this fix never touched; `getMoodEntries` is DEAD CODE -- not the cause, despite a device-QA hypothesis that pointed there). `loadInitialData` is an uncancelled async loader (same race class as Home's `fetchData`, but never got the latch) and `fetchEntriesPage` returns `[]` on error -> `sections=[]` -> blank. Needs its own instrumented repro (is `fetchEntriesPage` erroring -> data path, or is it a virtualized-list render glitch after the jank?) then fix + on-device verify. Candidate: apply `useLatestRun` to `loadInitialData` AND confirm the error path.
+- **Home does not update the new entry IMMEDIATELY in-place** after Submit on the already-focused Home tab (shows stale "No entry yet" for a few seconds; corrects on next focus / tab return). Mild, pre-existing, self-healing -- NOT the catastrophic blank. The refreshCount-bump-while-focused path may not re-run `fetchData` promptly.
+
+**Date**: 2026-06-26
+
 ## 2026-06-16: Local `node_modules` is missing test-only deps — judge the GATE by DELTA, not absolute pass
 **Context**: A clean v2.3.1 working tree already produces **26 `tsc` errors** and **17 jest suites that
 "fail to run"** locally. Every one is a missing-module error (`@testing-library/react-native`,
