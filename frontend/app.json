@@ -12,7 +12,7 @@
       "buildNumber": "20304"
     },
     "android": {
-      "package": "com.raeduslabs.soulsync",
+      "package": "com.raeduslabs.soulsyncapp",
       "versionCode": 20304,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
