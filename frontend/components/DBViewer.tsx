@@ -10,6 +10,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
 import { useDataContext } from '@/context/DataContext';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
+import { useLatestRun } from '@/hooks/useLatestRun';
 import { MoodEntry } from './types';
 
 import { EntryFormData, EntryFormModal } from './forms/EntryForm';
@@ -103,6 +104,19 @@ export function DatabaseViewer() {
     const [page, setPage] = useState(0);
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [currentEntry, setCurrentEntry] = useState<MoodEntry | null>(null);
+
+    // Run-sequence latch — the SAME guard Home's fetchData uses (see
+    // app/(tabs)/index.tsx + hooks/useLatestRun.ts). useDataRefresh ignores the
+    // loader's returned Promise (it can't cancel it), so overlapping invocations —
+    // a rapid focus change, or a refreshCount bump that re-runs loadInitialData
+    // while a previous run is still awaiting its DB reads — can resolve in EITHER
+    // order. Without the latch a slow STALE run's setSections/setPage/setHasMore
+    // would clobber a fresher run and, when the stale read came back short/empty,
+    // blank the Timeline list (sections.length === 0 -> EmptyState) until remount.
+    // One shared counter also makes a fresh initial load supersede any in-flight
+    // loadMore (and vice-versa) so pagination can't write a stale page either —
+    // only the most recently begun run is allowed to commit state.
+    const { begin: beginRun, isLatest: isLatestRun } = useLatestRun();
 
     // Data Fetching
     const fetchEntriesPage = async (pageNum: number) => {
@@ -284,28 +298,47 @@ export function DatabaseViewer() {
     // visible (no spinner flash) and swaps it for fresh data when the query
     // resolves. `hasLoadedOnce` is a ref so toggling it never itself re-renders.
     const loadInitialData = useCallback(async () => {
+        // Claim this run BEFORE the first await so any later invocation (focus /
+        // refreshCount bump / a loadMore) supersedes it; a stale run that resolves
+        // after a newer one is then dropped instead of clobbering fresher state.
+        const runId = beginRun();
         if (!hasLoadedOnce.current) setIsLoading(true);
         try {
             const initialEntries = await fetchEntriesPage(0);
+            // A newer run started while these reads were in flight — drop this
+            // (now stale) result so it can't overwrite the newer one or blank the
+            // list out of order.
+            if (!isLatestRun(runId)) return;
             setSections(groupEntriesByDate(initialEntries));
             setPage(0);
             setHasMore(initialEntries.length === ITEMS_PER_PAGE);
         } catch (error) {
             console.error('Error loading initial data:', error);
+        } finally {
+            // Only the latest run owns the loading flag / hasLoadedOnce — a stale
+            // run must not flip isLoading off under a newer in-flight load.
+            if (isLatestRun(runId)) {
+                hasLoadedOnce.current = true;
+                setIsLoading(false);
+            }
         }
-        hasLoadedOnce.current = true;
-        setIsLoading(false);
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchEntriesPage closes over `db`; setState identities are stable
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchEntriesPage closes over `db`; setState + latch (beginRun/isLatestRun) identities are stable
     }, [db]);
     useDataRefresh(loadInitialData, [db]);
 
     const loadMoreData = async () => {
         if (isLoadingMore || !hasMore) return;
 
+        // Pagination joins the same run sequence: if a fresh initial load (focus /
+        // refreshCount bump) begins while this page is loading, this run is no
+        // longer latest and must not append onto — or mis-set hasMore for — the
+        // list the newer load just reset.
+        const runId = beginRun();
         setIsLoadingMore(true);
         try {
             const nextPage = page + 1;
             const newEntries = await fetchEntriesPage(nextPage);
+            if (!isLatestRun(runId)) return;
 
             if (newEntries.length > 0) {
                 setSections(prevSections => {
@@ -319,8 +352,14 @@ export function DatabaseViewer() {
             }
         } catch (error) {
             console.error('Error loading more data:', error);
+        } finally {
+            // Always clear the loading flag, even when superseded: it's local
+            // pagination/guard UI state (NOT list data), so a stale run resetting
+            // it can't clobber fresher data — and leaving it stuck `true` would
+            // permanently block the `isLoadingMore` guard above. Only the data
+            // writes (setSections/setPage/setHasMore) are latch-gated.
+            setIsLoadingMore(false);
         }
-        setIsLoadingMore(false);
     };
 
     // Render Methods

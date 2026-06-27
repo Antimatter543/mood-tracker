@@ -3,6 +3,15 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.3.5] - Unreleased
+
+### Fixed
+- **Timeline no longer goes blank after rapid tab-switching.** When you moved quickly between
+  tabs (or added an entry and jumped straight to Timeline), the Timeline list could occasionally
+  render empty until you reopened the app. An overlapping data-load could finish out of order and
+  wipe the freshly-loaded list; Timeline now ignores any stale load that finishes late, so the
+  list stays put. (Same class of fix as the earlier Home-screen blank fix.)
+
 ## [2.0.0] - 2026-06-12
 
 ### Changed
