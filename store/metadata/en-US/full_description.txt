@@ -1,0 +1,59 @@
+SoulSync is a mood and journal tracker that keeps everything on your device. No account to create, no data sent to any server, no analytics, no ads. Just you and your entries.
+
+It's also open source. The full code is on GitHub: https://github.com/Antimatter543/mood-tracker — read it, fork it, verify the privacy claims yourself.
+
+---
+
+WHAT YOU CAN DO
+
+Log mood entries on a 10-point scale with optional notes, photos, and activities. The scale supports decimal precision if you want it. You can backdate entries too — caught up logging at the end of the day? No problem.
+
+Attach photos to any entry. They stay on your device along with everything else.
+
+Tag entries with activities (Exercise, Sleep, Work, Social, and more) or create your own with a custom icon. Drag to reorder them however you like.
+
+---
+
+UNDERSTAND YOUR PATTERNS
+
+The Statistics tab shows where your mood actually goes — not where you think it goes.
+
+- Week-over-week trend line with adaptive moving average
+- Mood heatmap calendar (darker = higher mood, at a glance)
+- Day-of-week breakdown: which day you reliably feel best and worst
+- Mood distribution histogram
+- Activity correlation: what genuinely lifts your mood vs. what doesn't
+
+The Insights tab turns all of that into plain English. Things like "You tend to feel best on Tuesday and toughest on Sunday" or "When you log Work, your mood averages 6.8 — that's +2.0 above without it." No interpretation needed.
+
+---
+
+TIMELINE
+
+Every entry lives in the Timeline tab in chronological order: mood score, activities, notes, photos. Scroll back through your own history. Edit or delete any entry.
+
+---
+
+REMINDERS
+
+Set a daily reminder at whatever time works for you. Tap the notification, log your mood, done.
+
+---
+
+THEMES
+
+5 built-in color themes: Dark, Light, Cherry Blossom, Midnight Blue, and Forest. Switch any time in Settings.
+
+---
+
+PRIVACY — THE ACTUAL DETAILS
+
+Everything is stored in a SQLite database on your device. Photos go to on-device file storage. Nothing is synced anywhere. There is no server. There is no account. There is no analytics SDK. The app has no internet permission for user data.
+
+You own your data fully: export it as JSON any time, or import it back. If you delete the app, all your data is gone — because it was only ever on your device.
+
+SoulSync is open source under the GPL-3.0 license. Source code: https://github.com/Antimatter543/mood-tracker
+
+---
+
+No subscription. No ads. No account. Free.
