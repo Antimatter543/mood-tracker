@@ -3,6 +3,16 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.3.6] - Unreleased
+
+### Fixed
+- **Your backups now include your photos.** Previously, exporting your data and importing it on a
+  new phone (or a fresh install) brought over your entries, activities and settings — but your photos
+  came up blank, because only a reference to each image was saved, not the image itself. Exports now
+  embed the actual photos, so exporting and importing carries your pictures across devices and
+  installs along with everything else. (Older backup files still import as before; only their photos
+  won't appear.)
+
 ## [2.3.5] - Unreleased
 
 ### Changed

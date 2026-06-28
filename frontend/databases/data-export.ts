@@ -10,6 +10,45 @@ import { SQLiteDatabase } from 'expo-sqlite';
 
 import { Platform } from 'react-native';
 
+import { deriveMediaExt, writeBase64ToMediaDir } from '@/databases/mediaHelpers';
+
+/**
+ * Shape of a single photo embedded in a v3 export. `data_base64` carries the
+ * actual image bytes so the backup is device-independent; `file_path` is the
+ * ORIGINAL on-device path, kept for reference/debugging only (it does not exist
+ * on a different install). `ext` is the lowercased extension used to name the
+ * restored file. v1/v2 backups carry `{ file_path, media_type }` with no bytes.
+ */
+interface ExportPhoto {
+  media_type: string;
+  /** Original absolute path on the exporting device — informational only. */
+  file_path: string;
+  /** Lowercased file extension (default `jpg`), used to name the restored file. */
+  ext: string;
+  /** The image bytes, base64-encoded. Present in v3 backups only. */
+  data_base64: string;
+}
+
+/**
+ * Read a photo file as base64. Returns `null` (and warns) if the source is
+ * missing or unreadable, so an export never fails because one image is gone.
+ */
+async function readPhotoBase64(filePath: string): Promise<string | null> {
+  try {
+    const info = await FileSystem.getInfoAsync(filePath);
+    if (!info.exists) {
+      console.warn(`Skipping photo export — source file missing: ${filePath}`);
+      return null;
+    }
+    return await FileSystem.readAsStringAsync(filePath, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  } catch (error) {
+    console.warn(`Skipping photo export — unreadable source: ${filePath} (${error})`);
+    return null;
+  }
+}
+
 
 
 
@@ -28,25 +67,31 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
         ORDER BY e.date DESC
       `);
   
-      // Photos are exported as FILE-REFERENCE URIs only, never base64. A
-      // base64 backup of a photo-heavy user would balloon to tens of MB and be
-      // unshareable. The tradeoff: the photo FILES are not part of this JSON,
-      // so importing on a different device leaves the entry_media rows pointing
-      // at paths that don't exist there. The `_note` field below documents this
-      // for anyone reading the file, and importDatabaseData surfaces a warning.
+      // v3: photos travel as actual image BYTES, base64-encoded, embedded in
+      // this JSON — so a backup is fully portable across devices/installs (the
+      // app's package id changed, so a new install is a separate sandbox and
+      // the original absolute paths no longer exist). Base64 inflates size by
+      // ~33%; we accept that for correctness — a backup of tens of MB is still
+      // shareable/saveable. A source file that is missing or unreadable is
+      // SKIPPED gracefully (warn + continue) so one gone image never fails the
+      // whole export.
       const photoRows = await db.getAllAsync<{
         entry_id: number;
         file_path: string;
         media_type: string;
       }>('SELECT entry_id, file_path, media_type FROM entry_media ORDER BY entry_id, id');
 
-      const photosByEntryId = photoRows.reduce((acc, p) => {
-        (acc[p.entry_id] ??= []).push({
-          file_path: p.file_path,
+      const photosByEntryId: Record<number, ExportPhoto[]> = {};
+      for (const p of photoRows) {
+        const data_base64 = await readPhotoBase64(p.file_path);
+        if (data_base64 === null) continue; // missing/unreadable — skip this one
+        (photosByEntryId[p.entry_id] ??= []).push({
           media_type: p.media_type,
+          file_path: p.file_path, // informational only — does not exist on a new device
+          ext: deriveMediaExt(p.file_path),
+          data_base64,
         });
-        return acc;
-      }, {} as Record<number, { file_path: string; media_type: string }[]>);
+      }
 
       const enrichedEntries = (entries as { id: number }[]).map(e => ({
         ...e,
@@ -59,13 +104,14 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
 
       // Create an export object
       const exportData = {
-        version: 2,
+        version: 3,
         exportDate: new Date().toISOString(),
-        // What "import" means for media: only the file-PATH references travel
-        // in this JSON. The image files themselves stay on the originating
-        // device. Importing recreates the entry_media rows, but the thumbnails
-        // will be broken unless the same files exist at the same paths.
-        _note: 'Photos are stored as file references, not embedded data. The photo files are not included in this export and must be re-added manually when importing on a new device.',
+        // v3 backups EMBED each photo's bytes (base64) directly in this JSON, so
+        // importing on a different device/install restores the images into the
+        // new app's media directory — the backup is fully portable. (v1/v2
+        // backups carried file-path references only; their photos do not travel
+        // and won't appear on a new device — unchanged, best-effort.)
+        _note: 'Photos are embedded as base64 image data, so this backup is fully portable: exporting and importing carries your photos across devices and installs.',
         data: {
           entries: enrichedEntries,
           activities,
@@ -207,7 +253,43 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
           message: 'Invalid data format'
         };
       }
-  
+
+      // v3 backups embed photo BYTES (base64). Materialise them to the new
+      // app's media directory BEFORE the DB transaction — this is slow
+      // FileSystem IO and must NOT run while we hold the exclusive SQLite lock
+      // (see the lesson on non-exclusive transactions racing reads). We write
+      // each embedded photo under a FRESH unique local path, then the in-txn
+      // step below inserts entry_media rows pointing at those new paths. A bad
+      // base64 / write failure for one photo is skipped (warn + continue) so a
+      // single corrupt image never aborts the whole import. Legacy (v1/v2)
+      // photos carry no `data_base64`, produce nothing here, and fall through
+      // to the path-reference insert (best-effort, unchanged).
+      const isV3Plus = Number(importData.version) >= 3;
+      const restoredPhotosByEntryId: Record<number, { newPath: string; media_type: string }[]> = {};
+      const importEntries = importData.data.entries;
+      if (Array.isArray(importEntries)) {
+        for (const entry of importEntries) {
+          if (!entry || !Array.isArray(entry.photos)) continue;
+          for (const photo of entry.photos) {
+            if (!photo || typeof photo.data_base64 !== 'string' || photo.data_base64.length === 0) {
+              continue; // legacy path-ref photo, or no embedded bytes — handled in-txn
+            }
+            try {
+              const newPath = await writeBase64ToMediaDir(
+                photo.data_base64,
+                typeof photo.ext === 'string' && photo.ext ? photo.ext : 'jpg'
+              );
+              (restoredPhotosByEntryId[entry.id] ??= []).push({
+                newPath,
+                media_type: photo.media_type ?? 'image',
+              });
+            } catch (error) {
+              console.warn(`Skipping embedded photo (write failed): ${error}`);
+            }
+          }
+        }
+      }
+
       // Import the data into the database. EXCLUSIVE (not the non-exclusive
       // `withTransactionAsync`): a large multi-table import must not interleave
       // with a concurrent read on the shared connection and leave it in a bad
@@ -336,22 +418,42 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
                   }
                 }
 
-                // Import photo refs (v2 exports only). These are file-path
-                // references, NOT the image data — on a new device the files
-                // won't exist, so the rows are inserted but thumbnails may be
-                // broken. We clear this entry's media first so a re-import is
-                // idempotent rather than accumulating duplicate rows.
+                // Photos. Clear this entry's media first so a re-import is
+                // idempotent (no accumulating duplicate rows).
+                //   - v3: insert rows pointing at the NEW local paths we wrote
+                //     above (the bytes already live in this app's media dir).
+                //   - v1/v2: insert the file-path REFERENCES as before. On a new
+                //     device those files won't exist (broken thumbnails) — the
+                //     same best-effort behaviour as prior versions, unchanged.
+                // A v3 photo whose pre-write failed has `data_base64` but no
+                // restored path, so it is skipped in BOTH branches (no dead ref).
                 if (entry.photos && Array.isArray(entry.photos)) {
                   await db.runAsync('DELETE FROM entry_media WHERE entry_id = ?', [entry.id]);
-                  for (const photo of entry.photos) {
-                    if (!photo || !photo.file_path) continue;
-                    try {
-                      await db.runAsync(
-                        `INSERT INTO entry_media (entry_id, file_path, media_type) VALUES (?, ?, ?)`,
-                        [entry.id, photo.file_path, photo.media_type ?? 'image']
-                      );
-                    } catch (error) {
-                      console.warn(`Skipping photo import: ${error}`);
+                  const restored = restoredPhotosByEntryId[entry.id];
+                  if (restored && restored.length > 0) {
+                    for (const media of restored) {
+                      try {
+                        await db.runAsync(
+                          `INSERT INTO entry_media (entry_id, file_path, media_type) VALUES (?, ?, ?)`,
+                          [entry.id, media.newPath, media.media_type]
+                        );
+                      } catch (error) {
+                        console.warn(`Skipping photo import: ${error}`);
+                      }
+                    }
+                  } else {
+                    for (const photo of entry.photos) {
+                      // Skip embedded-byte photos here — those are handled via
+                      // `restored` above (or were dropped on a write failure).
+                      if (!photo || !photo.file_path || typeof photo.data_base64 === 'string') continue;
+                      try {
+                        await db.runAsync(
+                          `INSERT INTO entry_media (entry_id, file_path, media_type) VALUES (?, ?, ?)`,
+                          [entry.id, photo.file_path, photo.media_type ?? 'image']
+                        );
+                      } catch (error) {
+                        console.warn(`Skipping photo import: ${error}`);
+                      }
                     }
                   }
                 }
@@ -383,7 +485,9 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
   
       return {
         success: true,
-        message: 'Data imported successfully. Note: photo files are not included in exports and must be re-added manually.'
+        message: isV3Plus
+          ? 'Data imported successfully. Your entries, settings, and photos were restored.'
+          : 'Data imported successfully. Note: photo files are not included in this backup and must be re-added manually.'
       };
     } catch (error) {
       console.error('Error importing data:', error);

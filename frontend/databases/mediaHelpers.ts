@@ -28,6 +28,20 @@ export async function ensureMediaDir(): Promise<void> {
 }
 
 /**
+ * Derive a lowercase file extension from a source URI / path.
+ *
+ * Strips any query string, lowercases, and defaults to `jpg` when the source
+ * has no usable extension (no dot, or the "extension" still contains a path
+ * separator). Pure — used both for naming copied files and for tagging photos
+ * embedded in a data export.
+ */
+export function deriveMediaExt(sourceUri: string): string {
+  const rawExt = sourceUri.split('.').pop()?.split('?')[0] ?? 'jpg';
+  // Guard against a "filename with no dot" producing the whole path as ext.
+  return rawExt.includes('/') || rawExt === '' ? 'jpg' : rawExt.toLowerCase();
+}
+
+/**
  * Build a unique destination filename for a picked source URI.
  *
  * Scheme: `<13-digit-timestamp>_<random>.<ext>` (e.g. `1717800000000_a1b2c3.jpg`).
@@ -37,12 +51,9 @@ export async function ensureMediaDir(): Promise<void> {
  * names, so we never collide or need to rename after the DB insert returns.
  */
 export function buildMediaFilename(sourceUri: string): string {
-  const rawExt = sourceUri.split('.').pop()?.split('?')[0] ?? 'jpg';
-  // Guard against a "filename with no dot" producing the whole path as ext.
-  const ext = rawExt.includes('/') || rawExt === '' ? 'jpg' : rawExt.toLowerCase();
   const ts = Date.now();
   const rand = Math.random().toString(36).slice(2, 8);
-  return `${ts}_${rand}.${ext}`;
+  return `${ts}_${rand}.${deriveMediaExt(sourceUri)}`;
 }
 
 /**
@@ -54,6 +65,22 @@ export async function copyToMediaDir(sourceUri: string): Promise<string> {
   const filename = buildMediaFilename(sourceUri);
   const dest = `${MEDIA_DIR}${filename}`;
   await FileSystem.copyAsync({ from: sourceUri, to: dest });
+  return dest;
+}
+
+/**
+ * Write a base64-encoded image into MEDIA_DIR under a fresh filename. Returns
+ * the stable absolute destination path. Mirrors {@link copyToMediaDir} but for
+ * bytes that arrive embedded (base64) rather than as a source URI — used by the
+ * data-import path to materialise photos carried inside a v3 backup.
+ */
+export async function writeBase64ToMediaDir(base64: string, ext: string): Promise<string> {
+  await ensureMediaDir();
+  const filename = buildMediaFilename(`x.${ext}`);
+  const dest = `${MEDIA_DIR}${filename}`;
+  await FileSystem.writeAsStringAsync(dest, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
   return dest;
 }
 

@@ -7,7 +7,7 @@ export const copyAsync = jest.fn().mockResolvedValue(undefined);
 export const getInfoAsync = jest.fn().mockResolvedValue({ exists: false });
 export const makeDirectoryAsync = jest.fn().mockResolvedValue(undefined);
 export const deleteAsync = jest.fn().mockResolvedValue(undefined);
-export const EncodingType = { UTF8: 'utf8' };
+export const EncodingType = { UTF8: 'utf8', Base64: 'base64' };
 export const StorageAccessFramework = {
   requestDirectoryPermissionsAsync: jest.fn().mockResolvedValue({ granted: false }),
   createFileAsync: jest.fn().mockResolvedValue('mock://file'),
