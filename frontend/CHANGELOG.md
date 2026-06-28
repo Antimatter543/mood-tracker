@@ -5,6 +5,12 @@ All notable changes to SoulSync are documented here. Versions follow
 
 ## [2.3.5] - Unreleased
 
+### Changed
+- **The Mood Heatmap now shows your most recent days on the left.** Week columns are reversed so
+  the latest week sits on the left edge and older weeks extend to the right — your recent moods are
+  visible the moment the heatmap opens, with no scrolling. The day-of-week rows (Mon at the top,
+  Sun at the bottom) are unchanged, and the month labels move with their columns.
+
 ### Fixed
 - **Timeline no longer goes blank after rapid tab-switching.** When you moved quickly between
   tabs (or added an entry and jumped straight to Timeline), the Timeline list could occasionally

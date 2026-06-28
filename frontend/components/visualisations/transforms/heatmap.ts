@@ -36,6 +36,21 @@ export type HeatmapGrid = {
 };
 
 /**
+ * Mirror a chronological week-column index so the NEWEST week renders on the
+ * LEFT edge and older weeks extend to the right (the reverse of the
+ * GitHub-contributions convention this grid is built in).
+ *
+ * `buildHeatmapGrid` keeps its chronological convention (weekIndex 0 = oldest);
+ * the pixel positioner applies this mirror so recent moods are visible on open
+ * without scrolling. Newest column (totalWeeks-1) → 0 (leftmost); oldest
+ * column (0) → totalWeeks-1 (rightmost); the mapping is its own inverse.
+ *
+ * Defensive on degenerate input: totalWeeks <= 1 → 0.
+ */
+export const mirrorWeekIndex = (weekIndex: number, totalWeeks: number): number =>
+    totalWeeks <= 1 ? 0 : totalWeeks - 1 - weekIndex;
+
+/**
  * Index 0 = Monday, ..., 6 = Sunday. Derived from a "YYYY-MM-DD" string via
  * its day-of-week (UTC parse → Date.getUTCDay()), so this is stable across
  * timezones.

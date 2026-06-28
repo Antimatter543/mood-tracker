@@ -1,5 +1,6 @@
 import {
   buildHeatmapGrid,
+  mirrorWeekIndex,
   type HeatmapInput,
 } from '@/components/visualisations/transforms/heatmap';
 
@@ -115,5 +116,40 @@ describe('buildHeatmapGrid', () => {
     const months = out.monthLabels.map((m) => m.month);
     // January of the new year is labelled "Jan 26"; Feb stays bare.
     expect(months).toEqual(expect.arrayContaining(['Jan 26', 'Feb']));
+  });
+});
+
+describe('mirrorWeekIndex', () => {
+  // The heatmap mirrors its chronological week columns so the NEWEST week
+  // renders on the LEFT edge (mirrored index 0) and older weeks extend right.
+  it('maps the newest week (weekIndex = totalWeeks-1) to the leftmost column (0)', () => {
+    expect(mirrorWeekIndex(9, 10)).toBe(0);
+  });
+
+  it('maps the oldest week (weekIndex 0) to the rightmost column (totalWeeks-1)', () => {
+    expect(mirrorWeekIndex(0, 10)).toBe(9);
+  });
+
+  it('maps a middle week symmetrically', () => {
+    // 11 columns (0..10): the centre column 5 maps to itself.
+    expect(mirrorWeekIndex(5, 11)).toBe(5);
+    // An off-centre column mirrors to its reflected position.
+    expect(mirrorWeekIndex(3, 11)).toBe(7);
+    expect(mirrorWeekIndex(7, 11)).toBe(3);
+  });
+
+  it('is its own inverse (mirroring twice is identity)', () => {
+    const totalWeeks = 8;
+    for (let w = 0; w < totalWeeks; w++) {
+      expect(mirrorWeekIndex(mirrorWeekIndex(w, totalWeeks), totalWeeks)).toBe(w);
+    }
+  });
+
+  it('maps the only column to 0 when totalWeeks = 1', () => {
+    expect(mirrorWeekIndex(0, 1)).toBe(0);
+  });
+
+  it('is defensive on degenerate totalWeeks (<= 0 → 0)', () => {
+    expect(mirrorWeekIndex(0, 0)).toBe(0);
   });
 });

@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useMemo, useRef } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Svg, Rect, Text as SvgText } from 'react-native-svg';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -6,7 +6,11 @@ import { useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
-import { buildHeatmapGrid, type HeatmapInput } from './transforms/heatmap';
+import {
+    buildHeatmapGrid,
+    mirrorWeekIndex,
+    type HeatmapInput,
+} from './transforms/heatmap';
 import { aggregateDailyAverages } from './transforms/dailyAverages';
 import { localDateString } from './transforms/dateHelpers';
 import { moodColor } from '@/components/timeline/moodColor';
@@ -20,7 +24,6 @@ const CustomHeatmap: React.FC = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
     const [moodData, setMoodData] = useState<DayData[]>([]);
-    const scrollViewRef = useRef<ScrollView>(null);
 
     const styles = useMemo(() => StyleSheet.create({
         title: {
@@ -108,10 +111,9 @@ const CustomHeatmap: React.FC = () => {
                 }
 
                 setMoodData(days);
-                // Scrolling to the newest (rightmost) data is handled by the
-                // ScrollView's onContentSizeChange — a timeout-based scrollToEnd
-                // races the SVG layout and often fires before content has width,
-                // leaving the heatmap parked at the oldest data.
+                // Newest week is mirrored to the LEFT edge (see
+                // generateCalendarData), so the ScrollView opens on the most
+                // recent data with no auto-scroll needed.
             } catch (error) {
                 console.error('Error fetching mood data:', error);
             }
@@ -144,21 +146,33 @@ const CustomHeatmap: React.FC = () => {
         if (grid.cells.length === 0) {
             return { cells: [], monthLabels: [], totalWeeks: 0 };
         }
+        // Horizontal columns are MIRRORED: the newest week sits on the LEFT
+        // edge and older weeks extend to the right, so recent moods are visible
+        // immediately on open without scrolling. The vertical day-of-week rows
+        // (Mon top → Sun bottom) are untouched. The transform stays
+        // chronological (weekIndex 0 = oldest); we mirror only at pixel time.
+        const { totalWeeks } = grid;
         return {
             cells: grid.cells.map((c) => ({
                 date: c.date,
                 dayOfMonth: c.dayOfMonth,
                 mood: c.mood,
-                x: LEFT_PADDING + c.weekIndex * (SQUARE_SIZE + GAP_SIZE),
+                x:
+                    LEFT_PADDING +
+                    mirrorWeekIndex(c.weekIndex, totalWeeks) *
+                        (SQUARE_SIZE + GAP_SIZE),
                 y: TOP_PADDING + c.dayIndex * (SQUARE_SIZE + GAP_SIZE),
                 inRange: true,
             })),
             monthLabels: grid.monthLabels.map((m) => ({
                 month: m.month,
-                x: LEFT_PADDING + m.weekIndex * (SQUARE_SIZE + GAP_SIZE),
+                x:
+                    LEFT_PADDING +
+                    mirrorWeekIndex(m.weekIndex, totalWeeks) *
+                        (SQUARE_SIZE + GAP_SIZE),
                 weekIndex: m.weekIndex,
             })),
-            totalWeeks: grid.totalWeeks,
+            totalWeeks,
         };
     }, [moodData]);
 
@@ -214,15 +228,11 @@ const CustomHeatmap: React.FC = () => {
             <View style={styles.chartContainer}>
                 <ScrollView
                     horizontal
-                    ref={scrollViewRef}
                     showsHorizontalScrollIndicator={true}
                     style={styles.scrollContainer}
-                    // Reliably reveal the newest data: scroll to the right edge
-                    // once the SVG content has a measured width. Re-fires if the
-                    // content grows (new entries), keeping recent dates in view.
-                    onContentSizeChange={() =>
-                        scrollViewRef.current?.scrollToEnd({ animated: false })
-                    }
+                    // Columns are mirrored so the newest week is on the LEFT
+                    // edge; the ScrollView's default (left) position already
+                    // shows the most recent data, so no auto-scroll is needed.
                 >
                     <Svg width={svgWidth} height={svgHeight}>
                         {renderDayLabels()}
