@@ -62,7 +62,24 @@ build -> download -> `gh release` (auto changelog) -> push. Same signed output.
 
 ### Releasing → Google Play (automated, local push)
 
-**Standing default so Play never drifts behind GitHub:** after cutting a release (tag → CI builds the AAB),
+**AUTOMATED (tag → Play, idempotent, local cron):** `frontend/scripts/publish-on-tag.sh` is the thin
+orchestrator that keeps Play in sync with GitHub WITHOUT a manual step. A laptop cron runs it every 30 min
+(`*/30 * * * *`, logs → `~/ops/runtime/soulsync-play.log`) and `release.sh` calls it as its final phase
+(skippable with `NO_PLAY=1`). It is safe to run on every tick: it does ONE read-only API call in steady
+state and exits 0. Logic ladder (each step exits 0, never crashes a poller): (1) assert app.json
+version/versionCode agree; (2) **cheap idempotent guard** — if the versionCode is already on the production
+track, log "already on track — nothing to do" and stop; (3) if CI hasn't built `SoulSync-<version>.aab` yet,
+log "AAB not built yet — will retry" and stop; (4) otherwise delegate to `publish-to-play.sh` (`SOURCE=run`).
+- **Draft-default + the live-rollout gate:** it defaults to `PLAY_STATUS=draft` (staged, zero users) because
+  SoulSync is a pre-approval Play app — v2.3.4 is still **IN_REVIEW** at Google and the one-time **IARC
+  content-rating questionnaire** (Console-only, Anti's step) isn't done; until BOTH clear, Play rejects any
+  non-draft upload. Once approved + IARC complete, flip to live by exporting
+  `PLAY_STATUS=inProgress PLAY_ROLLOUT=0.2` (20% staged, halt-able), then `PLAY_STATUS=completed PLAY_ROLLOUT=1.0`
+  for full rollout. Env knobs: `PLAY_STATUS` / `PLAY_ROLLOUT` / `PLAY_TRACK` / `SOULSYNC_PLAY_LOG`.
+- **Layout note:** `publish-on-tag.sh` lives at `frontend/scripts/` but `publish-to-play.sh` lives at the
+  **repo-root** `scripts/` (one level up), so the orchestrator references `$REPO_ROOT/scripts/publish-to-play.sh`.
+
+**Manual / low-level (what publish-on-tag delegates to):** after cutting a release (tag → CI builds the AAB),
 push it to Play review with ONE local command:
 ```bash
 scripts/publish-to-play.sh                 # stage v<app.json> as a production DRAFT (no users affected) — verify

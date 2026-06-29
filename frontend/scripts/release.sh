@@ -62,3 +62,16 @@ gh release create "$TAG" "$APK#SoulSync-$VERSION.apk" \
 git push origin main --tags
 
 echo "==> released https://github.com/$REPO/releases/tag/$TAG"
+
+# 8. Stage the release to Google Play (local, idempotent; draft by default).
+# publish-on-tag.sh waits for CI to build the AAB (it just retries if not ready), then
+# delegates to publish-to-play.sh. Safe to run here even though CI usually hasn't built
+# the AAB yet at push time — it'll log "AAB not built yet" and the 30-min cron picks it
+# up. Skip with NO_PLAY=1. The Play push is local-only because this repo is public and
+# the Google Play credential must never touch CI.
+if [ "${NO_PLAY:-}" = "1" ]; then
+  echo "==> NO_PLAY=1 set — skipping Google Play staging"
+else
+  echo "==> staging $TAG to Google Play (draft; cron retries until CI AAB is ready)"
+  scripts/publish-on-tag.sh "$VERSION"
+fi
