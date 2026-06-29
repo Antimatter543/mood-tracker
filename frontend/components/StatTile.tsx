@@ -32,6 +32,19 @@ export type StatTileProps = {
     color?: string;
     /** Icon glyph size. Default 18 (the Overview standard). */
     iconSize?: number;
+    /**
+     * Max lines for the value. Default 1 — right for short numbers/words. The
+     * 2-axis mood-state chip passes 2 so long warm labels like "Climbing
+     * through ups & downs" can wrap instead of clipping.
+     */
+    valueLines?: number;
+    /**
+     * When true, the value AND label shrink-to-fit their box (no truncation),
+     * width-independently. Off by default so the short tiles render crisp at the
+     * full type size; the mood-state trend chip turns it on because its label is
+     * free text whose width can't be bounded ahead of time.
+     */
+    shrinkToFit?: boolean;
 };
 
 const useStyles = (colors: ReturnType<typeof useThemeColors>) =>
@@ -74,6 +87,8 @@ export const StatTile: React.FC<StatTileProps> = ({
     label,
     color,
     iconSize = 18,
+    valueLines = 1,
+    shrinkToFit = false,
 }) => {
     const colors = useThemeColors();
     const styles = useStyles(colors);
@@ -86,11 +101,18 @@ export const StatTile: React.FC<StatTileProps> = ({
             <View style={styles.textCol}>
                 <Text
                     style={[styles.value, color ? { color } : null]}
-                    numberOfLines={1}
+                    numberOfLines={valueLines}
+                    adjustsFontSizeToFit={shrinkToFit}
+                    minimumFontScale={shrinkToFit ? 0.65 : undefined}
                 >
                     {value}
                 </Text>
-                <Text style={styles.label} numberOfLines={1}>
+                <Text
+                    style={styles.label}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit={shrinkToFit}
+                    minimumFontScale={shrinkToFit ? 0.7 : undefined}
+                >
                     {label}
                 </Text>
             </View>

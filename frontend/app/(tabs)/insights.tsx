@@ -107,75 +107,85 @@ export default function InsightsScreen() {
     const db = useSQLiteContext();
     const [data, setData] = useState<Insights | null>(null);
 
-    const load = useCallback(async () => {
-            try {
-                // All-time window: from the epoch up to the end of today (local).
-                const start = startOfLocalDay(new Date(0));
-                const end = endOfLocalDay(new Date());
-                const today = localDateString(new Date());
+    // Sync loader returning a cleanup: the `active` flag (flipped on
+    // blur/unmount by useDataRefresh) gates setData so a late all-time query
+    // can't update an unmounted screen. Mirrors stats.tsx's guard.
+    const load = useCallback(() => {
+            let active = true;
+            (async () => {
+                try {
+                    // All-time window: from the epoch up to the end of today (local).
+                    const start = startOfLocalDay(new Date(0));
+                    const end = endOfLocalDay(new Date());
+                    const today = localDateString(new Date());
 
-                const [summary, dowRawRows, dateRows, activityRawRows, moodRawRows] =
-                    await Promise.all([
-                        db.getFirstAsync<{ avg_mood: number | null; entry_count: number }>(
-                            WINDOW_SUMMARY,
-                            [start, end]
-                        ),
-                        db.getAllAsync<DowInstantRow>(DOW_MOOD_PATTERN, [start, end]),
-                        db.getAllAsync<{ date: string }>(RECENT_ENTRY_DATES, [start]),
-                        db.getAllAsync<ActivityCorrelationRawRow>(
-                            ACTIVITY_CORRELATION,
-                            [start, end]
-                        ),
-                        db.getAllAsync<{ date: string; mood: number }>(
-                            WEEKLY_MOOD_AVERAGES,
-                            [start, end]
-                        ),
-                    ]);
+                    const [summary, dowRawRows, dateRows, activityRawRows, moodRawRows] =
+                        await Promise.all([
+                            db.getFirstAsync<{ avg_mood: number | null; entry_count: number }>(
+                                WINDOW_SUMMARY,
+                                [start, end]
+                            ),
+                            db.getAllAsync<DowInstantRow>(DOW_MOOD_PATTERN, [start, end]),
+                            db.getAllAsync<{ date: string }>(RECENT_ENTRY_DATES, [start]),
+                            db.getAllAsync<ActivityCorrelationRawRow>(
+                                ACTIVITY_CORRELATION,
+                                [start, end]
+                            ),
+                            db.getAllAsync<{ date: string; mood: number }>(
+                                WEEKLY_MOOD_AVERAGES,
+                                [start, end]
+                            ),
+                        ]);
+                    if (!active) return;
 
-                // All three sources now return RAW instants/rows; day-keying
-                // happens in JS (localDateString / aggregate*) — see queries.ts.
-                const dates = Array.from(
-                    new Set(dateRows.map((r) => localDateString(r.date)))
-                );
-                const dow = buildDowPatternData(aggregateDowRows(dowRawRows));
-                const corr = computeActivityCorrelation(
-                    aggregateActivityCorrelation(activityRawRows)
-                );
-                // Most uplifting activity = largest positive, meaningful delta.
-                const positives = corr.meaningful
-                    .filter((m) => m.delta > 0)
-                    .sort((a, b) => b.delta - a.delta);
-                const top = positives[0] ?? null;
+                    // All sources return RAW instants/rows; day-keying happens
+                    // in JS (localDateString / aggregate*) — see queries.ts.
+                    const dates = Array.from(
+                        new Set(dateRows.map((r) => localDateString(r.date)))
+                    );
+                    const dow = buildDowPatternData(aggregateDowRows(dowRawRows));
+                    const corr = computeActivityCorrelation(
+                        aggregateActivityCorrelation(activityRawRows)
+                    );
+                    // Most uplifting activity = largest positive, meaningful delta.
+                    const positives = corr.meaningful
+                        .filter((m) => m.delta > 0)
+                        .sort((a, b) => b.delta - a.delta);
+                    const top = positives[0] ?? null;
 
-                // 2-axis "how you've been" state over all recorded local days,
-                // and the state-conditioned forward-looking drivers (reusing the
-                // SAME raw activity rows already fetched above).
-                const moodState = buildMoodState(aggregateDailyAverages(moodRawRows));
-                const drivers = buildMoodDrivers(activityRawRows);
+                    // 2-axis "how you've been" state over all recorded local days,
+                    // and the state-conditioned forward-looking drivers (reusing
+                    // the SAME raw activity rows already fetched above).
+                    const moodState = buildMoodState(aggregateDailyAverages(moodRawRows));
+                    const drivers = buildMoodDrivers(activityRawRows);
 
-                setData({
-                    totalEntries: summary?.entry_count ?? 0,
-                    avgMood: summary?.avg_mood ?? 0,
-                    streak: currentStreak(dates, today),
-                    longest: longestStreak(dates),
-                    bestDay: dow.hasEnoughData ? dow.bestDay : null,
-                    worstDay: dow.hasEnoughData ? dow.worstDay : null,
-                    hasDowSignal: dow.hasEnoughData,
-                    topActivity: top
-                        ? {
-                              name: top.activity_name,
-                              avgWith: top.avg_with,
-                              avgWithout: top.avg_without,
-                              delta: top.delta,
-                          }
-                        : null,
-                    moodState,
-                    drivers,
-                });
-            } catch (e) {
-                console.error('Error building insights:', e);
-                setData(EMPTY);
-            }
+                    setData({
+                        totalEntries: summary?.entry_count ?? 0,
+                        avgMood: summary?.avg_mood ?? 0,
+                        streak: currentStreak(dates, today),
+                        longest: longestStreak(dates),
+                        bestDay: dow.hasEnoughData ? dow.bestDay : null,
+                        worstDay: dow.hasEnoughData ? dow.worstDay : null,
+                        hasDowSignal: dow.hasEnoughData,
+                        topActivity: top
+                            ? {
+                                  name: top.activity_name,
+                                  avgWith: top.avg_with,
+                                  avgWithout: top.avg_without,
+                                  delta: top.delta,
+                              }
+                            : null,
+                        moodState,
+                        drivers,
+                    });
+                } catch (e) {
+                    console.error('Error building insights:', e);
+                    if (active) setData(EMPTY);
+                }
+            })();
+            return () => {
+                active = false;
+            };
         // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
         }, [db]);
     // Focus-aware refetch (replaces useEffect([db, refreshCount])): always
