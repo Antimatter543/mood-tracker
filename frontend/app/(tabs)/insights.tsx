@@ -17,6 +17,7 @@ import {
     WINDOW_SUMMARY,
     RECENT_ENTRY_DATES,
     ACTIVITY_CORRELATION,
+    WEEKLY_MOOD_AVERAGES,
 } from '@/components/visualisations/queries';
 import { currentStreak, longestStreak } from '@/components/visualisations/transforms/streak';
 import {
@@ -29,6 +30,16 @@ import {
     aggregateActivityCorrelation,
     type ActivityCorrelationRawRow,
 } from '@/components/visualisations/transforms/activityCorrelation';
+import { aggregateDailyAverages } from '@/components/visualisations/transforms/dailyAverages';
+import {
+    buildMoodState,
+    type MoodState,
+} from '@/components/visualisations/transforms/moodState';
+import {
+    buildMoodDrivers,
+    type MoodDriversData,
+} from '@/components/visualisations/transforms/moodDrivers';
+import MoodDriversCard from '@/components/visualisations/MoodDriversCard';
 
 /**
  * Insights — honest, locally-derived patterns from the user's own entries.
@@ -49,6 +60,27 @@ type Insights = {
     worstDay: string | null;
     hasDowSignal: boolean;
     topActivity: { name: string; avgWith: number; avgWithout: number; delta: number } | null;
+    moodState: MoodState;
+    drivers: MoodDriversData;
+};
+
+const EMPTY_MOOD_STATE: MoodState = {
+    state: 'building',
+    trend: null,
+    volatility: null,
+    swing: null,
+    slope: null,
+    label: 'Keep logging to reveal your pattern',
+    description: '',
+};
+
+const EMPTY_DRIVERS: MoodDriversData = {
+    recoveryDrivers: [],
+    destabilizers: [],
+    lowDayCount: 0,
+    steadyDayCount: 0,
+    hasRecoverySignal: false,
+    hasDestabilizerSignal: false,
 };
 
 const EMPTY: Insights = {
@@ -60,6 +92,8 @@ const EMPTY: Insights = {
     worstDay: null,
     hasDowSignal: false,
     topActivity: null,
+    moodState: EMPTY_MOOD_STATE,
+    drivers: EMPTY_DRIVERS,
 };
 
 // expo-router screen-level error boundary: a render throw in Insights shows a
@@ -80,15 +114,23 @@ export default function InsightsScreen() {
                 const end = endOfLocalDay(new Date());
                 const today = localDateString(new Date());
 
-                const [summary, dowRawRows, dateRows, activityRawRows] = await Promise.all([
-                    db.getFirstAsync<{ avg_mood: number | null; entry_count: number }>(
-                        WINDOW_SUMMARY,
-                        [start, end]
-                    ),
-                    db.getAllAsync<DowInstantRow>(DOW_MOOD_PATTERN, [start, end]),
-                    db.getAllAsync<{ date: string }>(RECENT_ENTRY_DATES, [start]),
-                    db.getAllAsync<ActivityCorrelationRawRow>(ACTIVITY_CORRELATION, [start, end]),
-                ]);
+                const [summary, dowRawRows, dateRows, activityRawRows, moodRawRows] =
+                    await Promise.all([
+                        db.getFirstAsync<{ avg_mood: number | null; entry_count: number }>(
+                            WINDOW_SUMMARY,
+                            [start, end]
+                        ),
+                        db.getAllAsync<DowInstantRow>(DOW_MOOD_PATTERN, [start, end]),
+                        db.getAllAsync<{ date: string }>(RECENT_ENTRY_DATES, [start]),
+                        db.getAllAsync<ActivityCorrelationRawRow>(
+                            ACTIVITY_CORRELATION,
+                            [start, end]
+                        ),
+                        db.getAllAsync<{ date: string; mood: number }>(
+                            WEEKLY_MOOD_AVERAGES,
+                            [start, end]
+                        ),
+                    ]);
 
                 // All three sources now return RAW instants/rows; day-keying
                 // happens in JS (localDateString / aggregate*) — see queries.ts.
@@ -104,6 +146,12 @@ export default function InsightsScreen() {
                     .filter((m) => m.delta > 0)
                     .sort((a, b) => b.delta - a.delta);
                 const top = positives[0] ?? null;
+
+                // 2-axis "how you've been" state over all recorded local days,
+                // and the state-conditioned forward-looking drivers (reusing the
+                // SAME raw activity rows already fetched above).
+                const moodState = buildMoodState(aggregateDailyAverages(moodRawRows));
+                const drivers = buildMoodDrivers(activityRawRows);
 
                 setData({
                     totalEntries: summary?.entry_count ?? 0,
@@ -121,6 +169,8 @@ export default function InsightsScreen() {
                               delta: top.delta,
                           }
                         : null,
+                    moodState,
+                    drivers,
                 });
             } catch (e) {
                 console.error('Error building insights:', e);
@@ -146,6 +196,21 @@ export default function InsightsScreen() {
         <Layout>
             <Text style={styles.heading}>Insights</Text>
             <Text style={styles.sub}>What your entries say about you</Text>
+
+            {/* How you've been — 2-axis mood state (only once classified) */}
+            {d.moodState.state === 'classified' && (
+                <Card>
+                    <View style={styles.row}>
+                        <View style={[styles.iconCircle, { backgroundColor: colors.accentLight }]}>
+                            <Ionicons name="pulse-outline" size={20} color={colors.accent} />
+                        </View>
+                        <View style={styles.grow}>
+                            <Text style={styles.cardTitle}>How you've been</Text>
+                            <Text style={styles.cardBody}>{d.moodState.description}</Text>
+                        </View>
+                    </View>
+                </Card>
+            )}
 
             {/* Streak hero */}
             <Card accentTop>
@@ -244,6 +309,9 @@ export default function InsightsScreen() {
                     </View>
                 </View>
             </Card>
+
+            {/* State-conditioned, forward-looking drivers */}
+            <MoodDriversCard data={d.drivers} />
 
             <Text style={styles.footnote}>
                 All insights are computed on your device from your own entries. Nothing leaves
