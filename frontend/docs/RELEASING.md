@@ -55,8 +55,10 @@ release. (The `upgrade/sdk-56` branch has the `.eslintrc.js` node-env override t
 Uploads the APK as a **run artifact** instead of a release. (This replaces the SDK-56 runbook's EAS
 preview-build step.)
 
-### Lane B — EAS via `scripts/release.sh` (quota-bound until 2026-07-01)
-The canonical one-command path once EAS quota returns (from `frontend/`):
+### Lane B — EAS via `scripts/release.sh` (DEPRECATED 2026-07-03 — exception-only)
+Portfolio policy: EAS cloud builds are prod/iOS-only and Lane A (free CI) covers this Android-only app,
+so Lane B is no longer canonical. The script's EAS step requires `ASTRA_ALLOW_EAS=1`; without it the
+script pushes the tag and lets CI build. Use only if the CI lane is broken (from `frontend/`):
 
 ```bash
 scripts/release.sh patch     # 1.2.1 -> 1.2.2   (bug fixes / polish)

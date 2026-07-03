@@ -44,6 +44,23 @@ git commit -m "release: $TAG"
 git tag "$TAG"
 
 # 4. EAS build (appVersionSource: local -> the APK reports $VERSION).
+# DEPRECATED LANE (portfolio policy 2026-07-03): EAS cloud is prod/iOS-only; the free CI
+# lane (release-apk.yml, fired by the tag push) is the canonical build AND it creates the
+# GitHub Release itself (idempotently), so the skip path below loses nothing but the spend.
+# Opt back into the legacy EAS lane with ASTRA_ALLOW_EAS=1.
+if [ "${ASTRA_ALLOW_EAS:-0}" != "1" ]; then
+  echo "==> Skipping EAS build (policy: EAS is prod/iOS-only; the v* tag push fires the free CI"
+  echo "    build, which attaches the APK to the GitHub Release). ASTRA_ALLOW_EAS=1 to force."
+  git push origin main --tags
+  echo "==> pushed $TAG — CI is building; watch: gh run list -R $REPO"
+  if [ "${NO_PLAY:-}" = "1" ]; then
+    echo "==> NO_PLAY=1 set — skipping Google Play staging"
+  else
+    echo "==> staging $TAG to Google Play (draft; cron retries until CI AAB is ready)"
+    scripts/publish-on-tag.sh "$VERSION"
+  fi
+  exit 0
+fi
 echo "==> EAS build (preview / optimized arm-only + R8)"
 npx eas-cli build --platform android --profile preview --non-interactive --wait
 

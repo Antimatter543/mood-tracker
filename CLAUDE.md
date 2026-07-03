@@ -44,9 +44,11 @@ unlimited. Used to ship v1.2.3 (2026-06-12).
     -R Antimatter543/mood-tracker --ref <branch>` (or `-f ref=<branch>`). Uploads the APK as a **run
     artifact**. This replaces the SDK-56 runbook's EAS preview-build step.
 
-**Lane B — EAS via `scripts/release.sh` (quota-bound until 2026-07-01).** The canonical one-command path once
-quota is back: `scripts/release.sh patch|minor|major` does tsc+jest -> bump -> commit -> tag -> EAS preview
-build -> download -> `gh release` (auto changelog) -> push. Same signed output.
+**Lane B — EAS via `scripts/release.sh` (DEPRECATED 2026-07-03 — exception-only).** Portfolio policy: EAS
+cloud is prod/iOS-only, and Lane A covers everything this Android-only app needs, so Lane B is no longer
+canonical even with quota available. `scripts/release.sh patch|minor|major` still works (tsc+jest -> bump ->
+commit -> tag -> push; CI builds + attaches the APK) but its EAS step now requires `ASTRA_ALLOW_EAS=1` —
+without it the script pushes the tag and lets the free CI lane build. Use EAS here only if CI is broken.
 
 - **Keystore custody** (the app's PERMANENT signing identity — losing it = can never update the app):
   (1) **EAS** (`eas credentials -p android`, account `@astraedus`, slug `soulsync-mood`), (2) **GitHub repo
@@ -126,9 +128,12 @@ regression test, new behavior => new tests, prefer class-level invariant tests (
 catalog, not one icon). The suite only grows. **Device/manual QA is BATCHED**: one consolidated Expo Go walk +
 one release-APK pass per multi-feature batch, never per individual fix (manual testing takes ages).
 **NEVER run a LOCAL native build** (`npx expo run:android`, `gradlew`, prebuild compiles). They peg the
-CPU to 100%+ and lag Anti's interactive machine (he is ON this box). **Builds go to EAS cloud only** ->
-`scripts/release.sh` (or `eas build`). This app also can't be relied on to build locally anyway.
-For fast JS-only iteration without a native rebuild, use **`eas update`** (OTA) to a dev client, not a local build.
+CPU to 100%+ and lag Anti's interactive machine (he is ON this box). **Builds go to the FREE GitHub Actions
+CI lane (Lane A)**: `v*` tag push = production release; `gh workflow run release-apk.yml -f ref=<branch>` =
+manual test build. **EAS cloud is prod/iOS-only** (portfolio policy 2026-07-03, `eas-build-guard.sh`
+hook-enforced) — this app is Android-only, so in practice EAS is never needed here. This app also can't be
+relied on to build locally anyway. For fast JS-only iteration use **Expo Go** (see On-device QA) — there is
+no dev-client/`eas update` wiring for this app.
 
 APK is optimized: `eas.json` preview profile = **arm-only ABIs** (via `plugins/withReleaseAbis.js`,
 drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-properties`). ~45MB, not ~98MB.
