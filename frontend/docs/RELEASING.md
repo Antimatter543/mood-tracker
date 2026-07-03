@@ -16,19 +16,27 @@ For every release these are all the SAME string:
 
 If they ever differ, something bypassed the pipeline.
 
-## Two build lanes (both emit the SAME signed APK — cert parity verified)
+## The build lane — GitHub Actions CI (FREE + permanent, the ONLY lane)
 
-The release APK can be built two ways. Both sign with the **same keystore** (the app's permanent
-identity), so an APK from either lane updates cleanly over an APK from the other — verified on-device
-for v1.2.3 (installed the CI APK over the EAS v1.2.2 with `adb install -r`, no
-`INSTALL_FAILED_UPDATE_INCOMPATIBLE`, data preserved).
+`.github/workflows/release-apk.yml`, fired by a `v*` tag push. Portfolio policy 2026-07-03: EAS cloud
+builds are prod/iOS-only and this app is Android-only, so the free CI gradlew lane is the only build
+path. (The old EAS lane was removed from `release.sh` the same day; it signed with the SAME keystore —
+cert parity was verified on-device for v1.2.3 over the EAS v1.2.2 — so historical EAS-built installs
+update cleanly over CI builds. Git history has the old lane if archaeology is ever needed.)
 
-### Lane A — GitHub Actions CI (FREE + permanent, the current default)
-`.github/workflows/release-apk.yml`. Exists because the EAS free-tier Android build quota is exhausted
-until **2026-07-01**; CI on this public repo is free + unlimited. Shipped v1.2.3 (2026-06-12).
+Cut a release = ONE command (from `frontend/`):
 
-Cut a release = replicate the bump steps below MINUS the EAS build, then push the tag (the tag push is
-what fires CI):
+```bash
+scripts/release.sh patch     # 1.2.1 -> 1.2.2   (bug fixes / polish)
+scripts/release.sh minor     # 1.2.x -> 1.3.0   (new features)
+scripts/release.sh major     # 1.x.x -> 2.0.0   (breaking / big)
+```
+
+Refuses a dirty tree; gates on `tsc + jest`; bumps `app.json` (+ derived versionCode); commits
+`release: vX.Y.Z`; tags; pushes. The tag push fires CI, which builds + signs + creates the GitHub
+Release; the script then stages the release to Google Play (draft; `NO_PLAY=1` to skip).
+
+Manual equivalent (only if the script itself is broken):
 
 ```bash
 cd frontend
@@ -54,21 +62,6 @@ release. (The `upgrade/sdk-56` branch has the `.eslintrc.js` node-env override t
 `gh workflow run release-apk.yml -R Antimatter543/mood-tracker --ref <branch>` (or `-f ref=<branch>`).
 Uploads the APK as a **run artifact** instead of a release. (This replaces the SDK-56 runbook's EAS
 preview-build step.)
-
-### Lane B — EAS via `scripts/release.sh` (DEPRECATED 2026-07-03 — exception-only)
-Portfolio policy: EAS cloud builds are prod/iOS-only and Lane A (free CI) covers this Android-only app,
-so Lane B is no longer canonical. The script's EAS step requires `ASTRA_ALLOW_EAS=1`; without it the
-script pushes the tag and lets CI build. Use only if the CI lane is broken (from `frontend/`):
-
-```bash
-scripts/release.sh patch     # 1.2.1 -> 1.2.2   (bug fixes / polish)
-scripts/release.sh minor     # 1.2.x -> 1.3.0   (new features)
-scripts/release.sh major     # 1.x.x -> 2.0.0   (breaking / big)
-```
-
-Refuses to proceed on a dirty tree or failing gates: `tsc + jest` -> bump version -> commit
-`release: vX.Y.Z` -> `git tag` -> EAS preview build (optimized arm-only + R8) -> download APK ->
-`gh release` with an auto changelog from commits since the last tag -> push commit + tag.
 
 ## Keystore custody (don't lose this — it's the app's permanent identity)
 Stored in three places: **EAS** (`eas credentials -p android`, account `@astraedus`, slug `soulsync-mood`),

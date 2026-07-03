@@ -19,15 +19,16 @@ Public repo: `Antimatter543/mood-tracker` (Anti's). Releases: GitHub Releases (A
 - `eas.json` uses `appVersionSource: "local"` — the version lives in the repo, NOT hidden EAS server state.
 - **Invariant:** `git tag == app.json version == APK versionName == GitHub release tag == asset (SoulSync-<version>.apk)`.
 
-### Two build lanes — both produce the SAME signed APK (cert parity verified)
-
-**Lane A — GitHub Actions CI (`.github/workflows/release-apk.yml`). FREE + permanent — the default.**
-The EAS free-tier Android build quota is exhausted until **2026-07-01**; CI on this public repo is free and
-unlimited. Used to ship v1.2.3 (2026-06-12).
-  - **Cut a release** = replicate `release.sh`'s bump steps MINUS the EAS build, then push the tag:
+### ONE build lane — GitHub Actions CI (`.github/workflows/release-apk.yml`), FREE + permanent
+Portfolio policy 2026-07-03: EAS cloud builds are prod/iOS-only (`eas-build-guard.sh` hook-enforced);
+this app is Android-only, so the free CI gradlew lane is the ONLY build path. (The old EAS lane was
+removed from `release.sh` the same day — git history has it if ever needed.)
+  - **Cut a release** = ONE command: `scripts/release.sh patch|minor|major` — gates (tsc+jest) -> bump ->
+    commit -> tag -> push. The `v*` tag push fires CI, which builds + signs + creates the GitHub Release.
+    Manual equivalent (if the script itself is broken):
     ```bash
     cd frontend
-    npx tsc --noEmit && npx jest --silent          # the real gate (what release.sh runs; NOT `npm run check`*)
+    npx tsc --noEmit && npx jest --silent          # the real gate (NOT `npm run check`*)
     VERSION="$(node scripts/bump-version.js patch)" # patch|minor|major
     git add app.json && git commit -m "release: v$VERSION" && git tag "v$VERSION"
     git push origin main --tags                     # the tag push fires the CI lane
@@ -42,13 +43,7 @@ unlimited. Used to ship v1.2.3 (2026-06-12).
     release. (The `upgrade/sdk-56` branch carries the `.eslintrc.js` node-env override that fixes it.)
   - **Branch QA builds** (build any ref, NO release): `gh workflow run release-apk.yml
     -R Antimatter543/mood-tracker --ref <branch>` (or `-f ref=<branch>`). Uploads the APK as a **run
-    artifact**. This replaces the SDK-56 runbook's EAS preview-build step.
-
-**Lane B — EAS via `scripts/release.sh` (DEPRECATED 2026-07-03 — exception-only).** Portfolio policy: EAS
-cloud is prod/iOS-only, and Lane A covers everything this Android-only app needs, so Lane B is no longer
-canonical even with quota available. `scripts/release.sh patch|minor|major` still works (tsc+jest -> bump ->
-commit -> tag -> push; CI builds + attaches the APK) but its EAS step now requires `ASTRA_ALLOW_EAS=1` —
-without it the script pushes the tag and lets the free CI lane build. Use EAS here only if CI is broken.
+    artifact**.
 
 - **Keystore custody** (the app's PERMANENT signing identity — losing it = can never update the app):
   (1) **EAS** (`eas credentials -p android`, account `@astraedus`, slug `soulsync-mood`), (2) **GitHub repo
@@ -129,8 +124,8 @@ catalog, not one icon). The suite only grows. **Device/manual QA is BATCHED**: o
 one release-APK pass per multi-feature batch, never per individual fix (manual testing takes ages).
 **NEVER run a LOCAL native build** (`npx expo run:android`, `gradlew`, prebuild compiles). They peg the
 CPU to 100%+ and lag Anti's interactive machine (he is ON this box). **Builds go to the FREE GitHub Actions
-CI lane (Lane A)**: `v*` tag push = production release; `gh workflow run release-apk.yml -f ref=<branch>` =
-manual test build. **EAS cloud is prod/iOS-only** (portfolio policy 2026-07-03, `eas-build-guard.sh`
+CI lane**: `v*` tag push (via `scripts/release.sh`) = production release; `gh workflow run release-apk.yml
+-f ref=<branch>` = manual test build. **EAS cloud is prod/iOS-only** (portfolio policy 2026-07-03, `eas-build-guard.sh`
 hook-enforced) — this app is Android-only, so in practice EAS is never needed here. This app also can't be
 relied on to build locally anyway. For fast JS-only iteration use **Expo Go** (see On-device QA) — there is
 no dev-client/`eas update` wiring for this app.
