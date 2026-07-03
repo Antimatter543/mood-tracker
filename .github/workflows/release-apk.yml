@@ -1,5 +1,9 @@
 name: Release APK
 
+# RELEASE CONVENTION (portfolio standard, set 2026-07-03): 'v*' tag -> production release
+# build; workflow_dispatch -> manual dev/test build. Never auto-build on a branch push.
+# EAS cloud builds are reserved for prod/iOS only (all Android builds use this free CI).
+#
 # Free, permanent CI lane that builds a SIGNED release APK for SoulSync (Expo CNG).
 # Exists because the EAS free-tier Android build quota is exhausted until 2026-07-01;
 # CI on a public repo is free. The CI keystore is the SAME cert EAS signs with
