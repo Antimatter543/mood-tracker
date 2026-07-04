@@ -68,7 +68,11 @@
 
 ## Install
 
-**Android:** grab the latest signed APK from the [GitHub Releases page](https://github.com/Antimatter543/mood-tracker/releases/latest) and sideload it. Nothing else to set up, no account, no sign-in.
+**Android:** SoulSync is on the [Google Play Store](https://play.google.com/store/apps/details?id=com.raeduslabs.soulsyncapp). Nothing else to set up, no account, no sign-in.
+
+Prefer installing outside Play? Grab the latest signed APK from the [GitHub Releases page](https://github.com/Antimatter543/mood-tracker/releases/latest) and sideload it.
+
+Enjoying SoulSync? A [Play Store review](https://play.google.com/store/apps/details?id=com.raeduslabs.soulsyncapp) helps a tiny open-source project a lot.
 
 ## Build from source
 
