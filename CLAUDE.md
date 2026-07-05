@@ -44,6 +44,11 @@ removed from `release.sh` the same day — git history has it if ever needed.)
   - **Branch QA builds** (build any ref, NO release): `gh workflow run release-apk.yml
     -R Antimatter543/mood-tracker --ref <branch>` (or `-f ref=<branch>`). Uploads the APK as a **run
     artifact**.
+  - **Every push to `main`** (added 2026-07-05) auto-builds the signed APK and publishes/refreshes a
+    rolling **`main-latest` PRERELEASE** (`…/releases/tag/main-latest`, always the newest main) — an
+    installable dev build per merge, asset `SoulSync-main.apk`. It is NOT a versioned release (app.json
+    version isn't bumped between releases); `v*` tags remain the real production releases. Watch:
+    `gh run list -R Antimatter543/mood-tracker --branch main`.
 
 - **Keystore custody** (the app's PERMANENT signing identity — losing it = can never update the app):
   (1) **EAS** (`eas credentials -p android`, account `@astraedus`, slug `soulsync-mood`), (2) **GitHub repo
