@@ -197,8 +197,13 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           TAG="main-latest"
+          # Rename to a STABLE filename so the download URL never changes
+          # (…/main-latest/SoulSync-main.apk) — the `#label` gh syntax only sets a
+          # display label, leaving the asset filename versioned, so copy instead.
+          DEV_APK="$RUNNER_TEMP/SoulSync-main.apk"
+          cp "$APK_PATH" "$DEV_APK"
           gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
-          gh release create "$TAG" "$APK_PATH#SoulSync-main.apk" \
+          gh release create "$TAG" "$DEV_APK" \
             --repo "$GITHUB_REPOSITORY" \
             --title "SoulSync — latest main (dev build)" \
             --target "$GITHUB_SHA" \
