@@ -1,0 +1,48 @@
+{
+  "_comment": "REAL working storyboard for SoulSync (com.raeduslabs.soulsync, standalone release v2.3.6) on the Pixel 3 (1080x2160). Story: a private mood tracker that turns your entries into plain-English insight, with nothing leaving your phone. Magic moment = the Insights tab ('What lifts your mood' + 'best on Sun, toughest on Fri'). Verified device facts (2026-06-30, hands-on): Home shows stat cards anchored by the text 'Average mood'. FAB 'Add mood entry' at (937,1577) -> mood scale 'How were you?' (mood number 7 at 907,1064) -> Continue button at (540,1541) -> 'What did you do?' tag screen (Emotions/Sleep/Social/Activities/Health chips; Happy chip at 540,524; fixed footer Submit at 782,1990, Back at 297,1990). Bottom nav centers y=1934: Home 108, Statistics 324, Timeline 540, Insights 756, Settings 972. App state PERSISTS across beats (beats run sequentially), so beat N can assume where beat N-1 left off. crop 120/120 -> clean 1080x1920. Narration matched to each beat's action length, no em dashes.",
+  "app": "soulsync",
+  "package": "com.raeduslabs.soulsync",
+  "orientation": "vertical",
+  "voice": "en-US-AndrewNeural",
+  "captions": true,
+  "crop_top": 120,
+  "crop_bottom": 120,
+  "title_card": {"text": "SoulSync", "subtitle": "Mood tracking that stays yours", "seconds": 1.6},
+  "end_card": {"text": "SoulSync", "subtitle": "Private. Free. Open source.", "seconds": 2.6},
+  "beats": [
+    {
+      "id": "hook",
+      "narration": "You can write down how you feel every day for a month and still have no idea what is actually moving your mood. SoulSync is built to answer that.",
+      "caption": "What's really moving your mood?",
+      "_note": "NO force-stop here: the capture loop does no pre-beat reset, so force-stop would kill the app and the slow cold-start leaks the phone launcher into the opening frames. The app is pre-warmed on Home before produce, so a warm launch foregrounds instantly with zero launcher gap. tap Home guarantees the Home tab; long wait tolerates render.",
+      "actions": ["launch", "sleep:2", "tap-xy:108:1934", "wait:Average mood:10", "sleep:1"],
+      "hold": 0.8,
+      "min_duration": 9
+    },
+    {
+      "id": "log",
+      "narration": "Logging a day takes about ten seconds. Pick how you felt, then tap what shaped it. Your sleep, the people you saw, the things you did. The more honest you are, the more it can show you later.",
+      "caption": "Log a day in ten seconds",
+      "_note": "tag screen renders inside the tab navigator; Back/Submit is at the END of the form, revealed after ~2 scroll:down. Submit is matchable by TEXT (per project CLAUDE.md), so tap:Submit is robust where a blind tap-xy on the footer band hits the nav bar / 'Add New Activity Group'. Ends on Home so the magic beat's Insights nav is clean.",
+      "actions": ["tap-xy:937:1577", "sleep:1", "tap-xy:907:1064", "sleep:1", "tap-xy:540:1541", "sleep:2", "tap-xy:540:524", "sleep:1", "scroll:down", "scroll:down", "sleep:1", "tap:Submit", "sleep:1"],
+      "hold": 0.8,
+      "min_duration": 13
+    },
+    {
+      "id": "magic",
+      "narration": "Here is where it earns its place. SoulSync reads your own entries and tells you the truth in plain words. The days you feel your best, the days you struggle, and the one thing that lifts you the most.",
+      "caption": "It tells you what lifts you",
+      "actions": ["tap-xy:756:1934", "wait:What lifts your mood:8", "sleep:2"],
+      "hold": 1.0,
+      "min_duration": 12
+    },
+    {
+      "id": "privacy",
+      "narration": "And every word of it is worked out right here on your phone. Nothing is uploaded, nothing is sold, no account needed. Free, and open source.",
+      "caption": "All on your phone. Free.",
+      "actions": ["scroll:down", "sleep:2", "scroll:down", "sleep:2"],
+      "hold": 1.0,
+      "min_duration": 9
+    }
+  ]
+}

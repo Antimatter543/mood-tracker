@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     View,
     Text,
+    Pressable,
     StyleSheet,
     SectionList,
     ActivityIndicator,
@@ -16,11 +17,21 @@ import { MoodEntry } from './types';
 import { EntryFormData, EntryFormModal } from './forms/EntryForm';
 import { EmptyState } from './EmptyState';
 import { EntryCard } from './timeline/EntryCard';
+import { TimelineSearchBar } from './timeline/TimelineSearchBar';
+import {
+    buildEntryFilter,
+    moodPresetToRange,
+    EntryFilters,
+    MoodPresetKey,
+} from './timeline/entryFilter';
 import { sectionKeyForDate, formatSectionTitle } from './timeline/dateHeader';
 import { getMediaByEntryIds } from '@/databases/entry-media';
 import { MEDIA_DIR, copyToMediaDir, deleteMediaFile } from '@/databases/mediaHelpers';
 
 const ITEMS_PER_PAGE = 20;
+// Debounce the search text before it hits SQL so each keystroke doesn't fire a
+// paged query; the mood chips filter instantly (no debounce needed).
+const SEARCH_DEBOUNCE_MS = 250;
 
 // Types — `key` is the stable local-day bucket; `title` is its humanized label.
 type Section = {
@@ -31,6 +42,11 @@ type Section = {
 
 const useThemedStyles = (colors: any) => {
     return useMemo(() => StyleSheet.create({
+        // Root fills the tab body so the search bar pins at the top and the list
+        // (or the loading / empty branch below it) takes the remaining space.
+        root: {
+            flex: 1,
+        },
         container: {
             paddingHorizontal: 16,
         },
@@ -38,6 +54,30 @@ const useThemedStyles = (colors: any) => {
             flex: 1,
             justifyContent: 'center',
             alignItems: 'center',
+        },
+        // Distinct "no results" state shown ONLY while a filter is active — it
+        // reads as "your filter matched nothing" (and offers a reset), never as
+        // "add your first entry" (that's <EmptyState/>, for a truly empty DB).
+        emptyFilterContainer: {
+            flex: 1,
+            justifyContent: 'center',
+            alignItems: 'center',
+            paddingHorizontal: 32,
+        },
+        emptyFilterText: {
+            color: colors.textSecondary,
+            fontSize: 15,
+            textAlign: 'center',
+            marginBottom: 16,
+        },
+        clearFiltersButton: {
+            paddingVertical: 8,
+            paddingHorizontal: 16,
+        },
+        clearFiltersText: {
+            color: colors.accent,
+            fontSize: 15,
+            fontWeight: '600',
         },
         loadingFooter: {
             paddingVertical: 20,
@@ -105,6 +145,34 @@ export function DatabaseViewer() {
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [currentEntry, setCurrentEntry] = useState<MoodEntry | null>(null);
 
+    // Search + mood filter. `searchQuery` is the RAW input (drives the field with
+    // zero lag); `debouncedQuery` is what actually reaches SQL. `moodPresetKey`
+    // is the selected mood band (no debounce — chip taps filter immediately).
+    const [searchQuery, setSearchQuery] = useState('');
+    const [moodPresetKey, setMoodPresetKey] = useState<MoodPresetKey>('all');
+    const [debouncedQuery, setDebouncedQuery] = useState('');
+    useEffect(() => {
+        const timer = setTimeout(() => setDebouncedQuery(searchQuery), SEARCH_DEBOUNCE_MS);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    // The SQL-facing filter state. Recomputed only when the debounced query or
+    // the mood preset changes.
+    const filters = useMemo<EntryFilters>(
+        () => ({ query: debouncedQuery, moodRange: moodPresetToRange(moodPresetKey) }),
+        [debouncedQuery, moodPresetKey]
+    );
+    // The non-memoized loaders (loadMoreData, and fetchEntriesPage which they
+    // share) close over stale state; a ref updated every render lets them read
+    // the CURRENT filter without threading it through — and, crucially, without
+    // touching the useLatestRun / useDataRefresh latch wiring.
+    const filtersRef = useRef(filters);
+    filtersRef.current = filters;
+
+    // Any active filter switches the empty branch from "add your first entry" to
+    // the filter-specific "nothing matched" message (with a reset).
+    const isFiltering = debouncedQuery.trim() !== '' || moodPresetKey !== 'all';
+
     // Run-sequence latch — the SAME guard Home's fetchData uses (see
     // app/(tabs)/index.tsx + hooks/useLatestRun.ts). useDataRefresh ignores the
     // loader's returned Promise (it can't cancel it), so overlapping invocations —
@@ -121,6 +189,11 @@ export function DatabaseViewer() {
     // Data Fetching
     const fetchEntriesPage = async (pageNum: number) => {
         const offset = pageNum * ITEMS_PER_PAGE;
+        // Build the active search / mood filter from the CURRENT filter state
+        // (via the ref, so this non-memoized fn is never stale). The WHERE is
+        // spliced BEFORE `GROUP BY e.id` so it filters raw rows; its EXISTS
+        // subquery uses `ea2`/`a2` aliases distinct from the outer `ea`/`a`.
+        const { where, params } = buildEntryFilter(filtersRef.current);
         try {
             const result = await db.getAllAsync<any>(`
                 WITH EntryData AS (
@@ -134,12 +207,13 @@ export function DatabaseViewer() {
                     FROM entries e
                     LEFT JOIN entry_activities ea ON e.id = ea.entry_id
                     LEFT JOIN activities a ON ea.activity_id = a.id
+                    ${where ? 'WHERE ' + where : ''}
                     GROUP BY e.id
                     ORDER BY e.date DESC
                     LIMIT ? OFFSET ?
                 )
                 SELECT * FROM EntryData
-            `, [ITEMS_PER_PAGE, offset]);
+            `, [...params, ITEMS_PER_PAGE, offset]);
 
             const baseEntries: MoodEntry[] = result.map(row => {
                 // Each GROUP_CONCAT(...) is a comma-joined string of one value per
@@ -322,9 +396,13 @@ export function DatabaseViewer() {
                 setIsLoading(false);
             }
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchEntriesPage closes over `db`; setState + latch (beginRun/isLatestRun) identities are stable
-    }, [db]);
-    useDataRefresh(loadInitialData, [db]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchEntriesPage reads db + filtersRef.current (not closed deps); the filter deps below make this loader re-run (resetting to page 0) on a filter change via useDataRefresh; setState + latch (beginRun/isLatestRun) identities are stable
+    }, [db, debouncedQuery, moodPresetKey]);
+    // A filter change flips these extraDeps -> useDataRefresh re-runs loadInitialData
+    // through the SAME run-sequence latch, which resets pagination to page 0 and
+    // supersedes any in-flight loadMore (shared beginRun) so it can't append stale
+    // pages onto the freshly-filtered list.
+    useDataRefresh(loadInitialData, [db, debouncedQuery, moodPresetKey]);
 
     const loadMoreData = async () => {
         if (isLoadingMore || !hasMore) return;
@@ -389,13 +467,42 @@ export function DatabaseViewer() {
     // the INITIAL load (isLoading && no sections yet) — a refetch over an
     // existing list keeps the stale list visible until fresh data arrives.
     return (
-        <>
+        <View style={styles.root}>
+            {/* Pinned above the list — always rendered (even while loading/empty)
+                so the user can filter regardless of the current data state. */}
+            <TimelineSearchBar
+                query={searchQuery}
+                onQueryChange={setSearchQuery}
+                moodPresetKey={moodPresetKey}
+                onMoodPresetChange={setMoodPresetKey}
+                colors={colors}
+            />
             {isLoading && sections.length === 0 ? (
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={colors.accent} />
                 </View>
             ) : sections.length === 0 ? (
-                <EmptyState />
+                isFiltering ? (
+                    <View style={styles.emptyFilterContainer}>
+                        <Text style={styles.emptyFilterText}>
+                            No entries match your filters
+                        </Text>
+                        <Pressable
+                            testID="timeline-clear-filters"
+                            onPress={() => {
+                                setSearchQuery('');
+                                setMoodPresetKey('all');
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Clear filters"
+                            style={styles.clearFiltersButton}
+                        >
+                            <Text style={styles.clearFiltersText}>Clear filters</Text>
+                        </Pressable>
+                    </View>
+                ) : (
+                    <EmptyState />
+                )
             ) : (
                 <SectionList
                     sections={sections}
@@ -405,6 +512,8 @@ export function DatabaseViewer() {
                     onEndReached={loadMoreData}
                     onEndReachedThreshold={0.5}
                     stickySectionHeadersEnabled={true}
+                    keyboardDismissMode="on-drag"
+                    keyboardShouldPersistTaps="handled"
                     maintainVisibleContentPosition={{
                         minIndexForVisible: 0,
                     }}
@@ -428,6 +537,6 @@ export function DatabaseViewer() {
                 } : undefined}
                 onSubmit={handleUpdate}
             />
-        </>
+        </View>
     );
 }
