@@ -102,6 +102,9 @@ const MoodDriversCard: React.FC<MoodDriversCardProps> = ({ data }) => {
 
 const signed = (n: number): string => `${n >= 0 ? '+' : ''}${n.toFixed(1)}`;
 
+const activityLabel = (name: string): string =>
+    name === 'Event' ? 'Social event' : name;
+
 type DriverLineProps = {
     driver: MoodDriver;
     kind: 'recovery' | 'destabilizer';
@@ -111,13 +114,14 @@ type DriverLineProps = {
 
 const DriverLine: React.FC<DriverLineProps> = ({ driver, kind, styles, colors }) => {
     const effectColor = kind === 'recovery' ? colors.accent : DRAIN_COLOR;
+    const label = activityLabel(driver.activity_name);
     return (
         <Text style={styles.body}>
-            {kind === 'recovery' ? 'After a low day, logging ' : 'When steady, logging '}
-            <Text style={styles.emphasis}>{driver.activity_name}</Text>
+            {kind === 'recovery' ? 'After a low day, entries tagged ' : 'When steady, entries tagged '}
+            <Text style={styles.emphasis}>{label}</Text>
             {kind === 'recovery'
-                ? ' is followed by a '
-                : ' tends to be followed by a '}
+                ? ' are followed by a '
+                : ' tend to be followed by a '}
             <Text style={[styles.emphasis, { color: effectColor }]}>
                 {signed(driver.effect)}
             </Text>

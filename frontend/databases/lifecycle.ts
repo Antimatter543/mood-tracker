@@ -11,7 +11,7 @@ import { runMigrations } from '@/databases/migrations';
  * Schema changes belong in `migrations.ts`. The V1 helpers
  * (`createInitialSchema`, `seedActivitiesV1`) are frozen — do not edit.
  */
-export const DATABASE_VERSION = 5;
+export const DATABASE_VERSION = 6;
 
 // Schema version log:
 //   1: initial schema
@@ -19,6 +19,7 @@ export const DATABASE_VERSION = 5;
 //   3: added show_mood_benchmarks setting
 //   4: seeded daily-reminder settings (reminder_enabled, reminder_time)
 //   5: rebuilt entry_media with created_at + index (media attachments)
+//   6: renamed vague default Social activity "Event" -> "Social event"
 
 /**
  * Entry point called once on app startup.

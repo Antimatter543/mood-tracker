@@ -197,3 +197,19 @@ describe('Migration V5', () => {
     expect(sql).toContain('DROP TABLE ENTRY_MEDIA_V1');
   });
 });
+
+describe('Migration V6', () => {
+  it('renames the vague default Event activity without clobbering custom duplicates', async () => {
+    const db = createMockDatabase();
+    const v6 = migrations.find(m => m.version === 6)!;
+    expect(v6).toBeDefined();
+
+    await v6.up(db as any);
+
+    expect(db.runAsync).toHaveBeenCalledTimes(1);
+    const [sql, params] = db.runAsync.mock.calls[0];
+    expect((sql as string).toUpperCase()).toContain('UPDATE ACTIVITIES');
+    expect(sql as string).toContain('NOT EXISTS');
+    expect(params).toEqual(['Social event', 'Event', 3, 'Social event', 3]);
+  });
+});

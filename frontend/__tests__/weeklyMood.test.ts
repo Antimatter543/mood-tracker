@@ -53,9 +53,17 @@ describe('formatLabel', () => {
     expect(label.length).toBeLessThanOrEqual(4);
   });
 
-  it('emits Week N for the month timeframe', () => {
-    expect(formatLabel('2025-06-15', 0, 4, 'month')).toBe('Week 1');
-    expect(formatLabel('2025-06-22', 1, 4, 'month')).toBe('Week 2');
+  it('sparse-labels the month timeframe with short dates', () => {
+    const total = 30;
+    const labels = Array.from({ length: total }, (_, i) =>
+      formatLabel('2025-06-15', i, total, 'month'),
+    );
+    const shown = labels.filter((l) => l.length > 0);
+    expect(shown.length).toBeGreaterThanOrEqual(3);
+    expect(shown.length).toBeLessThanOrEqual(7);
+    expect(labels[0]).toMatch(/\d+\/\d+/);
+    expect(labels[total - 1]).toMatch(/\d+\/\d+/);
+    expect(labels[1]).toBe('');
   });
 
   it('emits month + 2-digit year for year/alltime endpoints', () => {
@@ -98,10 +106,15 @@ describe('formatLabel', () => {
   });
 
   it('produces sparse labels for the 3months timeframe', () => {
-    // First and last get a M/D label; middle indices not divisible by 3 are empty.
-    expect(formatLabel('2025-06-15', 0, 18, '3months')).toMatch(/\d+\/\d+/);
-    expect(formatLabel('2025-06-15', 17, 18, '3months')).toMatch(/\d+\/\d+/);
-    expect(formatLabel('2025-06-15', 1, 18, '3months')).toBe('');
-    expect(formatLabel('2025-06-15', 3, 18, '3months')).toMatch(/\d+\/\d+/);
+    const total = 90;
+    const labels = Array.from({ length: total }, (_, i) =>
+      formatLabel('2025-06-15', i, total, '3months'),
+    );
+    const shown = labels.filter((l) => l.length > 0);
+    expect(shown.length).toBeGreaterThanOrEqual(3);
+    expect(shown.length).toBeLessThanOrEqual(7);
+    expect(labels[0]).toMatch(/\d+\/\d+/);
+    expect(labels[total - 1]).toMatch(/\d+\/\d+/);
+    expect(labels[1]).toBe('');
   });
 });

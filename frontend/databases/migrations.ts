@@ -118,6 +118,26 @@ export const migrations: Migration[] = [
                     ON entry_media(entry_id);
             `);
         }
+    },
+    {
+        // Clarify the vague default Social activity. This touches only the
+        // original seed value and leaves user-renamed/custom activities alone.
+        version: 6,
+        up: async (db: SQLiteDatabase) => {
+            await db.runAsync(
+                `UPDATE activities
+                 SET name = ?
+                 WHERE name = ?
+                   AND group_id = ?
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM activities
+                     WHERE name = ?
+                       AND group_id = ?
+                   )`,
+                ['Social event', 'Event', 3, 'Social event', 3]
+            );
+        }
     }
 
     // To add a new migration: create a new entry with the next version number.

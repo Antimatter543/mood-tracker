@@ -29,12 +29,11 @@ export type WeeklyMoodChartData = {
  *      previous inline `formatDateLabel` captured `timeframe` from render
  *      and was not listed in the effect deps).
  */
-// Long timeframes (year/alltime) plot one point PER DAY — up to 365+ points.
-// chart-kit draws every label, so returning a month name for each point crams
-// dozens of overlapping "Jan/Feb/..." onto the axis. We instead show a label
-// only at a handful of evenly-spaced index positions (TARGET_AXIS_LABELS total),
-// blanking the rest. Spreading by index (not by calendar month) guarantees the
-// labels never overlap regardless of how dense the data is.
+// Non-week timeframes plot one point PER DAY - up to 365+ points. chart-kit
+// draws every label, so returning a label for each point crams overlapping
+// text onto the axis. We instead show only a handful of evenly-spaced index
+// positions (TARGET_AXIS_LABELS total), blanking the rest. Spreading by index
+// guarantees labels stay sparse regardless of calendar density.
 const TARGET_AXIS_LABELS = 5;
 
 /**
@@ -58,6 +57,10 @@ const monthYearLabel = (date: Date): string => {
     return `${month} '${yy}`;
 };
 
+/** Short enough for month/quarter axes on narrow phones. */
+const numericMonthDayLabel = (date: Date): string =>
+    `${date.getMonth() + 1}/${date.getDate()}`;
+
 export const formatLabel = (
     dateStr: string,
     index: number,
@@ -74,19 +77,14 @@ export const formatLabel = (
             return date.toLocaleDateString(undefined, { weekday: 'short' });
 
         case 'month':
-            return `Week ${index + 1}`;
+            return isSparseLabelIndex(index, totalPoints)
+                ? numericMonthDayLabel(date)
+                : '';
 
-        case '3months': {
-            // Sparse M/D labels: endpoints + ~every 3rd point. Short enough a
-            // span that month/year context isn't needed for legibility.
-            if (index === 0 || index === totalPoints - 1) {
-                return `${date.getMonth() + 1}/${date.getDate()}`;
-            }
-            if (index % 3 === 0) {
-                return `${date.getMonth() + 1}/${date.getDate()}`;
-            }
-            return '';
-        }
+        case '3months':
+            return isSparseLabelIndex(index, totalPoints)
+                ? numericMonthDayLabel(date)
+                : '';
 
         case 'year':
         case 'alltime':
