@@ -1,7 +1,8 @@
 name: Release APK
 
-# RELEASE CONVENTION (portfolio standard, set 2026-07-03): 'v*' tag -> production release
-# build; workflow_dispatch -> manual dev/test build. Never auto-build on a branch push.
+# RELEASE CONVENTION (updated 2026-07-05): push to main -> rolling 'main-latest' dev-build
+# prerelease (an installable signed APK per merge to main); 'v*' tag -> versioned production
+# release; workflow_dispatch -> one-off manual build (run artifact, no release).
 # EAS cloud builds are reserved for prod/iOS only (all Android builds use this free CI).
 #
 # Free, permanent CI lane that builds a SIGNED release APK for SoulSync (Expo CNG).
@@ -11,15 +12,19 @@ name: Release APK
 # installed builds.
 #
 # Triggers:
-#   - push tag v*        -> build + create/update the GitHub Release for that tag.
+#   - push to main       -> build + publish/refresh the rolling 'main-latest' PRERELEASE
+#                           with the signed APK (every merge to main => installable dev build).
+#   - push tag v*        -> build + create/update the versioned GitHub Release for that tag.
 #   - workflow_dispatch  -> build ANY ref and upload the APK as a run artifact
-#                           (no release). Used for branch QA (e.g. the SDK-56 branch).
+#                           (no release). Used for one-off branch QA (e.g. an SDK-hop branch).
 #
 # Invariant preserved: git tag == app.json version == APK versionName ==
 #                      release tag == asset SoulSync-<version>.apk.
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
   workflow_dispatch:
@@ -177,3 +182,25 @@ jobs:
               --target "$GITHUB_SHA" \
               --generate-notes
           fi
+
+      # --- main push: publish/refresh a rolling "latest main" PRERELEASE carrying
+      #     the signed APK, so every merge to main yields an installable dev build at
+      #     a stable URL (…/releases/tag/main-latest). NOT a versioned release — the
+      #     app.json version isn't bumped between releases, so this is the bleeding-edge
+      #     build for testers; real installs use the Play Store or a v* release. The
+      #     rolling tag is deleted+recreated so it always points at the newest main. ---
+      - name: Publish rolling dev build (main)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APK_PATH: ${{ steps.apk.outputs.path }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          TAG="main-latest"
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+          gh release create "$TAG" "$APK_PATH#SoulSync-main.apk" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "SoulSync — latest main (dev build)" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --notes "Automated development build from the latest \`main\` (commit ${GITHUB_SHA::7}, v${VERSION}). Installable signed APK reflecting current main — NOT a versioned release. For stable installs use the Play Store or a \`v*\` release."
