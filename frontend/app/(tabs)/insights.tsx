@@ -76,11 +76,11 @@ const EMPTY_MOOD_STATE: MoodState = {
 
 const EMPTY_DRIVERS: MoodDriversData = {
     recoveryDrivers: [],
-    destabilizers: [],
+    stabilityAnchors: [],
     lowDayCount: 0,
     steadyDayCount: 0,
     hasRecoverySignal: false,
-    hasDestabilizerSignal: false,
+    hasStabilitySignal: false,
 };
 
 const EMPTY: Insights = {

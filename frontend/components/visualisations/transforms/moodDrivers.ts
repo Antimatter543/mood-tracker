@@ -1,20 +1,22 @@
 // moodDrivers.ts
 //
-// Pure transform: STATE-CONDITIONED, FORWARD-LOOKING activity correlation.
+// Pure transform: STATE-CONDITIONED, FORWARD-LOOKING activity insight.
 //
 // `activityCorrelation.ts` answers "on days I log X, is my mood higher?" — a
 // same-day, unconditioned comparison. That is useful but can't separate
 // "X cheers me up" from "I only log X when I already feel good". This transform
-// asks the two questions that actually help:
+// asks two questions that are more useful in a journaling app:
 //
 //   Recovery drivers — when I'm in a DIP, which activities tend to be FOLLOWED
 //                       by a lift the next day?
-//   Destabilizers    — when I'm usually STEADY, which activities tend to PRECEDE
-//                       a dip the next day?
+//   Steady anchors   — when I'm in an ORDINARY/steady patch, which activities
+//                       make a real next-day dip less likely?
 //
-// "Forward delta" (what my mood did the day AFTER) is the honest local proxy
-// for "did this lift / drain me", and conditioning on the regime (low vs steady)
-// removes the "I only do yoga on good days" confound.
+// Important product guardrail: do NOT surface "you felt great after X, then
+// cooled back toward normal" as a negative insight. That is often just
+// regression to baseline. Negative "destabilizer" copy made good tags feel
+// like warnings, so this transform now surfaces only positive/useful patterns:
+// rebounds from low days and anchors that reduce real dip risk.
 //
 // DOCTRINE: built from the SAME RAW `ActivityCorrelationRawRow[]` the Insights
 // tab already fetches. Day-keying goes through `localDateString` (via the shared
@@ -117,22 +119,32 @@ export type MoodDriver = {
     isMeaningful: boolean;
 };
 
+export type StabilityAnchor = {
+    activity_name: string;
+    riskReduction: number; // fraction, 2dp: withoutDipRate - withDipRate
+    withDipRate: number; // fraction of ordinary days followed by a dip, 2dp
+    withoutDipRate: number;
+    withCount: number;
+    withoutCount: number;
+    isMeaningful: boolean;
+};
+
 export type MoodDriversData = {
     recoveryDrivers: MoodDriver[]; // meaningful, effect > 0, sorted desc (biggest lift first)
-    destabilizers: MoodDriver[]; // meaningful, effect < 0, sorted asc (most draining first)
+    stabilityAnchors: StabilityAnchor[]; // meaningful, sorted by biggest dip-risk reduction first
     lowDayCount: number; // recorded low days with a forward signal (for empty-state copy)
-    steadyDayCount: number; // recorded steady days with a forward signal
+    steadyDayCount: number; // ordinary/steady days with a forward signal
     hasRecoverySignal: boolean;
-    hasDestabilizerSignal: boolean;
+    hasStabilitySignal: boolean;
 };
 
 const EMPTY: MoodDriversData = {
     recoveryDrivers: [],
-    destabilizers: [],
+    stabilityAnchors: [],
     lowDayCount: 0,
     steadyDayCount: 0,
     hasRecoverySignal: false,
-    hasDestabilizerSignal: false,
+    hasStabilitySignal: false,
 };
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
@@ -146,8 +158,30 @@ const median = (values: number[]): number => {
         : sorted[mid];
 };
 
-/** One regime-day: its avg, its forward delta, and which activities it carried. */
-type RegimeDay = { fwd: number; activities: Set<string> };
+/** Minimum extra next-day lift required to call a recovery helper useful. */
+export const MIN_RECOVERY_LIFT = 0.5;
+
+/** A drop this large, ending below baseline, counts as a real dip. */
+export const DIP_DROP_THRESHOLD = 1.5;
+
+/** Minimum reduction in dip rate required to call something an anchor. */
+export const MIN_STABILITY_RISK_REDUCTION = 0.2;
+
+/**
+ * One regime-day: its current avg, next avg, forward delta, whether the next
+ * logged day was a real dip, and which activities it carried.
+ */
+type RegimeDay = {
+    currentAvg: number;
+    nextAvg: number;
+    fwd: number;
+    didDip: boolean;
+    activities: Set<string>;
+};
+
+const isRealDip = (currentAvg: number, nextAvg: number, baseline: number): boolean =>
+    nextAvg <= DIP_THRESHOLD ||
+    (currentAvg - nextAvg >= DIP_DROP_THRESHOLD && nextAvg < baseline);
 
 /**
  * For every recorded day with a valid forward signal, compute its forward delta
@@ -157,7 +191,8 @@ type RegimeDay = { fwd: number; activities: Set<string> };
  * and are dropped.
  */
 const forwardDays = (
-    model: DayModel
+    model: DayModel,
+    baseline: number
 ): Map<string, RegimeDay> => {
     const { days, dayAvg, activityDays } = model;
     // Invert activityDays -> per-day activity set for O(1) lookup.
@@ -179,13 +214,21 @@ const forwardDays = (
         const next = days[i + 1];
         const gap = daysBetween(d + 'T00:00:00.000Z', next + 'T00:00:00.000Z');
         if (gap > FWD_MAX_GAP) continue;
+        const currentAvg = dayAvg.get(d)!;
+        const nextAvg = dayAvg.get(next)!;
         out.set(d, {
-            fwd: dayAvg.get(next)! - dayAvg.get(d)!,
+            currentAvg,
+            nextAvg,
+            fwd: nextAvg - currentAvg,
+            didDip: isRealDip(currentAvg, nextAvg, baseline),
             activities: dayActivities.get(d) ?? new Set<string>(),
         });
     }
     return out;
 };
+
+const rate = (count: number, total: number): number =>
+    total > 0 ? count / total : 0;
 
 /**
  * Run the with-vs-without forward-delta split for one regime over one set of
@@ -229,6 +272,50 @@ const analyzeRegime = (
 };
 
 /**
+ * Find tags that reduce the chance an ordinary/steady day turns into a real
+ * dip. This avoids the old "good tag followed by a smaller number" trap: a
+ * high day drifting back to baseline is not a dip, and unusually high days are
+ * not part of the ordinary-day regime in the first place.
+ */
+const analyzeStabilityAnchors = (
+    regimeDays: RegimeDay[],
+    activityNames: Set<string>
+): StabilityAnchor[] => {
+    const out: StabilityAnchor[] = [];
+    for (const name of activityNames) {
+        let withCount = 0;
+        let withoutCount = 0;
+        let withDips = 0;
+        let withoutDips = 0;
+
+        for (const rd of regimeDays) {
+            if (rd.activities.has(name)) {
+                withCount += 1;
+                if (rd.didDip) withDips += 1;
+            } else {
+                withoutCount += 1;
+                if (rd.didDip) withoutDips += 1;
+            }
+        }
+
+        const withDipRate = rate(withDips, withCount);
+        const withoutDipRate = rate(withoutDips, withoutCount);
+        out.push({
+            activity_name: name,
+            riskReduction: round2(withoutDipRate - withDipRate),
+            withDipRate: round2(withDipRate),
+            withoutDipRate: round2(withoutDipRate),
+            withCount,
+            withoutCount,
+            isMeaningful:
+                withCount >= MIN_DRIVER_SAMPLES &&
+                withoutCount >= MIN_DRIVER_SAMPLES,
+        });
+    }
+    return out;
+};
+
+/**
  * Build the state-conditioned, forward-looking drivers from RAW activity rows.
  *
  * Edge cases (never throws):
@@ -237,6 +324,7 @@ const analyzeRegime = (
  *  - large gaps killing the forward signal -> those days drop out; if the gate
  *    isn't met the arrays come back empty with false flags.
  *  - below-gate sample sizes -> empty arrays + false flags (honest "keep logging").
+ *  - high-day comedowns -> suppressed; only real dip-risk reduction is surfaced.
  */
 export const buildMoodDrivers = (
     rows: ActivityCorrelationRawRow[]
@@ -244,10 +332,9 @@ export const buildMoodDrivers = (
     const model = buildDayModel(rows);
     if (model.days.length < 2) return EMPTY;
 
-    const fwd = forwardDays(model);
-    if (fwd.size === 0) return EMPTY;
-
     const baseline = median([...model.dayAvg.values()]);
+    const fwd = forwardDays(model, baseline);
+    if (fwd.size === 0) return EMPTY;
 
     const lowDays: RegimeDay[] = [];
     const steadyDays: RegimeDay[] = [];
@@ -261,19 +348,28 @@ export const buildMoodDrivers = (
     }
 
     const recoveryDrivers = analyzeRegime(lowDays, model.activityNames)
-        .filter((d) => d.isMeaningful && d.effect > 0)
+        .filter(
+            (d) =>
+                d.isMeaningful &&
+                d.withMean > 0 &&
+                d.effect >= MIN_RECOVERY_LIFT
+        )
         .sort((a, b) => b.effect - a.effect);
 
-    const destabilizers = analyzeRegime(steadyDays, model.activityNames)
-        .filter((d) => d.isMeaningful && d.effect < 0)
-        .sort((a, b) => a.effect - b.effect);
+    const stabilityAnchors = analyzeStabilityAnchors(steadyDays, model.activityNames)
+        .filter(
+            (d) =>
+                d.isMeaningful &&
+                d.riskReduction >= MIN_STABILITY_RISK_REDUCTION
+        )
+        .sort((a, b) => b.riskReduction - a.riskReduction);
 
     return {
         recoveryDrivers,
-        destabilizers,
+        stabilityAnchors,
         lowDayCount: lowDays.length,
         steadyDayCount: steadyDays.length,
         hasRecoverySignal: recoveryDrivers.length > 0,
-        hasDestabilizerSignal: destabilizers.length > 0,
+        hasStabilitySignal: stabilityAnchors.length > 0,
     };
 };

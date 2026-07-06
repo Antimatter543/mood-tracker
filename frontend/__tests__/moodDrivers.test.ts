@@ -4,6 +4,9 @@ import {
     FWD_MAX_GAP,
     STEADY_BAND,
     MIN_DRIVER_SAMPLES,
+    MIN_RECOVERY_LIFT,
+    DIP_DROP_THRESHOLD,
+    MIN_STABILITY_RISK_REDUCTION,
     type DayModel,
 } from '@/components/visualisations/transforms/moodDrivers';
 import { DIP_THRESHOLD } from '@/components/visualisations/transforms/recoveryPatterns';
@@ -59,6 +62,15 @@ const buildRows = (specs: DaySpec[]): ActivityCorrelationRawRow[] => {
     return rows;
 };
 
+const addIsolatedPair = (
+    specs: DaySpec[],
+    first: Omit<DaySpec, 'gapBefore'>,
+    second: Omit<DaySpec, 'gapBefore'>
+) => {
+    specs.push({ ...first, gapBefore: specs.length === 0 ? 0 : FWD_MAX_GAP + 3 });
+    specs.push(second);
+};
+
 beforeEach(() => {
     entryId = 1;
 });
@@ -101,9 +113,9 @@ describe('buildMoodDrivers — edge cases never throw', () => {
     it('empty rows -> EMPTY', () => {
         const d = buildMoodDrivers([]);
         expect(d.recoveryDrivers).toEqual([]);
-        expect(d.destabilizers).toEqual([]);
+        expect(d.stabilityAnchors).toEqual([]);
         expect(d.hasRecoverySignal).toBe(false);
-        expect(d.hasDestabilizerSignal).toBe(false);
+        expect(d.hasStabilitySignal).toBe(false);
         expect(d.lowDayCount).toBe(0);
         expect(d.steadyDayCount).toBe(0);
     });
@@ -213,52 +225,74 @@ describe('buildMoodDrivers — recovery drivers (low-day regime)', () => {
     });
 });
 
-describe('buildMoodDrivers — destabilizers (steady-day regime)', () => {
-    it('surfaces an activity that precedes a dip when steady', () => {
-        // Steady baseline ~6 (above DIP_THRESHOLD, near median). On steady days
-        // WITH Doom the next day drops to 4 (-2); WITHOUT Doom it holds at 6 (0).
+describe('buildMoodDrivers — stability anchors (ordinary-day regime)', () => {
+    it('surfaces an activity that makes a real next-day dip less likely', () => {
+        // Ordinary baseline ~6. With Routine, the next day stays at 6. Without
+        // Routine, the next day falls to the dip line (4). Isolated pairs keep
+        // the filler days from becoming extra "without" samples.
         const specs: DaySpec[] = [];
         for (let i = 0; i < 4; i++) {
-            specs.push({ mood: 6, activities: ['Doom'] }); // steady day d
-            specs.push({ mood: 4 }); // next day: dip
-        }
-        for (let i = 0; i < 4; i++) {
-            specs.push({ mood: 6 }); // steady day d (no Doom)
-            specs.push({ mood: 6 }); // next day: holds
-        }
-        const d = buildMoodDrivers(buildRows(specs));
-        expect(d.hasDestabilizerSignal).toBe(true);
-        const doom = d.destabilizers.find((x) => x.activity_name === 'Doom');
-        expect(doom).toBeDefined();
-        expect(doom!.effect).toBeLessThan(0);
-        expect(doom!.withMean).toBeLessThan(doom!.withoutMean);
-        expect(doom!.isMeaningful).toBe(true);
-    });
-
-    it('sorts destabilizers ascending (most draining first)', () => {
-        const specs: DaySpec[] = [];
-        for (let i = 0; i < 4; i++) {
-            specs.push({ mood: 6, activities: ['BigDrain'] });
-            specs.push({ mood: 2 }); // -4
-        }
-        for (let i = 0; i < 4; i++) {
-            specs.push({ mood: 6, activities: ['SmallDrain'] });
-            specs.push({ mood: 5 }); // -1
-        }
-        for (let i = 0; i < 4; i++) {
-            specs.push({ mood: 6 });
-            specs.push({ mood: 6 }); // 0
-        }
-        const d = buildMoodDrivers(buildRows(specs));
-        const names = d.destabilizers.map((x) => x.activity_name);
-        if (names.includes('BigDrain') && names.includes('SmallDrain')) {
-            expect(names.indexOf('BigDrain')).toBeLessThan(names.indexOf('SmallDrain'));
-        }
-        for (let i = 1; i < d.destabilizers.length; i++) {
-            expect(d.destabilizers[i - 1].effect).toBeLessThanOrEqual(
-                d.destabilizers[i].effect
+            addIsolatedPair(
+                specs,
+                { mood: 6, activities: ['Routine'] },
+                { mood: 6 }
             );
         }
+        for (let i = 0; i < 4; i++) {
+            addIsolatedPair(specs, { mood: 6 }, { mood: 4 });
+        }
+        const d = buildMoodDrivers(buildRows(specs));
+        expect(d.hasStabilitySignal).toBe(true);
+        const routine = d.stabilityAnchors.find((x) => x.activity_name === 'Routine');
+        expect(routine).toBeDefined();
+        expect(routine!.withDipRate).toBe(0);
+        expect(routine!.withoutDipRate).toBe(1);
+        expect(routine!.riskReduction).toBe(1);
+        expect(routine!.isMeaningful).toBe(true);
+    });
+
+    it('sorts stability anchors by risk reduction descending', () => {
+        const specs: DaySpec[] = [];
+        for (let i = 0; i < 4; i++) {
+            addIsolatedPair(specs, { mood: 6, activities: ['Strong'] }, { mood: 6 });
+        }
+        for (let i = 0; i < 4; i++) {
+            addIsolatedPair(
+                specs,
+                { mood: 6, activities: ['Soft'] },
+                { mood: i === 0 ? 4 : 6 }
+            );
+        }
+        for (let i = 0; i < 4; i++) {
+            addIsolatedPair(specs, { mood: 6 }, { mood: 4 });
+        }
+        const d = buildMoodDrivers(buildRows(specs));
+        const names = d.stabilityAnchors.map((x) => x.activity_name);
+        expect(names.indexOf('Strong')).toBeLessThan(names.indexOf('Soft'));
+        for (let i = 1; i < d.stabilityAnchors.length; i++) {
+            expect(d.stabilityAnchors[i - 1].riskReduction).toBeGreaterThanOrEqual(
+                d.stabilityAnchors[i].riskReduction
+            );
+        }
+    });
+
+    it('does not treat high-day comedowns as useful negative insights', () => {
+        // Celebration only appears on unusually high days. The next day cools
+        // back to baseline, but that is not a "destabilizer" or an anchor.
+        const specs: DaySpec[] = [];
+        for (let i = 0; i < 5; i++) {
+            addIsolatedPair(
+                specs,
+                { mood: 9, activities: ['Celebration'] },
+                { mood: 6 }
+            );
+        }
+        for (let i = 0; i < 5; i++) {
+            addIsolatedPair(specs, { mood: 6 }, { mood: 6 });
+        }
+        const d = buildMoodDrivers(buildRows(specs));
+        expect(d.stabilityAnchors.find((x) => x.activity_name === 'Celebration')).toBeUndefined();
+        expect(d.recoveryDrivers.find((x) => x.activity_name === 'Celebration')).toBeUndefined();
     });
 });
 
@@ -267,21 +301,23 @@ describe('buildMoodDrivers — constants & honesty', () => {
         expect(FWD_MAX_GAP).toBe(3);
         expect(STEADY_BAND).toBe(1.0);
         expect(MIN_DRIVER_SAMPLES).toBe(4);
+        expect(MIN_RECOVERY_LIFT).toBe(0.5);
+        expect(DIP_DROP_THRESHOLD).toBe(1.5);
+        expect(MIN_STABILITY_RISK_REDUCTION).toBe(0.2);
         expect(DIP_THRESHOLD).toBe(4.0);
     });
 
-    it('never returns a positive-effect destabilizer or negative-effect recovery driver', () => {
+    it('does not call smaller losses a recovery helper', () => {
+        // Act is "better" than the no-activity days (-1 vs -2), but still not
+        // a bounce-back. The card should not tell the user this helps recovery.
         const specs: DaySpec[] = [];
         for (let i = 0; i < 4; i++) {
-            specs.push({ mood: 3, activities: ['Walk'] });
-            specs.push({ mood: 8 });
+            addIsolatedPair(specs, { mood: 3, activities: ['Act'] }, { mood: 2 });
         }
         for (let i = 0; i < 4; i++) {
-            specs.push({ mood: 3 });
-            specs.push({ mood: 4 });
+            addIsolatedPair(specs, { mood: 3 }, { mood: 1 });
         }
         const d = buildMoodDrivers(buildRows(specs));
-        for (const r of d.recoveryDrivers) expect(r.effect).toBeGreaterThan(0);
-        for (const r of d.destabilizers) expect(r.effect).toBeLessThan(0);
+        expect(d.recoveryDrivers.find((x) => x.activity_name === 'Act')).toBeUndefined();
     });
 });

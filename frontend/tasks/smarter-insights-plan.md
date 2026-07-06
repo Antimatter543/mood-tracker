@@ -5,6 +5,13 @@
 > (trend × volatility). 100% local. No new deps, no DB migration. Pure tested
 > transforms + thin renderers, matching the existing `transforms/` architecture.
 
+> 2026-07-06 correction: the original "destabilizers" framing was product-wrong.
+> It surfaced normal cool-downs after unusually good days as if good tags were
+> warnings. The shipped transform now keeps low-day recovery helpers and replaces
+> destabilizers with **steady anchors**: ordinary-day tags that reduce the chance
+> of a real next-day dip. Do not reintroduce negative "after good stuff your mood
+> drops" copy.
+
 ## Hard doctrine (do not violate — it is invariant-tested)
 - **SQL NEVER day-buckets.** Queries only range-filter on the stored UTC instant and
   return RAW rows. ALL "which local day" keying happens in JS via `localDateString` /
