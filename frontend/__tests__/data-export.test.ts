@@ -333,9 +333,27 @@ describe('exportDatabaseData', () => {
     db.getAllAsync.mockResolvedValue([]);
     (Sharing.isAvailableAsync as jest.Mock).mockResolvedValueOnce(false);
 
-    const result = await exportDatabaseData(db as any, 'share');
+    const result = await exportDatabaseData(db as any);
     expect(result.success).toBe(false);
     expect(result.message).toContain('not available');
+    // Nothing is handed to the share sheet when sharing is unavailable.
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+  });
+
+  it('delivers the backup via the OS share sheet (the single export path)', async () => {
+    const db = createMockDatabase();
+    db.getAllAsync.mockResolvedValue([]);
+
+    const result = await exportDatabaseData(db as any);
+    expect(result.success).toBe(true);
+
+    // The one and only delivery mechanism is Sharing.shareAsync, pointed at the
+    // JSON temp file — the OS sheet then exposes Drive / Files / send-anywhere.
+    expect(Sharing.shareAsync).toHaveBeenCalledTimes(1);
+    const [sharedPath, opts] = (Sharing.shareAsync as jest.Mock).mock.calls[0];
+    expect(String(sharedPath)).toMatch(/\.json$/);
+    expect(opts).toMatchObject({ mimeType: 'application/json' });
+    expect(sharedPath).toBe(result.filePath);
   });
 });
 

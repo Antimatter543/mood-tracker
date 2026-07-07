@@ -8,8 +8,6 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { SQLiteDatabase } from 'expo-sqlite';
 
-import { Platform } from 'react-native';
-
 import { deriveMediaExt, writeBase64ToMediaDir } from '@/databases/mediaHelpers';
 
 /**
@@ -52,7 +50,7 @@ async function readPhotoBase64(filePath: string): Promise<string | null> {
 
 
 
-export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share' | 'save' = 'share'): Promise<DatabaseResult> {
+export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseResult> {
     try {
       // Fetch all the necessary data
       const entries = await db.getAllAsync(`
@@ -129,92 +127,31 @@ export async function exportDatabaseData(db: SQLiteDatabase, saveMethod: 'share'
       const tempFilePath = `${FileSystem.documentDirectory}${fileName}`;
       
       await FileSystem.writeAsStringAsync(tempFilePath, jsonData);
-  
-      if (saveMethod === 'share') {
-        // Check if sharing is available
-        const isSharingAvailable = await Sharing.isAvailableAsync();
-        
-        if (isSharingAvailable) {
-          await Sharing.shareAsync(tempFilePath, {
-            mimeType: 'application/json',
-            dialogTitle: 'Export Mood Tracker Data',
-            UTI: 'public.json' // for iOS
-          });
-          
-          return {
-            success: true,
-            message: 'Data exported successfully',
-            filePath: tempFilePath
-          };
-        } else {
-          return {
-            success: false,
-            message: 'Sharing is not available on this device'
-          };
-        }
-      } else if (saveMethod === 'save') {
-        // Save directly to the Downloads folder if possible
-        // This requires different approaches for iOS and Android
-        
-        try {
-          // On Android, we can save to the Downloads directory
-          // On iOS, this will save to the app's documents directory
-          const downloadsDir = FileSystem.documentDirectory; // Default to document directory
-          
-          // On Android, we can try to use the downloads directory if available
-          if (Platform.OS === 'android') {
-            // Check if we have the permissions required
-            const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-            
-            if (permissions.granted) {
-              // User selected a directory
-              const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
-                permissions.directoryUri,
-                fileName,
-                'application/json'
-              );
-              
-              // Read the file we created
-              const fileContent = await FileSystem.readAsStringAsync(tempFilePath);
-              
-              // Write to the new location
-              await FileSystem.writeAsStringAsync(destinationUri, fileContent, {
-                encoding: FileSystem.EncodingType.UTF8
-              });
-              
-              return {
-                success: true,
-                message: 'File saved to selected location',
-                filePath: destinationUri
-              };
-            }
-          } 
-          
-          // For iOS or if Android permissions not granted
-          // Just copy to documents directory which is accessible to the user
-          const destPath = `${downloadsDir}${fileName}`;
-          await FileSystem.copyAsync({
-            from: tempFilePath,
-            to: destPath
-          });
-          
-          return {
-            success: true,
-            message: `File saved to ${Platform.OS === 'ios' ? 'Documents' : 'Downloads'} folder`,
-            filePath: destPath
-          };
-        } catch (error) {
-          console.error('Error saving file:', error);
-          return {
-            success: false,
-            message: `Error saving file: ${error}`
-          };
-        }
+
+      // ONE delivery path: hand the file to the OS share sheet. That single
+      // surface already exposes "Save to Drive", "Save to device/Files", Gmail,
+      // and every other installed target — so one "Back up" action covers cloud
+      // backup, local save, and send-anywhere. No Google OAuth / Drive API /
+      // account-linking, which would also break SoulSync's no-account,
+      // no-cloud, no-tracking promise.
+      const isSharingAvailable = await Sharing.isAvailableAsync();
+      if (!isSharingAvailable) {
+        return {
+          success: false,
+          message: 'Sharing is not available on this device'
+        };
       }
-      
+
+      await Sharing.shareAsync(tempFilePath, {
+        mimeType: 'application/json',
+        dialogTitle: 'Export Mood Tracker Data',
+        UTI: 'public.json' // for iOS
+      });
+
       return {
-        success: false,
-        message: 'Invalid save method specified'
+        success: true,
+        message: 'Data exported successfully',
+        filePath: tempFilePath
       };
     } catch (error) {
       console.error('Error exporting data:', error);
