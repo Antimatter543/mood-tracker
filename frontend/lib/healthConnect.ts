@@ -32,6 +32,7 @@
 import { Platform } from 'react-native';
 import type { Permission } from 'react-native-health-connect';
 import type * as HealthConnectModule from 'react-native-health-connect';
+import type { HeartRateSampleAt } from './healthConnectPure';
 import {
   averageBpm,
   hasRequiredReadAccess,
@@ -110,6 +111,22 @@ export interface HealthReadResult {
   heartRateSampleCount: number;
 }
 
+/**
+ * Raw-per-sample Sleep + Heart Rate over an explicit window. Unlike
+ * {@link HealthReadResult} (which collapses heart rate to a single window
+ * average), this preserves each timestamped heart-rate sample so the caller
+ * can bucket by LOCAL day — the shape Phase 2a's per-day storage needs.
+ */
+export interface HealthRangeResult {
+  /** ISO instant — inclusive start of the queried window. */
+  windowStart: string;
+  /** ISO instant — exclusive end of the queried window. */
+  windowEnd: string;
+  sleepSessions: SleepSessionSummary[];
+  /** Every heart-rate sample in the window, flattened + timestamped. */
+  heartRateSamples: HeartRateSampleAt[];
+}
+
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 /** The read permissions this layer requests (Sleep + Heart Rate). */
@@ -178,6 +195,48 @@ export async function connect(): Promise<HealthConnectPermissionResult> {
 }
 
 /**
+ * Read the raw Sleep + Heart Rate records over an explicit `[start, end]`
+ * window with a single `between` filter. The one place `readRecords` is called,
+ * so every read issues the identical query shape.
+ */
+async function readRawWindow(
+  hc: NonNullable<ReturnType<typeof getHealthConnect>>,
+  windowStart: string,
+  windowEnd: string
+) {
+  const timeRangeFilter = {
+    operator: 'between',
+    startTime: windowStart,
+    endTime: windowEnd,
+  } as const;
+
+  const [sleep, heart] = await Promise.all([
+    hc.readRecords('SleepSession', { timeRangeFilter }),
+    hc.readRecords('HeartRate', { timeRangeFilter }),
+  ]);
+  return { sleepRecords: sleep.records, heartRecords: heart.records };
+}
+
+/** The minimal sleep-record shape the summary mapping reads (library records are assignable). */
+type RawSleepRecord = {
+  startTime: string;
+  endTime: string;
+  stages?: { stage: number; startTime: string; endTime: string }[];
+};
+
+/** Normalize raw sleep-session records into the summary shape. */
+function toSleepSummaries(
+  records: ReadonlyArray<RawSleepRecord>
+): SleepSessionSummary[] {
+  return records.map((s) => ({
+    startTime: s.startTime,
+    endTime: s.endTime,
+    durationMinutes: sleepDurationMinutes(s),
+    stageMinutes: sleepStageMinutes(s),
+  }));
+}
+
+/**
  * Read Sleep Sessions + Heart Rate over the last `sinceHours` and return a
  * normalized summary. Returns an empty summary (with the correct window) off
  * Android, when the module is absent, or on any read failure — never throws.
@@ -203,26 +262,14 @@ export async function readSleepAndHeartRate(
   const hc = getHealthConnect();
   if (!hc) return empty;
 
-  const timeRangeFilter = {
-    operator: 'between',
-    startTime: windowStart,
-    endTime: windowEnd,
-  } as const;
-
   try {
-    const [sleep, heart] = await Promise.all([
-      hc.readRecords('SleepSession', { timeRangeFilter }),
-      hc.readRecords('HeartRate', { timeRangeFilter }),
-    ]);
+    const { sleepRecords, heartRecords } = await readRawWindow(
+      hc,
+      windowStart,
+      windowEnd
+    );
 
-    const sleepSessions: SleepSessionSummary[] = sleep.records.map((s) => ({
-      startTime: s.startTime,
-      endTime: s.endTime,
-      durationMinutes: sleepDurationMinutes(s),
-      stageMinutes: sleepStageMinutes(s),
-    }));
-
-    const heartRateSampleCount = heart.records.reduce(
+    const heartRateSampleCount = heartRecords.reduce(
       (n, r) => n + (r.samples?.length ?? 0),
       0
     );
@@ -230,12 +277,126 @@ export async function readSleepAndHeartRate(
     return {
       windowStart,
       windowEnd,
-      sleepSessions,
-      totalSleepMinutes: totalSleepMinutes(sleep.records),
-      avgHeartRate: averageBpm(heart.records),
+      sleepSessions: toSleepSummaries(sleepRecords),
+      totalSleepMinutes: totalSleepMinutes(sleepRecords),
+      avgHeartRate: averageBpm(heartRecords),
       heartRateSampleCount,
     };
   } catch {
     return empty;
+  }
+}
+
+/**
+ * Read Sleep + timestamped Heart-Rate samples over an explicit `[startISO,
+ * endISO]` window. Unlike {@link readSleepAndHeartRate} this keeps every
+ * heart-rate sample (with its instant) so the caller can bucket by local day.
+ * Returns an empty result (with the requested window) off Android, when the
+ * module is absent, or on any read failure — never throws.
+ */
+export async function readHealthForRange(
+  startISO: string,
+  endISO: string
+): Promise<HealthRangeResult> {
+  const empty: HealthRangeResult = {
+    windowStart: startISO,
+    windowEnd: endISO,
+    sleepSessions: [],
+    heartRateSamples: [],
+  };
+
+  if (Platform.OS !== 'android') return empty;
+  const hc = getHealthConnect();
+  if (!hc) return empty;
+
+  try {
+    const { sleepRecords, heartRecords } = await readRawWindow(
+      hc,
+      startISO,
+      endISO
+    );
+
+    const heartRateSamples: HeartRateSampleAt[] = [];
+    for (const record of heartRecords) {
+      for (const sample of record.samples ?? []) {
+        heartRateSamples.push({
+          time: sample.time,
+          beatsPerMinute: sample.beatsPerMinute,
+        });
+      }
+    }
+
+    return {
+      windowStart: startISO,
+      windowEnd: endISO,
+      sleepSessions: toSleepSummaries(sleepRecords),
+      heartRateSamples,
+    };
+  } catch {
+    return empty;
+  }
+}
+
+/**
+ * Whether the app currently holds the required Sleep + Heart Rate READ grants —
+ * checked WITHOUT prompting (uses `getGrantedPermissions`, not
+ * `requestPermission`). Lets the UI show a "connected" state on mount without
+ * throwing a permission dialog. `false` off Android / when the module is absent
+ * / on any failure.
+ */
+export async function hasReadPermission(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  const hc = getHealthConnect();
+  if (!hc) return false;
+
+  try {
+    const initialized = await hc.initialize();
+    if (!initialized) return false;
+    const granted = await hc.getGrantedPermissions();
+    return hasRequiredReadAccess(
+      granted.map((p) => ({
+        // Special grants (background/exercise-route) lack these fields; they
+        // become undefined and are harmlessly filtered out by the read check.
+        accessType: (p as Permission).accessType,
+        recordType: (p as Permission).recordType,
+      }))
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Revoke ALL of this app's Health Connect grants — an honest disconnect.
+ * No-op (returns `false`) off Android or when the module is absent. On Android
+ * 14+ the OS applies the revocation on next app restart.
+ */
+export async function disconnect(): Promise<boolean> {
+  if (Platform.OS !== 'android') return false;
+  const hc = getHealthConnect();
+  if (!hc) return false;
+
+  try {
+    await hc.initialize();
+    await hc.revokeAllPermissions();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Open the system Health Connect settings screen (to install/update the
+ * provider or manage permissions). No-op off Android / when the module is
+ * absent.
+ */
+export function openHealthConnectSettings(): void {
+  if (Platform.OS !== 'android') return;
+  const hc = getHealthConnect();
+  if (!hc) return;
+  try {
+    hc.openHealthConnectSettings();
+  } catch {
+    // best-effort — nothing to recover if the settings intent can't launch.
   }
 }

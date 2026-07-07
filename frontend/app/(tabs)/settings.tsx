@@ -19,6 +19,7 @@ import Constants from 'expo-constants';
 import { SettingsSection, RemindersSection } from "@/components/SettingRow";
 import { runMigrations } from "@/databases/migrations";
 import { DataManagementSection } from "@/components/DataManagementSection";
+import { HealthConnectSection } from "@/components/HealthConnectSection";
 import { versionLine, copyrightLine } from "@/lib/versionInfo";
 
 // Support Section
@@ -181,6 +182,11 @@ function Setting() {
             <RemindersSection />
 
             <DataManagementSection />
+
+            {/* Android-only, opt-in Health Connect integration (renders nothing on
+                iOS / when the feature flag is off). Sits by Data Management since
+                it's about what on-device data SoulSync holds. */}
+            <HealthConnectSection />
 
             {__DEV__ && <DevDatabaseSection db={db} refetchEntries={refetchEntries} />}
             <SupportSection />

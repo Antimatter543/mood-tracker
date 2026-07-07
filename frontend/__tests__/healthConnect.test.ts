@@ -12,11 +12,15 @@
  */
 
 import {
+  aggregateHealthByDay,
   averageBpm,
+  computeSyncWindow,
   durationMinutes,
   hasRequiredReadAccess,
+  minBpm,
   REQUIRED_READ_RECORD_TYPES,
   sleepDurationMinutes,
+  sleepSessionWakeDay,
   sleepStageMinutes,
   totalSleepMinutes,
 } from '../lib/healthConnectPure';
@@ -410,5 +414,271 @@ describe('healthConnect — Android path (mocked native module)', () => {
         expect(res.avgHeartRate).toBeNull();
       }
     );
+  });
+
+  it('readHealthForRange queries the explicit window and flattens timestamped HR samples', async () => {
+    const startISO = '2026-07-06T00:00:00.000Z';
+    const endISO = '2026-07-08T00:00:00.000Z';
+    const sleepRecords = [
+      {
+        startTime: '2026-07-06T12:00:00.000Z',
+        endTime: '2026-07-06T20:00:00.000Z', // 8h -> 480
+        stages: [
+          {
+            stage: 5,
+            startTime: '2026-07-06T12:00:00.000Z',
+            endTime: '2026-07-06T13:00:00.000Z',
+          }, // 60m deep
+        ],
+      },
+    ];
+    const heartRecords = [
+      {
+        samples: [
+          { time: '2026-07-06T20:30:00.000Z', beatsPerMinute: 60 },
+          { time: '2026-07-06T21:00:00.000Z', beatsPerMinute: 80 },
+        ],
+      },
+      { samples: [{ time: '2026-07-07T02:00:00.000Z', beatsPerMinute: 100 }] },
+    ];
+    const readRecords = jest.fn((recordType: string) => {
+      if (recordType === 'SleepSession') return Promise.resolve({ records: sleepRecords });
+      if (recordType === 'HeartRate') return Promise.resolve({ records: heartRecords });
+      return Promise.resolve({ records: [] });
+    });
+
+    await withHealthConnect(
+      'android',
+      { readRecords, SdkAvailabilityStatus },
+      async (mod) => {
+        const res = await mod.readHealthForRange(startISO, endISO);
+
+        expect(readRecords).toHaveBeenCalledWith('SleepSession', {
+          timeRangeFilter: { operator: 'between', startTime: startISO, endTime: endISO },
+        });
+        expect(readRecords).toHaveBeenCalledWith('HeartRate', {
+          timeRangeFilter: { operator: 'between', startTime: startISO, endTime: endISO },
+        });
+
+        expect(res.windowStart).toBe(startISO);
+        expect(res.windowEnd).toBe(endISO);
+        expect(res.sleepSessions).toEqual([
+          {
+            startTime: '2026-07-06T12:00:00.000Z',
+            endTime: '2026-07-06T20:00:00.000Z',
+            durationMinutes: 480,
+            stageMinutes: { 5: 60 },
+          },
+        ]);
+        // Every sample flattened, in order, with its instant preserved.
+        expect(res.heartRateSamples).toEqual([
+          { time: '2026-07-06T20:30:00.000Z', beatsPerMinute: 60 },
+          { time: '2026-07-06T21:00:00.000Z', beatsPerMinute: 80 },
+          { time: '2026-07-07T02:00:00.000Z', beatsPerMinute: 100 },
+        ]);
+      }
+    );
+  });
+
+  it('readHealthForRange degrades to an empty (windowed) result on read failure', async () => {
+    const readRecords = jest.fn().mockRejectedValue(new Error('read failed'));
+    await withHealthConnect(
+      'android',
+      { readRecords, SdkAvailabilityStatus },
+      async (mod) => {
+        const res = await mod.readHealthForRange('2026-07-06T00:00:00.000Z', '2026-07-08T00:00:00.000Z');
+        expect(res.windowStart).toBe('2026-07-06T00:00:00.000Z');
+        expect(res.sleepSessions).toEqual([]);
+        expect(res.heartRateSamples).toEqual([]);
+      }
+    );
+  });
+
+  it('hasReadPermission is true only when both required reads are granted (no prompt)', async () => {
+    const initialize = jest.fn().mockResolvedValue(true);
+    const getGrantedPermissions = jest
+      .fn()
+      .mockResolvedValueOnce([
+        { accessType: 'read', recordType: 'SleepSession' },
+        { accessType: 'read', recordType: 'HeartRate' },
+      ])
+      .mockResolvedValueOnce([{ accessType: 'read', recordType: 'SleepSession' }]);
+    await withHealthConnect(
+      'android',
+      { initialize, getGrantedPermissions, SdkAvailabilityStatus },
+      async (mod) => {
+        await expect(mod.hasReadPermission()).resolves.toBe(true);
+        await expect(mod.hasReadPermission()).resolves.toBe(false);
+        // Never requests permission — this must not throw a dialog.
+        expect(initialize).toHaveBeenCalled();
+      }
+    );
+  });
+
+  it('hasReadPermission is false when the SDK fails to initialize', async () => {
+    const initialize = jest.fn().mockResolvedValue(false);
+    const getGrantedPermissions = jest.fn();
+    await withHealthConnect(
+      'android',
+      { initialize, getGrantedPermissions, SdkAvailabilityStatus },
+      async (mod) => {
+        await expect(mod.hasReadPermission()).resolves.toBe(false);
+        expect(getGrantedPermissions).not.toHaveBeenCalled();
+      }
+    );
+  });
+
+  it('disconnect revokes all permissions', async () => {
+    const initialize = jest.fn().mockResolvedValue(true);
+    const revokeAllPermissions = jest.fn().mockResolvedValue(undefined);
+    await withHealthConnect(
+      'android',
+      { initialize, revokeAllPermissions, SdkAvailabilityStatus },
+      async (mod) => {
+        await expect(mod.disconnect()).resolves.toBe(true);
+        expect(revokeAllPermissions).toHaveBeenCalledTimes(1);
+      }
+    );
+  });
+});
+
+describe('healthConnect — non-Android guards on the new range/permission API', () => {
+  it('readHealthForRange returns an empty windowed result off Android', async () => {
+    await withHealthConnect('ios', null, async (mod) => {
+      const res = await mod.readHealthForRange('2026-07-06T00:00:00.000Z', '2026-07-08T00:00:00.000Z');
+      expect(res.sleepSessions).toEqual([]);
+      expect(res.heartRateSamples).toEqual([]);
+    });
+  });
+
+  it('hasReadPermission and disconnect are false off Android', async () => {
+    await withHealthConnect('ios', null, async (mod) => {
+      await expect(mod.hasReadPermission()).resolves.toBe(false);
+      await expect(mod.disconnect()).resolves.toBe(false);
+    });
+  });
+});
+
+// ─── PHASE 2a pure helpers: per-day aggregation + sync window ─────────────────
+
+describe('minBpm', () => {
+  it('returns null on no samples', () => {
+    expect(minBpm([])).toBeNull();
+  });
+
+  it('returns the lowest finite sample (resting-HR proxy)', () => {
+    expect(minBpm([{ beatsPerMinute: 72 }, { beatsPerMinute: 55 }, { beatsPerMinute: 90 }])).toBe(55);
+  });
+
+  it('skips non-finite samples', () => {
+    expect(
+      minBpm([
+        { beatsPerMinute: Number.NaN },
+        { beatsPerMinute: 61 },
+        { beatsPerMinute: Number.POSITIVE_INFINITY },
+      ])
+    ).toBe(61);
+    expect(minBpm([{ beatsPerMinute: Number.NaN }])).toBeNull();
+  });
+});
+
+describe('sleepSessionWakeDay (wake-day attribution, Brisbane UTC+10)', () => {
+  it('attributes a night to the local day you wake up', () => {
+    // 20:00Z = 06:00 next day in Brisbane → the wake day.
+    expect(sleepSessionWakeDay({ endTime: '2026-07-06T20:00:00.000Z' })).toBe('2026-07-07');
+  });
+});
+
+describe('aggregateHealthByDay', () => {
+  it('returns an empty array for no data', () => {
+    expect(aggregateHealthByDay({ sleepSessions: [], heartRateSamples: [] })).toEqual([]);
+  });
+
+  it('buckets sleep (by wake day) + heart rate (by sample day) into per-day rows, sorted asc', () => {
+    const rows = aggregateHealthByDay({
+      sleepSessions: [
+        {
+          endTime: '2026-07-06T20:00:00.000Z', // wakes 06:00 Brisbane Jul07
+          durationMinutes: 480,
+          stageMinutes: { 5: 60 },
+        },
+      ],
+      heartRateSamples: [
+        { time: '2026-07-06T20:30:00.000Z', beatsPerMinute: 60 }, // Jul07
+        { time: '2026-07-06T21:00:00.000Z', beatsPerMinute: 80 }, // Jul07
+        { time: '2026-07-07T02:00:00.000Z', beatsPerMinute: 100 }, // Jul07
+        { time: '2026-07-07T20:00:00.000Z', beatsPerMinute: 50 }, // Jul08 (06:00 Brisbane)
+      ],
+    });
+
+    expect(rows).toEqual([
+      {
+        date: '2026-07-07',
+        sleepTotalMinutes: 480,
+        sleepStages: { 5: 60 },
+        avgHeartRate: 80, // (60+80+100)/3
+        minHeartRate: 60,
+      },
+      {
+        date: '2026-07-08',
+        sleepTotalMinutes: null, // heart-rate-only day
+        sleepStages: {},
+        avgHeartRate: 50,
+        minHeartRate: 50,
+      },
+    ]);
+  });
+
+  it('sums multiple sessions + merges stage maps on the same wake day', () => {
+    const rows = aggregateHealthByDay({
+      sleepSessions: [
+        { endTime: '2026-07-06T20:00:00.000Z', durationMinutes: 300, stageMinutes: { 4: 100, 5: 60 } },
+        { endTime: '2026-07-06T22:00:00.000Z', durationMinutes: 60, stageMinutes: { 4: 20 } }, // nap, same Jul07
+      ],
+      heartRateSamples: [],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].date).toBe('2026-07-07');
+    expect(rows[0].sleepTotalMinutes).toBe(360);
+    expect(rows[0].sleepStages).toEqual({ 4: 120, 5: 60 });
+  });
+
+  it('a sleep-only day has null heart-rate metrics', () => {
+    const rows = aggregateHealthByDay({
+      sleepSessions: [{ endTime: '2026-07-06T20:00:00.000Z', durationMinutes: 400, stageMinutes: {} }],
+      heartRateSamples: [],
+    });
+    expect(rows[0].avgHeartRate).toBeNull();
+    expect(rows[0].minHeartRate).toBeNull();
+  });
+});
+
+describe('computeSyncWindow', () => {
+  const now = new Date('2026-07-08T05:00:00.000Z');
+
+  it('first sync reads the full lookback window', () => {
+    expect(computeSyncWindow(null, now, 30)).toEqual({
+      startISO: '2026-06-08T05:00:00.000Z',
+      endISO: '2026-07-08T05:00:00.000Z',
+    });
+  });
+
+  it('incremental sync re-reads from the start of the last-synced local day', () => {
+    // last synced 2026-07-07T00:00Z → Brisbane Jul07 10:00 → start of that local
+    // day is 2026-07-06T14:00Z.
+    expect(computeSyncWindow('2026-07-07T00:00:00.000Z', now, 30)).toEqual({
+      startISO: '2026-07-06T14:00:00.000Z',
+      endISO: '2026-07-08T05:00:00.000Z',
+    });
+  });
+
+  it('clamps a very old last-synced value to the full lookback', () => {
+    const res = computeSyncWindow('2026-01-01T00:00:00.000Z', now, 30);
+    expect(res.startISO).toBe('2026-06-08T05:00:00.000Z');
+  });
+
+  it('falls back to the full lookback when the last-synced value is in the future', () => {
+    const res = computeSyncWindow('2026-07-09T05:00:00.000Z', now, 30);
+    expect(res.startISO).toBe('2026-06-08T05:00:00.000Z');
   });
 });

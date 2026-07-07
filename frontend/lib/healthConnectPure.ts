@@ -9,16 +9,23 @@
  * `react-native-health-connect` — so they can be exhaustively unit-tested
  * WITHOUT importing or mocking that native module.
  *
- * Every import here is `import type` (erased at compile time), so this module
- * has ZERO runtime dependencies: it loads instantly under jest on any platform,
- * and importing it never pulls the native TurboModule into the bundle.
+ * The ONLY runtime import is the app's pure, native-free date helpers
+ * (`localDateString` / `startOfLocalDay`) — the single day-keying authority
+ * shared with the mood layer, so Health Connect days bucket EXACTLY the way
+ * mood entries do (see databases/dateHelpers.ts). Everything else is
+ * `import type` (erased at compile time), so this module never pulls the native
+ * TurboModule into the bundle and loads instantly under jest on any platform.
  *
- * PHASE 1 (foundation) scope: only Sleep + Heart Rate reads. No product UI,
- * no persistence — these helpers exist so the native wiring in
- * `lib/healthConnect.ts` is a thin, testable shell over tested logic.
+ * PHASE 1 (foundation) scope: Sleep + Heart Rate reads (averaging, duration,
+ * stage/permission rollups). PHASE 2a adds per-LOCAL-DAY aggregation
+ * (`aggregateHealthByDay`) + the incremental sync window (`computeSyncWindow`) —
+ * still pure, so the native wiring in `lib/healthConnect.ts` and the sync
+ * orchestrator in `lib/healthSync.ts` stay thin, testable shells over tested
+ * logic.
  */
 
 import type { SleepSessionRecord } from 'react-native-health-connect';
+import { localDateString, startOfLocalDay } from '@/databases/dateHelpers';
 
 /** The minimal heart-rate sample shape averageBpm needs (library HeartRateSample is assignable). */
 type BpmSample = { beatsPerMinute: number };
@@ -38,6 +45,21 @@ export const REQUIRED_READ_RECORD_TYPES = [
 ] as const;
 
 /**
+ * The finite beats-per-minute values from a flat sample list. Non-finite
+ * samples (NaN / Infinity / non-number) are dropped — the single place the
+ * "skip garbage samples" rule lives, shared by {@link averageBpm} and
+ * {@link minBpm}.
+ */
+function finiteBpm(samples: ReadonlyArray<BpmSample>): number[] {
+  const out: number[] = [];
+  for (const sample of samples) {
+    const bpm = sample.beatsPerMinute;
+    if (typeof bpm === 'number' && Number.isFinite(bpm)) out.push(bpm);
+  }
+  return out;
+}
+
+/**
  * Mean beats-per-minute across every sample of every record.
  *
  * Returns `null` when there are no (finite) samples — an empty or absent
@@ -47,18 +69,22 @@ export const REQUIRED_READ_RECORD_TYPES = [
 export function averageBpm(
   records: ReadonlyArray<BpmSamplesBearer>
 ): number | null {
-  let sum = 0;
-  let count = 0;
-  for (const record of records) {
-    for (const sample of record.samples ?? []) {
-      const bpm = sample.beatsPerMinute;
-      if (typeof bpm === 'number' && Number.isFinite(bpm)) {
-        sum += bpm;
-        count += 1;
-      }
-    }
-  }
-  return count === 0 ? null : sum / count;
+  const bpms: number[] = [];
+  for (const record of records) bpms.push(...finiteBpm(record.samples ?? []));
+  return bpms.length === 0
+    ? null
+    : bpms.reduce((sum, bpm) => sum + bpm, 0) / bpms.length;
+}
+
+/**
+ * Minimum beats-per-minute across a flat sample list — the day's lowest heart
+ * rate, a reasonable proxy for resting heart rate when no dedicated
+ * `RestingHeartRate` record is available. Returns `null` when there are no
+ * finite samples (never 0).
+ */
+export function minBpm(samples: ReadonlyArray<BpmSample>): number | null {
+  const bpms = finiteBpm(samples);
+  return bpms.length === 0 ? null : Math.min(...bpms);
 }
 
 /**
@@ -116,4 +142,158 @@ export function hasRequiredReadAccess(
     granted.filter((p) => p.accessType === 'read').map((p) => p.recordType)
   );
   return REQUIRED_READ_RECORD_TYPES.every((t) => readTypes.has(t));
+}
+
+// ─── PHASE 2a: per-local-day aggregation ─────────────────────────────────────
+
+/** A single heart-rate sample carrying its own instant (library HeartRateSample). */
+export interface HeartRateSampleAt {
+  /** ISO instant of the sample. */
+  time: string;
+  beatsPerMinute: number;
+}
+
+/**
+ * The minimal per-session sleep shape day-aggregation needs. The native layer's
+ * `SleepSessionSummary` is structurally assignable, so this module stays
+ * independent of `lib/healthConnect.ts` (no import cycle).
+ */
+export interface DailySleepInput {
+  /** Wake instant — determines which LOCAL calendar day the night is attributed to. */
+  endTime: string;
+  durationMinutes: number;
+  stageMinutes: Record<number, number>;
+}
+
+/** One local calendar day's rolled-up health metrics (the row shape we persist). */
+export interface DailyHealthMetrics {
+  /** Local calendar day `YYYY-MM-DD` — JOINs cleanly to day-keyed mood entries. */
+  date: string;
+  /** Total sleep minutes attributed to this day, or `null` when there was no sleep. */
+  sleepTotalMinutes: number | null;
+  /** Minutes per numeric sleep-stage type (empty when no staged sleep). */
+  sleepStages: Record<number, number>;
+  /** Mean bpm across the day's samples, or `null` when there were none. */
+  avgHeartRate: number | null;
+  /** Lowest bpm across the day's samples (resting-HR proxy), or `null`. */
+  minHeartRate: number | null;
+}
+
+/**
+ * Which LOCAL calendar day a sleep session belongs to.
+ *
+ * Attributed to the day you WAKE (the session's `endTime` in local time) — a
+ * night that starts 22:00 Mon and ends 06:00 Tue is "Tuesday's sleep", which is
+ * the pairing users expect when asking "did last night's sleep affect how I
+ * feel today". This is the ONE place that convention lives, so the insights
+ * phase inherits it for free.
+ */
+export function sleepSessionWakeDay(session: { endTime: string }): string {
+  return localDateString(session.endTime);
+}
+
+interface DayAccumulator {
+  hasSleep: boolean;
+  sleepTotalMinutes: number;
+  sleepStages: Record<number, number>;
+  heartSamples: BpmSample[];
+}
+
+/**
+ * Roll sleep sessions + heart-rate samples up into one {@link DailyHealthMetrics}
+ * row per LOCAL calendar day. Pure.
+ *
+ * - Sleep is keyed by wake-day ({@link sleepSessionWakeDay}); its stage maps are
+ *   summed. A day with any sleep session gets a numeric `sleepTotalMinutes`; a
+ *   day with none gets `null`.
+ * - Heart-rate samples are keyed by each sample's own local day; `avgHeartRate`
+ *   / `minHeartRate` are computed via the shared bpm helpers (finite-only). A
+ *   day with no samples gets `null` for both.
+ * - Days present in EITHER source appear in the output. Rows are sorted by date
+ *   ascending, so an upsert writes them in calendar order.
+ */
+export function aggregateHealthByDay(input: {
+  sleepSessions: ReadonlyArray<DailySleepInput>;
+  heartRateSamples: ReadonlyArray<HeartRateSampleAt>;
+}): DailyHealthMetrics[] {
+  const byDay = new Map<string, DayAccumulator>();
+
+  const dayOf = (key: string): DayAccumulator => {
+    let acc = byDay.get(key);
+    if (!acc) {
+      acc = {
+        hasSleep: false,
+        sleepTotalMinutes: 0,
+        sleepStages: {},
+        heartSamples: [],
+      };
+      byDay.set(key, acc);
+    }
+    return acc;
+  };
+
+  for (const session of input.sleepSessions) {
+    const acc = dayOf(sleepSessionWakeDay(session));
+    acc.hasSleep = true;
+    acc.sleepTotalMinutes += session.durationMinutes;
+    for (const [stage, minutes] of Object.entries(session.stageMinutes)) {
+      const n = Number(stage);
+      acc.sleepStages[n] = (acc.sleepStages[n] ?? 0) + minutes;
+    }
+  }
+
+  for (const sample of input.heartRateSamples) {
+    // Key by the sample's own local day. Skip unparseable timestamps rather
+    // than throwing (localDateString throws on invalid dates).
+    if (Number.isNaN(Date.parse(sample.time))) continue;
+    dayOf(localDateString(sample.time)).heartSamples.push(sample);
+  }
+
+  return [...byDay.entries()]
+    .map(([date, acc]) => ({
+      date,
+      sleepTotalMinutes: acc.hasSleep ? acc.sleepTotalMinutes : null,
+      sleepStages: acc.sleepStages,
+      avgHeartRate: averageBpm([{ samples: acc.heartSamples }]),
+      minHeartRate: minBpm(acc.heartSamples),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** An inclusive-start / exclusive-end read window, as ISO instants. */
+export interface SyncWindow {
+  startISO: string;
+  endISO: string;
+}
+
+/**
+ * Compute the read window for a sync. Pure.
+ *
+ * - First sync (no valid `lastSyncedAtISO`): the full `windowDays` lookback.
+ * - Incremental: re-read from the START of the last-synced LOCAL day (that day
+ *   may have been partial when last synced, and late-arriving samples land
+ *   retroactively), clamped so it never reaches further back than the full
+ *   lookback and never past `now` (guards clock skew / a future stored value).
+ *
+ * `endISO` is always `now`.
+ */
+export function computeSyncWindow(
+  lastSyncedAtISO: string | null | undefined,
+  now: Date,
+  windowDays: number
+): SyncWindow {
+  const endISO = now.toISOString();
+  const fullStartMs = now.getTime() - windowDays * 24 * 60 * 60 * 1000;
+
+  let startMs = fullStartMs;
+  if (lastSyncedAtISO) {
+    const lastMs = Date.parse(lastSyncedAtISO);
+    if (Number.isFinite(lastMs) && lastMs <= now.getTime()) {
+      const incrementalMs = Date.parse(startOfLocalDay(new Date(lastMs)));
+      // Never earlier than the full lookback; never later than now.
+      startMs = Math.min(Math.max(incrementalMs, fullStartMs), now.getTime());
+    }
+  }
+
+  return { startISO: new Date(startMs).toISOString(), endISO };
 }
