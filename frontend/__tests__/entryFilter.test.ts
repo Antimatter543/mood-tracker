@@ -86,8 +86,8 @@ describe('buildEntryFilter — LIKE wildcard escaping', () => {
 
 describe('buildEntryFilter — mood range only', () => {
     it.each([
-        ['low', 0, 3.5],
-        ['mid', 4, 6.5],
+        ['low', 0, 3],
+        ['mid', 3.5, 6.5],
         ['high', 7, 10],
     ] as const)('%s preset yields the BETWEEN params [%d, %d]', (key, min, max) => {
         const range = moodPresetToRange(key);
@@ -98,10 +98,10 @@ describe('buildEntryFilter — mood range only', () => {
 
     it('emits only the mood clause when query is whitespace-only', () => {
         const built = buildEntryFilter(
-            filters({ query: '   ', moodRange: { min: 4, max: 6.5 } })
+            filters({ query: '   ', moodRange: { min: 3.5, max: 6.5 } })
         );
         expect(built.where).toBe(MOOD_CLAUSE);
-        expect(built.params).toEqual([4, 6.5]);
+        expect(built.params).toEqual([3.5, 6.5]);
     });
 });
 
@@ -118,8 +118,8 @@ describe('buildEntryFilter — combined query + mood', () => {
 describe('moodPresetToRange', () => {
     it('maps every preset key to its declared range', () => {
         expect(moodPresetToRange('all')).toBeNull();
-        expect(moodPresetToRange('low')).toEqual({ min: 0, max: 3.5 });
-        expect(moodPresetToRange('mid')).toEqual({ min: 4, max: 6.5 });
+        expect(moodPresetToRange('low')).toEqual({ min: 0, max: 3 });
+        expect(moodPresetToRange('mid')).toEqual({ min: 3.5, max: 6.5 });
         expect(moodPresetToRange('high')).toEqual({ min: 7, max: 10 });
     });
 
@@ -133,7 +133,7 @@ describe('moodPresetToRange', () => {
         expect(MOOD_PRESETS.map(p => p.key)).toEqual(['all', 'low', 'mid', 'high']);
         const bands = MOOD_PRESETS.filter(p => p.range).map(p => p.range!);
         // Half-step ticks are the only REACHABLE mood values, so the class-level
-        // invariant isn't continuous tiling — the (3.5,4) / (6.5,7) intervals hold
+        // invariant isn't continuous tiling — the (3,3.5) / (6.5,7) intervals hold
         // no tick — it's that every reachable value falls in exactly one band
         // (gapless AND non-overlapping on the actual domain).
         for (let v = 0; v <= 10.0001; v += 0.5) {
@@ -141,7 +141,7 @@ describe('moodPresetToRange', () => {
             const hits = bands.filter(r => tick >= r.min && tick <= r.max);
             expect(hits).toHaveLength(1);
         }
-        expect(MOOD_PRESETS[1].range).toEqual({ min: 0, max: 3.5 });
+        expect(MOOD_PRESETS[1].range).toEqual({ min: 0, max: 3 });
         expect(MOOD_PRESETS[3].range).toEqual({ min: 7, max: 10 });
     });
 });

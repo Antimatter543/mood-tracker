@@ -15,13 +15,18 @@ export type BuiltFilter = { where: string; params: (string | number)[] };
 
 export type MoodPresetKey = 'all' | 'low' | 'mid' | 'high';
 
-// Mood presets. The mood domain is always 0–10 (REAL, half-step ticks possible),
-// so the bands TILE GAPLESSLY at the .5 boundaries — an entry logged at 3.5
-// falls in Low, 6.5 in Mid — nothing can slip between two adjacent bands.
+// Mood presets. The mood domain is always 0–10 (REAL, half-step ticks: 0,0.5,…,10),
+// so the labels must be HONEST about which tick lands in which band. Low is TRULY
+// 0–3 (a 3.5 entry falls in Mid, NOT Low); Mid is symmetric around the Neutral(5)
+// anchor (3.5–6.5); High is a clean 7–10. Half-steps force a `.5` boundary somewhere
+// and Mid absorbs it — this is the only numeric scheme where every label matches its
+// own range. The bands still TILE GAPLESSLY over the reachable ticks: every tick
+// (0,0.5,…,10) lands in exactly one band — 3 in Low, 3.5 & 6.5 in Mid, 7 in High —
+// nothing can slip between two adjacent bands.
 export const MOOD_PRESETS: { key: MoodPresetKey; label: string; range: MoodRange | null }[] = [
     { key: 'all', label: 'All', range: null },
-    { key: 'low', label: 'Low · 0–3', range: { min: 0, max: 3.5 } },
-    { key: 'mid', label: 'Mid · 4–6', range: { min: 4, max: 6.5 } },
+    { key: 'low', label: 'Low · 0–3', range: { min: 0, max: 3 } },
+    { key: 'mid', label: 'Mid · 3.5–6.5', range: { min: 3.5, max: 6.5 } },
     { key: 'high', label: 'High · 7–10', range: { min: 7, max: 10 } },
 ];
 
