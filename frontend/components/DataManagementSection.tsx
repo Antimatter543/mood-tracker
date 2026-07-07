@@ -1,6 +1,6 @@
 // DataManagementSection.tsx
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator } from 'react-native';
 import { useThemeColors } from '@/styles/global';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useDataContext } from '@/context/DataContext';
@@ -14,23 +14,19 @@ export const DataManagementSection = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
-  const handleExport = async (method: 'share' | 'save') => {
+  const handleExport = async () => {
     try {
       setIsExporting(true);
-      const result = await exportDatabaseData(db, method);
-      
+      const result = await exportDatabaseData(db);
+
       if (result.success) {
-        if (method === 'save') {
-          Alert.alert('Success', `Your data has been exported successfully. ${result.message}`);
-        } else {
-          Alert.alert('Success', 'Your data has been exported successfully');
-        }
+        Alert.alert('Backup ready', 'Choose where to save it — Google Drive, your device, or send it anywhere.');
       } else {
-        Alert.alert('Export Failed', result.message);
+        Alert.alert('Backup Failed', result.message);
       }
     } catch (error) {
       console.error('Error during export:', error);
-      Alert.alert('Export Error', 'An unexpected error occurred during export');
+      Alert.alert('Backup Error', 'An unexpected error occurred while creating your backup');
     } finally {
       setIsExporting(false);
     }
@@ -98,6 +94,10 @@ export const DataManagementSection = () => {
       marginBottom: 16,
       lineHeight: 20,
     },
+    emphasis: {
+      color: colors.text,
+      fontWeight: '600',
+    },
     button: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -107,8 +107,6 @@ export const DataManagementSection = () => {
       paddingHorizontal: 16,
       borderRadius: 8,
       gap: 8,
-      flex: 1,
-      minWidth: 140,
     },
     importButton: {
       flexDirection: 'row',
@@ -118,7 +116,6 @@ export const DataManagementSection = () => {
       paddingVertical: 12,
       paddingHorizontal: 16,
       borderRadius: 8,
-      marginTop: 12,
       gap: 8,
       borderWidth: 1,
       borderColor: colors.overlays.tagBorder,
@@ -126,20 +123,6 @@ export const DataManagementSection = () => {
     buttonContainer: {
       flexDirection: 'column',
       gap: 12,
-    },
-    exportOptions: {
-      marginBottom: 8,
-    },
-    optionsLabel: {
-      color: colors.textSecondary,
-      fontSize: 14,
-      marginBottom: 8,
-    },
-    exportButtonRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      gap: 12,
-      flexWrap: 'wrap',
     },
     buttonText: {
       color: '#fff',
@@ -164,52 +147,30 @@ export const DataManagementSection = () => {
       </View>
 
       <Text style={styles.description}>
-        Export your mood tracking data as a JSON file to keep a backup or analyze it in other applications. You can also import previously exported data.
+        Back up your entries to a file — save it to{' '}
+        <Text style={styles.emphasis}>Google Drive</Text>, your device, or send it
+        anywhere. Restore from a backup on this or any device. No account, all local.
       </Text>
 
       <View style={styles.buttonContainer}>
-        {/* Export options */}
-        <View style={styles.exportOptions}>
-          <Text style={styles.optionsLabel}>Export Options:</Text>
-          <View style={styles.exportButtonRow}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.button,
-                pressed && styles.buttonPressed
-              ]}
-              onPress={() => handleExport('share')}
-              disabled={isExporting || isImporting}
-            >
-              <Feather name="share" color="#fff" size={18} />
-              {isExporting ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.buttonText}>Share File</Text>
-              )}
-            </Pressable>
+        {/* Back up — hands the file to the OS share sheet (Drive / Files / send) */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.button,
+            pressed && styles.buttonPressed
+          ]}
+          onPress={handleExport}
+          disabled={isExporting || isImporting}
+        >
+          <Feather name="upload-cloud" color="#fff" size={18} />
+          {isExporting ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Back up</Text>
+          )}
+        </Pressable>
 
-            <Pressable
-              style={({ pressed }) => [
-                styles.button,
-                {backgroundColor: colors.accentDark},
-                pressed && styles.buttonPressed
-              ]}
-              onPress={() => handleExport('save')}
-              disabled={isExporting || isImporting}
-            >
-              <Feather name="download" color="#fff" size={18} />
-              {isExporting ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.buttonText}>
-                  {Platform.OS === 'ios' ? 'Save to Files' : 'Download'}
-                </Text>
-              )}
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Import button */}
+        {/* Restore — picks a backup file from Drive / Files / anywhere */}
         <Pressable
           style={({ pressed }) => [
             styles.importButton,
@@ -218,11 +179,11 @@ export const DataManagementSection = () => {
           onPress={handleImport}
           disabled={isExporting || isImporting}
         >
-          <Feather name="upload" color={colors.text} size={18} />
+          <Feather name="rotate-ccw" color={colors.text} size={18} />
           {isImporting ? (
             <ActivityIndicator size="small" color={colors.text} />
           ) : (
-            <Text style={styles.importButtonText}>Import Data</Text>
+            <Text style={styles.importButtonText}>Restore</Text>
           )}
         </Pressable>
       </View>
