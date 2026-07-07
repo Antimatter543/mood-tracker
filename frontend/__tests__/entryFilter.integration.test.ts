@@ -118,13 +118,18 @@ describeIfSqlite('entryFilter — real SQLite execution', () => {
     });
 
     it('mood-band presets filter by the numeric range, boundaries included', () => {
-        expect(idsFor(F('', moodPresetToRange('low')))).toEqual([1, 5]);  // 2, 3.5
-        expect(idsFor(F('', moodPresetToRange('mid')))).toEqual([3, 6]);  // 5, 4
-        expect(idsFor(F('', moodPresetToRange('high')))).toEqual([2, 4]); // 8, 9
+        // Honest bands: Low 0–3, Mid 3.5–6.5, High 7–10. A 3.5 entry (E5) now
+        // falls in Mid, NOT Low — the bug this fix closes.
+        expect(idsFor(F('', moodPresetToRange('low')))).toEqual([1]);       // mood 2 only (E5's 3.5 moved to Mid)
+        expect(idsFor(F('', moodPresetToRange('mid')))).toEqual([3, 5, 6]); // 5, 3.5, 4
+        expect(idsFor(F('', moodPresetToRange('high')))).toEqual([2, 4]);   // 8, 9
     });
 
     it('combines text AND mood (both constraints apply)', () => {
         expect(idsFor(F('day', moodPresetToRange('high')))).toEqual([2]); // note "day" & mood 8
-        expect(idsFor(F('case', moodPresetToRange('low')))).toEqual([5]); // E5(3.5) in, E6(4) out
+        // Both boundary entries carry "case"; under the honest bands E5(3.5) & E6(4)
+        // land in Mid [3.5–6.5], and NEITHER falls in Low (0–3) — regression guard.
+        expect(idsFor(F('case', moodPresetToRange('mid')))).toEqual([5, 6]);
+        expect(idsFor(F('case', moodPresetToRange('low')))).toEqual([]);
     });
 });
