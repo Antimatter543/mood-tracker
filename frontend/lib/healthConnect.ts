@@ -74,10 +74,27 @@ function getHealthConnect(): typeof HealthConnectModule | null {
 
 // ─── Public types ───────────────────────────────────────────────────────────
 
-/** Normalized SDK-availability status (maps the library's numeric SdkAvailabilityStatus). */
+/**
+ * Normalized SDK-availability status (maps the library's numeric
+ * `SdkAvailabilityStatus`). The two "not ready" states are DISTINCT and must not
+ * be conflated — getting this wrong is what showed a fresh device an "update"
+ * prompt when it had nothing to update:
+ *
+ *  - `'provider_required'` ← `SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED`: the
+ *    device CAN run Health Connect, but the Health Connect provider app is
+ *    **not installed OR is too old** — the actionable "send the user to the Play
+ *    listing" case. Android reports this SAME value whether the provider is
+ *    missing or merely outdated; `getSdkStatus` gives us no signal to tell
+ *    install from update apart (the Play listing itself renders the right
+ *    button), so the UI offers a single install-or-update action. This is the
+ *    status a freshly-set-up device with no Health Connect reports.
+ *  - `'unavailable'` ← `SDK_UNAVAILABLE`: Health Connect fundamentally cannot run
+ *    on this device (Android too old), or the native module is absent. Installing
+ *    the provider would NOT help — there is no useful action to offer.
+ */
 export type HealthConnectStatus =
   | 'available'
-  | 'update_required'
+  | 'provider_required'
   | 'unavailable'
   | 'unsupported_platform';
 
@@ -140,7 +157,9 @@ const SLEEP_HEART_READ_PERMISSIONS: Permission[] = [
 /**
  * Report whether the Health Connect SDK is available on this device.
  * Returns `'unsupported_platform'` off Android and `'unavailable'` when the
- * native module can't be reached.
+ * native module can't be reached. See {@link HealthConnectStatus} for why
+ * `SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED` maps to `'provider_required'`
+ * (install-or-update) and `SDK_UNAVAILABLE` maps to `'unavailable'`.
  */
 export async function getStatus(): Promise<HealthConnectStatus> {
   if (Platform.OS !== 'android') return 'unsupported_platform';
@@ -153,8 +172,11 @@ export async function getStatus(): Promise<HealthConnectStatus> {
       case hc.SdkAvailabilityStatus.SDK_AVAILABLE:
         return 'available';
       case hc.SdkAvailabilityStatus.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED:
-        return 'update_required';
+        // Provider not installed OR outdated — the actionable "get it from Play"
+        // case. This is what a device with no Health Connect app reports.
+        return 'provider_required';
       default:
+        // SDK_UNAVAILABLE — the device can't run Health Connect at all.
         return 'unavailable';
     }
   } catch {

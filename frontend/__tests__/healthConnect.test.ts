@@ -277,7 +277,12 @@ describe('healthConnect — Android path (mocked native module)', () => {
     SDK_AVAILABLE: 3,
   };
 
-  it('getStatus maps the numeric SDK status', async () => {
+  it('getStatus maps the numeric SDK status to DISTINCT provider_required vs unavailable', async () => {
+    // The two "not ready" statuses must NOT collapse:
+    //  - SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED (2) = provider not installed OR
+    //    outdated → 'provider_required' (the actionable install-or-update case, and
+    //    the status a device with NO Health Connect app actually reports).
+    //  - SDK_UNAVAILABLE (1) = device can't run Health Connect at all → 'unavailable'.
     const getSdkStatus = jest
       .fn()
       .mockResolvedValueOnce(SdkAvailabilityStatus.SDK_AVAILABLE)
@@ -290,7 +295,7 @@ describe('healthConnect — Android path (mocked native module)', () => {
       { getSdkStatus, SdkAvailabilityStatus },
       async (mod) => {
         await expect(mod.getStatus()).resolves.toBe('available');
-        await expect(mod.getStatus()).resolves.toBe('update_required');
+        await expect(mod.getStatus()).resolves.toBe('provider_required');
         await expect(mod.getStatus()).resolves.toBe('unavailable');
       }
     );

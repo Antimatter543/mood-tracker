@@ -6,7 +6,7 @@
 // prompt silently fails). Everything Health-Connect-touching goes through
 // lib/healthConnect.ts (guarded + lazy) — this file never imports the native
 // module directly.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import {
   Linking,
   Platform,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
 import { useThemeColors } from '@/styles/global';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -37,17 +38,18 @@ import {
   HEALTH_CONNECT_PLAY_WEB_URL,
   HEALTH_OPT_IN_SETTING_KEY,
   HEALTH_LAST_SYNCED_SETTING_KEY,
-  isHealthConnectVersionSupported,
+  resolveHealthConnectPhase,
   shouldShowHealthConnect,
+  type HealthConnectCardPhase,
 } from '@/lib/healthConnectConfig';
 
-/** UI phase, derived once on mount from the OS version + SDK status. */
-type Phase =
-  | 'loading'
-  | 'unsupported_version' // Android 16+ — permission prompt is broken upstream
-  | 'unavailable' // Health Connect not installed
-  | 'update_required' // provider needs an update
-  | 'available'; // ready to connect / connected
+/**
+ * UI phase. `'loading'` is the transient state shown before the first resolve;
+ * the rest come straight from {@link resolveHealthConnectPhase} and are re-derived
+ * every time the Settings screen regains focus (so installing/updating Health
+ * Connect and returning reflects without an app restart).
+ */
+type Phase = 'loading' | HealthConnectCardPhase;
 
 /** Friendly "Last synced …" line from an ISO timestamp. */
 function formatLastSynced(iso: string | null): string {
@@ -71,26 +73,30 @@ export const HealthConnectSection = () => {
   const [connected, setConnected] = useState(false);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // True while a user-initiated op (connect / sync / disconnect) is mid-flight.
+  // A ref, not state, so it can gate the focus re-resolve WITHOUT re-triggering
+  // the memoized effect when it flips.
+  const operationInFlight = useRef(false);
 
-  // Resolve the initial state: version gate → SDK status → (if available)
-  // opt-in + permission + last-synced. Only ever runs on Android (the whole
-  // section is gated off elsewhere).
-  useEffect(() => {
+  // Resolve the card's state: SDK status + version gate → phase, then (if
+  // available) opt-in + permission + last-synced. Wired through `useFocusEffect`
+  // (NOT a mount-only effect) so returning to Settings after installing/updating
+  // Health Connect re-checks and updates immediately — no app restart. Only ever
+  // runs on Android (the whole section is gated off elsewhere).
+  const resolveState = useCallback((): void | (() => void) => {
+    // A user op is running (e.g. the OS permission dialog blurred us and we just
+    // regained focus): skip so a background re-resolve can't race its state writes.
+    if (operationInFlight.current) return undefined;
+
     let cancelled = false;
 
     (async () => {
-      const apiLevel = Number(Platform.Version);
-      if (!isHealthConnectVersionSupported(apiLevel)) {
-        if (!cancelled) setPhase('unsupported_version');
-        return;
-      }
-
       const status: HealthConnectStatus = await getStatus();
+      const nextPhase = resolveHealthConnectPhase(Number(Platform.Version), status);
       if (cancelled) return;
 
-      if (status !== 'available') {
-        // 'unsupported_platform' can't happen on Android; fold it into unavailable.
-        setPhase(status === 'update_required' ? 'update_required' : 'unavailable');
+      if (nextPhase !== 'available') {
+        setPhase(nextPhase);
         return;
       }
 
@@ -104,10 +110,13 @@ export const HealthConnectSection = () => {
       setPhase('available');
     })();
 
+    // Runs on blur/unmount — cancels a late setState from the async above.
     return () => {
       cancelled = true;
     };
   }, [db]);
+
+  useFocusEffect(resolveState);
 
   const runSync = useCallback(async () => {
     const result = await syncHealthMetrics(db);
@@ -122,6 +131,7 @@ export const HealthConnectSection = () => {
   }, [db]);
 
   const handleConnect = useCallback(async () => {
+    operationInFlight.current = true;
     setBusy(true);
     try {
       const result = await connect();
@@ -139,15 +149,18 @@ export const HealthConnectSection = () => {
       Alert.alert('Something went wrong', 'Could not connect to Health Connect.');
     } finally {
       setBusy(false);
+      operationInFlight.current = false;
     }
   }, [db, runSync]);
 
   const handleSyncNow = useCallback(async () => {
+    operationInFlight.current = true;
     setBusy(true);
     try {
       await runSync();
     } finally {
       setBusy(false);
+      operationInFlight.current = false;
     }
   }, [runSync]);
 
@@ -161,6 +174,7 @@ export const HealthConnectSection = () => {
           text: 'Turn off',
           style: 'destructive',
           onPress: async () => {
+            operationInFlight.current = true;
             setBusy(true);
             try {
               await disconnect();
@@ -173,6 +187,7 @@ export const HealthConnectSection = () => {
               Alert.alert('Something went wrong', 'Could not turn off Health Connect.');
             } finally {
               setBusy(false);
+              operationInFlight.current = false;
             }
           },
         },
@@ -242,12 +257,17 @@ export const HealthConnectSection = () => {
         </Text>
       </View>
     );
-  } else if (phase === 'unavailable') {
+  } else if (phase === 'provider_required') {
+    // Health Connect isn't installed (or is outdated) but the device CAN run it.
+    // `getSdkStatus` can't tell "missing" from "outdated" apart, so one honest
+    // install-or-update action → the Play listing (which itself shows the right
+    // button). This is the state a device with no Health Connect app reports.
     body = (
       <>
         {consentCopy}
         <Text style={styles.subtle}>
-          Health Connect isn&apos;t installed on this device yet. Install it to
+          SoulSync uses the Health Connect app to read your sleep and heart rate.
+          Install it (or update it, if it&apos;s already on your device) to
           continue.
         </Text>
         <PrimaryButton
@@ -260,23 +280,18 @@ export const HealthConnectSection = () => {
         />
       </>
     );
-  } else if (phase === 'update_required') {
+  } else if (phase === 'unavailable') {
+    // SDK_UNAVAILABLE — the device fundamentally can't run Health Connect (Android
+    // too old). Installing the provider wouldn't help, so no action, just an
+    // honest info line (matching the unsupported-version state's shape).
     body = (
-      <>
-        {consentCopy}
-        <Text style={styles.subtle}>
-          Your Health Connect app needs an update before SoulSync can read your
-          data.
+      <View style={styles.infoRow}>
+        <Feather name="info" color={colors.textSecondary} size={16} />
+        <Text style={styles.infoText}>
+          Health Connect isn&apos;t available on this device, so SoulSync can&apos;t
+          bring in your sleep or heart rate here.
         </Text>
-        <PrimaryButton
-          styles={styles}
-          colors={colors}
-          icon="download"
-          label="Update Health Connect"
-          onPress={handleInstall}
-          disabled={busy}
-        />
-      </>
+      </View>
     );
   } else if (connected) {
     body = (
