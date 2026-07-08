@@ -138,6 +138,33 @@ export const migrations: Migration[] = [
                 ['Social event', 'Event', 3, 'Social event', 3]
             );
         }
+    },
+    {
+        // Health Connect (Android, opt-in): on-device store of daily sleep +
+        // heart-rate metrics. Keyed by LOCAL calendar day (YYYY-MM-DD) so a
+        // future insights JOIN with the mood `entries` (day-keyed in JS via
+        // localDateString) is a trivial date match — no timezone math at read
+        // time. 100% on-device: this data never leaves the phone. `sleep_stages`
+        // is a JSON map of {numericStageType: minutes}. Also seeds the opt-in
+        // flag OFF (opt-in only; the section never syncs until the user connects).
+        version: 7,
+        up: async (db: SQLiteDatabase) => {
+            await db.execAsync(`
+                CREATE TABLE IF NOT EXISTS health_metrics (
+                    date                TEXT PRIMARY KEY,
+                    sleep_total_minutes REAL,
+                    sleep_stages        TEXT,
+                    avg_heart_rate      REAL,
+                    min_heart_rate      REAL,
+                    source              TEXT NOT NULL DEFAULT 'health_connect',
+                    synced_at           TEXT NOT NULL
+                );
+            `);
+            await db.runAsync(`
+                INSERT OR IGNORE INTO user_settings (key, value)
+                VALUES ('health_connect_opt_in', 'false')
+            `);
+        }
     }
 
     // To add a new migration: create a new entry with the next version number.

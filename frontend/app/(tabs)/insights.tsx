@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Layout } from '@/components/PageContainer';
@@ -40,6 +40,15 @@ import {
     type MoodDriversData,
 } from '@/components/visualisations/transforms/moodDrivers';
 import MoodDriversCard from '@/components/visualisations/MoodDriversCard';
+import SleepMoodCard from '@/components/visualisations/SleepMoodCard';
+import HeartRateMoodCard from '@/components/visualisations/HeartRateMoodCard';
+import {
+    sleepMoodCorrelation,
+    heartRateMoodCorrelation,
+    type MetricMoodCorrelation,
+} from '@/components/visualisations/transforms/healthMoodCorrelation';
+import { getHealthMetricsRange } from '@/databases/health-metrics';
+import { shouldShowHealthConnect } from '@/lib/healthConnectConfig';
 
 /**
  * Insights — honest, locally-derived patterns from the user's own entries.
@@ -62,6 +71,21 @@ type Insights = {
     topActivity: { name: string; avgWith: number; avgWithout: number; delta: number } | null;
     moodState: MoodState;
     drivers: MoodDriversData;
+    // Health Connect (Android + feature-flag only). Cards render only when the
+    // corresponding metric has any on-device data; the correlation itself gates
+    // on MIN_PAIRS paired days internally.
+    showHealth: boolean;
+    hasSleepData: boolean;
+    hasHeartRateData: boolean;
+    sleepMood: MetricMoodCorrelation;
+    heartRateMood: MetricMoodCorrelation;
+};
+
+/** Neutral correlation used before health data loads / when the feature is off. */
+const EMPTY_CORRELATION: MetricMoodCorrelation = {
+    status: 'notEnoughData',
+    pairCount: 0,
+    pairs: [],
 };
 
 const EMPTY_MOOD_STATE: MoodState = {
@@ -94,6 +118,11 @@ const EMPTY: Insights = {
     topActivity: null,
     moodState: EMPTY_MOOD_STATE,
     drivers: EMPTY_DRIVERS,
+    showHealth: false,
+    hasSleepData: false,
+    hasHeartRateData: false,
+    sleepMood: EMPTY_CORRELATION,
+    heartRateMood: EMPTY_CORRELATION,
 };
 
 // expo-router screen-level error boundary: a render throw in Insights shows a
@@ -118,9 +147,20 @@ export default function InsightsScreen() {
                     const start = startOfLocalDay(new Date(0));
                     const end = endOfLocalDay(new Date());
                     const today = localDateString(new Date());
+                    // Health Connect cards only exist on Android behind the flag;
+                    // skip the read entirely elsewhere. Bounds are day-strings
+                    // (health_metrics.date is a local 'YYYY-MM-DD'), a wide
+                    // all-time span up to today.
+                    const showHealth = shouldShowHealthConnect(Platform.OS);
 
-                    const [summary, dowRawRows, dateRows, activityRawRows, moodRawRows] =
-                        await Promise.all([
+                    const [
+                        summary,
+                        dowRawRows,
+                        dateRows,
+                        activityRawRows,
+                        moodRawRows,
+                        healthRows,
+                    ] = await Promise.all([
                             db.getFirstAsync<{ avg_mood: number | null; entry_count: number }>(
                                 WINDOW_SUMMARY,
                                 [start, end]
@@ -135,6 +175,9 @@ export default function InsightsScreen() {
                                 WEEKLY_MOOD_AVERAGES,
                                 [start, end]
                             ),
+                            showHealth
+                                ? getHealthMetricsRange(db, '0000-01-01', today)
+                                : Promise.resolve([]),
                         ]);
                     if (!active) return;
 
@@ -156,8 +199,21 @@ export default function InsightsScreen() {
                     // 2-axis "how you've been" state over all recorded local days,
                     // and the state-conditioned forward-looking drivers (reusing
                     // the SAME raw activity rows already fetched above).
-                    const moodState = buildMoodState(aggregateDailyAverages(moodRawRows));
+                    const dailyMoods = aggregateDailyAverages(moodRawRows);
+                    const moodState = buildMoodState(dailyMoods);
                     const drivers = buildMoodDrivers(activityRawRows);
+
+                    // Health↔mood correlations (Android only). Pair each health
+                    // day (already local-day-keyed + wake-day-attributed) with
+                    // that day's mood average — the join is a pure string-key
+                    // match, never SQL day-bucketing. Cards render only when the
+                    // metric has any data (below); the transform gates on MIN_PAIRS.
+                    const hasSleepData = healthRows.some(
+                        (r) => r.sleepTotalMinutes != null && r.sleepTotalMinutes > 0
+                    );
+                    const hasHeartRateData = healthRows.some(
+                        (r) => r.avgHeartRate != null && r.avgHeartRate > 0
+                    );
 
                     setData({
                         totalEntries: summary?.entry_count ?? 0,
@@ -177,6 +233,11 @@ export default function InsightsScreen() {
                             : null,
                         moodState,
                         drivers,
+                        showHealth,
+                        hasSleepData,
+                        hasHeartRateData,
+                        sleepMood: sleepMoodCorrelation(healthRows, dailyMoods),
+                        heartRateMood: heartRateMoodCorrelation(healthRows, dailyMoods),
                     });
                 } catch (e) {
                     console.error('Error building insights:', e);
@@ -322,6 +383,16 @@ export default function InsightsScreen() {
 
             {/* State-conditioned, forward-looking drivers */}
             <MoodDriversCard data={d.drivers} />
+
+            {/* Health Connect: sleep/heart-rate ↔ mood (Android + opt-in only).
+                Each card renders only when that metric has on-device data, so
+                Insights stays uncluttered for non-health users. */}
+            {d.showHealth && d.hasSleepData && (
+                <SleepMoodCard correlation={d.sleepMood} />
+            )}
+            {d.showHealth && d.hasHeartRateData && (
+                <HeartRateMoodCard correlation={d.heartRateMood} />
+            )}
 
             <Text style={styles.footnote}>
                 All insights are computed on your device from your own entries. Nothing leaves

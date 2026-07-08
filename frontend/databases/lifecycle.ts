@@ -11,7 +11,7 @@ import { runMigrations } from '@/databases/migrations';
  * Schema changes belong in `migrations.ts`. The V1 helpers
  * (`createInitialSchema`, `seedActivitiesV1`) are frozen — do not edit.
  */
-export const DATABASE_VERSION = 6;
+export const DATABASE_VERSION = 7;
 
 // Schema version log:
 //   1: initial schema
@@ -20,6 +20,8 @@ export const DATABASE_VERSION = 6;
 //   4: seeded daily-reminder settings (reminder_enabled, reminder_time)
 //   5: rebuilt entry_media with created_at + index (media attachments)
 //   6: renamed vague default Social activity "Event" -> "Social event"
+//   7: health_metrics table + health_connect_opt_in setting (Health Connect,
+//      on-device daily sleep/HR, Android opt-in — Phase 2a)
 
 /**
  * Entry point called once on app startup.
@@ -161,6 +163,7 @@ export async function resetDatabase(db: SQLiteDatabase): Promise<DatabaseResult>
           DROP TABLE IF EXISTS activities;
           DROP TABLE IF EXISTS activity_groups;
           DROP TABLE IF EXISTS user_settings;
+          DROP TABLE IF EXISTS health_metrics;
         `);
 
         // Reset the version to 0 so migrations will run again

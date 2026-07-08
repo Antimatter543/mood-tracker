@@ -213,3 +213,42 @@ describe('Migration V6', () => {
     expect(params).toEqual(['Social event', 'Event', 3, 'Social event', 3]);
   });
 });
+
+describe('Migration V7 (Health Connect)', () => {
+  it('creates the health_metrics table keyed by local calendar date', async () => {
+    const db = createMockDatabase();
+    const v7 = migrations.find(m => m.version === 7)!;
+    expect(v7).toBeDefined();
+
+    await v7.up(db as any);
+
+    const sql = db.execAsync.mock.calls
+      .map((c: any[]) => (c[0] as string).toUpperCase())
+      .join(' ');
+    expect(sql).toContain('CREATE TABLE IF NOT EXISTS HEALTH_METRICS');
+    // date is the PRIMARY KEY → one row per day + trivial JOIN to day-keyed entries.
+    expect(sql).toContain('DATE                TEXT PRIMARY KEY');
+    // the columns the sync layer writes.
+    expect(sql).toContain('SLEEP_TOTAL_MINUTES');
+    expect(sql).toContain('SLEEP_STAGES');
+    expect(sql).toContain('AVG_HEART_RATE');
+    expect(sql).toContain('MIN_HEART_RATE');
+    expect(sql).toContain('SYNCED_AT');
+    // never touches the mood entries table.
+    expect(sql).not.toContain('DROP TABLE ENTRIES');
+  });
+
+  it('seeds the Health Connect opt-in flag OFF with INSERT OR IGNORE', async () => {
+    const db = createMockDatabase();
+    const v7 = migrations.find(m => m.version === 7)!;
+
+    await v7.up(db as any);
+
+    const seed = db.runAsync.mock.calls.find((c: any[]) =>
+      typeof c[0] === 'string' && c[0].includes('health_connect_opt_in')
+    );
+    expect(seed).toBeDefined();
+    expect((seed![0] as string).toUpperCase()).toContain('INSERT OR IGNORE');
+    expect(seed![0] as string).toContain("'false'");
+  });
+});
