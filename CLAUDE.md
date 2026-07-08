@@ -68,16 +68,25 @@ removed from `release.sh` the same day — git history has it if ever needed.)
 orchestrator that keeps Play in sync with GitHub WITHOUT a manual step. A laptop cron runs it every 30 min
 (`*/30 * * * *`, logs → `~/ops/runtime/soulsync-play.log`) and `release.sh` calls it as its final phase
 (skippable with `NO_PLAY=1`). It is safe to run on every tick: it does ONE read-only API call in steady
-state and exits 0. Logic ladder (each step exits 0, never crashes a poller): (1) assert app.json
-version/versionCode agree; (2) **cheap idempotent guard** — if the versionCode is already on the production
-track, log "already on track — nothing to do" and stop; (3) if CI hasn't built `SoulSync-<version>.aab` yet,
-log "AAB not built yet — will retry" and stop; (4) otherwise delegate to `publish-to-play.sh` (`SOURCE=run`).
-- **Draft-default + the live-rollout gate:** it defaults to `PLAY_STATUS=draft` (staged, zero users) because
-  SoulSync is a pre-approval Play app — v2.3.4 is still **IN_REVIEW** at Google and the one-time **IARC
-  content-rating questionnaire** (Console-only, Anti's step) isn't done; until BOTH clear, Play rejects any
-  non-draft upload. Once approved + IARC complete, flip to live by exporting
-  `PLAY_STATUS=inProgress PLAY_ROLLOUT=0.2` (20% staged, halt-able), then `PLAY_STATUS=completed PLAY_ROLLOUT=1.0`
-  for full rollout. Env knobs: `PLAY_STATUS` / `PLAY_ROLLOUT` / `PLAY_TRACK` / `SOULSYNC_PLAY_LOG`.
+state and exits 0. **The cron env now exports `GPLAY_SERVICE_ACCOUNT_JSON`** (the local admin SA key) — before
+2026-07-08 it lacked the interactive profile's creds, so every stage silently failed "no credentials found"
+(preflight ran, then `gplay release` died on auth). Logic ladder (each step exits 0, never crashes a poller):
+**(0) HOLD gate** — if a local `.play-hold` marker exists (repo root, gitignored), log `HELD …` and stop,
+staging NOTHING (a deterministic pause for policy gates — see below); (1) assert app.json version/versionCode
+agree; (2) **cheap idempotent guard** — if the versionCode is already on the production track, log "already on
+track — nothing to do" and stop; (3) if CI hasn't built `SoulSync-<version>.aab` yet, log "AAB not built yet —
+will retry" and stop; (4) otherwise delegate to `publish-to-play.sh` (`SOURCE=run`).
+- **Play state (2026-07-08) + the HOLD gate (supersedes the old "v2.3.4 IN_REVIEW / draft-only" note):** the
+  app is LIVE — `gplay status` shows the production track = **2.3.4 completed** (live) + **2.3.6 draft**.
+  **`v2.3.8`** (Health Connect + Back up/Restore + honest filter bands) is **tagged but deliberately HELD from
+  Play** via a local `.play-hold` marker (`~/projects/soulsync/.play-hold`, gitignored): its manifest carries
+  Health Connect permissions (`READ_SLEEP`/`READ_HEART_RATE`) that require Google's **"Health Apps" declaration
+  APPROVED first** (undeclared health access risks store removal; justification drafted in
+  `ops/routes/soulsync/research/health-connect-integration-plan.md`). **To resume Play staging: file + clear the
+  declaration, then `rm ~/projects/soulsync/.play-hold`.** Rollout knobs once un-held (app is already approved,
+  so non-draft is now accepted): `PLAY_STATUS=inProgress PLAY_ROLLOUT=0.2` (20% staged, halt-able) →
+  `PLAY_STATUS=completed PLAY_ROLLOUT=1.0`. Env knobs: `PLAY_STATUS` / `PLAY_ROLLOUT` / `PLAY_TRACK` /
+  `SOULSYNC_PLAY_LOG` / `SOULSYNC_PLAY_HOLD_FILE`.
 - **Layout note:** `publish-on-tag.sh` lives at `frontend/scripts/` but `publish-to-play.sh` lives at the
   **repo-root** `scripts/` (one level up), so the orchestrator references `$REPO_ROOT/scripts/publish-to-play.sh`.
 
