@@ -57,6 +57,14 @@ set -uo pipefail
 export PATH="/home/astraedus/.local/bin:/home/astraedus/bin:/home/astraedus/.nvm/versions/node/v24.14.0/bin:$PATH"
 export HOME="/home/astraedus"
 
+# gplay creds: interactive shells get GPLAY_SERVICE_ACCOUNT_JSON from the profile, but
+# cron has no profile — so every Play push silently failed "no credentials found" (the
+# preflight ran, then `gplay release` died on auth). The admin SA key lives OUTSIDE this
+# PUBLIC repo (chmod 600). Set only if unset so a caller can override; not asserted here
+# because a missing key just re-produces the graceful auth error downstream.
+: "${GPLAY_SERVICE_ACCOUNT_JSON:=$HOME/ops/credentials/gcp/gplay-admin-sa.json}"
+export GPLAY_SERVICE_ACCOUNT_JSON
+
 REPO="Antimatter543/mood-tracker"
 PKG="com.raeduslabs.soulsyncapp"
 TRACK="${PLAY_TRACK:-production}"
@@ -90,6 +98,20 @@ for tool in node jq gh gplay; do
 done
 [ -f "$APP_JSON" ]  || { log "app.json not found at $APP_JSON — skipping tick"; exit 0; }
 [ -x "$PUBLISH" ]   || { log "publish-to-play.sh not executable at $PUBLISH — skipping tick"; exit 0; }
+
+# --- HOLD gate: a local marker file pauses ALL Play staging, deterministically. -------
+# WHY: some CI-built versions must NOT reach Play yet — v2.3.8+ carries Health Connect
+# manifest permissions (READ_SLEEP/READ_HEART_RATE) that require Google's "Health Apps"
+# declaration to be APPROVED first; staging an undeclared health build risks store
+# removal. Before this gate, the ONLY thing stopping a stage was the cron's broken auth
+# (fixed just above) — an accident, not a decision. This replaces that accident with
+# intent: `touch`/write the marker to hold, `rm` it to resume. LOCAL-only (gitignored),
+# because the cron runs on this laptop; path is overridable for testing.
+HOLD_FILE="${SOULSYNC_PLAY_HOLD_FILE:-$REPO_ROOT/.play-hold}"
+if [ -f "$HOLD_FILE" ]; then
+  log "HELD by $HOLD_FILE: $(head -1 "$HOLD_FILE" 2>/dev/null) — not staging to Play (rm the file to resume)"
+  exit 0
+fi
 
 # --- 1. resolve VERSION + versionCode, assert they agree (same rule as publish-to-play) ---
 VERSION="${1:-$(node -p "require('$APP_JSON').expo.version" 2>/dev/null)}"

@@ -17,3 +17,6 @@ keystore.properties
 # but guard the tree against any stray copy of the signed bundle/APK).
 *.aab
 *.apk
+
+# local Play-staging hold marker (publish-on-tag.sh), not a repo concern
+.play-hold
