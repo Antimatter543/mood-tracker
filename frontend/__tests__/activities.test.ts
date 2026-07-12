@@ -11,10 +11,27 @@ import {
   deleteActivity,
   updateActivityPositions,
 } from '@/databases/activities';
+import {
+  __setWriteConnectionForTests,
+  __resetWriteTransactionForTests,
+} from '@/databases/writeTransaction';
+
+// Route the write transaction onto the same mock we assert on (`txn === db`), so
+// deleteActivity / updateActivityPositions writes issued via withWriteTransaction
+// land on db.runAsync. See writeTransaction's test hooks.
+const makeDb = () => {
+  const db = createMockDatabase();
+  __setWriteConnectionForTests(db as any);
+  return db;
+};
+
+beforeEach(() => {
+  __resetWriteTransactionForTests();
+});
 
 describe('getActivities', () => {
   it('returns empty array on error', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockRejectedValue(new Error('disk gone'));
 
     const result = await getActivities(db as any);
@@ -22,7 +39,7 @@ describe('getActivities', () => {
   });
 
   it('orders by group_id then position', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     await getActivities(db as any);
     const sql = db.getAllAsync.mock.calls[0][0] as string;
     expect(sql).toContain('ORDER BY group_id, position');
@@ -31,21 +48,21 @@ describe('getActivities', () => {
 
 describe('addActivity — additional', () => {
   it('rejects empty name', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const result = await addActivity(db as any, '', 1);
     expect(result.success).toBe(false);
     expect(result.message).toContain('empty');
   });
 
   it('rejects whitespace-only name', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const result = await addActivity(db as any, '   ', 1);
     expect(result.success).toBe(false);
     expect(result.message).toContain('empty');
   });
 
   it('trims name before insert', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue({ maxPosition: 0 });
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
@@ -56,7 +73,7 @@ describe('addActivity — additional', () => {
   });
 
   it('returns failure result on DB throw', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockRejectedValue(new Error('boom'));
 
     const result = await addActivity(db as any, 'New', 1);
@@ -65,7 +82,7 @@ describe('addActivity — additional', () => {
   });
 
   it('handles null maxPosition (empty group) by starting at 1', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue(null);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
@@ -75,7 +92,7 @@ describe('addActivity — additional', () => {
   });
 
   it('uses provided icon family and name', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue({ maxPosition: 0 });
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
@@ -88,7 +105,7 @@ describe('addActivity — additional', () => {
 
 describe('updateActivity — additional', () => {
   it('trims new name before update', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync
       .mockResolvedValueOnce({ group_id: 1 })
       .mockResolvedValueOnce(null);
@@ -104,7 +121,7 @@ describe('updateActivity — additional', () => {
   });
 
   it('allows updating an activity to a name that exists in a DIFFERENT group', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     // Current activity is in group 1; duplicate check is scoped to group 1,
     // so we return null for the duplicate query.
     db.getFirstAsync
@@ -117,7 +134,7 @@ describe('updateActivity — additional', () => {
   });
 
   it('returns failure on DB throw', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockRejectedValue(new Error('disk gone'));
 
     const result = await updateActivity(db as any, 1, 'X', 'Feather', 'circle');
@@ -125,7 +142,7 @@ describe('updateActivity — additional', () => {
   });
 
   it('rejects whitespace-only name', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const result = await updateActivity(db as any, 1, '   ', 'Feather', 'circle');
     expect(result.success).toBe(false);
     expect(result.message).toContain('empty');
@@ -134,7 +151,7 @@ describe('updateActivity — additional', () => {
 
 describe('deleteActivity — additional', () => {
   it('compacts positions of activities after the deleted one', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     // Activity at position 2 in group 1
     db.getFirstAsync.mockResolvedValue({ group_id: 1, position: 2 });
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
@@ -151,7 +168,7 @@ describe('deleteActivity — additional', () => {
   });
 
   it('returns failure on DB throw during initial lookup', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockRejectedValue(new Error('disk gone'));
 
     const result = await deleteActivity(db as any, 1);
@@ -159,9 +176,11 @@ describe('deleteActivity — additional', () => {
   });
 
   it('returns failure on DB throw inside transaction', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue({ group_id: 1, position: 1 });
-    db.withExclusiveTransactionAsync.mockRejectedValue(new Error('txn failed'));
+    // The DELETE inside the write transaction fails → rollback + rethrow →
+    // deleteActivity returns a failure result.
+    db.runAsync.mockRejectedValue(new Error('txn failed'));
 
     const result = await deleteActivity(db as any, 1);
     expect(result.success).toBe(false);
@@ -170,7 +189,7 @@ describe('deleteActivity — additional', () => {
 
 describe('updateActivityPositions', () => {
   it('updates positions 1..N in supplied order', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
     await updateActivityPositions(db as any, [
@@ -189,8 +208,10 @@ describe('updateActivityPositions', () => {
   });
 
   it('returns failure when the transaction throws', async () => {
-    const db = createMockDatabase();
-    db.withExclusiveTransactionAsync.mockRejectedValue(new Error('txn boom'));
+    const db = makeDb();
+    // Empty list = no runAsync inside the txn, so fail BEGIN IMMEDIATE (execAsync)
+    // to force the transaction to throw.
+    db.execAsync.mockRejectedValue(new Error('txn boom'));
 
     const result = await updateActivityPositions(db as any, []);
     expect(result.success).toBe(false);

@@ -35,12 +35,26 @@ jest.mock('@/databases/migrations', () => ({
 }));
 
 import { importDatabaseData, exportDatabaseData } from '@/databases/data-export';
+import {
+  __setWriteConnectionForTests,
+  __resetWriteTransactionForTests,
+} from '@/databases/writeTransaction';
+
+// importDatabaseData writes via withWriteTransaction; route it onto the same mock
+// the test asserts on (`txn === db`). exportDatabaseData is read-only, so
+// injecting its mock is harmless.
+const makeDb = () => {
+  const db = createMockDatabase();
+  __setWriteConnectionForTests(db as any);
+  return db;
+};
 
 // Re-establish a clean, predictable set of mock defaults before every test so
 // queued `*Once` implementations never leak across tests. The DB mock is fresh
 // per test (createMockDatabase) so it is unaffected.
 beforeEach(() => {
   jest.resetAllMocks();
+  __resetWriteTransactionForTests();
   (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true });
   (FileSystem.makeDirectoryAsync as jest.Mock).mockResolvedValue(undefined);
   (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue('');
@@ -70,7 +84,7 @@ function mediaInserts(db: ReturnType<typeof createMockDatabase>) {
 
 describe('importDatabaseData', () => {
   it('returns failure when picker is cancelled', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
       canceled: true,
     });
@@ -81,7 +95,7 @@ describe('importDatabaseData', () => {
   });
 
   it('returns failure for invalid JSON', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
       canceled: false,
       assets: [{ uri: 'file:///mock/bad.json' }],
@@ -93,7 +107,7 @@ describe('importDatabaseData', () => {
   });
 
   it('does NOT delete all existing entries (non-destructive import)', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
 
     const importPayload = {
       version: 1,
@@ -134,7 +148,7 @@ describe('importDatabaseData', () => {
   });
 
   it('is robust to one embedded photo whose write fails — skips it, completes the rest', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const payload = {
       version: 3,
       exportDate: '2026-06-28',
@@ -182,7 +196,7 @@ describe('importDatabaseData', () => {
   });
 
   it('imports a legacy v2 (path-only) backup without crashing', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const payload = {
       version: 2,
       exportDate: '2026-01-01',
@@ -228,7 +242,7 @@ describe('importDatabaseData', () => {
 
 describe('exportDatabaseData', () => {
   it('exported JSON includes version 3 and exportDate fields', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync
       .mockResolvedValueOnce([]) // entries
       .mockResolvedValueOnce([]) // entry_media (photos)
@@ -245,7 +259,7 @@ describe('exportDatabaseData', () => {
   });
 
   it('embeds each photo as base64 image bytes on the exported entry (v3)', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync
       .mockResolvedValueOnce([
         { id: 1, mood: 5, notes: 'a', date: '2025-01-01' },
@@ -281,7 +295,7 @@ describe('exportDatabaseData', () => {
   });
 
   it('skips a missing source file without failing the export', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync
       .mockResolvedValueOnce([{ id: 1, mood: 5, notes: 'a', date: '2025-01-01' }]) // entries
       .mockResolvedValueOnce([
@@ -306,7 +320,7 @@ describe('exportDatabaseData', () => {
   });
 
   it('skips a source whose read throws, keeping the readable ones', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync
       .mockResolvedValueOnce([{ id: 1, mood: 5, notes: 'a', date: '2025-01-01' }]) // entries
       .mockResolvedValueOnce([
@@ -329,7 +343,7 @@ describe('exportDatabaseData', () => {
   });
 
   it('handles sharing unavailable gracefully', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([]);
     (Sharing.isAvailableAsync as jest.Mock).mockResolvedValueOnce(false);
 
@@ -341,7 +355,7 @@ describe('exportDatabaseData', () => {
   });
 
   it('delivers the backup via the OS share sheet (the single export path)', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([]);
 
     const result = await exportDatabaseData(db as any);
@@ -391,7 +405,7 @@ describe('round-trip: export then import carries photos across installs', () => 
     });
     (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue(JSON.stringify(backup));
 
-    const importDb = createMockDatabase();
+    const importDb = makeDb();
     importDb.getAllAsync
       .mockResolvedValueOnce([]) // existing groups
       .mockResolvedValueOnce([]); // existing activities

@@ -30,45 +30,64 @@ import {
   addActivityGroup,
   updateActivity,
 } from '@/databases/database';
+import {
+  __setWriteConnectionForTests,
+  __resetWriteTransactionForTests,
+} from '@/databases/writeTransaction';
+
+// Route the write transaction onto the same mock we assert on (`txn === db`).
+const makeDb = () => {
+  const db = createMockDatabase();
+  __setWriteConnectionForTests(db as any);
+  return db;
+};
+
+beforeEach(() => {
+  __resetWriteTransactionForTests();
+});
 
 describe('addMoodEntry', () => {
   it('rejects mood < 0', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const result = await addMoodEntry(db as any, -1, [], 'test');
     expect(result.success).toBe(false);
     expect(result.message).toContain('valid mood score');
   });
 
   it('rejects mood > 10', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const result = await addMoodEntry(db as any, 11, [], 'test');
     expect(result.success).toBe(false);
     expect(result.message).toContain('valid mood score');
   });
 
   it('rejects NaN mood', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const result = await addMoodEntry(db as any, NaN, [], 'test');
     expect(result.success).toBe(false);
   });
 
-  it('uses an EXCLUSIVE transaction for a valid entry', async () => {
-    const db = createMockDatabase();
+  it('uses a real write transaction for a valid entry', async () => {
+    const db = makeDb();
     // getAllAsync is used by filterValidActivityIds
     db.getAllAsync.mockResolvedValue([]);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
     const result = await addMoodEntry(db as any, 5, [], 'test note');
     expect(result.success).toBe(true);
-    // Must be the EXCLUSIVE variant — the non-exclusive withTransactionAsync
-    // can interleave with the focus-driven Home refresh reads on the shared
-    // connection and blank the dashboard until restart.
-    expect(db.withExclusiveTransactionAsync).toHaveBeenCalled();
+    // Real transaction on the write connection (BEGIN IMMEDIATE), not expo's
+    // transaction API (whose statements this codebase used to run outside any
+    // transaction — see databases/writeTransaction.ts).
+    const beganImmediate = db.execAsync.mock.calls.some(
+      (c: any[]) => typeof c[0] === 'string' && c[0].toUpperCase().includes('BEGIN IMMEDIATE')
+    );
+    expect(beganImmediate).toBe(true);
+    expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
     expect(db.withTransactionAsync).not.toHaveBeenCalled();
   });
 
   it('filters invalid activity IDs', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     // Only ID 1 exists in the mock DB
     db.getAllAsync.mockResolvedValue([{ id: 1 }]);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
@@ -81,7 +100,7 @@ describe('addMoodEntry', () => {
 
 describe('getMoodEntries', () => {
   it('returns empty array on error', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     // getMoodEntries is a READ with NO transaction wrapper, so the error must
     // come from the query itself, not from a (now-absent) transaction.
     db.getAllAsync.mockRejectedValue(new Error('DB error'));
@@ -93,7 +112,7 @@ describe('getMoodEntries', () => {
 
 describe('addActivity', () => {
   it('calculates next position from max', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue({ maxPosition: 3 });
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
@@ -105,7 +124,7 @@ describe('addActivity', () => {
   });
 
   it('uses default icons when not specified', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue({ maxPosition: 0 });
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
@@ -119,7 +138,7 @@ describe('addActivity', () => {
 
 describe('deleteActivity', () => {
   it('returns not found for missing ID', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue(null);
 
     const result = await deleteActivity(db as any, 999);
@@ -127,26 +146,30 @@ describe('deleteActivity', () => {
     expect(result.message).toContain('not found');
   });
 
-  it('uses an EXCLUSIVE transaction for deletion', async () => {
-    const db = createMockDatabase();
+  it('uses a real write transaction for deletion', async () => {
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue({ group_id: 1, position: 2 });
 
     await deleteActivity(db as any, 1);
-    expect(db.withExclusiveTransactionAsync).toHaveBeenCalled();
+    const beganImmediate = db.execAsync.mock.calls.some(
+      (c: any[]) => typeof c[0] === 'string' && c[0].toUpperCase().includes('BEGIN IMMEDIATE')
+    );
+    expect(beganImmediate).toBe(true);
+    expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
     expect(db.withTransactionAsync).not.toHaveBeenCalled();
   });
 });
 
 describe('addActivityGroup', () => {
   it('rejects empty name', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const result = await addActivityGroup(db as any, '  ');
     expect(result.success).toBe(false);
     expect(result.message).toContain('empty');
   });
 
   it('rejects duplicate name', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue({ id: 1 });
 
     const result = await addActivityGroup(db as any, 'Existing Group');
@@ -155,7 +178,7 @@ describe('addActivityGroup', () => {
   });
 
   it('trims whitespace from name', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue(null); // no duplicate
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
@@ -168,14 +191,14 @@ describe('addActivityGroup', () => {
 
 describe('updateActivity', () => {
   it('rejects empty name', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const result = await updateActivity(db as any, 1, '', 'Feather', 'circle');
     expect(result.success).toBe(false);
     expect(result.message).toContain('empty');
   });
 
   it('checks duplicate within same group', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     // First call: get current activity's group_id
     db.getFirstAsync
       .mockResolvedValueOnce({ group_id: 1 })
@@ -188,7 +211,7 @@ describe('updateActivity', () => {
   });
 
   it('returns not found for missing ID', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue(null);
 
     const result = await updateActivity(db as any, 999, 'Test', 'Feather', 'circle');

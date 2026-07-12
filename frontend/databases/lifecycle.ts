@@ -2,6 +2,7 @@ import { SQLiteDatabase } from 'expo-sqlite';
 import { initialActivities, initialActivityGroups } from '@/components/seedData';
 import { DatabaseResult } from '@/components/types';
 import { runMigrations } from '@/databases/migrations';
+import { withWriteLock } from '@/databases/writeTransaction';
 
 /**
  * Database schema lifecycle: version, initial schema, V1 seed, and the
@@ -24,15 +25,28 @@ export const DATABASE_VERSION = 7;
 //      on-device daily sleep/HR, Android opt-in — Phase 2a)
 
 /**
- * Entry point called once on app startup.
+ * Entry point called once on app startup, on the SQLiteProvider's READ
+ * connection.
  *
- * Enables foreign keys (a per-connection PRAGMA, not persisted) then runs
- * any pending migrations.
+ * PRAGMAs, in order:
+ *   - `journal_mode = WAL` — PERSISTED in the database file (not per-connection).
+ *     There are now genuinely TWO connections open on this file (this read
+ *     connection + the singleton write connection in writeTransaction.ts), and
+ *     WAL is what lets them run concurrently: readers never block the writer and
+ *     the writer never blocks readers. Setting it once here persists it for the
+ *     write connection too.
+ *   - `busy_timeout = 5000` — per-connection; makes this reader wait-and-retry
+ *     (up to 5s) instead of erroring if it ever races the write connection for a
+ *     lock, rather than throwing SQLITE_BUSY.
+ *   - `foreign_keys = ON` — per-connection, NOT persisted, so it must be set on
+ *     every connection that needs cascades (the write connection sets its own).
+ *     Also cannot be changed inside a transaction.
+ * Then run any pending migrations.
  */
 export async function initializeDatabase(db: SQLiteDatabase): Promise<void> {
   try {
-    // PRAGMA foreign_keys is per-connection in SQLite; must be set every
-    // time we open the DB. It also cannot be changed inside a transaction.
+    await db.execAsync('PRAGMA journal_mode = WAL;');
+    await db.execAsync('PRAGMA busy_timeout = 5000;');
     await db.execAsync('PRAGMA foreign_keys = ON;');
     await runMigrations(db);
   } catch (error) {
@@ -139,42 +153,64 @@ export async function seedActivitiesV1(db: SQLiteDatabase): Promise<DatabaseResu
 /**
  * Drops every app table and re-runs all migrations from V0.
  *
- * IMPORTANT: `PRAGMA foreign_keys` cannot be toggled inside a transaction
- * in SQLite — the PRAGMA is silently a no-op there. So we toggle FK
- * enforcement *outside* the transaction, then drop+remigrate inside the
- * transaction, then turn FKs back on.
+ * Runs entirely on the singleton WRITE connection, holding the write mutex for
+ * the whole reset (via `withWriteLock`) so no app write can interleave with a
+ * half-dropped schema. The `db` (read) connection is intentionally NOT touched:
+ * all writes in this app go through the write connection, and doing the reset
+ * there is what makes it a real, atomic operation (the old code ran it via
+ * `withExclusiveTransactionAsync`, which on this codebase executed the drops on
+ * the MAIN connection outside any transaction — see writeTransaction.ts).
  *
- * If the transaction throws, we still want to re-enable FKs (otherwise
- * subsequent queries on this connection would silently lose referential
- * integrity), so the re-enable lives in a `finally`.
+ * Three phases, ordered deliberately:
+ *   1. `foreign_keys = OFF` on the write connection, OUTSIDE any transaction
+ *      (the PRAGMA is a silent no-op inside one), so dropping tables in any
+ *      order can't trip a cascade constraint.
+ *   2. ONE real transaction (BEGIN IMMEDIATE … COMMIT) to drop everything and
+ *      reset `user_version` to 0. This is kept SEPARATE from step 3 because
+ *      `runMigrations` opens its OWN transaction, and nesting BEGIN inside BEGIN
+ *      is a SQLite error — so this transaction must COMMIT first.
+ *   3. `runMigrations` on the SAME write connection: its inner transaction now
+ *      runs un-nested and recreates the schema + seeds.
+ * `foreign_keys = ON` is restored in a `finally` so a failure never leaves the
+ * write connection with referential integrity silently disabled.
  */
-export async function resetDatabase(db: SQLiteDatabase): Promise<DatabaseResult> {
+export async function resetDatabase(_db: SQLiteDatabase): Promise<DatabaseResult> {
   try {
-    // Disable FK enforcement so dropping tables in arbitrary order doesn't
-    // trip cascade constraints. Outside the transaction — see fn docs.
-    await db.execAsync('PRAGMA foreign_keys = OFF;');
+    await withWriteLock(async (conn) => {
+      // Phase 1: FK OFF, outside any transaction.
+      await conn.execAsync('PRAGMA foreign_keys = OFF;');
+      try {
+        // Phase 2: drop + version reset in one real transaction.
+        await conn.execAsync('BEGIN IMMEDIATE;');
+        try {
+          await conn.execAsync(`
+            DROP TABLE IF EXISTS entry_activities;
+            DROP TABLE IF EXISTS entry_media;
+            DROP TABLE IF EXISTS entries;
+            DROP TABLE IF EXISTS activities;
+            DROP TABLE IF EXISTS activity_groups;
+            DROP TABLE IF EXISTS user_settings;
+            DROP TABLE IF EXISTS health_metrics;
+          `);
+          await conn.execAsync('PRAGMA user_version = 0');
+          await conn.execAsync('COMMIT;');
+        } catch (txnError) {
+          try {
+            await conn.execAsync('ROLLBACK;');
+          } catch {
+            // ignore — surface the original txnError below.
+          }
+          throw txnError;
+        }
 
-    try {
-      await db.withExclusiveTransactionAsync(async () => {
-        await db.execAsync(`
-          DROP TABLE IF EXISTS entry_activities;
-          DROP TABLE IF EXISTS entry_media;
-          DROP TABLE IF EXISTS entries;
-          DROP TABLE IF EXISTS activities;
-          DROP TABLE IF EXISTS activity_groups;
-          DROP TABLE IF EXISTS user_settings;
-          DROP TABLE IF EXISTS health_metrics;
-        `);
-
-        // Reset the version to 0 so migrations will run again
-        await db.execAsync('PRAGMA user_version = 0');
-
-        await runMigrations(db);
-      });
-    } finally {
-      // Always restore FK enforcement, even if the transaction threw.
-      await db.execAsync('PRAGMA foreign_keys = ON;');
-    }
+        // Phase 3: recreate schema + seed via migrations (its own transaction,
+        // now un-nested because phase 2 committed).
+        await runMigrations(conn);
+      } finally {
+        // Always restore FK enforcement, even if a phase threw.
+        await conn.execAsync('PRAGMA foreign_keys = ON;');
+      }
+    });
 
     return {
       success: true,

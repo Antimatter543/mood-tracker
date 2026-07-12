@@ -1,5 +1,53 @@
 # SoulSync — Project Lessons
 
+## 2026-07-13: The transactions were FAKE — expo's `withExclusiveTransactionAsync` ran every statement OUTSIDE the transaction; the FK-per-connection trap; error-swallowing masked real failures as EmptyState
+
+**Mistake (three intertwined bugs)**:
+
+1. **Every write "transaction" was empty.** `db.withExclusiveTransactionAsync(task)` (expo-sqlite) opens a
+   SEPARATE connection and passes it as the `txn` callback arg (`Transaction.createAsync` →
+   `useNewConnection: true`); statements MUST run on `txn`. Every call site in this app wrote
+   `async () => { await db.runAsync(...) }` — ignoring `txn`, using the OUTER `db` (the main connection). So
+   `BEGIN`/`COMMIT` wrapped NOTHING on the idle second connection while the real statements ran on the main
+   connection in autocommit. Consequence: ZERO atomicity (a mid-write failure left an entry without its
+   activities; a retry could duplicate a row), and the "exclusive lock" the 2026-06-26 Home-blank fix believed
+   it shipped never existed. Green `tsc + jest` proved nothing — the mock's `withExclusiveTransactionAsync`
+   just runs the callback, indistinguishable from a real transaction. This is "verified for the wrong reason"
+   theater: the 2026-06-26 fix passed its tests but the mechanism was inert.
+2. **The FK-per-connection trap.** A naive fix (just use `txn`) silently breaks cascades: `PRAGMA
+   foreign_keys` is PER-CONNECTION, set ON only on the main connection in `initializeDatabase`; a fresh `txn`
+   connection has FK OFF, so `ON DELETE CASCADE` stops firing. `PRAGMA foreign_keys` is also a silent no-op
+   inside an open transaction, and expo BEGINs before your callback — so expo's API can't be salvaged.
+3. **Swallowed read errors masked failures as "empty".** `DBViewer.fetchEntriesPage` caught errors and
+   returned `[]` → a transient read failure blanked the Timeline into `<EmptyState/>` ("add your first entry")
+   over a FULL DB (the user-reported "shows nothing at all"). `AddEntryButton`/`DBViewer` update/delete
+   swallowed failures to console with no user feedback. Home's `today?.mood || null` + `average ? … : '--'`
+   treated a legitimate 0.0 mood/average as "no data" (falsy-zero bug).
+
+**Rule**:
+1. ALL multi-statement writes go through `withWriteTransaction` (`databases/writeTransaction.ts`): ONE
+   singleton write connection (`openDatabaseAsync(DATABASE_NAME, { useNewConnection: true })` + `busy_timeout`
+   + `foreign_keys = ON` set BEFORE any BEGIN), an in-process mutex serializing all writes, `BEGIN IMMEDIATE`
+   → task(`txn`) → `COMMIT`/`ROLLBACK`. Statements on `txn` ONLY. NEVER expo's
+   `withExclusiveTransactionAsync`/`withTransactionAsync` in runtime code (migrations.ts is the one documented
+   exception). `initializeDatabase` sets `journal_mode = WAL` (persisted) so the read + write connections
+   coexist without blocking. Enforced by `__tests__/writeTransactionInvariant.test.ts` (no expo txn APIs in
+   runtime modules, every write module imports the primitive, no `db.<dml>` inside a write callback body).
+2. Verify the crown-jewel write path against a REAL engine: `__tests__/entries.integration.test.ts`
+   (`node:sqlite`) proves atomicity (a forced mid-txn failure rolls back the entries row), rollback+rethrow,
+   and that delete cascades to entry_activities/entry_media with FK ON. Unit tests inject the write connection
+   (`__setWriteConnectionForTests(db)`) so `txn === db` and statements land on the asserted mock.
+3. Reads THROW on failure (no `return []`) so a component can show a recoverable "Couldn't load" + retry,
+   never the EmptyState. Writes surface failures to the user (`Alert`) and preserve state (keep the modal
+   open / the row on screen). Home falsy-zero: `today?.mood ?? null` and a `null` average sentinel (extracted
+   to the testable `transforms/homeSummary.ts`).
+
+**Meta**: a passing test over a no-op mock is not verification. When a fix's mechanism lives in a 3rd-party
+API's contract (here: "run statements on the `txn` arg"), assert the mechanism against a real engine, and
+add a class-level invariant so the whole category can't regress.
+
+**Date**: 2026-07-13
+
 ## 2026-07-05: The `expo-sqlite` jest mock is a NO-OP stub — jest can't verify actual SQL behavior; use a `node:sqlite` integration test
 
 **Mistake/gap**: Building the Timeline search+filter (a `WHERE` with `LIKE ? ESCAPE`, a correlated `EXISTS` on activity names, `mood BETWEEN`, spliced into the paged CTE), I wanted to prove the query actually FILTERS correctly — but `__mocks__/expo-sqlite.ts` is a 19-line stub whose `getAllAsync` is `jest.fn().mockResolvedValue([])`. Every db-layer test (`entries.test.ts`, `database.test.ts`, …) `jest.mock('expo-sqlite')`, so they exercise the JS AROUND the query, never the SQL itself. A green `tsc + jest` says NOTHING about whether a query returns the right rows. The usual real-run check — Expo Go on the Pixel — was also unavailable (a second live Claude session was concurrently driving the same physical device via astra-adb/uiautomator; `UiAutomationService … already registered!` conflict + foreground stolen by a Nudge test → only 1/7 device checks completed).

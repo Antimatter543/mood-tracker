@@ -11,6 +11,7 @@ import { DataProvider } from "../../context/DataContext";
 import { useThemeColors } from "@/styles/global";
 import { SettingsProvider, useSettings } from "@/context/SettingsContext";
 import { initializeDatabase } from "@/databases/database";
+import { DATABASE_NAME } from "@/databases/writeTransaction";
 import { SQLiteProvider, useSQLiteContext } from "expo-sqlite";
 import { localDateString, startOfLocalDay } from "@/databases/dateHelpers";
 import { RECENT_ENTRY_DATES } from "@/components/visualisations/queries";
@@ -29,7 +30,7 @@ export default function RootLayout() {
 
 
     return (
-        <SQLiteProvider databaseName='moodTracker.db' onInit={initializeDatabase}>
+        <SQLiteProvider databaseName={DATABASE_NAME} onInit={initializeDatabase}>
             <DataProvider value={{ refetchEntries, refreshCount }}>
                 <SettingsProvider>
                     {/* OverlayProvider hosts our in-tree native-<Modal> replacement.

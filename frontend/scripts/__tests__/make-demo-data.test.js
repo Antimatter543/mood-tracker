@@ -34,6 +34,10 @@ jest.mock('@/databases/migrations', () => ({ runMigrations: jest.fn() }));
 
 const { importDatabaseData } = require('@/databases/data-export');
 const {
+  __setWriteConnectionForTests,
+  __resetWriteTransactionForTests,
+} = require('@/databases/writeTransaction');
+const {
   generateDemoData,
   DEFAULT_ACTIVITIES,
   NOTE_POOL,
@@ -56,6 +60,11 @@ function localDay(d) {
  */
 async function runImport(payload) {
   const db = createMockDatabase();
+  // importDatabaseData writes through withWriteTransaction now; route that onto
+  // this same mock (`txn === db`) so the INSERT/DELETE assertions below still see
+  // the SQL it issues. See databases/writeTransaction.ts test hooks.
+  __resetWriteTransactionForTests();
+  __setWriteConnectionForTests(db);
   DocumentPicker.getDocumentAsync.mockResolvedValueOnce({
     canceled: false,
     assets: [{ uri: 'file:///mock/demo.json' }],

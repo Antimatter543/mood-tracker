@@ -18,8 +18,23 @@ import {
   createInitialSchema,
 } from '@/databases/lifecycle';
 import { runMigrations } from '@/databases/migrations';
+import {
+  __setWriteConnectionForTests,
+  __resetWriteTransactionForTests,
+} from '@/databases/writeTransaction';
+
+// resetDatabase runs on the WRITE connection (via withWriteLock); route it onto
+// the same mock the test asserts on (`conn === db`). initializeDatabase /
+// createInitialSchema run on the passed connection directly (no write lock), so
+// the injection is a harmless no-op for them.
+const makeDb = () => {
+  const db = createMockDatabase();
+  __setWriteConnectionForTests(db as any);
+  return db;
+};
 
 beforeEach(() => {
+  __resetWriteTransactionForTests();
   (runMigrations as jest.Mock).mockClear();
 });
 
@@ -32,7 +47,7 @@ describe('DATABASE_VERSION', () => {
 
 describe('initializeDatabase', () => {
   it('enables foreign keys before running migrations', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     await initializeDatabase(db as any);
 
     const fkCall = db.execAsync.mock.calls.find((c: any[]) =>
@@ -43,7 +58,7 @@ describe('initializeDatabase', () => {
   });
 
   it('propagates errors from runMigrations', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     (runMigrations as jest.Mock).mockRejectedValueOnce(new Error('migration broke'));
 
     await expect(initializeDatabase(db as any)).rejects.toThrow('migration broke');
@@ -52,48 +67,49 @@ describe('initializeDatabase', () => {
 
 describe('resetDatabase — PRAGMA outside transaction', () => {
   it('toggles PRAGMA foreign_keys OUTSIDE the transaction', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
 
-    // Track call order: every execAsync call gets timestamped via a counter
-    let counter = 0;
-    const calls: { sql: string; order: number; insideTxn: boolean }[] = [];
-    let insideTxn = false;
-
+    // Record execAsync order. resetDatabase issues, on the write connection:
+    //   FK OFF → BEGIN IMMEDIATE → DROP… → user_version=0 → COMMIT → (migrations) → FK ON
+    const calls: string[] = [];
     db.execAsync.mockImplementation((sql: string) => {
-      calls.push({ sql, order: counter++, insideTxn });
+      calls.push(String(sql));
       return Promise.resolve();
-    });
-    db.withExclusiveTransactionAsync.mockImplementation(async (cb: any) => {
-      insideTxn = true;
-      try {
-        await cb();
-      } finally {
-        insideTxn = false;
-      }
     });
 
     await resetDatabase(db as any);
 
-    const fkOffCall = calls.find((c) => c.sql.includes('foreign_keys = OFF'));
-    const fkOnCall = calls.find((c) => c.sql.includes('foreign_keys = ON'));
+    const idx = (needle: string) =>
+      calls.findIndex((sql) => sql.toUpperCase().includes(needle));
+    const fkOff = idx('FOREIGN_KEYS = OFF');
+    const begin = idx('BEGIN IMMEDIATE');
+    const commit = idx('COMMIT');
+    const fkOn = idx('FOREIGN_KEYS = ON');
 
-    expect(fkOffCall).toBeDefined();
-    expect(fkOnCall).toBeDefined();
-    // Both PRAGMA toggles must NOT be inside the txn — SQLite silently
-    // ignores them inside a transaction.
-    expect(fkOffCall!.insideTxn).toBe(false);
-    expect(fkOnCall!.insideTxn).toBe(false);
+    expect(fkOff).toBeGreaterThanOrEqual(0);
+    expect(begin).toBeGreaterThanOrEqual(0);
+    expect(commit).toBeGreaterThanOrEqual(0);
+    expect(fkOn).toBeGreaterThanOrEqual(0);
+    // FK OFF is issued BEFORE the transaction opens and FK ON AFTER it commits —
+    // both outside the BEGIN..COMMIT window (a PRAGMA is a no-op inside a txn).
+    expect(fkOff).toBeLessThan(begin);
+    expect(fkOn).toBeGreaterThan(commit);
   });
 
   it('re-enables foreign keys even when the transaction throws', async () => {
-    const db = createMockDatabase();
-    db.withExclusiveTransactionAsync.mockRejectedValue(new Error('boom'));
+    const db = makeDb();
+    // FK OFF succeeds, then the DROP inside the transaction fails — the finally
+    // must still restore FK ON on the write connection.
+    db.execAsync.mockImplementation((sql: string) => {
+      if (typeof sql === 'string' && sql.includes('DROP TABLE')) {
+        return Promise.reject(new Error('boom'));
+      }
+      return Promise.resolve();
+    });
 
     const result = await resetDatabase(db as any);
     expect(result.success).toBe(false);
 
-    // Even though the txn threw, we should have called PRAGMA foreign_keys = ON
-    // in the finally block.
     const fkOnCall = db.execAsync.mock.calls.find((c: any[]) =>
       typeof c[0] === 'string' && c[0].includes('foreign_keys = ON')
     );
@@ -101,7 +117,7 @@ describe('resetDatabase — PRAGMA outside transaction', () => {
   });
 
   it('resets user_version to 0 inside the transaction', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     await resetDatabase(db as any);
 
     const resetCall = db.execAsync.mock.calls.find((c: any[]) =>
@@ -111,7 +127,7 @@ describe('resetDatabase — PRAGMA outside transaction', () => {
   });
 
   it('re-runs migrations after dropping tables', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     await resetDatabase(db as any);
     expect(runMigrations).toHaveBeenCalled();
   });
@@ -119,7 +135,7 @@ describe('resetDatabase — PRAGMA outside transaction', () => {
 
 describe('createInitialSchema', () => {
   it('creates the expected V1 tables', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     await createInitialSchema(db as any);
 
     const sql = db.execAsync.mock.calls[0][0] as string;
@@ -131,7 +147,7 @@ describe('createInitialSchema', () => {
   });
 
   it('creates required indexes', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     await createInitialSchema(db as any);
 
     const sql = db.execAsync.mock.calls[0][0] as string;

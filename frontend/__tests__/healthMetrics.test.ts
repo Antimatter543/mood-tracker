@@ -15,6 +15,21 @@ import {
   getLatestHealthMetric,
   clearAllHealthMetrics,
 } from '@/databases/health-metrics';
+import {
+  __setWriteConnectionForTests,
+  __resetWriteTransactionForTests,
+} from '@/databases/writeTransaction';
+
+// Route the write transaction onto the same mock we assert on (`txn === db`).
+const makeDb = () => {
+  const db = createMockDatabase();
+  __setWriteConnectionForTests(db as any);
+  return db;
+};
+
+beforeEach(() => {
+  __resetWriteTransactionForTests();
+});
 
 const rowA = {
   date: '2026-07-07',
@@ -33,17 +48,24 @@ const rowB = {
 
 describe('upsertHealthMetrics', () => {
   it('is a no-op for an empty list (no transaction, no writes)', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     await upsertHealthMetrics(db as any, [], 'health_connect', '2026-07-08T05:00:00.000Z');
-    expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
+    // Returns before opening a transaction: no BEGIN, no writes.
+    expect(db.execAsync).not.toHaveBeenCalled();
     expect(db.runAsync).not.toHaveBeenCalled();
   });
 
-  it('writes one upsert per row inside an EXCLUSIVE transaction, keyed by date', async () => {
-    const db = createMockDatabase();
+  it('writes one upsert per row inside a real write transaction, keyed by date', async () => {
+    const db = makeDb();
     await upsertHealthMetrics(db as any, [rowA, rowB], 'health_connect', '2026-07-08T05:00:00.000Z');
 
-    expect(db.withExclusiveTransactionAsync).toHaveBeenCalledTimes(1);
+    // A real transaction on the write connection (BEGIN IMMEDIATE), not expo's
+    // withExclusiveTransactionAsync/withTransactionAsync.
+    const beganImmediate = db.execAsync.mock.calls.some(
+      (c: any[]) => typeof c[0] === 'string' && c[0].toUpperCase().includes('BEGIN IMMEDIATE')
+    );
+    expect(beganImmediate).toBe(true);
+    expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
     expect(db.withTransactionAsync).not.toHaveBeenCalled();
     expect(db.runAsync).toHaveBeenCalledTimes(2);
 
@@ -54,7 +76,7 @@ describe('upsertHealthMetrics', () => {
   });
 
   it('serializes stage maps to JSON and passes nulls through unchanged', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     await upsertHealthMetrics(db as any, [rowA, rowB], 'health_connect', '2026-07-08T05:00:00.000Z');
 
     // rowA — stages serialized, real numbers.
@@ -82,7 +104,7 @@ describe('upsertHealthMetrics', () => {
 
 describe('getHealthMetricsRange', () => {
   it('range-filters by local-day bounds and parses stored rows', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([
       {
         date: '2026-07-07',
@@ -116,7 +138,7 @@ describe('getHealthMetricsRange', () => {
   });
 
   it('decodes corrupt or absent stage JSON to an empty map (never throws)', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([
       { date: '2026-07-07', sleep_total_minutes: 400, sleep_stages: 'not-json', avg_heart_rate: null, min_heart_rate: null, source: 's', synced_at: 't' },
       { date: '2026-07-08', sleep_total_minutes: null, sleep_stages: null, avg_heart_rate: 70, min_heart_rate: 55, source: 's', synced_at: 't' },
@@ -128,7 +150,7 @@ describe('getHealthMetricsRange', () => {
   });
 
   it('returns [] on error', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockRejectedValue(new Error('db gone'));
     await expect(getHealthMetricsRange(db as any, '2026-07-01', '2026-07-31')).resolves.toEqual([]);
   });
@@ -136,7 +158,7 @@ describe('getHealthMetricsRange', () => {
 
 describe('getLatestHealthMetric', () => {
   it('reads the newest day (ORDER BY date DESC LIMIT 1)', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue({
       date: '2026-07-08',
       sleep_total_minutes: 500,
@@ -156,7 +178,7 @@ describe('getLatestHealthMetric', () => {
   });
 
   it('returns null when the table is empty', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue(null);
     await expect(getLatestHealthMetric(db as any)).resolves.toBeNull();
   });
@@ -164,7 +186,7 @@ describe('getLatestHealthMetric', () => {
 
 describe('clearAllHealthMetrics', () => {
   it('deletes every row', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     await clearAllHealthMetrics(db as any);
     const [sql] = db.runAsync.mock.calls[0];
     expect((sql as string).toUpperCase()).toContain('DELETE FROM HEALTH_METRICS');
