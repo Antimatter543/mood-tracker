@@ -22,6 +22,7 @@ jest.mock('expo-router', () => {
         useFocusEffect: (cb: () => void | (() => void)) => {
             ReactActual.useEffect(() => cb(), [cb]);
         },
+        useIsFocused: () => true,
     };
 });
 

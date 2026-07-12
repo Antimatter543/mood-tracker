@@ -25,16 +25,24 @@
 import React from 'react';
 import { render, act, waitFor } from '@testing-library/react-native';
 
-// ── Mock expo-router useFocusEffect (run on mount + on callback-identity change),
-//    plus drive refreshCount so a SECOND focus-load fires while the first is still
-//    in flight. Mirrors useDataRefresh.test.tsx + dbViewerEntryFormMount.test.tsx. ─
+// ── Mock expo-router. `useFocusEffect` models FOCUS GAIN only (mount-once) so it
+//    does NOT double the loader on a refreshCount bump; the SECOND overlapping
+//    load (run B) is driven purely by useDataRefresh's VECTOR 2 (`useIsFocused`-
+//    gated effect on refreshCount) when the test bumps refreshCount. This mirrors
+//    production: useFocusEffect owns focus transitions, VECTOR 2 owns in-focus
+//    data updates. (Before VECTOR 2 existed this mock re-ran on callback identity;
+//    keeping that here would fire BOTH vectors and enqueue 3 reads, not 2.) ──────
 let mockRefreshCount = 0;
 jest.mock('expo-router', () => {
     const ReactActual = require('react') as typeof React;
     return {
         useFocusEffect: (cb: () => void | (() => void)) => {
-            ReactActual.useEffect(() => cb(), [cb]);
+            // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only; ref keeps the latest cb without re-running on identity change
+            const ref = ReactActual.useRef(cb);
+            ref.current = cb;
+            ReactActual.useEffect(() => ref.current(), []);
         },
+        useIsFocused: () => true,
     };
 });
 
