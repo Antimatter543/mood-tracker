@@ -11,6 +11,9 @@ All notable changes to SoulSync are documented here. Versions follow
   keeps the time you set, and vice versa.
 
 ### Fixed
+- **Home updates the moment you log a mood.** Adding a mood while you're on the Home tab now refreshes
+  Today's Mood, your streak, and the charts immediately — no more waiting, or switching tabs and back, to
+  see it appear.
 - **The Timeline no longer shows "add your first entry" when it can't load.** If a read hiccupped, the
   Timeline used to blank out and look like an empty app even when you had entries. It now shows a clear
   "Couldn't load your entries" with a **Try again** button, and if a refresh fails it keeps the entries

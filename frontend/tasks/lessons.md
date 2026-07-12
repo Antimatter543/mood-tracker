@@ -1,5 +1,13 @@
 # SoulSync — Project Lessons
 
+## 2026-07-13: "Home doesn't update after adding a mood" survived TWO fixes because focus-gain and data-changed-while-focused are DIFFERENT events sharing one unreliable mechanism
+
+**Mistake**: `useDataRefresh` drove live updates by putting `refreshCount` in the `useFocusEffect` callback's dep list, betting that a changed callback identity makes the effect "re-run while focused." That bet holds for a tab you NAVIGATE to (focus gain), so Timeline always looked fixed — you switch to it and the focus-gain reload fires. But it is unreliable for the ALREADY-focused screen on expo-router v6 bottom-tabs, so Home — focused when you tap its own FAB — never reloaded and showed a stale Today's Mood until you left and came back. The 2026-06-26 transaction work listed this as a mild "self-healing" follow-up and never owned it; device QA of 2.3.8 proved it was still fully live. It was invisible to jest because the faithful `useFocusEffect` mock (`useEffect(()=>cb(),[cb])`) ALWAYS re-runs on identity change — it over-models the real hook and hid the exact gap.
+
+**Rule**: (a) Treat "reload on focus gain" and "reload because data changed while I'm focused" as TWO vectors with separate owners: `useFocusEffect` for the first, an explicit `useEffect` keyed on the change signal + gated by the reactive `useIsFocused()` for the second (`hooks/useDataRefresh.ts` VECTOR 1 / VECTOR 2). Don't smuggle a data-change signal through a focus hook's dep list. (b) When a bug is device-reported as "doesn't update in place" but a test asserts it updates, SUSPECT THE MOCK is more capable than production — model the unreliable behavior (here: useFocusEffect as focus-gain-ONLY) so the test can actually fail. (c) A "mild, self-healing" follow-up that reproduces on every add is not mild — it was the user's original complaint.
+
+**Date**: 2026-07-13
+
 ## 2026-07-13: The transactions were FAKE — expo's `withExclusiveTransactionAsync` ran every statement OUTSIDE the transaction; the FK-per-connection trap; error-swallowing masked real failures as EmptyState
 
 **Mistake (three intertwined bugs)**:
