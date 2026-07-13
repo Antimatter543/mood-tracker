@@ -14,6 +14,7 @@ import CustomHeatmap from '@/components/visualisations/CustomHeatMap';
 import TimeOfDayChart from '@/components/visualisations/TimeOfDayChart';
 import ActivityCorrelationChart from '@/components/visualisations/ActivityCorrelationChart';
 import MonthOverMonthCard from '@/components/visualisations/MonthOverMonthCard';
+import ActivityExplorer from '@/components/ActivityExplorer';
 import TimeframeSelector from '@/components/TimeframeSelector';
 import { TimeframeProvider, useTimeframe } from '@/context/TimeframeContext';
 import { useThemeColors } from '@/styles/global';
@@ -155,6 +156,10 @@ const StatisticsContent = () => {
           <SectionHeader label="Activities" />
           <ActivityCorrelationChart />
           <MonthOverMonthCard />
+
+          {/* SECTION 4 — EXPLORE (search + per-activity detail insights) */}
+          <SectionHeader label="Explore your activities" />
+          <ActivityExplorer />
         </View>
       </ScrollView>
     </View>
