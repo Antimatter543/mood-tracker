@@ -38,6 +38,7 @@ const rowA = {
   sleepStages: { 5: 60 },
   avgHeartRate: 80,
   minHeartRate: 60,
+  restingHeartRate: 58,
   avgHrvMillis: 42,
 };
 const rowB = {
@@ -46,6 +47,7 @@ const rowB = {
   sleepStages: {},
   avgHeartRate: null,
   minHeartRate: null,
+  restingHeartRate: null,
   avgHrvMillis: null,
 };
 
@@ -79,26 +81,32 @@ describe('upsertHealthMetrics', () => {
     // HRV column is part of both the insert and the conflict-update.
     expect((sql as string)).toContain('avg_hrv_millis');
     expect((sql as string)).toContain('avg_hrv_millis      = excluded.avg_hrv_millis');
+    // Dedicated resting-HR column is part of both the insert and the conflict-update.
+    expect((sql as string)).toContain('resting_heart_rate');
+    expect((sql as string)).toContain('resting_heart_rate  = excluded.resting_heart_rate');
   });
 
   it('serializes stage maps to JSON and passes nulls through unchanged', async () => {
     const db = makeDb();
     await upsertHealthMetrics(db as any, [rowA, rowB], 'health_connect', '2026-07-08T05:00:00.000Z');
 
-    // rowA — stages serialized, real numbers (incl. avg_hrv_millis).
+    // rowA — stages serialized, real numbers (incl. resting_heart_rate + avg_hrv_millis).
+    // Param order: date, sleep_total, sleep_stages, avg_hr, min_hr, resting_hr, avg_hrv, source, synced_at.
     expect(db.runAsync.mock.calls[0][1]).toEqual([
       '2026-07-07',
       480,
       '{"5":60}',
       80,
       60,
+      58,
       42,
       'health_connect',
       '2026-07-08T05:00:00.000Z',
     ]);
-    // rowB — empty stages become NULL; missing metrics (incl. HRV) stay null.
+    // rowB — empty stages become NULL; missing metrics (incl. resting HR + HRV) stay null.
     expect(db.runAsync.mock.calls[1][1]).toEqual([
       '2026-07-08',
+      null,
       null,
       null,
       null,
@@ -120,6 +128,7 @@ describe('getHealthMetricsRange', () => {
         sleep_stages: '{"5":60}',
         avg_heart_rate: 80,
         min_heart_rate: 60,
+        resting_heart_rate: 58,
         avg_hrv_millis: 42,
         source: 'health_connect',
         synced_at: '2026-07-08T05:00:00.000Z',
@@ -140,6 +149,7 @@ describe('getHealthMetricsRange', () => {
         sleepStages: { 5: 60 },
         avgHeartRate: 80,
         minHeartRate: 60,
+        restingHeartRate: 58,
         avgHrvMillis: 42,
         source: 'health_connect',
         syncedAt: '2026-07-08T05:00:00.000Z',
@@ -175,6 +185,7 @@ describe('getLatestHealthMetric', () => {
       sleep_stages: null,
       avg_heart_rate: 70,
       min_heart_rate: 55,
+      resting_heart_rate: 53,
       avg_hrv_millis: 38,
       source: 'health_connect',
       synced_at: '2026-07-08T05:00:00.000Z',
@@ -186,6 +197,7 @@ describe('getLatestHealthMetric', () => {
     expect((sql as string).toUpperCase()).toContain('LIMIT 1');
     expect(result?.date).toBe('2026-07-08');
     expect(result?.avgHeartRate).toBe(70);
+    expect(result?.restingHeartRate).toBe(53);
     expect(result?.avgHrvMillis).toBe(38);
   });
 

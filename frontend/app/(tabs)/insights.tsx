@@ -83,6 +83,7 @@ type Insights = {
     showHealth: boolean;
     hasSleepData: boolean;
     hasHeartRateData: boolean;
+    hasRestingHrData: boolean;
     hasHrvData: boolean;
     sleepMood: MetricMoodCorrelation;
     heartRateMood: MetricMoodCorrelation;
@@ -134,6 +135,7 @@ const EMPTY: Insights = {
     showHealth: false,
     hasSleepData: false,
     hasHeartRateData: false,
+    hasRestingHrData: false,
     hasHrvData: false,
     sleepMood: EMPTY_CORRELATION,
     heartRateMood: EMPTY_CORRELATION,
@@ -232,6 +234,14 @@ export default function InsightsScreen() {
                     const hasHeartRateData = healthRows.some(
                         (r) => r.avgHeartRate != null && r.avgHeartRate > 0
                     );
+                    // Resting-HR card gates on the resting-HR series specifically —
+                    // the dedicated RestingHeartRate reading, or the min-bpm proxy
+                    // fallback. A Fitbit user has resting HR but NO intraday avg HR,
+                    // so this must NOT be tied to hasHeartRateData.
+                    const hasRestingHrData = healthRows.some((r) => {
+                        const resting = r.restingHeartRate ?? r.minHeartRate;
+                        return resting != null && resting > 0;
+                    });
                     const hasHrvData = healthRows.some(
                         (r) => r.avgHrvMillis != null && r.avgHrvMillis > 0
                     );
@@ -257,6 +267,7 @@ export default function InsightsScreen() {
                         showHealth,
                         hasSleepData,
                         hasHeartRateData,
+                        hasRestingHrData,
                         hasHrvData,
                         sleepMood: sleepMoodCorrelation(healthRows, dailyMoods),
                         heartRateMood: heartRateMoodCorrelation(healthRows, dailyMoods),
@@ -424,7 +435,7 @@ export default function InsightsScreen() {
             {d.showHealth && d.hasHeartRateData && (
                 <HeartRateMoodCard correlation={d.heartRateMood} />
             )}
-            {d.showHealth && d.hasHeartRateData && (
+            {d.showHealth && d.hasRestingHrData && (
                 <RestingHeartRateMoodCard correlation={d.restingHeartRateMood} />
             )}
             {d.showHealth && d.hasHrvData && (
@@ -435,7 +446,10 @@ export default function InsightsScreen() {
                 HRV / avg HR over time, with a metric toggle. Mounts once ANY
                 health metric has data (the toggle only offers metrics that do). */}
             {d.showHealth &&
-                (d.hasSleepData || d.hasHeartRateData || d.hasHrvData) && (
+                (d.hasSleepData ||
+                    d.hasHeartRateData ||
+                    d.hasRestingHrData ||
+                    d.hasHrvData) && (
                     <MoodMetricOverlayCard
                         healthRows={d.healthRows}
                         dailyMoods={d.dailyMoods}

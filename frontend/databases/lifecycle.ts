@@ -12,7 +12,7 @@ import { withWriteLock } from '@/databases/writeTransaction';
  * Schema changes belong in `migrations.ts`. The V1 helpers
  * (`createInitialSchema`, `seedActivitiesV1`) are frozen — do not edit.
  */
-export const DATABASE_VERSION = 8;
+export const DATABASE_VERSION = 9;
 
 // Schema version log:
 //   1: initial schema
@@ -25,6 +25,9 @@ export const DATABASE_VERSION = 8;
 //      on-device daily sleep/HR, Android opt-in — Phase 2a)
 //   8: health_metrics.avg_hrv_millis column (HRV analytics — nullable REAL,
 //      optional source; ADD COLUMN only, never in migration 7's CREATE TABLE)
+//   9: health_metrics.resting_heart_rate column (dedicated RestingHeartRate
+//      reading — Fitbit et al. write daily resting HR but no intraday HR;
+//      nullable REAL; ADD COLUMN only, never in migration 7's CREATE TABLE)
 
 /**
  * Entry point called once on app startup, on the SQLiteProvider's READ

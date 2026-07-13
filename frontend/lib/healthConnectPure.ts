@@ -49,13 +49,16 @@ export const REQUIRED_READ_RECORD_TYPES = [
 
 /**
  * OPTIONAL read-record types — requested alongside the required ones, but NOT
- * gated on. HRV isn't emitted by every source (many phones/wearables never
- * record it), so a device that grants only Sleep + Heart Rate is still fully
- * "connected"; HRV analytics simply stay empty until data appears. `connect()`'s
+ * gated on. Neither HRV nor a dedicated RestingHeartRate reading is emitted by
+ * every source (many phones/wearables record neither; some sources — e.g.
+ * Fitbit — write a daily RestingHeartRate record but NO intraday HeartRate), so
+ * a device that grants only Sleep + Heart Rate is still fully "connected"; the
+ * optional analytics simply stay empty until data appears. `connect()`'s
  * `granted` boolean therefore checks {@link REQUIRED_READ_RECORD_TYPES} only.
  */
 export const OPTIONAL_READ_RECORD_TYPES = [
   'HeartRateVariabilityRmssd',
+  'RestingHeartRate',
 ] as const;
 
 /**
@@ -208,6 +211,19 @@ export interface HrvSampleAt {
 }
 
 /**
+ * A single dedicated RestingHeartRate reading carrying its own instant — the
+ * flattened shape of a library `RestingHeartRateRecord` (an InstantaneousRecord:
+ * `time` + `beatsPerMinute`). Distinct from the per-second `HeartRate` samples:
+ * this is the ONE resting-HR value a source (e.g. Fitbit) writes ~1/day, and it
+ * is the REAL resting heart rate — not the intraday-minimum proxy.
+ */
+export interface RestingHrSampleAt {
+  /** ISO instant of the reading. */
+  time: string;
+  beatsPerMinute: number;
+}
+
+/**
  * The minimal per-session sleep shape day-aggregation needs. The native layer's
  * `SleepSessionSummary` is structurally assignable, so this module stays
  * independent of `lib/healthConnect.ts` (no import cycle).
@@ -231,6 +247,13 @@ export interface DailyHealthMetrics {
   avgHeartRate: number | null;
   /** Lowest bpm across the day's samples (resting-HR proxy), or `null`. */
   minHeartRate: number | null;
+  /**
+   * Mean of the dedicated RestingHeartRate readings that day (Fitbit et al. write
+   * ~1/day), or `null` when none. Distinct from `minHeartRate` — the intraday-min
+   * proxy. This is the REAL resting heart rate and is preferred over the proxy
+   * wherever a resting-HR value is shown.
+   */
+  restingHeartRate: number | null;
   /** Mean HRV (RMSSD, ms) across the day's samples, or `null` when there were none. */
   avgHrvMillis: number | null;
 }
@@ -253,6 +276,7 @@ interface DayAccumulator {
   sleepTotalMinutes: number;
   sleepStages: Record<number, number>;
   heartSamples: BpmSample[];
+  restingHrSamples: BpmSample[];
   hrvSamples: { hrvMillis: number }[];
 }
 
@@ -266,6 +290,10 @@ interface DayAccumulator {
  * - Heart-rate samples are keyed by each sample's own local day; `avgHeartRate`
  *   / `minHeartRate` are computed via the shared bpm helpers (finite-only). A
  *   day with no samples gets `null` for both.
+ * - Dedicated RestingHeartRate readings are keyed by their own local day;
+ *   `restingHeartRate` is the finite mean of that day's readings (sources like
+ *   Fitbit write ~1/day), `null` when the day had none. Distinct from — and
+ *   independent of — `minHeartRate`, the intraday-min proxy.
  * - HRV (RMSSD) samples are keyed by their own local day; `avgHrvMillis` is the
  *   finite mean, `null` when the day had no HRV reading (HRV is optional — many
  *   sources never emit it, so most days will be `null` here).
@@ -275,6 +303,7 @@ interface DayAccumulator {
 export function aggregateHealthByDay(input: {
   sleepSessions: ReadonlyArray<DailySleepInput>;
   heartRateSamples: ReadonlyArray<HeartRateSampleAt>;
+  restingHrSamples?: ReadonlyArray<RestingHrSampleAt>;
   hrvSamples?: ReadonlyArray<HrvSampleAt>;
 }): DailyHealthMetrics[] {
   const byDay = new Map<string, DayAccumulator>();
@@ -287,6 +316,7 @@ export function aggregateHealthByDay(input: {
         sleepTotalMinutes: 0,
         sleepStages: {},
         heartSamples: [],
+        restingHrSamples: [],
         hrvSamples: [],
       };
       byDay.set(key, acc);
@@ -311,6 +341,13 @@ export function aggregateHealthByDay(input: {
     dayOf(localDateString(sample.time)).heartSamples.push(sample);
   }
 
+  for (const sample of input.restingHrSamples ?? []) {
+    // Same guard as the intraday HR samples — the { beatsPerMinute } shape is
+    // exactly what averageBpm consumes, so it accumulates into its own bucket.
+    if (Number.isNaN(Date.parse(sample.time))) continue;
+    dayOf(localDateString(sample.time)).restingHrSamples.push(sample);
+  }
+
   for (const sample of input.hrvSamples ?? []) {
     if (Number.isNaN(Date.parse(sample.time))) continue;
     dayOf(localDateString(sample.time)).hrvSamples.push(sample);
@@ -323,6 +360,7 @@ export function aggregateHealthByDay(input: {
       sleepStages: acc.sleepStages,
       avgHeartRate: averageBpm([{ samples: acc.heartSamples }]),
       minHeartRate: minBpm(acc.heartSamples),
+      restingHeartRate: averageBpm([{ samples: acc.restingHrSamples }]),
       avgHrvMillis: averageHrv(acc.hrvSamples),
     }))
     .sort((a, b) => a.date.localeCompare(b.date));

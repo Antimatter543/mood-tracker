@@ -33,11 +33,23 @@ const {
   WarningAggregator,
 } = require('@expo/config-plugins');
 
-// Health Connect read permissions this app declares. Keep in sync with the
-// permissions requested at runtime in lib/healthConnect.ts.
+// Health Connect read permissions this app declares in the Android manifest.
+// This MUST stay in sync with the permissions requested at runtime in
+// lib/healthConnect.ts (REQUIRED + OPTIONAL record types): a permission absent
+// here is never offered/granted, so Health Connect returns NOTHING for it —
+// which is exactly how HRV silently never populated after 2.4.0 (it was in the
+// runtime request but never declared here). The invariant is locked by
+// __tests__/healthPermissionInvariant.test.ts, which asserts this array exactly
+// equals the runtime record-type set mapped to READ_* permission names.
+//   SleepSession                → READ_SLEEP
+//   HeartRate                   → READ_HEART_RATE
+//   HeartRateVariabilityRmssd   → READ_HEART_RATE_VARIABILITY
+//   RestingHeartRate            → READ_RESTING_HEART_RATE
 const HEALTH_PERMISSIONS = [
   'android.permission.health.READ_SLEEP',
   'android.permission.health.READ_HEART_RATE',
+  'android.permission.health.READ_HEART_RATE_VARIABILITY',
+  'android.permission.health.READ_RESTING_HEART_RATE',
 ];
 
 const ACTIVITY_ALIAS_NAME = 'ViewPermissionUsageActivity';
@@ -167,3 +179,6 @@ const withHealthConnect = (config) =>
   withHealthConnectMainActivity(withHealthConnectManifest(config));
 
 module.exports = withHealthConnect;
+// Exported for the manifest-vs-runtime permission-drift invariant test
+// (__tests__/healthPermissionInvariant.test.ts). Not used by the prebuild path.
+module.exports.HEALTH_PERMISSIONS = HEALTH_PERMISSIONS;

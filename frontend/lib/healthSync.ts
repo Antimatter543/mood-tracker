@@ -72,11 +72,14 @@ async function syncOneWindow(
   window: SyncWindow,
   syncedAt: string
 ): Promise<number> {
-  const { sleepSessions, heartRateSamples, hrvSamples } = await readHealthForRange(
-    window.startISO,
-    window.endISO
-  );
-  const rows = aggregateHealthByDay({ sleepSessions, heartRateSamples, hrvSamples });
+  const { sleepSessions, heartRateSamples, restingHrSamples, hrvSamples } =
+    await readHealthForRange(window.startISO, window.endISO);
+  const rows = aggregateHealthByDay({
+    sleepSessions,
+    heartRateSamples,
+    restingHrSamples,
+    hrvSamples,
+  });
   await upsertHealthMetrics(db, rows, HEALTH_CONNECT_SOURCE, syncedAt);
   return rows.length;
 }

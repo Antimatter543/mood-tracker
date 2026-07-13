@@ -64,6 +64,7 @@ const richRows = (): HealthMetricDay[] =>
         sleepTotalMinutes: 360 + i * 20,
         avgHeartRate: 68 + i,
         minHeartRate: 52 + i,
+        restingHeartRate: null, // no dedicated resting reading → restingHr uses the min proxy
         avgHrvMillis: null, // no HRV source
     }));
 const richMoods = () => days(8).map((day, i) => ({ day, avg: 4 + (i % 4) }));
@@ -122,7 +123,7 @@ describe('MoodMetricOverlayCard', () => {
     it('too little data → calm keep-logging state, no chart', async () => {
         // One day only → no metric reaches OVERLAY_MIN_POINTS.
         const view = await renderMeasured(
-            [{ date: '2026-06-01', sleepTotalMinutes: 420, avgHeartRate: 70, minHeartRate: 55, avgHrvMillis: null }],
+            [{ date: '2026-06-01', sleepTotalMinutes: 420, avgHeartRate: 70, minHeartRate: 55, restingHeartRate: null, avgHrvMillis: null }],
             [{ day: '2026-06-01', avg: 6 }]
         );
         expect(view.getByText(/Keep logging/i)).toBeTruthy();
