@@ -301,15 +301,19 @@ describe('healthConnect — Android path (mocked native module)', () => {
     );
   });
 
-  it('connect initializes and requests the two read permissions', async () => {
+  it('connect initializes, requests the two read permissions, and reports the ACTUAL grants', async () => {
+    // connect() opens the prompt via requestPermission, then reads the real grant
+    // state via getGrantedPermissions (source of truth — robust to Android 16's
+    // never-resolving prompt). So the result comes from getGrantedPermissions.
     const initialize = jest.fn().mockResolvedValue(true);
-    const requestPermission = jest.fn().mockResolvedValue([
+    const requestPermission = jest.fn().mockResolvedValue([]);
+    const getGrantedPermissions = jest.fn().mockResolvedValue([
       { accessType: 'read', recordType: 'SleepSession' },
       { accessType: 'read', recordType: 'HeartRate' },
     ]);
     await withHealthConnect(
       'android',
-      { initialize, requestPermission, SdkAvailabilityStatus },
+      { initialize, requestPermission, getGrantedPermissions, SdkAvailabilityStatus },
       async (mod) => {
         const res = await mod.connect();
         expect(initialize).toHaveBeenCalledTimes(1);
@@ -328,17 +332,40 @@ describe('healthConnect — Android path (mocked native module)', () => {
 
   it('connect reports not-granted when a required permission is withheld', async () => {
     const initialize = jest.fn().mockResolvedValue(true);
-    const requestPermission = jest
+    const requestPermission = jest.fn().mockResolvedValue([]);
+    const getGrantedPermissions = jest
       .fn()
-      .mockResolvedValue([
-        { accessType: 'read', recordType: 'SleepSession' },
-      ]);
+      .mockResolvedValue([{ accessType: 'read', recordType: 'SleepSession' }]);
     await withHealthConnect(
       'android',
-      { initialize, requestPermission, SdkAvailabilityStatus },
+      { initialize, requestPermission, getGrantedPermissions, SdkAvailabilityStatus },
       async (mod) => {
         const res = await mod.connect();
         expect(res.granted).toBe(false);
+      }
+    );
+  });
+
+  it('connect still detects a grant even when the permission prompt ERRORS (Android-16 resilience)', async () => {
+    // The Android-16 never-resolve case is simulated here by requestPermission
+    // rejecting: connect() must NOT propagate that — it falls through to
+    // getGrantedPermissions and reports the grant the user actually made. (The
+    // production timeout path lands in the same catch; this covers it without
+    // burning a real 90s timer.)
+    const initialize = jest.fn().mockResolvedValue(true);
+    const requestPermission = jest
+      .fn()
+      .mockRejectedValue(new Error('prompt hung / never resolved'));
+    const getGrantedPermissions = jest.fn().mockResolvedValue([
+      { accessType: 'read', recordType: 'SleepSession' },
+      { accessType: 'read', recordType: 'HeartRate' },
+    ]);
+    await withHealthConnect(
+      'android',
+      { initialize, requestPermission, getGrantedPermissions, SdkAvailabilityStatus },
+      async (mod) => {
+        const res = await mod.connect();
+        expect(res.granted).toBe(true);
       }
     );
   });

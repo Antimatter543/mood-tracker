@@ -24,17 +24,6 @@ import type { HealthConnectStatus } from './healthConnect';
  */
 export const HEALTH_CONNECT_ENABLED = true;
 
-/**
- * Android API level at/above which `react-native-health-connect`'s permission
- * prompt silently fails (an unfixed upstream bug on Android 16 / API 36). On
- * such devices we surface an explicit "not supported yet" state and never call
- * `connect()` — calling it would open a prompt the user can never complete.
- *
- * Behind a named constant so it's a one-line change to lift once the library
- * ships a fix.
- */
-export const HEALTH_CONNECT_MIN_UNSUPPORTED_API = 36; // Android 16
-
 /** How many days back the FIRST sync reads (incremental syncs read less). */
 export const HEALTH_CONNECT_SYNC_WINDOW_DAYS = 30;
 
@@ -64,17 +53,6 @@ export const HEALTH_OPT_IN_SETTING_KEY = 'health_connect_opt_in';
 export const HEALTH_LAST_SYNCED_SETTING_KEY = 'health_last_synced_at';
 
 /**
- * Whether the running Android version supports the Health Connect permission
- * flow. `false` at/above {@link HEALTH_CONNECT_MIN_UNSUPPORTED_API}. Pure.
- *
- * @param apiLevel `Platform.Version` on Android (the numeric API level).
- */
-export function isHealthConnectVersionSupported(apiLevel: number): boolean {
-  if (!Number.isFinite(apiLevel)) return false;
-  return apiLevel < HEALTH_CONNECT_MIN_UNSUPPORTED_API;
-}
-
-/**
  * Whether the Health Connect Settings section should render at all. Android +
  * feature-flag-on only; on iOS / web / when disabled the section renders
  * nothing. Pure.
@@ -90,37 +68,41 @@ export function shouldShowHealthConnect(
  * The card's resolved display phase (excludes the transient `'loading'` state the
  * component shows before this resolves). Each phase drives one distinct body:
  *
- *  - `'unsupported_version'` — Android 16+, where the library's permission prompt
- *    is broken upstream (an info state, no action).
  *  - `'unavailable'` — the device can't run Health Connect at all (Android too
  *    old / native module absent). Info state, NO install action (installing the
  *    provider wouldn't help).
  *  - `'provider_required'` — Health Connect isn't installed (or is outdated) but
  *    the device CAN run it: offer an install-or-update action to the Play listing.
  *  - `'available'` — ready to connect / already connected.
+ *
+ * NOTE (2026-07-13): there is deliberately NO Android-version gate. An earlier
+ * build blocked Android 16 / API 36 outright ("not supported on your Android
+ * version") on the belief that `react-native-health-connect`'s permission prompt
+ * silently fails there. That was over-broad — Health Connect works on Android
+ * 14/15/16 real devices (the library is current: 3.5.3 / connect-client
+ * 1.1.0-alpha11); the "silent fail" reproduced only on an emulator (limited HC
+ * support). The genuine Android-16 edge case — the permission promise not
+ * resolving in the `never_ask_again`/blocked state (react-native#53887) — is
+ * handled by a timeout on `connect()` (see lib/healthConnect.ts), not by
+ * disabling the feature. So the phase is now a pure function of the SDK status.
  */
 export type HealthConnectCardPhase =
-  | 'unsupported_version'
   | 'unavailable'
   | 'provider_required'
   | 'available';
 
 /**
- * Pure decision: which card phase to show, given the OS API level + the resolved
- * SDK status. The version gate wins first (an unsupported Android version can't
- * complete the permission flow regardless of provider state); otherwise the SDK
- * status decides. `'unsupported_platform'` can't occur on Android (the whole
- * section is gated off elsewhere) but folds to `'unavailable'` for safety.
+ * Pure decision: which card phase to show, given the resolved SDK status.
+ * `'unsupported_platform'` can't occur on Android (the whole section is gated off
+ * elsewhere) but folds to `'unavailable'` for safety.
  *
  * This is the mapping the "wrong copy on a device with no Health Connect" bug
- * lived in — kept pure + exported so the not-installed vs unsupported branches
+ * lived in — kept pure + exported so the not-installed vs unavailable branches
  * are unit-testable without a device or the native module.
  */
 export function resolveHealthConnectPhase(
-  apiLevel: number,
   status: HealthConnectStatus
 ): HealthConnectCardPhase {
-  if (!isHealthConnectVersionSupported(apiLevel)) return 'unsupported_version';
   if (status === 'available') return 'available';
   if (status === 'provider_required') return 'provider_required';
   // 'unavailable' or the impossible-on-Android 'unsupported_platform'.
