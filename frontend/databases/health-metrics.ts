@@ -31,6 +31,7 @@ interface HealthMetricRow {
   sleep_stages: string | null;
   avg_heart_rate: number | null;
   min_heart_rate: number | null;
+  avg_hrv_millis: number | null;
   source: string;
   synced_at: string;
 }
@@ -53,6 +54,7 @@ function rowToMetric(row: HealthMetricRow): StoredHealthMetric {
     sleepStages,
     avgHeartRate: row.avg_heart_rate,
     minHeartRate: row.min_heart_rate,
+    avgHrvMillis: row.avg_hrv_millis,
     source: row.source,
     syncedAt: row.synced_at,
   };
@@ -82,13 +84,14 @@ export async function upsertHealthMetrics(
     for (const row of rows) {
       await txn.runAsync(
         `INSERT INTO health_metrics
-           (date, sleep_total_minutes, sleep_stages, avg_heart_rate, min_heart_rate, source, synced_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+           (date, sleep_total_minutes, sleep_stages, avg_heart_rate, min_heart_rate, avg_hrv_millis, source, synced_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(date) DO UPDATE SET
            sleep_total_minutes = excluded.sleep_total_minutes,
            sleep_stages        = excluded.sleep_stages,
            avg_heart_rate      = excluded.avg_heart_rate,
            min_heart_rate      = excluded.min_heart_rate,
+           avg_hrv_millis      = excluded.avg_hrv_millis,
            source              = excluded.source,
            synced_at           = excluded.synced_at`,
         [
@@ -97,6 +100,7 @@ export async function upsertHealthMetrics(
           serializeStages(row.sleepStages),
           row.avgHeartRate,
           row.minHeartRate,
+          row.avgHrvMillis,
           source,
           syncedAt,
         ]
@@ -139,6 +143,26 @@ export async function getLatestHealthMetric(
     return row ? rowToMetric(row) : null;
   } catch (error) {
     console.error('Error reading latest health metric:', error);
+    return null;
+  }
+}
+
+/**
+ * The earliest stored LOCAL day (`YYYY-MM-DD`), or `null` when the table is empty
+ * / on error. `date` is already a local-day string (not an instant), so this is a
+ * plain `MIN(date)` — no timezone math. Used by the sync orchestrator to decide
+ * whether stored coverage already reaches the desired backfill start.
+ */
+export async function getEarliestHealthMetricDate(
+  db: SQLiteDatabase
+): Promise<string | null> {
+  try {
+    const row = await db.getFirstAsync<{ earliest: string | null }>(
+      `SELECT MIN(date) AS earliest FROM health_metrics`
+    );
+    return row?.earliest ?? null;
+  } catch (error) {
+    console.error('Error reading earliest health metric date:', error);
     return null;
   }
 }

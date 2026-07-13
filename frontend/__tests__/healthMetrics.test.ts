@@ -13,6 +13,7 @@ import {
   upsertHealthMetrics,
   getHealthMetricsRange,
   getLatestHealthMetric,
+  getEarliestHealthMetricDate,
   clearAllHealthMetrics,
 } from '@/databases/health-metrics';
 import {
@@ -37,6 +38,7 @@ const rowA = {
   sleepStages: { 5: 60 },
   avgHeartRate: 80,
   minHeartRate: 60,
+  avgHrvMillis: 42,
 };
 const rowB = {
   date: '2026-07-08',
@@ -44,6 +46,7 @@ const rowB = {
   sleepStages: {},
   avgHeartRate: null,
   minHeartRate: null,
+  avgHrvMillis: null,
 };
 
 describe('upsertHealthMetrics', () => {
@@ -73,25 +76,30 @@ describe('upsertHealthMetrics', () => {
     // Same-day re-sync REPLACES the row — the upsert contract lives in the SQL.
     expect((sql as string)).toContain('INSERT INTO health_metrics');
     expect((sql as string).toUpperCase()).toContain('ON CONFLICT(DATE) DO UPDATE');
+    // HRV column is part of both the insert and the conflict-update.
+    expect((sql as string)).toContain('avg_hrv_millis');
+    expect((sql as string)).toContain('avg_hrv_millis      = excluded.avg_hrv_millis');
   });
 
   it('serializes stage maps to JSON and passes nulls through unchanged', async () => {
     const db = makeDb();
     await upsertHealthMetrics(db as any, [rowA, rowB], 'health_connect', '2026-07-08T05:00:00.000Z');
 
-    // rowA — stages serialized, real numbers.
+    // rowA — stages serialized, real numbers (incl. avg_hrv_millis).
     expect(db.runAsync.mock.calls[0][1]).toEqual([
       '2026-07-07',
       480,
       '{"5":60}',
       80,
       60,
+      42,
       'health_connect',
       '2026-07-08T05:00:00.000Z',
     ]);
-    // rowB — empty stages become NULL; missing metrics stay null.
+    // rowB — empty stages become NULL; missing metrics (incl. HRV) stay null.
     expect(db.runAsync.mock.calls[1][1]).toEqual([
       '2026-07-08',
+      null,
       null,
       null,
       null,
@@ -112,6 +120,7 @@ describe('getHealthMetricsRange', () => {
         sleep_stages: '{"5":60}',
         avg_heart_rate: 80,
         min_heart_rate: 60,
+        avg_hrv_millis: 42,
         source: 'health_connect',
         synced_at: '2026-07-08T05:00:00.000Z',
       },
@@ -131,6 +140,7 @@ describe('getHealthMetricsRange', () => {
         sleepStages: { 5: 60 },
         avgHeartRate: 80,
         minHeartRate: 60,
+        avgHrvMillis: 42,
         source: 'health_connect',
         syncedAt: '2026-07-08T05:00:00.000Z',
       },
@@ -165,6 +175,7 @@ describe('getLatestHealthMetric', () => {
       sleep_stages: null,
       avg_heart_rate: 70,
       min_heart_rate: 55,
+      avg_hrv_millis: 38,
       source: 'health_connect',
       synced_at: '2026-07-08T05:00:00.000Z',
     });
@@ -175,12 +186,37 @@ describe('getLatestHealthMetric', () => {
     expect((sql as string).toUpperCase()).toContain('LIMIT 1');
     expect(result?.date).toBe('2026-07-08');
     expect(result?.avgHeartRate).toBe(70);
+    expect(result?.avgHrvMillis).toBe(38);
   });
 
   it('returns null when the table is empty', async () => {
     const db = makeDb();
     db.getFirstAsync.mockResolvedValue(null);
     await expect(getLatestHealthMetric(db as any)).resolves.toBeNull();
+  });
+});
+
+describe('getEarliestHealthMetricDate', () => {
+  it('reads MIN(date) — the earliest stored local day', async () => {
+    const db = makeDb();
+    db.getFirstAsync.mockResolvedValue({ earliest: '2026-05-01' });
+    const result = await getEarliestHealthMetricDate(db as any);
+    const [sql] = db.getFirstAsync.mock.calls[0];
+    expect((sql as string).toUpperCase()).toContain('MIN(DATE)');
+    expect((sql as string).toUpperCase()).toContain('FROM HEALTH_METRICS');
+    expect(result).toBe('2026-05-01');
+  });
+
+  it('returns null when the table is empty (MIN over no rows is NULL)', async () => {
+    const db = makeDb();
+    db.getFirstAsync.mockResolvedValue({ earliest: null });
+    await expect(getEarliestHealthMetricDate(db as any)).resolves.toBeNull();
+  });
+
+  it('returns null on error (never throws)', async () => {
+    const db = makeDb();
+    db.getFirstAsync.mockRejectedValue(new Error('db gone'));
+    await expect(getEarliestHealthMetricDate(db as any)).resolves.toBeNull();
   });
 });
 

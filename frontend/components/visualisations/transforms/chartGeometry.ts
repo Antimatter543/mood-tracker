@@ -31,6 +31,12 @@
 export const MOOD_MIN = 0;
 export const MOOD_MAX = 10;
 
+/** A value range mapped to the plot's vertical extent. */
+export type ValueDomain = { min: number; max: number };
+
+/** The fixed 0..10 mood domain — the default for the Home mood chart. */
+export const MOOD_DOMAIN: ValueDomain = { min: MOOD_MIN, max: MOOD_MAX };
+
 export type ChartDims = {
     width: number;
     height: number;
@@ -73,16 +79,31 @@ const clamp = (n: number, lo: number, hi: number): number =>
     Math.min(hi, Math.max(lo, n));
 
 /**
- * Map a mood value (0..10, clamped) to a y pixel coordinate. Higher mood = lower
- * y (closer to the top). When the plot area has zero height (degenerate dims)
- * everything collapses to the top inset.
+ * Map a value (clamped to `domain`) to a y pixel coordinate. Higher value = lower
+ * y (closer to the top). A degenerate domain (`max <= min`, e.g. a constant
+ * metric series) maps everything to the vertical MIDDLE so a flat line reads
+ * sensibly instead of collapsing to an edge. Zero plot height → the top inset.
  */
-export const moodToY = (mood: number, dims: ChartDims): number => {
+export const valueToY = (
+    value: number,
+    dims: ChartDims,
+    domain: ValueDomain = MOOD_DOMAIN
+): number => {
     const plotH = Math.max(0, dims.height - dims.padTop - dims.padBottom);
-    const t = (clamp(mood, MOOD_MIN, MOOD_MAX) - MOOD_MIN) / (MOOD_MAX - MOOD_MIN);
-    // t=0 (mood 0) -> bottom (padTop + plotH); t=1 (mood 10) -> top (padTop).
+    const span = domain.max - domain.min;
+    const t =
+        span <= 0 ? 0.5 : (clamp(value, domain.min, domain.max) - domain.min) / span;
+    // t=0 (domain min) -> bottom (padTop + plotH); t=1 (domain max) -> top (padTop).
     return dims.padTop + (1 - t) * plotH;
 };
+
+/**
+ * Map a mood value (0..10, clamped) to a y pixel coordinate — the fixed-domain
+ * special case of {@link valueToY}. Kept as a named export for the mood chart +
+ * its tests.
+ */
+export const moodToY = (mood: number, dims: ChartDims): number =>
+    valueToY(mood, dims, MOOD_DOMAIN);
 
 /**
  * Map a slot index to an x pixel coordinate, evenly spread across the inset
@@ -113,15 +134,19 @@ const polyline = (pts: { x: number; y: number }[]): string => {
 /**
  * Compute the full geometry for a slot array.
  *
- * @param values  per-slot mood averages, oldest first; null = missing.
+ * @param values  per-slot values, oldest first; null = missing.
  * @param dims    pixel dimensions + insets.
+ * @param domain  the value range mapped to the plot height. Defaults to the fixed
+ *                0..10 mood domain (the Home chart); the mood↔metric overlay
+ *                passes a data-derived domain for its second (metric) series.
  */
 export const buildChartGeometry = (
     values: (number | null)[],
-    dims: ChartDims
+    dims: ChartDims,
+    domain: ValueDomain = MOOD_DOMAIN
 ): ChartGeometry => {
     const n = values.length;
-    const baselineY = moodToY(MOOD_MIN, dims);
+    const baselineY = valueToY(domain.min, dims, domain);
 
     const points: ChartPoint[] = values.map((v, index) => {
         const missing = v === null || v === undefined || !Number.isFinite(v as number);
@@ -130,7 +155,7 @@ export const buildChartGeometry = (
         // baseline so a stray render never floats it mid-plot. The renderer
         // does not connect or solid-dot missing slots, so this y is only a
         // sensible default for an optional faint "missing" marker.
-        const y = missing ? baselineY : moodToY(v as number, dims);
+        const y = missing ? baselineY : valueToY(v as number, dims, domain);
         return { index, x, y, value: missing ? null : (v as number), missing };
     });
 

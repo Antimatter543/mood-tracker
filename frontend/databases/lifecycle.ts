@@ -12,7 +12,7 @@ import { withWriteLock } from '@/databases/writeTransaction';
  * Schema changes belong in `migrations.ts`. The V1 helpers
  * (`createInitialSchema`, `seedActivitiesV1`) are frozen — do not edit.
  */
-export const DATABASE_VERSION = 7;
+export const DATABASE_VERSION = 8;
 
 // Schema version log:
 //   1: initial schema
@@ -23,6 +23,8 @@ export const DATABASE_VERSION = 7;
 //   6: renamed vague default Social activity "Event" -> "Social event"
 //   7: health_metrics table + health_connect_opt_in setting (Health Connect,
 //      on-device daily sleep/HR, Android opt-in — Phase 2a)
+//   8: health_metrics.avg_hrv_millis column (HRV analytics — nullable REAL,
+//      optional source; ADD COLUMN only, never in migration 7's CREATE TABLE)
 
 /**
  * Entry point called once on app startup, on the SQLiteProvider's READ

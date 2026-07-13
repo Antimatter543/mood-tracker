@@ -38,10 +38,24 @@ type SleepStagesBearer = Pick<SleepSessionRecord, 'stages'>;
 
 const MS_PER_MINUTE = 60_000;
 
-/** Read-record types the mood layer requests from Health Connect (Phase 1). */
+/**
+ * Read-record types the mood layer REQUIRES from Health Connect — the app's
+ * "connected" state gates on read access to every one of these.
+ */
 export const REQUIRED_READ_RECORD_TYPES = [
   'SleepSession',
   'HeartRate',
+] as const;
+
+/**
+ * OPTIONAL read-record types — requested alongside the required ones, but NOT
+ * gated on. HRV isn't emitted by every source (many phones/wearables never
+ * record it), so a device that grants only Sleep + Heart Rate is still fully
+ * "connected"; HRV analytics simply stay empty until data appears. `connect()`'s
+ * `granted` boolean therefore checks {@link REQUIRED_READ_RECORD_TYPES} only.
+ */
+export const OPTIONAL_READ_RECORD_TYPES = [
+  'HeartRateVariabilityRmssd',
 ] as const;
 
 /**
@@ -85,6 +99,34 @@ export function averageBpm(
 export function minBpm(samples: ReadonlyArray<BpmSample>): number | null {
   const bpms = finiteBpm(samples);
   return bpms.length === 0 ? null : Math.min(...bpms);
+}
+
+/**
+ * The finite HRV-in-millis values from a flat sample list. Mirrors
+ * {@link finiteBpm} — non-finite / non-number values are dropped so a garbage
+ * reading never poisons the day's mean.
+ */
+function finiteHrv(samples: ReadonlyArray<{ hrvMillis: number }>): number[] {
+  const out: number[] = [];
+  for (const sample of samples) {
+    const ms = sample.hrvMillis;
+    if (typeof ms === 'number' && Number.isFinite(ms)) out.push(ms);
+  }
+  return out;
+}
+
+/**
+ * Mean heart-rate-variability (RMSSD, milliseconds) across a flat sample list.
+ * Returns `null` when there are no finite samples — an absent HRV source must
+ * read as "no data", never 0. Mirrors {@link averageBpm} for the HR side.
+ */
+export function averageHrv(
+  samples: ReadonlyArray<{ hrvMillis: number }>
+): number | null {
+  const values = finiteHrv(samples);
+  return values.length === 0
+    ? null
+    : values.reduce((sum, ms) => sum + ms, 0) / values.length;
 }
 
 /**
@@ -154,6 +196,18 @@ export interface HeartRateSampleAt {
 }
 
 /**
+ * A single HRV (RMSSD) reading carrying its own instant — the flattened shape of
+ * a library `HeartRateVariabilityRmssdRecord` (an InstantaneousRecord: `time` +
+ * `heartRateVariabilityMillis`, flattened here to `hrvMillis`).
+ */
+export interface HrvSampleAt {
+  /** ISO instant of the reading. */
+  time: string;
+  /** RMSSD in milliseconds. */
+  hrvMillis: number;
+}
+
+/**
  * The minimal per-session sleep shape day-aggregation needs. The native layer's
  * `SleepSessionSummary` is structurally assignable, so this module stays
  * independent of `lib/healthConnect.ts` (no import cycle).
@@ -177,6 +231,8 @@ export interface DailyHealthMetrics {
   avgHeartRate: number | null;
   /** Lowest bpm across the day's samples (resting-HR proxy), or `null`. */
   minHeartRate: number | null;
+  /** Mean HRV (RMSSD, ms) across the day's samples, or `null` when there were none. */
+  avgHrvMillis: number | null;
 }
 
 /**
@@ -197,6 +253,7 @@ interface DayAccumulator {
   sleepTotalMinutes: number;
   sleepStages: Record<number, number>;
   heartSamples: BpmSample[];
+  hrvSamples: { hrvMillis: number }[];
 }
 
 /**
@@ -209,12 +266,16 @@ interface DayAccumulator {
  * - Heart-rate samples are keyed by each sample's own local day; `avgHeartRate`
  *   / `minHeartRate` are computed via the shared bpm helpers (finite-only). A
  *   day with no samples gets `null` for both.
- * - Days present in EITHER source appear in the output. Rows are sorted by date
+ * - HRV (RMSSD) samples are keyed by their own local day; `avgHrvMillis` is the
+ *   finite mean, `null` when the day had no HRV reading (HRV is optional — many
+ *   sources never emit it, so most days will be `null` here).
+ * - Days present in ANY source appear in the output. Rows are sorted by date
  *   ascending, so an upsert writes them in calendar order.
  */
 export function aggregateHealthByDay(input: {
   sleepSessions: ReadonlyArray<DailySleepInput>;
   heartRateSamples: ReadonlyArray<HeartRateSampleAt>;
+  hrvSamples?: ReadonlyArray<HrvSampleAt>;
 }): DailyHealthMetrics[] {
   const byDay = new Map<string, DayAccumulator>();
 
@@ -226,6 +287,7 @@ export function aggregateHealthByDay(input: {
         sleepTotalMinutes: 0,
         sleepStages: {},
         heartSamples: [],
+        hrvSamples: [],
       };
       byDay.set(key, acc);
     }
@@ -249,6 +311,11 @@ export function aggregateHealthByDay(input: {
     dayOf(localDateString(sample.time)).heartSamples.push(sample);
   }
 
+  for (const sample of input.hrvSamples ?? []) {
+    if (Number.isNaN(Date.parse(sample.time))) continue;
+    dayOf(localDateString(sample.time)).hrvSamples.push(sample);
+  }
+
   return [...byDay.entries()]
     .map(([date, acc]) => ({
       date,
@@ -256,6 +323,7 @@ export function aggregateHealthByDay(input: {
       sleepStages: acc.sleepStages,
       avgHeartRate: averageBpm([{ samples: acc.heartSamples }]),
       minHeartRate: minBpm(acc.heartSamples),
+      avgHrvMillis: averageHrv(acc.hrvSamples),
     }))
     .sort((a, b) => a.date.localeCompare(b.date));
 }
@@ -296,4 +364,165 @@ export function computeSyncWindow(
   }
 
   return { startISO: new Date(startMs).toISOString(), endISO };
+}
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** Inputs for {@link resolveSyncWindow} — all pure, all provided by the caller. */
+export interface ResolveSyncWindowOptions {
+  /** Earliest mood-entry instant (raw UTC ISO), or `null` for an empty DB. */
+  earliestMoodInstant: string | null;
+  /** Last successful sync marker (ISO), or `null`/'' when never synced. */
+  lastSyncedAtISO: string | null;
+  /** Earliest LOCAL day (`YYYY-MM-DD`) already stored in health_metrics, or `null`. */
+  earliestStoredHealthDate: string | null;
+  now: Date;
+  /** Hard cap on how far back a backfill may reach (days). */
+  maxBackfillDays: number;
+  /** Fallback lookback when there is no mood history to anchor to (days). */
+  initialWindowDays: number;
+}
+
+/** A resolved read window plus whether it's a (chunked) historical backfill. */
+export interface ResolvedSyncWindow extends SyncWindow {
+  /** True when this window is a one-time historical backfill (drive it chunked). */
+  isBackfill: boolean;
+}
+
+/**
+ * Decide the Health Connect read window for a sync, choosing between a one-time
+ * historical BACKFILL and a small INCREMENTAL read. Pure.
+ *
+ * The problem it solves: the first sync used to read only a fixed 30 days back,
+ * so a user with months/years of Health Connect history AND older mood history
+ * only ever got 30 days paired — the (health-day ∩ mood-day) count could stay
+ * below the insight threshold forever ("keep logging"). This reaches back to the
+ * earliest mood day (capped) so the full overlap is pulled.
+ *
+ * - `desiredBackfillStart` = the earliest mood day (local midnight), floored at
+ *   `now − maxBackfillDays`; or, with no mood history, `now − initialWindowDays`.
+ * - `needBackfill` when stored health coverage doesn't yet reach that desired
+ *   start (nothing stored, or the earliest stored day is later than desired).
+ *   → read `[desiredBackfillStart, now]` as a backfill.
+ * - Otherwise steady-state: an INCREMENTAL read from the start of the last-synced
+ *   local day ({@link computeSyncWindow}), clamped so it never reaches earlier
+ *   than the desired start nor later than `now`.
+ *
+ * Guarantees: `startISO ≤ endISO` always; the window never reaches earlier than
+ * `now − maxBackfillDays`; future/garbage `lastSyncedAtISO` can't push the start
+ * past `now`.
+ *
+ * NOTE (known, bounded limitation): coverage is judged by the earliest STORED
+ * health day, not the earliest day we've READ. If a user's mood history predates
+ * their available Health Connect data (no HC data exists that far back), the
+ * earliest stored day can never reach `desiredBackfillStart`, so each sync
+ * re-runs the (idempotent) backfill instead of going incremental. This is
+ * wasteful-but-correct and, since sync is user-triggered (connect / manual
+ * refresh, not every app-open), acceptable; a future `backfilled-through` marker
+ * would make it strictly one-time.
+ */
+export function resolveSyncWindow(
+  opts: ResolveSyncWindowOptions
+): ResolvedSyncWindow {
+  const {
+    earliestMoodInstant,
+    lastSyncedAtISO,
+    earliestStoredHealthDate,
+    now,
+    maxBackfillDays,
+    initialWindowDays,
+  } = opts;
+
+  const nowMs = now.getTime();
+  const endISO = now.toISOString();
+  const backfillFloorMs = nowMs - maxBackfillDays * MS_PER_DAY;
+
+  // The day we'd LIKE the backfill to reach: the earliest mood day (local
+  // midnight), never earlier than the hard cap; or the initial-window fallback
+  // when there is no mood history to anchor to.
+  const moodMs = earliestMoodInstant ? Date.parse(earliestMoodInstant) : NaN;
+  let desiredStartMs: number;
+  if (Number.isFinite(moodMs)) {
+    const moodDayStartMs = Date.parse(startOfLocalDay(new Date(moodMs)));
+    desiredStartMs = Math.max(moodDayStartMs, backfillFloorMs);
+  } else {
+    desiredStartMs = nowMs - initialWindowDays * MS_PER_DAY;
+  }
+  // Never past now (guards a pathological config where initialWindowDays ≤ 0).
+  desiredStartMs = Math.min(desiredStartMs, nowMs);
+  const desiredStartDay = localDateString(new Date(desiredStartMs));
+
+  // Backfill when stored coverage doesn't reach the desired start.
+  const needBackfill =
+    earliestStoredHealthDate == null ||
+    earliestStoredHealthDate > desiredStartDay;
+
+  if (needBackfill) {
+    return {
+      startISO: new Date(desiredStartMs).toISOString(),
+      endISO,
+      isBackfill: true,
+    };
+  }
+
+  // Steady state: small incremental read from the last-synced local day, but
+  // never earlier than the desired start and never later than now.
+  const incremental = computeSyncWindow(lastSyncedAtISO, now, maxBackfillDays);
+  let startMs = Date.parse(incremental.startISO);
+  startMs = Math.min(Math.max(startMs, desiredStartMs), nowMs);
+
+  return { startISO: new Date(startMs).toISOString(), endISO, isBackfill: false };
+}
+
+/**
+ * Split an inclusive-start / exclusive-end window into consecutive sub-windows
+ * of at most `chunkDays` each, so a large backfill can be read + upserted one
+ * chunk at a time (bounding peak memory). Pure.
+ *
+ * Interior boundaries are SNAPPED to a local-day start so no calendar day ever
+ * straddles two chunks — otherwise a night's sleep (attributed to its wake day)
+ * or a day's HR samples could be split across chunks and the second chunk's
+ * per-day upsert would overwrite the first with a partial day. Contiguous:
+ * chunk N's `endISO` is exactly chunk N+1's `startISO`. Returns `[]` for an empty
+ * or inverted window (start ≥ end) or a non-positive `chunkDays`.
+ */
+export function splitWindow(
+  startISO: string,
+  endISO: string,
+  chunkDays: number
+): SyncWindow[] {
+  const startMs = Date.parse(startISO);
+  const endMs = Date.parse(endISO);
+  if (
+    !Number.isFinite(startMs) ||
+    !Number.isFinite(endMs) ||
+    startMs >= endMs ||
+    chunkDays <= 0
+  ) {
+    return [];
+  }
+
+  const chunkMs = chunkDays * MS_PER_DAY;
+  const windows: SyncWindow[] = [];
+  let cursorMs = startMs;
+
+  while (cursorMs < endMs) {
+    let nextMs = cursorMs + chunkMs;
+    if (nextMs >= endMs) {
+      nextMs = endMs;
+    } else {
+      // Snap the interior boundary down to a local-day start (keeps each chunk
+      // ≤ chunkDays and day-aligned). Guard against a non-advancing snap.
+      const snapped = Date.parse(startOfLocalDay(new Date(nextMs)));
+      nextMs = snapped > cursorMs ? snapped : cursorMs + chunkMs;
+      if (nextMs >= endMs) nextMs = endMs;
+    }
+    windows.push({
+      startISO: new Date(cursorMs).toISOString(),
+      endISO: new Date(nextMs).toISOString(),
+    });
+    cursorMs = nextMs;
+  }
+
+  return windows;
 }

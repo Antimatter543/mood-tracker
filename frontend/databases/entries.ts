@@ -210,6 +210,26 @@ export async function getMoodEntries(db: SQLiteDatabase): Promise<MoodEntry[]> {
 }
 
 /**
+ * The RAW UTC instant of the earliest mood entry (`MIN(date)`), or `null` when
+ * the DB has no entries yet. Used to anchor the Health Connect historical
+ * backfill window to the start of the user's mood history.
+ *
+ * Returning the raw stored instant is doctrine-compliant: SQL only range-filters
+ * or returns the raw `date`; it never day-buckets (no `date()`/`strftime()`).
+ * `MIN(date)` over an empty table returns one row whose value is `NULL`, so an
+ * empty DB yields `null` and never throws. Does NOT swallow errors — the caller
+ * (syncHealthMetrics) treats a read failure as a sync failure.
+ */
+export async function getEarliestEntryInstant(
+  db: SQLiteDatabase
+): Promise<string | null> {
+  const row = await db.getFirstAsync<{ earliest: string | null }>(
+    'SELECT MIN(date) AS earliest FROM entries'
+  );
+  return row?.earliest ?? null;
+}
+
+/**
  * Read ONE page of entries for the Timeline, applying the search / mood filter
  * in SQL (the list is server-paginated, so a client-side filter would only see
  * the ~pageSize rows currently loaded — see components/timeline/entryFilter.ts).
