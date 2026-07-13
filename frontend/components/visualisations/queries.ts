@@ -182,3 +182,65 @@ export const ACTIVITY_CORRELATION = `
   WHERE e.date BETWEEN ? AND ?
   ORDER BY e.date
 `;
+
+// -----------------------------------------------------------------------------
+// Per-activity detail: every entry that logged a specific activity — RAW rows.
+//
+// Powers the "Explore your activities" detail screen (mood distribution,
+// variability, trend). Returns the RAW stored instant + mood, ordered oldest→
+// newest; JS keys each entry to its LOCAL day (localDateString / aggregate*),
+// exactly like every other query here. No `date()` bucketing.
+//
+// Caller supplies `?activityId`.
+// -----------------------------------------------------------------------------
+export const ENTRIES_FOR_ACTIVITY = `
+  SELECT e.id, e.date, e.mood
+  FROM entries e
+  JOIN entry_activities ea ON ea.entry_id = e.id
+  WHERE ea.activity_id = ?
+  ORDER BY e.date
+`;
+
+// Windowed variant of ENTRIES_FOR_ACTIVITY: same shape, additionally range-
+// filtered on the raw instant with parameterised UTC ISO bounds (?start, ?end
+// from startOfLocalDay / endOfLocalDay / computeWindow). Caller supplies
+// `?activityId, ?start, ?end`.
+export const ENTRIES_FOR_ACTIVITY_IN_RANGE = `
+  SELECT e.id, e.date, e.mood
+  FROM entries e
+  JOIN entry_activities ea ON ea.entry_id = e.id
+  WHERE ea.activity_id = ? AND e.date BETWEEN ? AND ?
+  ORDER BY e.date
+`;
+
+// -----------------------------------------------------------------------------
+// Co-occurring activities: for one activity, the OTHER activities most often
+// logged on the SAME entries ("often paired with"). One row per other activity
+// with the count of shared entries, most-shared first. No date logic at all —
+// this is a pure structural join over entry_activities.
+//
+// Caller supplies `?activityId`.
+// -----------------------------------------------------------------------------
+export const CO_OCCURRING_ACTIVITIES = `
+  SELECT a2.id, a2.name, a2.icon_family, a2.icon_name, COUNT(*) AS n
+  FROM entry_activities ea1
+  JOIN entry_activities ea2
+    ON ea2.entry_id = ea1.entry_id AND ea2.activity_id <> ea1.activity_id
+  JOIN activities a2 ON a2.id = ea2.activity_id
+  WHERE ea1.activity_id = ?
+  GROUP BY a2.id
+  ORDER BY n DESC, a2.name
+`;
+
+// -----------------------------------------------------------------------------
+// Entry count per activity — one row per activity that has at least one entry.
+// Backs the "Explore your activities" list (each row shows how many times the
+// activity has been logged, and the list is sorted by it). Activities with zero
+// entries simply don't appear here; the caller left-joins them in at count 0.
+// No parameters.
+// -----------------------------------------------------------------------------
+export const ACTIVITY_ENTRY_COUNTS = `
+  SELECT activity_id, COUNT(*) AS n
+  FROM entry_activities
+  GROUP BY activity_id
+`;
