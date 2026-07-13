@@ -198,10 +198,16 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   (use `@expo/vector-icons`). 5 themes (dark/light/cherry/midnight/forest) — check at least one light theme.
 - Schema/settings changes go through `databases/migrations.ts` (+ `SETTINGS_REGISTRY` for settings). The
   `entry_media` table backs photo attachments.
+- **DB writes: EVERY multi-statement write goes through `withWriteTransaction` (`databases/writeTransaction.ts`),
+  statements on the `txn` arg only — NEVER expo's `withExclusiveTransactionAsync`/`withTransactionAsync`
+  (they ran statements on the main connection outside any transaction = fake transactions, zero atomicity).
+  `foreign_keys` is per-connection (cascades only fire on the FK-ON write connection); WAL + two connections
+  (read provider + singleton writer) is now real. Full contract + PRAGMA traps: `frontend/databases/CLAUDE.md`.**
 
 ## Layout
 - `frontend/app/(tabs)/` — screens (index=Home, stats, timeline, insights, settings).
 - `frontend/components/visualisations/` — charts + `transforms/` (pure, unit-tested) + `queries.ts` (SQL).
 - `frontend/lib/notifications.ts` — local daily-reminder scheduling (pure + testable).
-- `frontend/databases/` — SQLite facade, migrations, CRUD, mediaHelpers, entry-media.
+- `frontend/databases/` — SQLite facade, migrations, CRUD, mediaHelpers, entry-media, `writeTransaction.ts`
+  (the write primitive). **Read `frontend/databases/CLAUDE.md` before touching any write path.**
 - `frontend/.maestro/` — device QA flows. `frontend/tasks/lessons.md` — project lessons. `frontend/docs/` — RELEASING.md + exec plans.

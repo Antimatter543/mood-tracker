@@ -3,14 +3,16 @@ import { Tabs } from "expo-router";
 import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
-import { useCallback, useState, useMemo, useEffect, useRef } from "react";
+import { useCallback, useMemo, useEffect, useRef } from "react";
 import { AppState, AppStateStatus, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as SystemUI from "expo-system-ui";
 import { DataProvider } from "../../context/DataContext";
+import { bumpDataVersion } from "../../context/dataRefreshStore";
 import { useThemeColors } from "@/styles/global";
 import { SettingsProvider, useSettings } from "@/context/SettingsContext";
 import { initializeDatabase } from "@/databases/database";
+import { DATABASE_NAME } from "@/databases/writeTransaction";
 import { SQLiteProvider, useSQLiteContext } from "expo-sqlite";
 import { localDateString, startOfLocalDay } from "@/databases/dateHelpers";
 import { RECENT_ENTRY_DATES } from "@/components/visualisations/queries";
@@ -20,17 +22,20 @@ import { OverlayProvider } from "@/context/OverlayHost";
 import { buildTabBarStyle } from "@/lib/tabBarStyle";
 
 export default function RootLayout() {
-    const [refreshCount, setRefreshCount] = useState(0);
-
-    // Create our refetch function so we can refresh states whenever our db changes/adds or edits new entries
+    // The app-wide "a write happened → reload" trigger. It bumps the external
+    // data-version store, which every data-reading screen subscribes to via
+    // useDataRefresh. (We deliberately do NOT keep a `refreshCount` in React
+    // state here: handing that down through DataContext did NOT reach the
+    // bottom-tab screens for in-place updates — device-proven, see
+    // context/dataRefreshStore.ts. The store's imperative notify does.)
     const refetchEntries = useCallback(() => {
-        setRefreshCount(prev => prev + 1)
+        bumpDataVersion();
     }, []);
 
 
     return (
-        <SQLiteProvider databaseName='moodTracker.db' onInit={initializeDatabase}>
-            <DataProvider value={{ refetchEntries, refreshCount }}>
+        <SQLiteProvider databaseName={DATABASE_NAME} onInit={initializeDatabase}>
+            <DataProvider value={{ refetchEntries }}>
                 <SettingsProvider>
                     {/* OverlayProvider hosts our in-tree native-<Modal> replacement.
                         It MUST sit inside SQLite/Data/Settings so the overlays it

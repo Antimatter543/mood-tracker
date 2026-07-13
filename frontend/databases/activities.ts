@@ -1,5 +1,6 @@
 import { SQLiteDatabase } from 'expo-sqlite';
 import { Activity, DatabaseResult } from '@/components/types';
+import { withWriteTransaction } from '@/databases/writeTransaction';
 
 /**
  * CRUD for activities.
@@ -166,17 +167,17 @@ export async function deleteActivity(
       };
     }
 
-    // EXCLUSIVE (not `withTransactionAsync`, which takes NO exclusive lock on
-    // the shared connection): a concurrent read on the focus-driven refresh
-    // must not interleave with this DELETE + position compaction and observe a
-    // half-applied state. See databases/entries.ts addMoodEntry for the full
-    // why; lifecycle.ts resetDatabase uses the same drop-in.
-    await db.withExclusiveTransactionAsync(async () => {
+    // Real write transaction on the write connection (statements on `txn`): the
+    // DELETE + position compaction must land atomically, and the CASCADE that
+    // removes entry_activities rows only fires because the write connection has
+    // foreign_keys = ON. See databases/writeTransaction.ts for why the app's old
+    // withExclusiveTransactionAsync usage was a no-op transaction.
+    await withWriteTransaction(async (txn) => {
       // CASCADE removes entry_activities rows.
-      await db.runAsync('DELETE FROM activities WHERE id = ?', [activityId]);
+      await txn.runAsync('DELETE FROM activities WHERE id = ?', [activityId]);
 
       // Shift remaining positions down to keep [1..N] contiguous.
-      await db.runAsync(
+      await txn.runAsync(
         `UPDATE activities
          SET position = position - 1
          WHERE group_id = ?
@@ -205,16 +206,16 @@ export async function deleteActivity(
  * 1-indexed regardless of the input.
  */
 export async function updateActivityPositions(
-  db: SQLiteDatabase,
+  _db: SQLiteDatabase,
   activities: Activity[]
 ): Promise<DatabaseResult> {
   try {
-    // EXCLUSIVE so the whole reorder lands atomically against concurrent reads
-    // on the shared connection (see entries.ts addMoodEntry for the why).
-    await db.withExclusiveTransactionAsync(async () => {
+    // Real write transaction so the whole reorder lands atomically (statements
+    // on `txn`; see databases/writeTransaction.ts).
+    await withWriteTransaction(async (txn) => {
       for (let i = 0; i < activities.length; i++) {
         const activity = activities[i];
-        await db.runAsync(
+        await txn.runAsync(
           'UPDATE activities SET position = ? WHERE id = ?',
           [i + 1, activity.id]
         );

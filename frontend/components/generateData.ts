@@ -1,6 +1,7 @@
 import { SQLiteDatabase } from 'expo-sqlite';
 import { Activity, DatabaseResult } from './types';
 import { getActivities } from "@/databases/database";
+import { withWriteTransaction } from "@/databases/writeTransaction";
 
 /// GENERATE DATA (SETTINGS / ADMIN STUFF)
 
@@ -112,26 +113,26 @@ export async function seedMoodEntries(
       };
     }
 
-    // EXCLUSIVE for consistency with the rest of the DB layer (dev-only seed
-    // path; the shared connection can still be read by a screen mid-seed).
-    await db.withExclusiveTransactionAsync(async () => {
+    // Real write transaction (statements on `txn`; dev-only seed path). See
+    // databases/writeTransaction.ts.
+    await withWriteTransaction(async (txn) => {
       for (let i = 0; i < numberOfEntries; i++) {
         const entry = generateMoodEntry();
-        
+
         // Insert the mood entry
-        const result = await db.runAsync(
+        const result = await txn.runAsync(
           `INSERT INTO entries (mood, notes, date) VALUES (?, ?, ?)`,
           [entry.mood, entry.notes, entry.date]
         );
 
         const entryId = result.lastInsertRowId;
-        
+
         // Add 1-4 random activities for this entry
         const activityCount = Math.floor(Math.random() * 4) + 1;
         const selectedActivities = getRandomActivities(activities, activityCount);
-        
+
         for (const activity of selectedActivities) {
-          await db.runAsync(
+          await txn.runAsync(
             `INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?)`,
             [entryId, activity.id]
           );
@@ -153,16 +154,17 @@ export async function seedMoodEntries(
 }
 
 // Helper function to clear all entries (useful for testing)
-export async function clearAllEntries(db: SQLiteDatabase): Promise<DatabaseResult> {
+export async function clearAllEntries(_db: SQLiteDatabase): Promise<DatabaseResult> {
   try {
-    // EXCLUSIVE for consistency with the rest of the DB layer (dev/test-only).
-    await db.withExclusiveTransactionAsync(async () => {
+    // Real write transaction (statements on `txn`; dev/test-only). See
+    // databases/writeTransaction.ts.
+    await withWriteTransaction(async (txn) => {
       // Delete from entry_activities first due to foreign key constraints
-      await db.runAsync('DELETE FROM entry_activities');
-      await db.runAsync('DELETE FROM entries');
-      
+      await txn.runAsync('DELETE FROM entry_activities');
+      await txn.runAsync('DELETE FROM entries');
+
       // Reset the autoincrement counters
-      await db.runAsync('DELETE FROM sqlite_sequence WHERE name IN (\'entries\', \'entry_activities\')');
+      await txn.runAsync('DELETE FROM sqlite_sequence WHERE name IN (\'entries\', \'entry_activities\')');
     });
 
     return {

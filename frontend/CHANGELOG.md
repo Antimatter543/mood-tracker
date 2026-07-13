@@ -3,6 +3,30 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [Unreleased]
+
+### Added
+- **Set the time of an entry, not just the date.** The entry form now has separate "Entry date" and
+  "Entry time" fields, so you can log (or back-date) a mood to a specific time of day. Changing the date
+  keeps the time you set, and vice versa.
+
+### Fixed
+- **Home updates the moment you log a mood.** Adding a mood while you're on the Home tab now refreshes
+  Today's Mood, your streak, and the charts immediately — no more waiting, or switching tabs and back, to
+  see it appear.
+- **The Timeline no longer shows "add your first entry" when it can't load.** If a read hiccupped, the
+  Timeline used to blank out and look like an empty app even when you had entries. It now shows a clear
+  "Couldn't load your entries" with a **Try again** button, and if a refresh fails it keeps the entries
+  already on screen instead of clearing them.
+- **Saving now tells you when something goes wrong.** Adding, editing, or deleting an entry used to fail
+  silently — the form just sat there. If a save can't complete you now get a message and your work is kept
+  so you can retry.
+- **Entries save reliably and completely.** Under the hood, writes now run in a real database transaction,
+  so a rare mid-save error can no longer leave an entry saved without its activities (or create a duplicate
+  on retry).
+- **A mood of 0 shows correctly.** A genuine 0 mood used to display as "No entry yet" on Home, and a 30-day
+  average of 0 showed "-- / 10". Both now show the real value.
+
 ## [2.3.6] - Unreleased
 
 ### Fixed

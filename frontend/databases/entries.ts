@@ -1,8 +1,14 @@
 import { SQLiteDatabase } from 'expo-sqlite';
 import { Activity, DatabaseResult, MoodEntry } from '@/components/types';
 import { getDefaultEntryDate } from '@/databases/dateHelpers';
-import { addEntryMedia, getEntryMedia } from '@/databases/entry-media';
-import { copyToMediaDir } from '@/databases/mediaHelpers';
+import {
+  addEntryMedia,
+  getEntryMedia,
+  getMediaByEntryIds,
+} from '@/databases/entry-media';
+import { MEDIA_DIR, copyToMediaDir, deleteMediaFile } from '@/databases/mediaHelpers';
+import { withWriteTransaction } from '@/databases/writeTransaction';
+import { buildEntryFilter, EntryFilters } from '@/components/timeline/entryFilter';
 
 /**
  * CRUD for mood entries.
@@ -11,6 +17,12 @@ import { copyToMediaDir } from '@/databases/mediaHelpers';
  * `dateHelpers.ts`). Callers that want to query by user-local day must use
  * `startOfLocalDay` / `endOfLocalDay` to compute the UTC range — do NOT
  * use SQLite's `date('now')` or `date(entries.date)`, which assume UTC.
+ *
+ * Transaction contract: every multi-statement WRITE goes through
+ * `withWriteTransaction` (databases/writeTransaction.ts) — a real transaction on
+ * the singleton write connection, statements on the `txn` argument only. READS
+ * (`getMoodEntries`, `getEntriesPage`) take no transaction and run on the caller-
+ * supplied connection (the SQLiteProvider's read connection).
  */
 
 /**
@@ -62,9 +74,14 @@ export async function filterValidActivityIds(
  * for the whole copy), then a row per stable path is inserted alongside the
  * entry. Backward-compatible: existing callers that omit `photos` are
  * unaffected.
+ *
+ * `_db` is intentionally unused: statements run on the singleton write
+ * connection (`withWriteTransaction`), not the caller's read handle. The param
+ * stays for the uniform CRUD signature (siblings like `updateMoodEntry` DO use
+ * it for pre-transaction reads).
  */
 export async function addMoodEntry(
-  db: SQLiteDatabase,
+  _db: SQLiteDatabase,
   mood: number,
   activityIds: number[],
   notes: string,
@@ -92,20 +109,17 @@ export async function addMoodEntry(
       }
     }
 
-    // EXCLUSIVE transaction (not the non-exclusive `withTransactionAsync`):
-    // `withTransactionAsync` does NOT take an exclusive lock — per the
-    // expo-sqlite docs, "any query that runs while the transaction is active
-    // will be included in the transaction, including statements outside the
-    // scope function." On our single shared connection, the focus-driven Home
-    // refresh fires ~6 concurrent reads; a non-exclusive write here could
-    // interleave with them and leave the connection in a bad in-memory state
-    // (reads come back empty → Home cards revert to their empty state until
-    // the app is reopened). The exclusive lock serializes the connection for
-    // the callback duration. Same drop-in shape as lifecycle.ts resetDatabase.
-    await db.withExclusiveTransactionAsync(async () => {
+    // Real write transaction on the singleton write connection: statements run
+    // on `txn`, never on the read `db`. This is the fix for the incident where
+    // every write used expo's `withExclusiveTransactionAsync` but ran its
+    // statements on the MAIN connection (ignoring the `txn` callback arg), so
+    // BEGIN/COMMIT wrapped nothing and the multi-table insert had no atomicity
+    // (an entry could persist without its activities on a mid-write failure).
+    // See databases/writeTransaction.ts for the full incident write-up.
+    await withWriteTransaction(async (txn) => {
       // Filter inside the transaction so concurrent activity deletes can't
       // produce dangling FK references.
-      const validActivityIds = await filterValidActivityIds(db, activityIds);
+      const validActivityIds = await filterValidActivityIds(txn, activityIds);
 
       if (validActivityIds.length !== activityIds.length) {
         console.warn(
@@ -113,7 +127,7 @@ export async function addMoodEntry(
         );
       }
 
-      const result = await db.runAsync(
+      const result = await txn.runAsync(
         `INSERT INTO entries (mood, notes, date) VALUES (?, ?, ?);`,
         [mood, notes, entryDate]
       );
@@ -121,13 +135,13 @@ export async function addMoodEntry(
       const entryId = result.lastInsertRowId;
 
       for (const activityId of validActivityIds) {
-        await db.runAsync(
+        await txn.runAsync(
           `INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?);`,
           [entryId, activityId]
         );
       }
 
-      await addEntryMedia(db, entryId, photoPaths);
+      await addEntryMedia(txn, entryId, photoPaths);
     });
 
     return {
@@ -159,7 +173,8 @@ export async function getMoodEntries(db: SQLiteDatabase): Promise<MoodEntry[]> {
     // and a read-side BEGIN is itself a collision vector. A consistent snapshot
     // isn't needed for a timeline list (the focus-driven refresh re-reads anyway),
     // and plain awaited queries serialize on the single connection fine. WRITES
-    // stay EXCLUSIVE (addMoodEntry etc.) — that's the actual Home-blank fix.
+    // run in real transactions on the write connection (withWriteTransaction) —
+    // under WAL these reads never block on (or corrupt under) a concurrent write.
     const rawEntries = await db.getAllAsync<Omit<MoodEntry, 'activities' | 'photos'>>(
       'SELECT * FROM entries ORDER BY date DESC'
     );
@@ -191,5 +206,203 @@ export async function getMoodEntries(db: SQLiteDatabase): Promise<MoodEntry[]> {
   } catch (error) {
     console.error('Error fetching mood entries:', error);
     return [];
+  }
+}
+
+/**
+ * Read ONE page of entries for the Timeline, applying the search / mood filter
+ * in SQL (the list is server-paginated, so a client-side filter would only see
+ * the ~pageSize rows currently loaded — see components/timeline/entryFilter.ts).
+ *
+ * A READ: no transaction, runs on the caller's connection (the SQLiteProvider's
+ * read connection). Unlike the old inline `DBViewer.fetchEntriesPage`, this
+ * DELIBERATELY does NOT catch-and-return-[] on error: a transient read failure
+ * that returns [] blanks the Timeline into the "add your first entry" empty
+ * state over a full DB. Errors PROPAGATE so the component can show a real
+ * "couldn't load" state with a retry (see DBViewer.loadInitialData).
+ *
+ * INVARIANT: the CTE here is mirrored by __tests__/entryFilter.integration.test.ts
+ * (same FROM/JOINs, the `${where && 'WHERE '+where}` splice BEFORE GROUP BY, and
+ * the `[...params, LIMIT, OFFSET]` bind order). If this query changes, update it.
+ */
+export async function getEntriesPage(
+  db: SQLiteDatabase,
+  filters: EntryFilters,
+  page: number,
+  pageSize: number
+): Promise<MoodEntry[]> {
+  const offset = page * pageSize;
+  // The WHERE is spliced BEFORE `GROUP BY e.id` so it filters raw rows; its
+  // EXISTS subquery uses `ea2`/`a2` aliases distinct from the outer `ea`/`a`.
+  const { where, params } = buildEntryFilter(filters);
+  const rows = await db.getAllAsync<any>(
+    `
+      WITH EntryData AS (
+          SELECT
+              e.id, e.mood, e.notes, e.date,
+              GROUP_CONCAT(a.id) as activity_ids,
+              GROUP_CONCAT(a.name) as activity_names,
+              GROUP_CONCAT(a.group_id) as activity_group_ids,
+              GROUP_CONCAT(a.icon_name) as activity_icon_names,
+              GROUP_CONCAT(a.icon_family) as activity_icon_families
+          FROM entries e
+          LEFT JOIN entry_activities ea ON e.id = ea.entry_id
+          LEFT JOIN activities a ON ea.activity_id = a.id
+          ${where ? 'WHERE ' + where : ''}
+          GROUP BY e.id
+          ORDER BY e.date DESC
+          LIMIT ? OFFSET ?
+      )
+      SELECT * FROM EntryData
+    `,
+    [...params, pageSize, offset]
+  );
+
+  const baseEntries: MoodEntry[] = rows.map((row) => {
+    // Each GROUP_CONCAT(...) is a comma-joined string with one value per joined
+    // activity, all emitted in the SAME order, so index `i` lines up across all
+    // of them. icon_family is a closed enum (never contains a comma); a
+    // missing/blank family falls back to 'Feather' (the column default).
+    const iconFamilies = row.activity_icon_families
+      ? row.activity_icon_families.split(',')
+      : [];
+    return {
+      id: row.id,
+      mood: row.mood,
+      notes: row.notes,
+      date: row.date,
+      activities: row.activity_ids
+        ? row.activity_ids.split(',').map((id: string, index: number) => ({
+            id: parseInt(id),
+            name: row.activity_names.split(',')[index],
+            group_id: parseInt(row.activity_group_ids.split(',')[index]),
+            icon_name: row.activity_icon_names.split(',')[index],
+            icon_family: iconFamilies[index] || 'Feather',
+          }))
+        : [],
+      photos: [],
+    };
+  });
+
+  // Batch-load photos for the whole page in one query (avoids the N+1 that
+  // joining entry_media into the big query + re-splitting would create).
+  const mediaByEntry = await getMediaByEntryIds(
+    db,
+    baseEntries.map((e) => e.id)
+  );
+  for (const entry of baseEntries) {
+    entry.photos = mediaByEntry[entry.id] ?? [];
+  }
+
+  return baseEntries;
+}
+
+/** The fields an edit form supplies to {@link updateMoodEntry}. */
+export type MoodEntryUpdate = {
+  mood: number;
+  activities: number[];
+  notes: string;
+  /** The entry's timestamp; stored as UTC ISO via `.toISOString()`. */
+  date: Date;
+  /**
+   * The draft's photos: a mix of already-persisted MEDIA_DIR paths (kept) and
+   * freshly-picked source URIs (copied in). Paths NOT under MEDIA_DIR are the
+   * new ones; existing DB photos absent from this list are removed.
+   */
+  photos: string[];
+};
+
+/**
+ * Update an entry's mood/notes/date, its activity links, and its photos in one
+ * write transaction. Absorbs the SQL + photo-diff/media-file logic that used to
+ * live inline in `DBViewer.handleUpdate` so the component stays SQL-free.
+ *
+ * File IO stays OUTSIDE the transaction: new photos are copied into MEDIA_DIR
+ * BEFORE the txn (a copy must not hold the write lock; orphaned only if the txn
+ * throws), and removed photos are unlinked AFTER commit (so a rollback can't
+ * leave a missing file pointed at by a still-live row). `db` is used for the
+ * pre-transaction read of the entry's current photos.
+ */
+export async function updateMoodEntry(
+  db: SQLiteDatabase,
+  entryId: number,
+  update: MoodEntryUpdate
+): Promise<DatabaseResult> {
+  try {
+    // Photo diff, computed against the entry's current DB photos. Photos already
+    // under MEDIA_DIR are kept; any path NOT under MEDIA_DIR is a new source URI.
+    const dbPhotos = (await getMediaByEntryIds(db, [entryId]))[entryId] ?? [];
+    const draftPaths = new Set(update.photos);
+    const removedPhotos = dbPhotos.filter((p) => !draftPaths.has(p.file_path));
+    const addedSourceUris = update.photos.filter((p) => !p.startsWith(MEDIA_DIR));
+
+    // Copy newly-picked photos into MEDIA_DIR BEFORE the transaction.
+    const addedPaths: string[] = [];
+    for (const uri of addedSourceUris) {
+      addedPaths.push(await copyToMediaDir(uri));
+    }
+
+    await withWriteTransaction(async (txn) => {
+      await txn.runAsync(
+        `UPDATE entries SET mood = ?, notes = ?, date = ? WHERE id = ?`,
+        [update.mood, update.notes, update.date.toISOString(), entryId]
+      );
+
+      await txn.runAsync('DELETE FROM entry_activities WHERE entry_id = ?', [entryId]);
+      for (const activityId of update.activities) {
+        await txn.runAsync(
+          'INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?)',
+          [entryId, activityId]
+        );
+      }
+
+      for (const photo of removedPhotos) {
+        await txn.runAsync('DELETE FROM entry_media WHERE id = ?', [photo.id]);
+      }
+      for (const path of addedPaths) {
+        await txn.runAsync(
+          `INSERT INTO entry_media (entry_id, file_path, media_type) VALUES (?, ?, 'image')`,
+          [entryId, path]
+        );
+      }
+    });
+
+    // Unlink removed files only after the rows are gone (and committed).
+    // Best-effort: a failed unlink never fails the update.
+    await Promise.all(removedPhotos.map((p) => deleteMediaFile(p.file_path)));
+
+    return { success: true, message: 'Entry updated successfully' };
+  } catch (error) {
+    console.error('Error updating entry:', error);
+    return { success: false, message: 'Error updating entry' };
+  }
+}
+
+/**
+ * Delete an entry and everything that hangs off it. The `DELETE FROM entries`
+ * cascades to `entry_activities` + `entry_media` ROWS because the write
+ * connection has `foreign_keys = ON` (the read connection's FK state is
+ * irrelevant here — the delete runs on the write connection). CASCADE never
+ * touches the files on disk, so we capture the photo paths BEFORE the delete and
+ * unlink them AFTER commit (so a rollback can't orphan a live row's file).
+ */
+export async function deleteMoodEntry(
+  db: SQLiteDatabase,
+  entryId: number
+): Promise<DatabaseResult> {
+  try {
+    const media = await getMediaByEntryIds(db, [entryId]);
+    const filesToUnlink = (media[entryId] ?? []).map((p) => p.file_path);
+
+    await withWriteTransaction(async (txn) => {
+      await txn.runAsync('DELETE FROM entries WHERE id = ?', [entryId]);
+    });
+
+    await Promise.all(filesToUnlink.map((fp) => deleteMediaFile(fp)));
+
+    return { success: true, message: 'Entry deleted successfully' };
+  } catch (error) {
+    console.error('Error deleting entry:', error);
+    return { success: false, message: 'Error deleting entry' };
   }
 }

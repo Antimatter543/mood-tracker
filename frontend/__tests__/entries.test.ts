@@ -1,4 +1,8 @@
 import { createMockDatabase } from 'expo-sqlite';
+import {
+  __setWriteConnectionForTests,
+  __resetWriteTransactionForTests,
+} from '@/databases/writeTransaction';
 
 jest.mock('expo-sqlite');
 jest.mock('@/components/IconPicker', () => ({ IconFamilyType: {} }));
@@ -15,9 +19,23 @@ import {
   filterValidActivityIds,
 } from '@/databases/entries';
 
+// Create a mock DB and route the write transaction onto it, so writes issued via
+// withWriteTransaction (databases/writeTransaction.ts) land on THIS mock —
+// `txn === db` — and the assertions below (which inspect db.runAsync etc.) see
+// them. Reads still run on the same mock. See writeTransaction's test hooks.
+const makeDb = () => {
+  const db = createMockDatabase();
+  __setWriteConnectionForTests(db as any);
+  return db;
+};
+
+beforeEach(() => {
+  __resetWriteTransactionForTests();
+});
+
 describe('addMoodEntry — additional validation', () => {
   it('uses provided date when supplied', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([]);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
@@ -33,7 +51,7 @@ describe('addMoodEntry — additional validation', () => {
   });
 
   it('uses getDefaultEntryDate (UTC ISO) when date omitted', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([]);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
@@ -47,9 +65,12 @@ describe('addMoodEntry — additional validation', () => {
     expect(dateArg).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
   });
 
-  it('returns failure on transaction throw', async () => {
-    const db = createMockDatabase();
-    db.withExclusiveTransactionAsync.mockRejectedValue(new Error('disk full'));
+  it('returns failure when the write transaction throws', async () => {
+    const db = makeDb();
+    db.getAllAsync.mockResolvedValue([]);
+    // A failed INSERT inside the transaction → withWriteTransaction ROLLBACKs
+    // and rethrows → addMoodEntry returns a failure result.
+    db.runAsync.mockRejectedValue(new Error('disk full'));
 
     const result = await addMoodEntry(db as any, 5, [1], 'note');
     expect(result.success).toBe(false);
@@ -57,23 +78,29 @@ describe('addMoodEntry — additional validation', () => {
   });
 
   // Regression for the "Home cards vanish after adding a mood, fixed only by a
-  // restart" bug: addMoodEntry must take an EXCLUSIVE lock so it can't interleave
-  // with the focus-driven Home refresh reads on the shared connection. (The
-  // class-level guard lives in exclusiveTransactions.test.ts; this pins the
-  // single most important call site at the behavioral level.)
-  it('opens an EXCLUSIVE transaction, never the non-exclusive variant', async () => {
-    const db = createMockDatabase();
+  // restart" bug AND the deeper "the transactions were fake" incident: the write
+  // must run in a REAL transaction (BEGIN IMMEDIATE on the write connection),
+  // NEVER expo's withExclusiveTransactionAsync/withTransactionAsync (whose
+  // statements this codebase ran outside any transaction — see
+  // databases/writeTransaction.ts). The class-level guard lives in
+  // writeTransactionInvariant.test.ts; this pins the most important call site.
+  it('runs the insert in a real write transaction (BEGIN IMMEDIATE), not expo txn APIs', async () => {
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([]);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
     await addMoodEntry(db as any, 5, [1, 2], 'note');
 
-    expect(db.withExclusiveTransactionAsync).toHaveBeenCalledTimes(1);
+    const beganImmediate = db.execAsync.mock.calls.some(
+      (c: any[]) => typeof c[0] === 'string' && c[0].toUpperCase().includes('BEGIN IMMEDIATE')
+    );
+    expect(beganImmediate).toBe(true);
+    expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
     expect(db.withTransactionAsync).not.toHaveBeenCalled();
   });
 
   it('inserts a link row for every valid activity', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([{ id: 1 }, { id: 2 }]);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 42, changes: 1 });
 
@@ -90,7 +117,7 @@ describe('addMoodEntry — additional validation', () => {
   });
 
   it('handles empty activities array without inserting links', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([]);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
@@ -104,7 +131,7 @@ describe('addMoodEntry — additional validation', () => {
   });
 
   it('mood exactly 0 is accepted', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([]);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
@@ -113,7 +140,7 @@ describe('addMoodEntry — additional validation', () => {
   });
 
   it('mood exactly 10 is accepted', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([]);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
@@ -121,14 +148,13 @@ describe('addMoodEntry — additional validation', () => {
     expect(result.success).toBe(true);
   });
 
-  it('runs validation INSIDE the transaction (not before it)', async () => {
-    // We invert the mock so the transaction never executes its callback.
-    // If filterValidActivityIds ran *outside* the txn, getAllAsync would
-    // still be called. If it runs inside, getAllAsync should NOT be called.
-    const db = createMockDatabase();
-    db.withExclusiveTransactionAsync.mockImplementation(async () => {
-      // do not run the callback — simulates txn rolling back immediately
-    });
+  it('runs activity-id validation INSIDE the transaction (after BEGIN, not before)', async () => {
+    // Fail BEGIN IMMEDIATE so the transaction body never runs. If
+    // filterValidActivityIds ran OUTSIDE/BEFORE the transaction its getAllAsync
+    // would still fire; because it runs on `txn` INSIDE, a failed BEGIN means it
+    // is never reached.
+    const db = makeDb();
+    db.execAsync.mockRejectedValue(new Error('cannot begin'));
 
     await addMoodEntry(db as any, 5, [1, 2], 'note');
     expect(db.getAllAsync).not.toHaveBeenCalled();
@@ -137,14 +163,14 @@ describe('addMoodEntry — additional validation', () => {
 
 describe('filterValidActivityIds', () => {
   it('returns empty array for empty input', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const result = await filterValidActivityIds(db as any, []);
     expect(result).toEqual([]);
     expect(db.getAllAsync).not.toHaveBeenCalled();
   });
 
   it('filters out non-integer values defensively', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([{ id: 1 }, { id: 2 }]);
 
     // Cast to bypass TS — simulate runtime poisoning.
@@ -166,7 +192,7 @@ describe('filterValidActivityIds', () => {
   });
 
   it('returns empty array when only non-integer values are supplied', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const result = await filterValidActivityIds(db as any, [
       'a' as any,
       NaN,
@@ -177,7 +203,7 @@ describe('filterValidActivityIds', () => {
   });
 
   it('returns empty array on DB error', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockRejectedValue(new Error('db gone'));
 
     const result = await filterValidActivityIds(db as any, [1, 2]);
@@ -187,7 +213,7 @@ describe('filterValidActivityIds', () => {
 
 describe('getMoodEntries — additional', () => {
   it('hydrates each entry with its activities', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     // Default any unspecified getAllAsync (e.g. the per-entry photo fetch) to
     // an empty array so the activity-fetch ordering below is unaffected.
     db.getAllAsync.mockResolvedValue([]);
@@ -208,9 +234,7 @@ describe('getMoodEntries — additional', () => {
     expect(result[1].activities).toHaveLength(2);
 
     // The READ path must NOT open any transaction — the SELECT + per-entry
-    // sub-reads run as plain awaited queries directly on the connection. Wrapping
-    // them in withExclusiveTransactionAsync held the exclusive lock across ~510
-    // serialized queries for a 255-entry DB and blanked Timeline (~3.2s block).
+    // sub-reads run as plain awaited queries directly on the connection.
     expect(db.withTransactionAsync).not.toHaveBeenCalled();
     expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
     // The reads went straight through getAllAsync.
@@ -218,7 +242,7 @@ describe('getMoodEntries — additional', () => {
   });
 
   it('reads without any transaction wrapper on the empty-DB path too', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([]); // no entries
 
     const result = await getMoodEntries(db as any);
@@ -231,18 +255,23 @@ describe('getMoodEntries — additional', () => {
 describe('addMoodEntry — photos', () => {
   it('copies each photo and inserts an entry_media row per photo', async () => {
     // copyToMediaDir hits expo-file-system; mock it so no real IO happens.
+    // resetModules gives us a FRESH entries + writeTransaction module graph, so
+    // we must re-inject the write connection on that fresh writeTransaction.
     jest.resetModules();
     jest.doMock('@/databases/mediaHelpers', () => ({
+      MEDIA_DIR: 'file:///media/',
       copyToMediaDir: jest
         .fn()
         .mockImplementation(async (uri: string) => `/mock/media/${uri.split('/').pop()}`),
       deleteMediaFile: jest.fn(),
     }));
     const { addMoodEntry: addWithMockedMedia } = require('@/databases/entries');
+    const freshWriteTxn = require('@/databases/writeTransaction');
 
     const db = createMockDatabase();
     db.getAllAsync.mockResolvedValue([]);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 99, changes: 1 });
+    freshWriteTxn.__setWriteConnectionForTests(db);
 
     await addWithMockedMedia(
       db as any,
@@ -261,12 +290,13 @@ describe('addMoodEntry — photos', () => {
       expect(call[1][0]).toBe(99); // entry_id = lastInsertRowId
     }
 
+    freshWriteTxn.__resetWriteTransactionForTests();
     jest.dontMock('@/databases/mediaHelpers');
     jest.resetModules();
   });
 
   it('inserts no media rows when no photos are supplied', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([]);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 

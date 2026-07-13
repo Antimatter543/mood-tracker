@@ -1,5 +1,6 @@
 import { SQLiteDatabase } from 'expo-sqlite';
 import { DatabaseResult } from '@/components/types';
+import { withWriteTransaction } from '@/databases/writeTransaction';
 
 /**
  * CRUD for activity groups.
@@ -83,13 +84,13 @@ export async function deleteActivityGroup(
       };
     }
 
-    // EXCLUSIVE (not `withTransactionAsync`, which takes NO exclusive lock):
-    // the cascading group delete must not interleave with a concurrent read on
-    // the focus-driven refresh and leave the shared connection mid-cascade. See
-    // databases/entries.ts addMoodEntry for the full why.
-    await db.withExclusiveTransactionAsync(async () => {
+    // Real write transaction on the write connection (statement on `txn`). The
+    // cascade that removes the group's activities (and, through them,
+    // entry_activities rows) only fires because the write connection has
+    // foreign_keys = ON. See databases/writeTransaction.ts.
+    await withWriteTransaction(async (txn) => {
       // CASCADE handles activities + entry_activities.
-      await db.runAsync('DELETE FROM activity_groups WHERE id = ?', [groupId]);
+      await txn.runAsync('DELETE FROM activity_groups WHERE id = ?', [groupId]);
     });
 
     return {

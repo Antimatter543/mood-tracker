@@ -14,7 +14,8 @@ import { ActivityIcon } from '@/components/activityIcon';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useLatestRun } from '@/hooks/useLatestRun';
 import { startOfLocalDay, endOfLocalDay, localDateString } from '@/databases/dateHelpers';
-import { dailyAverageMap, bestDayLocal } from '@/components/visualisations/transforms/dailyAverages';
+import { dailyAverageMap } from '@/components/visualisations/transforms/dailyAverages';
+import { todaysMoodValue, monthlyOverview, formatAverageDisplay } from '@/components/visualisations/transforms/homeSummary';
 import { currentStreak } from '@/components/visualisations/transforms/streak';
 
 // Screen-level error boundary (expo-router convention): re-exporting a symbol
@@ -186,14 +187,16 @@ const WeeklyChartCard = memo(function WeeklyChartCard({ data }: { data: (number 
 // the fourth cell intentionally empty.
 const MonthlyOverviewCard = memo(function MonthlyOverviewCard({ stats }: {
     stats: {
-        average: number;
+        average: number | null;
         totalEntries: number;
         bestDay: string;
     }
 }) {
     const styles = useThemedStyles(useThemeColors());
 
-    const displayAverage = stats.average ? `${stats.average.toFixed(1)} / 10` : '-- / 10';
+    // `average` is null (not 0) when there's no data, so a real 0.0 average still
+    // shows "0.0 / 10" — see transforms/homeSummary.ts.
+    const displayAverage = formatAverageDisplay(stats.average);
     const bestDay = stats.bestDay ? formatDate(stats.bestDay).short : '--';
 
     const tiles: {
@@ -419,8 +422,12 @@ export default function Home() {
     const styles = useThemedStyles(colors);
     const db = useSQLiteContext();
     const [todaysMood, setTodaysMood] = useState<number | null>(null);
-    const [monthlyStats, setMonthlyStats] = useState({
-        average: 0,
+    const [monthlyStats, setMonthlyStats] = useState<{
+        average: number | null;
+        totalEntries: number;
+        bestDay: string;
+    }>({
+        average: null,
         totalEntries: 0,
         bestDay: ''
     });
@@ -508,22 +515,15 @@ export default function Home() {
                 // newer one's state out of order.
                 if (!isLatestFetch(runId)) return;
 
-                setTodaysMood(today?.mood || null);
+                // `?? null` (not `|| null`): a real 0.0 mood is an entry, not
+                // "No entry yet". See transforms/homeSummary.ts.
+                setTodaysMood(todaysMoodValue(today));
                 setTotalEntries(totals?.count ?? 0);
 
-                // Last-30-days stats. average = mean over all entries in the
-                // window (1 dp), totalEntries = entry count, bestDay = local day
-                // with the highest daily average — all derived in JS.
-                if (monthRows.length > 0) {
-                    const sum = monthRows.reduce((s, r) => s + r.mood, 0);
-                    setMonthlyStats({
-                        average: Math.round((sum / monthRows.length) * 10) / 10,
-                        totalEntries: monthRows.length,
-                        bestDay: bestDayLocal(monthRows),
-                    });
-                } else {
-                    setMonthlyStats({ average: 0, totalEntries: 0, bestDay: '' });
-                }
+                // Last-30-days overview (average / count / best local day) — all
+                // derived in JS. `average` is null when there's no data so a real
+                // 0.0 average isn't mistaken for "no data".
+                setMonthlyStats(monthlyOverview(monthRows));
 
                 setRecentActivities(
                     activities.map((a) => ({

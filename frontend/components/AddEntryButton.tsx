@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { StyleSheet, Pressable } from 'react-native';
+import { StyleSheet, Pressable, Alert } from 'react-native';
 import Animated, {
     useAnimatedStyle,
     useSharedValue,
@@ -58,9 +58,18 @@ export function AddEntryButton() {
             if (result.success) {
                 setModalVisible(false);
                 refetchEntries();
+            } else {
+                // On a failed save the form used to silently stay open with no
+                // feedback — the user couldn't tell the entry didn't save. Surface
+                // the reason and KEEP the modal open (the draft is preserved).
+                Alert.alert("Couldn't save entry", result.message);
             }
         } catch (error) {
             console.error('Error adding entry:', error);
+            Alert.alert(
+                "Couldn't save entry",
+                error instanceof Error ? error.message : 'Something went wrong. Please try again.'
+            );
         }
     };
 

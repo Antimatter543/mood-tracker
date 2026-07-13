@@ -9,6 +9,7 @@ import * as Sharing from 'expo-sharing';
 import { SQLiteDatabase } from 'expo-sqlite';
 
 import { deriveMediaExt, writeBase64ToMediaDir } from '@/databases/mediaHelpers';
+import { withWriteTransaction } from '@/databases/writeTransaction';
 
 /**
  * Shape of a single photo embedded in a v3 export. `data_base64` carries the
@@ -161,7 +162,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
       };
     }
   }
-  export async function importDatabaseData(db: SQLiteDatabase): Promise<DatabaseResult> {
+  export async function importDatabaseData(_db: SQLiteDatabase): Promise<DatabaseResult> {
     try {
       // Pick a document
       const result = await DocumentPicker.getDocumentAsync({
@@ -227,18 +228,19 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
         }
       }
 
-      // Import the data into the database. EXCLUSIVE (not the non-exclusive
-      // `withTransactionAsync`): a large multi-table import must not interleave
-      // with a concurrent read on the shared connection and leave it in a bad
-      // in-memory state. See databases/entries.ts addMoodEntry for the full why.
-      await db.withExclusiveTransactionAsync(async () => {
+      // Import the data into the database in a real write transaction on the
+      // write connection: EVERY statement below — the existing-groups/activities
+      // reads AND the writes — runs on `txn`, so the whole multi-table import is
+      // atomic and its FK-ordered inserts are enforced (the write connection has
+      // foreign_keys = ON). See databases/writeTransaction.ts.
+      await withWriteTransaction(async (txn) => {
         // Step 1: Import activity groups first (needed for foreign key constraints)
         if (importData.data.activityGroups && Array.isArray(importData.data.activityGroups)) {
           // Keep track of original group IDs to handle activities correctly
           const groupIdMapping = new Map<number, number>();
           
           // First, get existing groups to avoid duplicates
-          const existingGroups = await db.getAllAsync<{ id: number, name: string }>(
+          const existingGroups = await txn.getAllAsync<{ id: number, name: string }>(
             'SELECT id, name FROM activity_groups'
           );
           const existingGroupNames = existingGroups.map(g => g.name.toLowerCase());
@@ -261,7 +263,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
               }
               
               // Insert the new group
-              const result = await db.runAsync(
+              const result = await txn.runAsync(
                 'INSERT INTO activity_groups (name) VALUES (?)',
                 [group.name]
               );
@@ -274,7 +276,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
           // Step 2: Import activities
           if (importData.data.activities && Array.isArray(importData.data.activities)) {
             // Get existing activities to avoid duplicates
-            const existingActivities = await db.getAllAsync<{ id: number, name: string, group_id: number }>(
+            const existingActivities = await txn.getAllAsync<{ id: number, name: string, group_id: number }>(
               'SELECT id, name, group_id FROM activities'
             );
             
@@ -304,7 +306,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
                 const iconName = activity.icon_name || 'circle';
                 const position = activity.position || 0;
                 
-                const result = await db.runAsync(
+                const result = await txn.runAsync(
                   `INSERT INTO activities (name, group_id, icon_family, icon_name, position) 
                    VALUES (?, ?, ?, ?, ?)`,
                   [activity.name, mappedGroupId, iconFamily, iconName, position]
@@ -323,7 +325,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
 
               for (const entry of importData.data.entries) {
                 // Upsert entry (merge, don't destroy)
-                await db.runAsync(
+                await txn.runAsync(
                   'INSERT OR REPLACE INTO entries (id, mood, notes, date) VALUES (?, ?, ?, ?)',
                   [entry.id, entry.mood, entry.notes, entry.date]
                 );
@@ -331,7 +333,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
                 maxEntryId = Math.max(maxEntryId, entry.id);
 
                 // Clear only this entry's activity links before re-inserting
-                await db.runAsync('DELETE FROM entry_activities WHERE entry_id = ?', [entry.id]);
+                await txn.runAsync('DELETE FROM entry_activities WHERE entry_id = ?', [entry.id]);
 
                 // Insert activity relationships if they exist
                 if (entry.activity_ids) {
@@ -344,7 +346,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
                     const newActivityId = activityIdMapping.get(oldActivityId) || oldActivityId;
 
                     try {
-                      await db.runAsync(
+                      await txn.runAsync(
                         'INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?)',
                         [entry.id, newActivityId]
                       );
@@ -365,12 +367,12 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
                 // A v3 photo whose pre-write failed has `data_base64` but no
                 // restored path, so it is skipped in BOTH branches (no dead ref).
                 if (entry.photos && Array.isArray(entry.photos)) {
-                  await db.runAsync('DELETE FROM entry_media WHERE entry_id = ?', [entry.id]);
+                  await txn.runAsync('DELETE FROM entry_media WHERE entry_id = ?', [entry.id]);
                   const restored = restoredPhotosByEntryId[entry.id];
                   if (restored && restored.length > 0) {
                     for (const media of restored) {
                       try {
-                        await db.runAsync(
+                        await txn.runAsync(
                           `INSERT INTO entry_media (entry_id, file_path, media_type) VALUES (?, ?, ?)`,
                           [entry.id, media.newPath, media.media_type]
                         );
@@ -384,7 +386,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
                       // `restored` above (or were dropped on a write failure).
                       if (!photo || !photo.file_path || typeof photo.data_base64 === 'string') continue;
                       try {
-                        await db.runAsync(
+                        await txn.runAsync(
                           `INSERT INTO entry_media (entry_id, file_path, media_type) VALUES (?, ?, ?)`,
                           [entry.id, photo.file_path, photo.media_type ?? 'image']
                         );
@@ -397,7 +399,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
               }
               
               // Reset the autoincrement counter
-              await db.runAsync(
+              await txn.runAsync(
                 'UPDATE sqlite_sequence SET seq = ? WHERE name = ?',
                 [maxEntryId, 'entries']
               );
@@ -409,7 +411,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
         if (importData.data.settings && Array.isArray(importData.data.settings)) {
           for (const setting of importData.data.settings) {
             try {
-              await db.runAsync(
+              await txn.runAsync(
                 'INSERT OR REPLACE INTO user_settings (key, value) VALUES (?, ?)',
                 [setting.key, setting.value]
               );

@@ -83,6 +83,11 @@ jest.mock('expo-router', () => {
         return typeof cleanup === 'function' ? cleanup : undefined;
       }, [cb]);
     },
+    // useDataRefresh also reads useIsFocused (VECTOR 2). This section drives its
+    // refresh via the manual mockFocus.cb handle, not refreshCount, so a constant
+    // `true` keeps VECTOR 2 inert here (refreshCount never changes) while letting
+    // the hook mount without crashing.
+    useIsFocused: () => true,
   };
 });
 

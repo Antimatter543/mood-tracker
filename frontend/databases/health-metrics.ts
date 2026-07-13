@@ -1,5 +1,6 @@
 import { SQLiteDatabase } from 'expo-sqlite';
 import type { DailyHealthMetrics } from '@/lib/healthConnectPure';
+import { withWriteTransaction } from '@/databases/writeTransaction';
 
 /**
  * CRUD for the `health_metrics` table — Health Connect daily sleep + heart-rate
@@ -66,21 +67,20 @@ function serializeStages(stages: Record<number, number>): string | null {
  * Upsert daily metrics BY DATE: a second sync of the same day REPLACES that
  * day's row (via `ON CONFLICT(date) DO UPDATE`), so re-syncing a partial day is
  * idempotent and never duplicates. All rows share one `syncedAt`. Runs inside a
- * single EXCLUSIVE transaction (consistent with the rest of the write layer —
- * the shared connection has concurrent focus-driven reads). No-op for an empty
- * list.
+ * single real write transaction (statements on `txn`; see
+ * databases/writeTransaction.ts). No-op for an empty list.
  */
 export async function upsertHealthMetrics(
-  db: SQLiteDatabase,
+  _db: SQLiteDatabase,
   rows: ReadonlyArray<DailyHealthMetrics>,
   source: string,
   syncedAt: string
 ): Promise<void> {
   if (rows.length === 0) return;
 
-  await db.withExclusiveTransactionAsync(async () => {
+  await withWriteTransaction(async (txn) => {
     for (const row of rows) {
-      await db.runAsync(
+      await txn.runAsync(
         `INSERT INTO health_metrics
            (date, sleep_total_minutes, sleep_stages, avg_heart_rate, min_heart_rate, source, synced_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)
