@@ -176,6 +176,46 @@ describe('sleepMoodCorrelation — direction & split', () => {
   });
 });
 
+// ── p-value on the result (significance layer) ───────────────────────────────
+
+describe('MetricMoodResult.pValue', () => {
+  it('a directional (≥MIN_PAIRS) result carries a finite p-value in [0,1]', () => {
+    const r = ok(sleepMoodCorrelation(posRows, posMoods));
+    expect(r.r).not.toBeNull();
+    expect(r.pValue).not.toBeNull();
+    expect(Number.isFinite(r.pValue!)).toBe(true);
+    expect(r.pValue!).toBeGreaterThanOrEqual(0);
+    expect(r.pValue!).toBeLessThanOrEqual(1);
+    // A strong positive r over 8 days is significant-ish, not p=1.
+    expect(r.pValue!).toBeLessThan(0.05);
+  });
+
+  it('a zero-variance (constant mood) result has r=null AND pValue=null', () => {
+    const moods = POS_DATES.map((d) => dm(d, 5));
+    const r = ok(sleepMoodCorrelation(posRows, moods));
+    expect(r.r).toBeNull();
+    expect(r.pValue).toBeNull();
+  });
+
+  it('a near-zero (flat) r still gets a finite p-value (the honest nerdy detail)', () => {
+    const rows = POS_DATES.map((d, i) => hRow(d, { sleep: 300 + i * 30 }));
+    const moods = POS_DATES.map((d, i) => dm(d, [5, 5, 6, 6, 6, 6, 5, 5][i]));
+    const r = ok(sleepMoodCorrelation(rows, moods));
+    expect(r.direction).toBe('flat');
+    expect(r.r).not.toBeNull();
+    expect(r.pValue).not.toBeNull();
+    expect(r.pValue!).toBeGreaterThanOrEqual(0);
+    expect(r.pValue!).toBeLessThanOrEqual(1);
+  });
+
+  it('notEnoughData results carry no pValue field (variant unchanged)', () => {
+    const c = sleepMoodCorrelation([], []);
+    expect(c.status).toBe('notEnoughData');
+    expect(c).toEqual({ status: 'notEnoughData', pairCount: 0, pairs: [] });
+    expect('pValue' in c).toBe(false);
+  });
+});
+
 // ── day-key / wake-day / pairing correctness ─────────────────────────────────
 
 describe('pairing correctness', () => {

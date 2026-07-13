@@ -29,6 +29,7 @@
 //   finding, not a bug). Nothing here ever throws on empty/degenerate input.
 
 import type { DailyAverage } from './dailyAverages';
+import { pValueTwoSided } from './correlationStats';
 
 /**
  * Minimum paired (health + mood) days before we report a sleep↔mood or
@@ -97,6 +98,11 @@ export interface MetricMoodResult {
   moodDelta: number;
   /** Pearson r over the pairs (2 dp), or null when either series has zero variance. */
   r: number | null;
+  /**
+   * Two-tailed p-value of the Pearson r over the paired days (null when r is
+   * null). See correlationStats.pValueTwoSided.
+   */
+  pValue: number | null;
   /** Direction, flat-banded so a near-zero / undefined r reads as "no clear link". */
   direction: MetricMoodDirection;
 }
@@ -211,6 +217,9 @@ function buildCorrelation(pairs: MetricMoodPair[]): MetricMoodCorrelation {
   const upper = summarize(sorted.slice(half));
 
   const r = pearson(sorted);
+  // Significance of that r over the paired days. Null when r is null (a
+  // zero-variance series has no correlation to test).
+  const pValue = pValueTwoSided(r ?? NaN, pairCount);
   // From the ROUNDED half averages, so it equals what the UI renders.
   const moodDelta = round1(upper.avgMood - lower.avgMood);
   const direction: MetricMoodDirection =
@@ -220,7 +229,7 @@ function buildCorrelation(pairs: MetricMoodPair[]): MetricMoodCorrelation {
         ? 'positive'
         : 'negative';
 
-  return { status: 'ok', pairCount, pairs: sorted, lower, upper, moodDelta, r, direction };
+  return { status: 'ok', pairCount, pairs: sorted, lower, upper, moodDelta, r, pValue, direction };
 }
 
 /**
