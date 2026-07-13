@@ -1,11 +1,12 @@
 // HealthConnectSection.tsx
 //
 // Settings card for the opt-in Android Health Connect integration (Phase 2a).
-// Renders NOTHING on iOS / web / when the feature flag is off, and shows an
-// explicit "not supported" state on Android 16+ (where the library's permission
-// prompt silently fails). Everything Health-Connect-touching goes through
-// lib/healthConnect.ts (guarded + lazy) — this file never imports the native
-// module directly.
+// Renders NOTHING on iOS / web / when the feature flag is off. Works on Android
+// 14/15/16 (no Android-version gate — see healthConnectConfig.ts note; the
+// Android-16 never-resolve permission edge case is handled by a timeout in
+// lib/healthConnect.connect(), not by disabling the feature). Everything
+// Health-Connect-touching goes through lib/healthConnect.ts (guarded + lazy) —
+// this file never imports the native module directly.
 import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
@@ -92,7 +93,7 @@ export const HealthConnectSection = () => {
 
     (async () => {
       const status: HealthConnectStatus = await getStatus();
-      const nextPhase = resolveHealthConnectPhase(Number(Platform.Version), status);
+      const nextPhase = resolveHealthConnectPhase(status);
       if (cancelled) return;
 
       if (nextPhase !== 'available') {
@@ -244,17 +245,6 @@ export const HealthConnectSection = () => {
     body = (
       <View style={styles.centerRow}>
         <ActivityIndicator size="small" color={colors.accent} />
-      </View>
-    );
-  } else if (phase === 'unsupported_version') {
-    body = (
-      <View style={styles.infoRow}>
-        <Feather name="info" color={colors.textSecondary} size={16} />
-        <Text style={styles.infoText}>
-          Health Connect isn&apos;t supported on your Android version yet. We&apos;ll
-          enable this once the integration works reliably on newer Android
-          releases.
-        </Text>
       </View>
     );
   } else if (phase === 'provider_required') {

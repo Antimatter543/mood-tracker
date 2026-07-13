@@ -72,6 +72,36 @@ function getHealthConnect(): typeof HealthConnectModule | null {
   return cachedModule;
 }
 
+/**
+ * Resolve `promise`, or reject after `ms`. Used to cap Health Connect's
+ * `requestPermission`, whose returned promise can hang FOREVER on Android 16 when
+ * the permission is in the `never_ask_again`/blocked state (an upstream RN issue,
+ * react-native#53887). A hung promise would freeze the "Connect" spinner
+ * indefinitely; the timeout lets us fall through to reading the ACTUAL granted
+ * permissions instead. The timer is always cleared so it can't leak or fire late.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('health-connect: request timed out')),
+      ms
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+/** Max wait for the Health Connect permission prompt before we stop blocking on it. */
+const PERMISSION_PROMPT_TIMEOUT_MS = 90_000;
+
 // ─── Public types ───────────────────────────────────────────────────────────
 
 /**
@@ -202,10 +232,25 @@ export async function connect(): Promise<HealthConnectPermissionResult> {
     const initialized = await hc.initialize();
     if (!initialized) return empty;
 
-    const granted = await hc.requestPermission(SLEEP_HEART_READ_PERMISSIONS);
-    const grantedPermissions = granted.map((p) => ({
-      accessType: p.accessType,
-      recordType: p.recordType,
+    // Open the system permission prompt, but don't block on it forever: on
+    // Android 16 the returned promise can hang in the never_ask_again state
+    // (react-native#53887). Whether it resolves, times out, or throws, we read
+    // the ACTUAL grants afterwards as the source of truth — so a hung prompt
+    // never freezes the caller's spinner, and a grant the user DID make is still
+    // detected. (This also makes the happy path robust: getGrantedPermissions
+    // reflects the real state regardless of what requestPermission returned.)
+    try {
+      await withTimeout(
+        hc.requestPermission(SLEEP_HEART_READ_PERMISSIONS),
+        PERMISSION_PROMPT_TIMEOUT_MS
+      );
+    } catch {
+      // timeout or prompt error — fall through to the real grant check below.
+    }
+
+    const grantedPermissions = (await hc.getGrantedPermissions()).map((p) => ({
+      accessType: (p as Permission).accessType,
+      recordType: (p as Permission).recordType,
     }));
     return {
       granted: hasRequiredReadAccess(grantedPermissions),
