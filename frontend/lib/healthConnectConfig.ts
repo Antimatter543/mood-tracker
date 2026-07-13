@@ -24,8 +24,28 @@ import type { HealthConnectStatus } from './healthConnect';
  */
 export const HEALTH_CONNECT_ENABLED = true;
 
-/** How many days back the FIRST sync reads (incremental syncs read less). */
-export const HEALTH_CONNECT_SYNC_WINDOW_DAYS = 30;
+/**
+ * Hard cap on how far back a historical backfill reads (≈1 year). A user with
+ * months/years of both Health Connect history AND mood history gets that overlap
+ * pulled on first connect — but never more than this, so a huge history can't
+ * make the first sync unbounded. See `resolveSyncWindow` in healthConnectPure.
+ */
+export const HEALTH_CONNECT_MAX_BACKFILL_DAYS = 365;
+
+/**
+ * Fallback lookback for the FIRST sync when there is NO mood history to anchor a
+ * backfill to (a fresh, empty DB). With mood entries present the backfill instead
+ * reaches back to the earliest mood day (capped at {@link HEALTH_CONNECT_MAX_BACKFILL_DAYS}).
+ */
+export const HEALTH_CONNECT_INITIAL_WINDOW_DAYS = 30;
+
+/**
+ * Max calendar-days read per chunk during a backfill. A large backfill is split
+ * into ≤ this-many-day sub-windows and each chunk is aggregated + upserted before
+ * the next is read, so at most one chunk's worth of raw heart-rate samples is held
+ * in memory at once (a year of per-second HR would otherwise OOM the read).
+ */
+export const HEALTH_CONNECT_CHUNK_DAYS = 30;
 
 /** The `source` label written on every locally-stored health row. */
 export const HEALTH_CONNECT_SOURCE = 'health_connect';

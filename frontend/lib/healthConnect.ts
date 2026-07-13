@@ -30,9 +30,14 @@
  */
 
 import { Platform } from 'react-native';
-import type { Permission } from 'react-native-health-connect';
+import type {
+  Permission,
+  ReadRecordsOptions,
+  RecordResult,
+  RecordType,
+} from 'react-native-health-connect';
 import type * as HealthConnectModule from 'react-native-health-connect';
-import type { HeartRateSampleAt } from './healthConnectPure';
+import type { HeartRateSampleAt, HrvSampleAt } from './healthConnectPure';
 import {
   averageBpm,
   hasRequiredReadAccess,
@@ -172,15 +177,46 @@ export interface HealthRangeResult {
   sleepSessions: SleepSessionSummary[];
   /** Every heart-rate sample in the window, flattened + timestamped. */
   heartRateSamples: HeartRateSampleAt[];
+  /** Every HRV (RMSSD) reading in the window, flattened + timestamped (may be empty). */
+  hrvSamples: HrvSampleAt[];
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-/** The read permissions this layer requests (Sleep + Heart Rate). */
+/** The REQUIRED read permissions (Sleep + Heart Rate) — the "connected" gate. */
 const SLEEP_HEART_READ_PERMISSIONS: Permission[] = [
   { accessType: 'read', recordType: 'SleepSession' },
   { accessType: 'read', recordType: 'HeartRate' },
 ];
+
+/**
+ * OPTIONAL read permissions — requested alongside the required ones but NOT
+ * gated on. HRV isn't emitted by every source, so a device that grants only
+ * Sleep + Heart Rate is still fully connected.
+ */
+const OPTIONAL_READ_PERMISSIONS: Permission[] = [
+  { accessType: 'read', recordType: 'HeartRateVariabilityRmssd' },
+];
+
+/** All read permissions requested at connect time (required + optional). */
+const ALL_READ_PERMISSIONS: Permission[] = [
+  ...SLEEP_HEART_READ_PERMISSIONS,
+  ...OPTIONAL_READ_PERMISSIONS,
+];
+
+/**
+ * Max records per Health Connect page. 5000 is Health Connect's per-read ceiling;
+ * we page through with `pageToken` until exhausted so a large backfill window
+ * (a year of per-second heart rate) is never silently truncated to one page.
+ */
+const READ_PAGE_SIZE = 5000;
+
+/**
+ * Hard cap on pages per record type per read — a safety valve so a provider that
+ * kept returning a non-empty `pageToken` can never spin forever. 5000 pages ×
+ * 5000 records ≫ any realistic window.
+ */
+const MAX_PAGES = 5000;
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
@@ -241,7 +277,7 @@ export async function connect(): Promise<HealthConnectPermissionResult> {
     // reflects the real state regardless of what requestPermission returned.)
     try {
       await withTimeout(
-        hc.requestPermission(SLEEP_HEART_READ_PERMISSIONS),
+        hc.requestPermission(ALL_READ_PERMISSIONS),
         PERMISSION_PROMPT_TIMEOUT_MS
       );
     } catch {
@@ -262,9 +298,40 @@ export async function connect(): Promise<HealthConnectPermissionResult> {
 }
 
 /**
- * Read the raw Sleep + Heart Rate records over an explicit `[start, end]`
- * window with a single `between` filter. The one place `readRecords` is called,
- * so every read issues the identical query shape.
+ * Read EVERY record of `recordType` in the window, paging through Health
+ * Connect's `pageToken` until exhausted. `readRecords` returns at most
+ * `pageSize` records plus a continuation `pageToken`; without this loop a window
+ * larger than one page is silently truncated (the bug a full-year backfill hits).
+ * The one place `readRecords` is called, so every read issues the identical query
+ * shape.
+ */
+async function readAllPages<T extends RecordType>(
+  hc: NonNullable<ReturnType<typeof getHealthConnect>>,
+  recordType: T,
+  timeRangeFilter: { operator: 'between'; startTime: string; endTime: string }
+): Promise<RecordResult<T>[]> {
+  const all: RecordResult<T>[] = [];
+  let pageToken: string | undefined;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const options: ReadRecordsOptions = {
+      timeRangeFilter,
+      pageSize: READ_PAGE_SIZE,
+      ...(pageToken ? { pageToken } : {}),
+    };
+    const result = await hc.readRecords(recordType, options);
+    all.push(...result.records);
+    if (!result.pageToken) break;
+    pageToken = result.pageToken;
+  }
+
+  return all;
+}
+
+/**
+ * Read the raw Sleep + Heart Rate + HRV records over an explicit `[start, end]`
+ * window with a single `between` filter, fully paginated. HRV is read too (it's
+ * optional; the array is simply empty when the source has none).
  */
 async function readRawWindow(
   hc: NonNullable<ReturnType<typeof getHealthConnect>>,
@@ -277,11 +344,12 @@ async function readRawWindow(
     endTime: windowEnd,
   } as const;
 
-  const [sleep, heart] = await Promise.all([
-    hc.readRecords('SleepSession', { timeRangeFilter }),
-    hc.readRecords('HeartRate', { timeRangeFilter }),
+  const [sleepRecords, heartRecords, hrvRecords] = await Promise.all([
+    readAllPages(hc, 'SleepSession', timeRangeFilter),
+    readAllPages(hc, 'HeartRate', timeRangeFilter),
+    readAllPages(hc, 'HeartRateVariabilityRmssd', timeRangeFilter),
   ]);
-  return { sleepRecords: sleep.records, heartRecords: heart.records };
+  return { sleepRecords, heartRecords, hrvRecords };
 }
 
 /** The minimal sleep-record shape the summary mapping reads (library records are assignable). */
@@ -370,6 +438,7 @@ export async function readHealthForRange(
     windowEnd: endISO,
     sleepSessions: [],
     heartRateSamples: [],
+    hrvSamples: [],
   };
 
   if (Platform.OS !== 'android') return empty;
@@ -377,7 +446,7 @@ export async function readHealthForRange(
   if (!hc) return empty;
 
   try {
-    const { sleepRecords, heartRecords } = await readRawWindow(
+    const { sleepRecords, heartRecords, hrvRecords } = await readRawWindow(
       hc,
       startISO,
       endISO
@@ -393,11 +462,20 @@ export async function readHealthForRange(
       }
     }
 
+    // HeartRateVariabilityRmssd is an InstantaneousRecord: one `time` +
+    // `heartRateVariabilityMillis` per record (no nested samples). Flatten to
+    // the pure layer's `{ time, hrvMillis }` shape.
+    const hrvSamples: HrvSampleAt[] = hrvRecords.map((record) => ({
+      time: record.time,
+      hrvMillis: record.heartRateVariabilityMillis,
+    }));
+
     return {
       windowStart: startISO,
       windowEnd: endISO,
       sleepSessions: toSleepSummaries(sleepRecords),
       heartRateSamples,
+      hrvSamples,
     };
   } catch {
     return empty;

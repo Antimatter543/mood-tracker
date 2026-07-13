@@ -165,6 +165,21 @@ export const migrations: Migration[] = [
                 VALUES ('health_connect_opt_in', 'false')
             `);
         }
+    },
+    {
+        // HRV analytics: add a nullable avg_hrv_millis column to health_metrics
+        // (mean RMSSD in ms per local day). HRV is OPTIONAL — many sources never
+        // emit it — so the column stays NULL until data appears. This single
+        // ALTER is the sole path for BOTH fresh installs (migration 7 creates the
+        // table without HRV, then this adds the column) and existing users. Do
+        // NOT also add the column to migration 7's CREATE TABLE — that would make
+        // a fresh install create-then-ALTER the same column ("duplicate column").
+        version: 8,
+        up: async (db: SQLiteDatabase) => {
+            await db.runAsync(
+                `ALTER TABLE health_metrics ADD COLUMN avg_hrv_millis REAL`
+            );
+        }
     }
 
     // To add a new migration: create a new entry with the next version number.

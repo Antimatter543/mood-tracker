@@ -113,7 +113,10 @@ export interface HealthMetricDay {
   date: string;
   sleepTotalMinutes: number | null;
   avgHeartRate: number | null;
+  /** Lowest bpm that day — the resting-HR proxy (see restingHeartRateMoodCorrelation). */
   minHeartRate: number | null;
+  /** Mean HRV (RMSSD, ms) that day, or null when the source emitted none. */
+  avgHrvMillis: number | null;
 }
 
 /** The mood side: only the local day key + its average is needed (DailyAverage subset). */
@@ -235,8 +238,8 @@ export function sleepMoodCorrelation(
 
 /**
  * Correlate a day's AVERAGE heart rate (bpm) with that day's mood. Uses
- * avgHeartRate (the day-representative value); minHeartRate is a resting-HR
- * proxy kept in the row for a possible future variant. Same honesty gates.
+ * avgHeartRate (the day-representative value); minHeartRate powers the separate
+ * {@link restingHeartRateMoodCorrelation}. Same honesty gates.
  */
 export function heartRateMoodCorrelation(
   healthRows: ReadonlyArray<HealthMetricDay>,
@@ -244,5 +247,35 @@ export function heartRateMoodCorrelation(
 ): MetricMoodCorrelation {
   return buildCorrelation(
     pairMetricWithMood(healthRows, dailyMoods, (row) => row.avgHeartRate)
+  );
+}
+
+/**
+ * Correlate a day's RESTING heart rate with that day's mood. Uses minHeartRate —
+ * the day's lowest bpm, the resting-HR proxy this row has always reserved (no
+ * dedicated RestingHeartRate record is read). A lower resting HR is generally the
+ * "recovered" signal, so this often reads oppositely to average HR. Same honesty
+ * gates.
+ */
+export function restingHeartRateMoodCorrelation(
+  healthRows: ReadonlyArray<HealthMetricDay>,
+  dailyMoods: ReadonlyArray<DailyMood>
+): MetricMoodCorrelation {
+  return buildCorrelation(
+    pairMetricWithMood(healthRows, dailyMoods, (row) => row.minHeartRate)
+  );
+}
+
+/**
+ * Correlate a day's AVERAGE HRV (RMSSD, ms) with that day's mood. HRV is optional
+ * and sparse (many sources never emit it), so most users will stay below MIN_PAIRS
+ * here — the honesty gate handles that with the "keep logging" state. Same gates.
+ */
+export function hrvMoodCorrelation(
+  healthRows: ReadonlyArray<HealthMetricDay>,
+  dailyMoods: ReadonlyArray<DailyMood>
+): MetricMoodCorrelation {
+  return buildCorrelation(
+    pairMetricWithMood(healthRows, dailyMoods, (row) => row.avgHrvMillis)
   );
 }

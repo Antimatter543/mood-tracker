@@ -42,10 +42,16 @@ import {
 import MoodDriversCard from '@/components/visualisations/MoodDriversCard';
 import SleepMoodCard from '@/components/visualisations/SleepMoodCard';
 import HeartRateMoodCard from '@/components/visualisations/HeartRateMoodCard';
+import RestingHeartRateMoodCard from '@/components/visualisations/RestingHeartRateMoodCard';
+import HrvMoodCard from '@/components/visualisations/HrvMoodCard';
+import MoodMetricOverlayCard from '@/components/visualisations/MoodMetricOverlayCard';
 import {
     sleepMoodCorrelation,
     heartRateMoodCorrelation,
+    restingHeartRateMoodCorrelation,
+    hrvMoodCorrelation,
     type MetricMoodCorrelation,
+    type HealthMetricDay,
 } from '@/components/visualisations/transforms/healthMoodCorrelation';
 import { getHealthMetricsRange } from '@/databases/health-metrics';
 import { shouldShowHealthConnect } from '@/lib/healthConnectConfig';
@@ -77,8 +83,15 @@ type Insights = {
     showHealth: boolean;
     hasSleepData: boolean;
     hasHeartRateData: boolean;
+    hasHrvData: boolean;
     sleepMood: MetricMoodCorrelation;
     heartRateMood: MetricMoodCorrelation;
+    restingHeartRateMood: MetricMoodCorrelation;
+    hrvMood: MetricMoodCorrelation;
+    // Raw rows for the mood×metric overlay chart (its own pure transform aligns
+    // + windows them per selected metric). Kept minimal; empty off Android/opt-out.
+    healthRows: HealthMetricDay[];
+    dailyMoods: { day: string; avg: number }[];
 };
 
 /** Neutral correlation used before health data loads / when the feature is off. */
@@ -121,8 +134,13 @@ const EMPTY: Insights = {
     showHealth: false,
     hasSleepData: false,
     hasHeartRateData: false,
+    hasHrvData: false,
     sleepMood: EMPTY_CORRELATION,
     heartRateMood: EMPTY_CORRELATION,
+    restingHeartRateMood: EMPTY_CORRELATION,
+    hrvMood: EMPTY_CORRELATION,
+    healthRows: [],
+    dailyMoods: [],
 };
 
 // expo-router screen-level error boundary: a render throw in Insights shows a
@@ -214,6 +232,9 @@ export default function InsightsScreen() {
                     const hasHeartRateData = healthRows.some(
                         (r) => r.avgHeartRate != null && r.avgHeartRate > 0
                     );
+                    const hasHrvData = healthRows.some(
+                        (r) => r.avgHrvMillis != null && r.avgHrvMillis > 0
+                    );
 
                     setData({
                         totalEntries: summary?.entry_count ?? 0,
@@ -236,8 +257,17 @@ export default function InsightsScreen() {
                         showHealth,
                         hasSleepData,
                         hasHeartRateData,
+                        hasHrvData,
                         sleepMood: sleepMoodCorrelation(healthRows, dailyMoods),
                         heartRateMood: heartRateMoodCorrelation(healthRows, dailyMoods),
+                        restingHeartRateMood: restingHeartRateMoodCorrelation(
+                            healthRows,
+                            dailyMoods
+                        ),
+                        hrvMood: hrvMoodCorrelation(healthRows, dailyMoods),
+                        // Reuse the already-fetched rows/day-averages for the overlay.
+                        healthRows,
+                        dailyMoods,
                     });
                 } catch (e) {
                     console.error('Error building insights:', e);
@@ -384,15 +414,33 @@ export default function InsightsScreen() {
             {/* State-conditioned, forward-looking drivers */}
             <MoodDriversCard data={d.drivers} />
 
-            {/* Health Connect: sleep/heart-rate ↔ mood (Android + opt-in only).
-                Each card renders only when that metric has on-device data, so
-                Insights stays uncluttered for non-health users. */}
+            {/* Health Connect: sleep / heart-rate / resting-HR / HRV ↔ mood
+                (Android + opt-in only). Each card renders only when that metric
+                has on-device data, so Insights stays uncluttered for non-health
+                users. */}
             {d.showHealth && d.hasSleepData && (
                 <SleepMoodCard correlation={d.sleepMood} />
             )}
             {d.showHealth && d.hasHeartRateData && (
                 <HeartRateMoodCard correlation={d.heartRateMood} />
             )}
+            {d.showHealth && d.hasHeartRateData && (
+                <RestingHeartRateMoodCard correlation={d.restingHeartRateMood} />
+            )}
+            {d.showHealth && d.hasHrvData && (
+                <HrvMoodCard correlation={d.hrvMood} />
+            )}
+
+            {/* The mood × metric overlay — plot mood against sleep / resting HR /
+                HRV / avg HR over time, with a metric toggle. Mounts once ANY
+                health metric has data (the toggle only offers metrics that do). */}
+            {d.showHealth &&
+                (d.hasSleepData || d.hasHeartRateData || d.hasHrvData) && (
+                    <MoodMetricOverlayCard
+                        healthRows={d.healthRows}
+                        dailyMoods={d.dailyMoods}
+                    />
+                )}
 
             <Text style={styles.footnote}>
                 All insights are computed on your device from your own entries. Nothing leaves
