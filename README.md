@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="frontend/assets/images/banner.svg" alt="SoulSync Banner" width="100%"/>
+  <img src="docs/assets/readme-banner.png" alt="SoulSync — a private mood tracker. Your data never leaves your phone." width="100%"/>
 </p>
 
 <p align="center">
@@ -60,10 +60,10 @@
 ## Screenshots
 
 <p align="center">
-  <img src="frontend/assets/images/screenshot-home.png" alt="Home" width="24%"/>
-  <img src="frontend/assets/images/screenshot-stats.png" alt="Statistics" width="24%"/>
-  <img src="frontend/assets/images/screenshot-timeline.png" alt="Timeline" width="24%"/>
-  <img src="frontend/assets/images/screenshot-settings.png" alt="Settings" width="24%"/>
+  <img src="docs/assets/screenshots/1.png" alt="Home dashboard" width="24%"/>
+  <img src="docs/assets/screenshots/2.png" alt="Insights" width="24%"/>
+  <img src="docs/assets/screenshots/3.png" alt="Statistics heatmap" width="24%"/>
+  <img src="docs/assets/screenshots/4.png" alt="Timeline" width="24%"/>
 </p>
 
 ## Install
