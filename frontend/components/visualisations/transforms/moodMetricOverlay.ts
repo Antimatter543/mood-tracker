@@ -49,7 +49,9 @@ export const OVERLAY_METRICS: readonly OverlayMetricConfig[] = [
     key: 'restingHr',
     label: 'Resting HR',
     unit: 'bpm',
-    extract: (r) => r.minHeartRate,
+    // Prefer the dedicated RestingHeartRate reading (the REAL resting HR); fall
+    // back to the intraday-min proxy when the source emitted none.
+    extract: (r) => r.restingHeartRate ?? r.minHeartRate,
     toDisplay: (v) => v,
   },
   {

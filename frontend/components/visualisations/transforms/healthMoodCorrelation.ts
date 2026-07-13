@@ -115,6 +115,12 @@ export interface HealthMetricDay {
   avgHeartRate: number | null;
   /** Lowest bpm that day — the resting-HR proxy (see restingHeartRateMoodCorrelation). */
   minHeartRate: number | null;
+  /**
+   * Dedicated RestingHeartRate reading — the REAL resting HR (sources like
+   * Fitbit write ~1/day), preferred over the minHeartRate proxy. Null when the
+   * source emitted none, in which case the minHeartRate proxy is used instead.
+   */
+  restingHeartRate: number | null;
   /** Mean HRV (RMSSD, ms) that day, or null when the source emitted none. */
   avgHrvMillis: number | null;
 }
@@ -251,18 +257,23 @@ export function heartRateMoodCorrelation(
 }
 
 /**
- * Correlate a day's RESTING heart rate with that day's mood. Uses minHeartRate —
- * the day's lowest bpm, the resting-HR proxy this row has always reserved (no
- * dedicated RestingHeartRate record is read). A lower resting HR is generally the
- * "recovered" signal, so this often reads oppositely to average HR. Same honesty
- * gates.
+ * Correlate a day's RESTING heart rate with that day's mood. Prefers the
+ * dedicated RestingHeartRate reading (`restingHeartRate` — the REAL resting HR
+ * that sources like Fitbit write ~1/day) and falls back to `minHeartRate`, the
+ * day's lowest bpm, as an intraday-min proxy when no dedicated reading exists. A
+ * lower resting HR is generally the "recovered" signal, so this often reads
+ * oppositely to average HR. Same honesty gates.
  */
 export function restingHeartRateMoodCorrelation(
   healthRows: ReadonlyArray<HealthMetricDay>,
   dailyMoods: ReadonlyArray<DailyMood>
 ): MetricMoodCorrelation {
   return buildCorrelation(
-    pairMetricWithMood(healthRows, dailyMoods, (row) => row.minHeartRate)
+    pairMetricWithMood(
+      healthRows,
+      dailyMoods,
+      (row) => row.restingHeartRate ?? row.minHeartRate
+    )
   );
 }
 

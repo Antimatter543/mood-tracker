@@ -206,11 +206,15 @@ describe('hasRequiredReadAccess / record-type constants', () => {
     expect(REQUIRED_READ_RECORD_TYPES).toEqual(['SleepSession', 'HeartRate']);
   });
 
-  it('lists HRV as OPTIONAL (not gated on)', () => {
-    expect(OPTIONAL_READ_RECORD_TYPES).toEqual(['HeartRateVariabilityRmssd']);
-    // HRV is deliberately NOT in the required set — a device without it is still
-    // fully "connected".
+  it('lists HRV + RestingHeartRate as OPTIONAL (not gated on)', () => {
+    expect(OPTIONAL_READ_RECORD_TYPES).toEqual([
+      'HeartRateVariabilityRmssd',
+      'RestingHeartRate',
+    ]);
+    // Neither is in the required set — a device without them (e.g. a source that
+    // writes only Sleep + intraday HeartRate) is still fully "connected".
     expect(REQUIRED_READ_RECORD_TYPES).not.toContain('HeartRateVariabilityRmssd');
+    expect(REQUIRED_READ_RECORD_TYPES).not.toContain('RestingHeartRate');
   });
 
   it('is unaffected by whether the optional HRV read is granted', () => {
@@ -367,11 +371,13 @@ describe('healthConnect — Android path (mocked native module)', () => {
       async (mod) => {
         const res = await mod.connect();
         expect(initialize).toHaveBeenCalledTimes(1);
-        // Requests the required Sleep + Heart Rate reads AND the optional HRV read.
+        // Requests the required Sleep + Heart Rate reads AND the optional HRV +
+        // RestingHeartRate reads.
         expect(requestPermission).toHaveBeenCalledWith([
           { accessType: 'read', recordType: 'SleepSession' },
           { accessType: 'read', recordType: 'HeartRate' },
           { accessType: 'read', recordType: 'HeartRateVariabilityRmssd' },
+          { accessType: 'read', recordType: 'RestingHeartRate' },
         ]);
         expect(res.granted).toBe(true);
         expect(res.grantedPermissions).toEqual([
@@ -538,11 +544,19 @@ describe('healthConnect — Android path (mocked native module)', () => {
       { time: '2026-07-06T22:00:00.000Z', heartRateVariabilityMillis: 45 },
       { time: '2026-07-07T03:00:00.000Z', heartRateVariabilityMillis: 52 },
     ];
+    // RestingHeartRate records are InstantaneousRecords too: one time +
+    // beatsPerMinute each (Fitbit et al. write ~1/day, no intraday HeartRate).
+    const restingHrRecords = [
+      { time: '2026-07-06T22:30:00.000Z', beatsPerMinute: 58 },
+      { time: '2026-07-07T03:30:00.000Z', beatsPerMinute: 56 },
+    ];
     const readRecords = jest.fn((recordType: string) => {
       if (recordType === 'SleepSession') return Promise.resolve({ records: sleepRecords });
       if (recordType === 'HeartRate') return Promise.resolve({ records: heartRecords });
       if (recordType === 'HeartRateVariabilityRmssd')
         return Promise.resolve({ records: hrvRecords });
+      if (recordType === 'RestingHeartRate')
+        return Promise.resolve({ records: restingHrRecords });
       return Promise.resolve({ records: [] });
     });
 
@@ -571,6 +585,13 @@ describe('healthConnect — Android path (mocked native module)', () => {
             timeRangeFilter: { operator: 'between', startTime: startISO, endTime: endISO },
           })
         );
+        // RestingHeartRate is read too (optional).
+        expect(readRecords).toHaveBeenCalledWith(
+          'RestingHeartRate',
+          expect.objectContaining({
+            timeRangeFilter: { operator: 'between', startTime: startISO, endTime: endISO },
+          })
+        );
 
         expect(res.windowStart).toBe(startISO);
         expect(res.windowEnd).toBe(endISO);
@@ -592,6 +613,11 @@ describe('healthConnect — Android path (mocked native module)', () => {
         expect(res.hrvSamples).toEqual([
           { time: '2026-07-06T22:00:00.000Z', hrvMillis: 45 },
           { time: '2026-07-07T03:00:00.000Z', hrvMillis: 52 },
+        ]);
+        // RestingHeartRate records flattened to { time, beatsPerMinute }.
+        expect(res.restingHrSamples).toEqual([
+          { time: '2026-07-06T22:30:00.000Z', beatsPerMinute: 58 },
+          { time: '2026-07-07T03:30:00.000Z', beatsPerMinute: 56 },
         ]);
       }
     );
@@ -784,6 +810,7 @@ describe('aggregateHealthByDay', () => {
         sleepStages: { 5: 60 },
         avgHeartRate: 80, // (60+80+100)/3
         minHeartRate: 60,
+        restingHeartRate: null, // no dedicated resting-HR samples in this fixture
         avgHrvMillis: null, // no HRV samples in this fixture
       },
       {
@@ -792,6 +819,77 @@ describe('aggregateHealthByDay', () => {
         sleepStages: {},
         avgHeartRate: 50,
         minHeartRate: 50,
+        restingHeartRate: null,
+        avgHrvMillis: null,
+      },
+    ]);
+  });
+
+  it('buckets dedicated RestingHeartRate readings by local day into restingHeartRate (finite mean), independent of minHeartRate', () => {
+    // Fitbit shape: dedicated resting readings, plus some intraday HR on one day
+    // to prove the two are computed independently (restingHeartRate ≠ minHeartRate).
+    const rows = aggregateHealthByDay({
+      sleepSessions: [],
+      heartRateSamples: [
+        { time: '2026-07-06T20:30:00.000Z', beatsPerMinute: 70 }, // Jul07 intraday
+        { time: '2026-07-07T02:00:00.000Z', beatsPerMinute: 90 }, // Jul07 intraday
+      ],
+      restingHrSamples: [
+        { time: '2026-07-06T20:30:00.000Z', beatsPerMinute: 58 }, // Jul07 (Brisbane)
+        { time: '2026-07-07T02:00:00.000Z', beatsPerMinute: 60 }, // Jul07 → mean 59
+        { time: '2026-07-07T20:00:00.000Z', beatsPerMinute: 55 }, // Jul08 → single
+      ],
+    });
+    expect(rows).toEqual([
+      {
+        date: '2026-07-07',
+        sleepTotalMinutes: null,
+        sleepStages: {},
+        avgHeartRate: 80, // (70+90)/2 intraday — untouched by resting readings
+        minHeartRate: 70, // intraday min — distinct from resting
+        restingHeartRate: 59, // (58+60)/2 dedicated resting
+        avgHrvMillis: null,
+      },
+      {
+        date: '2026-07-08',
+        sleepTotalMinutes: null,
+        sleepStages: {},
+        avgHeartRate: null,
+        minHeartRate: null, // no intraday HR that day
+        restingHeartRate: 55, // dedicated resting present with NO intraday HR (Fitbit)
+        avgHrvMillis: null,
+      },
+    ]);
+  });
+
+  it('a day with no dedicated resting reading has null restingHeartRate (and resting input is optional)', () => {
+    const rows = aggregateHealthByDay({
+      sleepSessions: [{ endTime: '2026-07-06T20:00:00.000Z', durationMinutes: 400, stageMinutes: {} }],
+      heartRateSamples: [{ time: '2026-07-06T20:30:00.000Z', beatsPerMinute: 62 }], // Jul07
+      // restingHrSamples omitted entirely — must not throw.
+    });
+    expect(rows[0].restingHeartRate).toBeNull();
+    // The intraday-min proxy is unaffected by the absence of resting readings.
+    expect(rows[0].minHeartRate).toBe(62);
+  });
+
+  it('skips a resting reading with an unparseable timestamp (never throws)', () => {
+    const rows = aggregateHealthByDay({
+      sleepSessions: [],
+      heartRateSamples: [],
+      restingHrSamples: [
+        { time: 'not-a-date', beatsPerMinute: 999 }, // dropped
+        { time: '2026-07-06T20:30:00.000Z', beatsPerMinute: 57 }, // Jul07
+      ],
+    });
+    expect(rows).toEqual([
+      {
+        date: '2026-07-07',
+        sleepTotalMinutes: null,
+        sleepStages: {},
+        avgHeartRate: null,
+        minHeartRate: null,
+        restingHeartRate: 57,
         avgHrvMillis: null,
       },
     ]);
@@ -814,6 +912,7 @@ describe('aggregateHealthByDay', () => {
         sleepStages: {},
         avgHeartRate: null,
         minHeartRate: null,
+        restingHeartRate: null,
         avgHrvMillis: 50,
       },
       {
@@ -822,6 +921,7 @@ describe('aggregateHealthByDay', () => {
         sleepStages: {},
         avgHeartRate: null,
         minHeartRate: null,
+        restingHeartRate: null,
         avgHrvMillis: 55,
       },
     ]);

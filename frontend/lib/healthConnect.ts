@@ -37,7 +37,11 @@ import type {
   RecordType,
 } from 'react-native-health-connect';
 import type * as HealthConnectModule from 'react-native-health-connect';
-import type { HeartRateSampleAt, HrvSampleAt } from './healthConnectPure';
+import type {
+  HeartRateSampleAt,
+  HrvSampleAt,
+  RestingHrSampleAt,
+} from './healthConnectPure';
 import {
   averageBpm,
   hasRequiredReadAccess,
@@ -177,6 +181,8 @@ export interface HealthRangeResult {
   sleepSessions: SleepSessionSummary[];
   /** Every heart-rate sample in the window, flattened + timestamped. */
   heartRateSamples: HeartRateSampleAt[];
+  /** Every dedicated RestingHeartRate reading in the window, flattened + timestamped (may be empty). */
+  restingHrSamples: RestingHrSampleAt[];
   /** Every HRV (RMSSD) reading in the window, flattened + timestamped (may be empty). */
   hrvSamples: HrvSampleAt[];
 }
@@ -191,11 +197,15 @@ const SLEEP_HEART_READ_PERMISSIONS: Permission[] = [
 
 /**
  * OPTIONAL read permissions — requested alongside the required ones but NOT
- * gated on. HRV isn't emitted by every source, so a device that grants only
- * Sleep + Heart Rate is still fully connected.
+ * gated on. Neither HRV nor a dedicated RestingHeartRate reading is emitted by
+ * every source (Fitbit, notably, writes a daily RestingHeartRate record but no
+ * intraday HeartRate), so a device that grants only Sleep + Heart Rate is still
+ * fully connected. MUST stay in sync with the manifest permissions declared in
+ * plugins/withHealthConnect.js — see healthPermissionInvariant.test.ts.
  */
 const OPTIONAL_READ_PERMISSIONS: Permission[] = [
   { accessType: 'read', recordType: 'HeartRateVariabilityRmssd' },
+  { accessType: 'read', recordType: 'RestingHeartRate' },
 ];
 
 /** All read permissions requested at connect time (required + optional). */
@@ -329,9 +339,11 @@ async function readAllPages<T extends RecordType>(
 }
 
 /**
- * Read the raw Sleep + Heart Rate + HRV records over an explicit `[start, end]`
- * window with a single `between` filter, fully paginated. HRV is read too (it's
- * optional; the array is simply empty when the source has none).
+ * Read the raw Sleep + Heart Rate + RestingHeartRate + HRV records over an
+ * explicit `[start, end]` window with a single `between` filter, fully
+ * paginated. RestingHeartRate + HRV are read too (both optional; each array is
+ * simply empty when the source has none). RestingHeartRate is ~1 record/day so
+ * pagination is trivially cheap.
  */
 async function readRawWindow(
   hc: NonNullable<ReturnType<typeof getHealthConnect>>,
@@ -344,12 +356,14 @@ async function readRawWindow(
     endTime: windowEnd,
   } as const;
 
-  const [sleepRecords, heartRecords, hrvRecords] = await Promise.all([
-    readAllPages(hc, 'SleepSession', timeRangeFilter),
-    readAllPages(hc, 'HeartRate', timeRangeFilter),
-    readAllPages(hc, 'HeartRateVariabilityRmssd', timeRangeFilter),
-  ]);
-  return { sleepRecords, heartRecords, hrvRecords };
+  const [sleepRecords, heartRecords, restingHrRecords, hrvRecords] =
+    await Promise.all([
+      readAllPages(hc, 'SleepSession', timeRangeFilter),
+      readAllPages(hc, 'HeartRate', timeRangeFilter),
+      readAllPages(hc, 'RestingHeartRate', timeRangeFilter),
+      readAllPages(hc, 'HeartRateVariabilityRmssd', timeRangeFilter),
+    ]);
+  return { sleepRecords, heartRecords, restingHrRecords, hrvRecords };
 }
 
 /** The minimal sleep-record shape the summary mapping reads (library records are assignable). */
@@ -438,6 +452,7 @@ export async function readHealthForRange(
     windowEnd: endISO,
     sleepSessions: [],
     heartRateSamples: [],
+    restingHrSamples: [],
     hrvSamples: [],
   };
 
@@ -446,11 +461,8 @@ export async function readHealthForRange(
   if (!hc) return empty;
 
   try {
-    const { sleepRecords, heartRecords, hrvRecords } = await readRawWindow(
-      hc,
-      startISO,
-      endISO
-    );
+    const { sleepRecords, heartRecords, restingHrRecords, hrvRecords } =
+      await readRawWindow(hc, startISO, endISO);
 
     const heartRateSamples: HeartRateSampleAt[] = [];
     for (const record of heartRecords) {
@@ -461,6 +473,17 @@ export async function readHealthForRange(
         });
       }
     }
+
+    // RestingHeartRate is an InstantaneousRecord: one `time` + `beatsPerMinute`
+    // per record (no nested samples — unlike HeartRate). This is the dedicated
+    // daily resting-HR reading Fitbit et al. write. Flatten to the pure layer's
+    // `{ time, beatsPerMinute }` shape.
+    const restingHrSamples: RestingHrSampleAt[] = restingHrRecords.map(
+      (record) => ({
+        time: record.time,
+        beatsPerMinute: record.beatsPerMinute,
+      })
+    );
 
     // HeartRateVariabilityRmssd is an InstantaneousRecord: one `time` +
     // `heartRateVariabilityMillis` per record (no nested samples). Flatten to
@@ -475,6 +498,7 @@ export async function readHealthForRange(
       windowEnd: endISO,
       sleepSessions: toSleepSummaries(sleepRecords),
       heartRateSamples,
+      restingHrSamples,
       hrvSamples,
     };
   } catch {

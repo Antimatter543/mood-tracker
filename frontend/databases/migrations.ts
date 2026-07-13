@@ -180,6 +180,25 @@ export const migrations: Migration[] = [
                 `ALTER TABLE health_metrics ADD COLUMN avg_hrv_millis REAL`
             );
         }
+    },
+    {
+        // Dedicated resting-heart-rate analytics: add a nullable
+        // resting_heart_rate column to health_metrics (mean of the day's
+        // dedicated RestingHeartRate readings — sources like Fitbit write one
+        // ~daily but NO intraday HeartRate, so their avg/resting HR used to
+        // collapse to a single sample). Distinct from min_heart_rate (the
+        // intraday-min proxy, kept as the fallback). Nullable/optional — stays
+        // NULL until such a reading appears. Like migration 8, this single ALTER
+        // is the SOLE path for BOTH fresh installs (migration 7 creates the table
+        // without this column, then this adds it) and existing users. Do NOT also
+        // add it to migration 7's CREATE TABLE — that would make a fresh install
+        // create-then-ALTER the same column ("duplicate column").
+        version: 9,
+        up: async (db: SQLiteDatabase) => {
+            await db.runAsync(
+                `ALTER TABLE health_metrics ADD COLUMN resting_heart_rate REAL`
+            );
+        }
     }
 
     // To add a new migration: create a new entry with the next version number.
