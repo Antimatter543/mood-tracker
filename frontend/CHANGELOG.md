@@ -3,6 +3,30 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.5.0] - 2026-07-13
+
+### Added
+- **See the numbers behind your patterns.** Each Health Connect card (sleep, heart rate, resting
+  heart rate, HRV) now shows the actual stats — the correlation strength (r), a p-value, and how many
+  days it's based on (n) — with a plain-language read like "moderate positive · statistically
+  significant" and a tap-to-explain "?" for what each number means. It stays honest about small
+  samples: fewer days means treat it lightly.
+- **Heart rate variability, properly shown.** HRV now reliably appears as its own card and in the
+  mood-over-time overlay. (Previously it couldn't: the app requested HRV but never declared the
+  permission, so it was never actually granted — now fixed.)
+
+### Fixed
+- **Resting heart rate now works with Fitbit (and similar devices).** Fitbit shares only a daily
+  resting heart rate with Health Connect — not continuous readings — so the app was collapsing to a
+  single recent number. It now reads your dedicated daily resting heart rate directly, and the
+  resting-HR card shows up even when your device shares nothing else. (Average heart rate still needs
+  a device that shares continuous readings; if yours doesn't, that card simply stays hidden rather
+  than showing a misleading value.)
+
+> **After updating:** version 2.5.0 asks for two new Health Connect permissions (resting heart rate
+> and HRV). If you connected before, tap Connect again — or toggle Health Connect off and on in
+> Settings — to grant them, then the resting-HR and HRV cards will populate.
+
 ## [2.4.0] - 2026-07-13
 
 ### Added
