@@ -53,10 +53,12 @@ const emptyPayload = (windowStart = '', windowEnd = '') => ({
   windowEnd,
   sleepSessions: [],
   heartRateSamples: [],
+  restingHrSamples: [],
   hrvSamples: [],
 });
 
-// Two calendar days: a Jul07 night + a Jul08 heart-rate sample + a Jul07 HRV.
+// Two calendar days: a Jul07 night + a Jul08 heart-rate sample + a Jul07 HRV +
+// a Jul07 dedicated resting-HR reading.
 const TWO_DAY_PAYLOAD = {
   ...emptyPayload(),
   sleepSessions: [
@@ -68,6 +70,7 @@ const TWO_DAY_PAYLOAD = {
     },
   ],
   heartRateSamples: [{ time: '2026-07-07T20:00:00.000Z', beatsPerMinute: 50 }], // Jul08
+  restingHrSamples: [{ time: '2026-07-07T02:00:00.000Z', beatsPerMinute: 58 }], // Jul07
   hrvSamples: [{ time: '2026-07-07T02:00:00.000Z', hrvMillis: 45 }], // Jul07
 };
 
@@ -101,9 +104,10 @@ describe('syncHealthMetrics — first sync (empty DB, no mood, nothing stored)',
     expect(source).toBe(HEALTH_CONNECT_SOURCE);
     expect(syncedAt).toBe(END);
     expect(rows.map((r: { date: string }) => r.date)).toEqual(['2026-07-07', '2026-07-08']);
-    // HRV flowed through aggregation onto Jul07.
+    // HRV + dedicated resting HR flowed through aggregation onto Jul07.
     const jul07 = rows.find((r: { date: string }) => r.date === '2026-07-07');
     expect(jul07.avgHrvMillis).toBe(45);
+    expect(jul07.restingHeartRate).toBe(58);
 
     expect(mockUpdateSetting).toHaveBeenCalledWith(expect.anything(), HEALTH_LAST_SYNCED_SETTING_KEY, END);
     expect(result).toEqual({ success: true, daysWritten: 2, syncedAt: END });

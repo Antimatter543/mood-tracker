@@ -25,6 +25,7 @@ const hRow = (
     sleep?: number | null;
     avgHr?: number | null;
     minHr?: number | null;
+    restingHr?: number | null;
     hrv?: number | null;
   } = {}
 ): HealthMetricDay => ({
@@ -32,6 +33,7 @@ const hRow = (
   sleepTotalMinutes: opts.sleep ?? null,
   avgHeartRate: opts.avgHr ?? null,
   minHeartRate: opts.minHr ?? null,
+  restingHeartRate: opts.restingHr ?? null,
   avgHrvMillis: opts.hrv ?? null,
 });
 
@@ -57,9 +59,17 @@ describe('OVERLAY_METRICS config', () => {
     expect(cfg('sleep').toDisplay(480)).toBe(8);
     expect(cfg('sleep').unit).toBe('h');
     expect(cfg('restingHr').toDisplay(55)).toBe(55);
+    // restingHr falls back to the minHeartRate proxy when no dedicated reading.
     expect(cfg('restingHr').extract(hRow('x', { minHr: 55 }))).toBe(55);
     expect(cfg('hrv').extract(hRow('x', { hrv: 42 }))).toBe(42);
     expect(cfg('avgHr').extract(hRow('x', { avgHr: 70 }))).toBe(70);
+  });
+
+  it('restingHr PREFERS the dedicated restingHeartRate over the minHeartRate proxy', () => {
+    // Both present → the dedicated reading wins; only the proxy → it falls back.
+    expect(cfg('restingHr').extract(hRow('x', { restingHr: 51, minHr: 99 }))).toBe(51);
+    expect(cfg('restingHr').extract(hRow('x', { minHr: 60 }))).toBe(60);
+    expect(cfg('restingHr').extract(hRow('x', {}))).toBeNull();
   });
 });
 

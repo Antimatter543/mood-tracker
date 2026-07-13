@@ -29,6 +29,7 @@
 //   finding, not a bug). Nothing here ever throws on empty/degenerate input.
 
 import type { DailyAverage } from './dailyAverages';
+import { pValueTwoSided } from './correlationStats';
 
 /**
  * Minimum paired (health + mood) days before we report a sleep↔mood or
@@ -97,6 +98,11 @@ export interface MetricMoodResult {
   moodDelta: number;
   /** Pearson r over the pairs (2 dp), or null when either series has zero variance. */
   r: number | null;
+  /**
+   * Two-tailed p-value of the Pearson r over the paired days (null when r is
+   * null). See correlationStats.pValueTwoSided.
+   */
+  pValue: number | null;
   /** Direction, flat-banded so a near-zero / undefined r reads as "no clear link". */
   direction: MetricMoodDirection;
 }
@@ -115,6 +121,12 @@ export interface HealthMetricDay {
   avgHeartRate: number | null;
   /** Lowest bpm that day — the resting-HR proxy (see restingHeartRateMoodCorrelation). */
   minHeartRate: number | null;
+  /**
+   * Dedicated RestingHeartRate reading — the REAL resting HR (sources like
+   * Fitbit write ~1/day), preferred over the minHeartRate proxy. Null when the
+   * source emitted none, in which case the minHeartRate proxy is used instead.
+   */
+  restingHeartRate: number | null;
   /** Mean HRV (RMSSD, ms) that day, or null when the source emitted none. */
   avgHrvMillis: number | null;
 }
@@ -211,6 +223,9 @@ function buildCorrelation(pairs: MetricMoodPair[]): MetricMoodCorrelation {
   const upper = summarize(sorted.slice(half));
 
   const r = pearson(sorted);
+  // Significance of that r over the paired days. Null when r is null (a
+  // zero-variance series has no correlation to test).
+  const pValue = pValueTwoSided(r ?? NaN, pairCount);
   // From the ROUNDED half averages, so it equals what the UI renders.
   const moodDelta = round1(upper.avgMood - lower.avgMood);
   const direction: MetricMoodDirection =
@@ -220,7 +235,7 @@ function buildCorrelation(pairs: MetricMoodPair[]): MetricMoodCorrelation {
         ? 'positive'
         : 'negative';
 
-  return { status: 'ok', pairCount, pairs: sorted, lower, upper, moodDelta, r, direction };
+  return { status: 'ok', pairCount, pairs: sorted, lower, upper, moodDelta, r, pValue, direction };
 }
 
 /**
@@ -251,18 +266,23 @@ export function heartRateMoodCorrelation(
 }
 
 /**
- * Correlate a day's RESTING heart rate with that day's mood. Uses minHeartRate —
- * the day's lowest bpm, the resting-HR proxy this row has always reserved (no
- * dedicated RestingHeartRate record is read). A lower resting HR is generally the
- * "recovered" signal, so this often reads oppositely to average HR. Same honesty
- * gates.
+ * Correlate a day's RESTING heart rate with that day's mood. Prefers the
+ * dedicated RestingHeartRate reading (`restingHeartRate` — the REAL resting HR
+ * that sources like Fitbit write ~1/day) and falls back to `minHeartRate`, the
+ * day's lowest bpm, as an intraday-min proxy when no dedicated reading exists. A
+ * lower resting HR is generally the "recovered" signal, so this often reads
+ * oppositely to average HR. Same honesty gates.
  */
 export function restingHeartRateMoodCorrelation(
   healthRows: ReadonlyArray<HealthMetricDay>,
   dailyMoods: ReadonlyArray<DailyMood>
 ): MetricMoodCorrelation {
   return buildCorrelation(
-    pairMetricWithMood(healthRows, dailyMoods, (row) => row.minHeartRate)
+    pairMetricWithMood(
+      healthRows,
+      dailyMoods,
+      (row) => row.restingHeartRate ?? row.minHeartRate
+    )
   );
 }
 

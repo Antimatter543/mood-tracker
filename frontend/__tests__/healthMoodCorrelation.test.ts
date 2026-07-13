@@ -28,6 +28,7 @@ const hRow = (
     sleep?: number | null;
     avgHr?: number | null;
     minHr?: number | null;
+    restingHr?: number | null;
     hrv?: number | null;
   } = {}
 ): HealthMetricDay => ({
@@ -35,6 +36,7 @@ const hRow = (
   sleepTotalMinutes: opts.sleep ?? null,
   avgHeartRate: opts.avgHr ?? null,
   minHeartRate: opts.minHr ?? null,
+  restingHeartRate: opts.restingHr ?? null,
   avgHrvMillis: opts.hrv ?? null,
 });
 
@@ -176,6 +178,46 @@ describe('sleepMoodCorrelation — direction & split', () => {
   });
 });
 
+// ── p-value on the result (significance layer) ───────────────────────────────
+
+describe('MetricMoodResult.pValue', () => {
+  it('a directional (≥MIN_PAIRS) result carries a finite p-value in [0,1]', () => {
+    const r = ok(sleepMoodCorrelation(posRows, posMoods));
+    expect(r.r).not.toBeNull();
+    expect(r.pValue).not.toBeNull();
+    expect(Number.isFinite(r.pValue!)).toBe(true);
+    expect(r.pValue!).toBeGreaterThanOrEqual(0);
+    expect(r.pValue!).toBeLessThanOrEqual(1);
+    // A strong positive r over 8 days is significant-ish, not p=1.
+    expect(r.pValue!).toBeLessThan(0.05);
+  });
+
+  it('a zero-variance (constant mood) result has r=null AND pValue=null', () => {
+    const moods = POS_DATES.map((d) => dm(d, 5));
+    const r = ok(sleepMoodCorrelation(posRows, moods));
+    expect(r.r).toBeNull();
+    expect(r.pValue).toBeNull();
+  });
+
+  it('a near-zero (flat) r still gets a finite p-value (the honest nerdy detail)', () => {
+    const rows = POS_DATES.map((d, i) => hRow(d, { sleep: 300 + i * 30 }));
+    const moods = POS_DATES.map((d, i) => dm(d, [5, 5, 6, 6, 6, 6, 5, 5][i]));
+    const r = ok(sleepMoodCorrelation(rows, moods));
+    expect(r.direction).toBe('flat');
+    expect(r.r).not.toBeNull();
+    expect(r.pValue).not.toBeNull();
+    expect(r.pValue!).toBeGreaterThanOrEqual(0);
+    expect(r.pValue!).toBeLessThanOrEqual(1);
+  });
+
+  it('notEnoughData results carry no pValue field (variant unchanged)', () => {
+    const c = sleepMoodCorrelation([], []);
+    expect(c.status).toBe('notEnoughData');
+    expect(c).toEqual({ status: 'notEnoughData', pairCount: 0, pairs: [] });
+    expect('pValue' in c).toBe(false);
+  });
+});
+
 // ── day-key / wake-day / pairing correctness ─────────────────────────────────
 
 describe('pairing correctness', () => {
@@ -265,11 +307,13 @@ describe('heartRateMoodCorrelation', () => {
   });
 });
 
-// ── resting heart-rate correlation (keys on minHeartRate) ────────────────────
+// ── resting heart-rate correlation (prefers restingHeartRate, falls back to
+//    minHeartRate; never keys on avgHeartRate) ─────────────────────────────────
 
 describe('restingHeartRateMoodCorrelation', () => {
-  it('keys on minHeartRate, not avgHeartRate', () => {
-    // Only minHeartRate present → resting HR pairs; avg is null → HR pairs 0.
+  it('never keys on avgHeartRate (uses the resting/min column)', () => {
+    // Only minHeartRate present (restingHeartRate null → falls back to it); avg
+    // is null → the avg-HR correlation pairs 0.
     const d = days(8);
     const rows = d.map((day, i) => hRow(day, { avgHr: null, minHr: 48 + i }));
     const moods = d.map((day, i) => dm(day, 3 + i));
@@ -278,11 +322,42 @@ describe('restingHeartRateMoodCorrelation', () => {
     expect(heartRateMoodCorrelation(rows, moods).pairCount).toBe(0);
   });
 
-  it('positive: higher resting HR half has higher mood (uses the min column)', () => {
+  it('PREFERS the dedicated restingHeartRate over the minHeartRate proxy', () => {
+    // Every row carries BOTH: a real resting reading (54..) and a divergent min
+    // proxy (99). The metric must be the resting reading, never the proxy — so
+    // the pairs' metric values are the resting series.
     const d = days(8);
-    const minHr = [48, 50, 52, 54, 56, 58, 60, 62];
+    const resting = [54, 55, 56, 57, 58, 59, 60, 61];
+    const rows = d.map((day, i) => hRow(day, { restingHr: resting[i], minHr: 99 }));
+    const moods = d.map((day, i) => dm(day, 3 + i));
+    const r = ok(restingHeartRateMoodCorrelation(rows, moods));
+    expect(r.pairs.map((p) => p.metric)).toEqual(resting);
+    // The constant-99 proxy would have zero variance (r null); a real signal is present.
+    expect(r.r).not.toBeNull();
+  });
+
+  it('FALLS BACK to minHeartRate when restingHeartRate is null (per-day, mixed)', () => {
+    // Fitbit-style: some days have the dedicated resting reading, others only the
+    // intraday-min proxy. Each day contributes whichever is present (resting first).
+    const d = days(8);
+    const rows = d.map((day, i) =>
+      i % 2 === 0
+        ? hRow(day, { restingHr: 50 + i }) // even days: real resting reading
+        : hRow(day, { minHr: 50 + i }) //     odd days: proxy only
+    );
+    const moods = d.map((day, i) => dm(day, 3 + i));
+    const r = ok(restingHeartRateMoodCorrelation(rows, moods));
+    expect(r.pairCount).toBe(8);
+    expect(r.pairs.map((p) => p.metric).sort((a, b) => a - b)).toEqual([
+      50, 51, 52, 53, 54, 55, 56, 57,
+    ]);
+  });
+
+  it('positive: higher resting HR half has higher mood', () => {
+    const d = days(8);
+    const restingHr = [48, 50, 52, 54, 56, 58, 60, 62];
     const mood = [3, 4, 4, 5, 6, 6, 7, 8];
-    const rows = d.map((day, i) => hRow(day, { minHr: minHr[i] }));
+    const rows = d.map((day, i) => hRow(day, { restingHr: restingHr[i] }));
     const moods = d.map((day, i) => dm(day, mood[i]));
     const r = ok(restingHeartRateMoodCorrelation(rows, moods));
     expect(r.lower.avgMood).toBe(4.0);
@@ -291,13 +366,13 @@ describe('restingHeartRateMoodCorrelation', () => {
     expect(r.direction).toBe('positive');
   });
 
-  it('drops null / non-positive resting-HR values', () => {
+  it('drops days where BOTH restingHeartRate and minHeartRate are null / non-positive', () => {
     const d = days(4);
     const rows = [
-      hRow(d[0], { minHr: null }),
-      hRow(d[1], { minHr: 0 }),
-      hRow(d[2], { minHr: -5 }),
-      hRow(d[3], { minHr: 55 }),
+      hRow(d[0], { restingHr: null, minHr: null }), // both absent → dropped
+      hRow(d[1], { restingHr: 0, minHr: 0 }), //         both non-positive → dropped
+      hRow(d[2], { restingHr: -5, minHr: -3 }), //       both negative → dropped
+      hRow(d[3], { restingHr: 55 }), //                  real resting → kept
     ];
     const moods = d.map((day) => dm(day, 5));
     expect(restingHeartRateMoodCorrelation(rows, moods).pairs).toEqual([
@@ -365,7 +440,7 @@ describe('degenerate input never throws', () => {
       sleepMoodCorrelation(
         [
           null as unknown as HealthMetricDay,
-          { date: null as unknown as string, sleepTotalMinutes: 480, avgHeartRate: null, minHeartRate: null, avgHrvMillis: null },
+          { date: null as unknown as string, sleepTotalMinutes: 480, avgHeartRate: null, minHeartRate: null, restingHeartRate: null, avgHrvMillis: null },
           hRow('2026-06-01', { sleep: 480 }),
         ],
         [
