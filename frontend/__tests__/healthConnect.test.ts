@@ -14,14 +14,18 @@
 import {
   aggregateHealthByDay,
   averageBpm,
+  averageHrv,
   computeSyncWindow,
   durationMinutes,
   hasRequiredReadAccess,
   minBpm,
+  OPTIONAL_READ_RECORD_TYPES,
   REQUIRED_READ_RECORD_TYPES,
+  resolveSyncWindow,
   sleepDurationMinutes,
   sleepSessionWakeDay,
   sleepStageMinutes,
+  splitWindow,
   totalSleepMinutes,
 } from '../lib/healthConnectPure';
 
@@ -175,9 +179,55 @@ describe('sleepStageMinutes', () => {
   });
 });
 
-describe('hasRequiredReadAccess', () => {
+describe('averageHrv', () => {
+  it('returns null on no samples', () => {
+    expect(averageHrv([])).toBeNull();
+  });
+
+  it('means the finite HRV values', () => {
+    expect(averageHrv([{ hrvMillis: 40 }, { hrvMillis: 60 }])).toBe(50);
+  });
+
+  it('skips non-finite samples rather than poisoning the mean', () => {
+    expect(
+      averageHrv([
+        { hrvMillis: 40 },
+        { hrvMillis: Number.NaN },
+        { hrvMillis: Number.POSITIVE_INFINITY },
+        { hrvMillis: 60 },
+      ])
+    ).toBe(50);
+    expect(averageHrv([{ hrvMillis: Number.NaN }])).toBeNull();
+  });
+});
+
+describe('hasRequiredReadAccess / record-type constants', () => {
   it('requires a read grant for every required record type', () => {
     expect(REQUIRED_READ_RECORD_TYPES).toEqual(['SleepSession', 'HeartRate']);
+  });
+
+  it('lists HRV as OPTIONAL (not gated on)', () => {
+    expect(OPTIONAL_READ_RECORD_TYPES).toEqual(['HeartRateVariabilityRmssd']);
+    // HRV is deliberately NOT in the required set — a device without it is still
+    // fully "connected".
+    expect(REQUIRED_READ_RECORD_TYPES).not.toContain('HeartRateVariabilityRmssd');
+  });
+
+  it('is unaffected by whether the optional HRV read is granted', () => {
+    // Required-only grants → connected, with or without HRV present.
+    expect(
+      hasRequiredReadAccess([
+        { accessType: 'read', recordType: 'SleepSession' },
+        { accessType: 'read', recordType: 'HeartRate' },
+      ])
+    ).toBe(true);
+    expect(
+      hasRequiredReadAccess([
+        { accessType: 'read', recordType: 'SleepSession' },
+        { accessType: 'read', recordType: 'HeartRate' },
+        { accessType: 'read', recordType: 'HeartRateVariabilityRmssd' },
+      ])
+    ).toBe(true);
   });
 
   it('is true when both required reads are granted', () => {
@@ -317,9 +367,11 @@ describe('healthConnect — Android path (mocked native module)', () => {
       async (mod) => {
         const res = await mod.connect();
         expect(initialize).toHaveBeenCalledTimes(1);
+        // Requests the required Sleep + Heart Rate reads AND the optional HRV read.
         expect(requestPermission).toHaveBeenCalledWith([
           { accessType: 'read', recordType: 'SleepSession' },
           { accessType: 'read', recordType: 'HeartRate' },
+          { accessType: 'read', recordType: 'HeartRateVariabilityRmssd' },
         ]);
         expect(res.granted).toBe(true);
         expect(res.grantedPermissions).toEqual([
@@ -404,21 +456,28 @@ describe('healthConnect — Android path (mocked native module)', () => {
       async (mod) => {
         const res = await mod.readSleepAndHeartRate(24);
 
-        // Both record types queried with a between filter spanning the window.
-        expect(readRecords).toHaveBeenCalledWith('SleepSession', {
-          timeRangeFilter: {
-            operator: 'between',
-            startTime: res.windowStart,
-            endTime: res.windowEnd,
-          },
-        });
-        expect(readRecords).toHaveBeenCalledWith('HeartRate', {
-          timeRangeFilter: {
-            operator: 'between',
-            startTime: res.windowStart,
-            endTime: res.windowEnd,
-          },
-        });
+        // Both record types queried with a between filter spanning the window,
+        // paginated (pageSize present). objectContaining tolerates the pageSize.
+        expect(readRecords).toHaveBeenCalledWith(
+          'SleepSession',
+          expect.objectContaining({
+            timeRangeFilter: {
+              operator: 'between',
+              startTime: res.windowStart,
+              endTime: res.windowEnd,
+            },
+          })
+        );
+        expect(readRecords).toHaveBeenCalledWith(
+          'HeartRate',
+          expect.objectContaining({
+            timeRangeFilter: {
+              operator: 'between',
+              startTime: res.windowStart,
+              endTime: res.windowEnd,
+            },
+          })
+        );
 
         expect(res.sleepSessions).toEqual([
           {
@@ -473,9 +532,17 @@ describe('healthConnect — Android path (mocked native module)', () => {
       },
       { samples: [{ time: '2026-07-07T02:00:00.000Z', beatsPerMinute: 100 }] },
     ];
+    // HeartRateVariabilityRmssd records are InstantaneousRecords: one time +
+    // heartRateVariabilityMillis each (no nested samples).
+    const hrvRecords = [
+      { time: '2026-07-06T22:00:00.000Z', heartRateVariabilityMillis: 45 },
+      { time: '2026-07-07T03:00:00.000Z', heartRateVariabilityMillis: 52 },
+    ];
     const readRecords = jest.fn((recordType: string) => {
       if (recordType === 'SleepSession') return Promise.resolve({ records: sleepRecords });
       if (recordType === 'HeartRate') return Promise.resolve({ records: heartRecords });
+      if (recordType === 'HeartRateVariabilityRmssd')
+        return Promise.resolve({ records: hrvRecords });
       return Promise.resolve({ records: [] });
     });
 
@@ -485,12 +552,25 @@ describe('healthConnect — Android path (mocked native module)', () => {
       async (mod) => {
         const res = await mod.readHealthForRange(startISO, endISO);
 
-        expect(readRecords).toHaveBeenCalledWith('SleepSession', {
-          timeRangeFilter: { operator: 'between', startTime: startISO, endTime: endISO },
-        });
-        expect(readRecords).toHaveBeenCalledWith('HeartRate', {
-          timeRangeFilter: { operator: 'between', startTime: startISO, endTime: endISO },
-        });
+        expect(readRecords).toHaveBeenCalledWith(
+          'SleepSession',
+          expect.objectContaining({
+            timeRangeFilter: { operator: 'between', startTime: startISO, endTime: endISO },
+          })
+        );
+        expect(readRecords).toHaveBeenCalledWith(
+          'HeartRate',
+          expect.objectContaining({
+            timeRangeFilter: { operator: 'between', startTime: startISO, endTime: endISO },
+          })
+        );
+        // HRV is read too (optional).
+        expect(readRecords).toHaveBeenCalledWith(
+          'HeartRateVariabilityRmssd',
+          expect.objectContaining({
+            timeRangeFilter: { operator: 'between', startTime: startISO, endTime: endISO },
+          })
+        );
 
         expect(res.windowStart).toBe(startISO);
         expect(res.windowEnd).toBe(endISO);
@@ -502,11 +582,65 @@ describe('healthConnect — Android path (mocked native module)', () => {
             stageMinutes: { 5: 60 },
           },
         ]);
-        // Every sample flattened, in order, with its instant preserved.
+        // Every HR sample flattened, in order, with its instant preserved.
         expect(res.heartRateSamples).toEqual([
           { time: '2026-07-06T20:30:00.000Z', beatsPerMinute: 60 },
           { time: '2026-07-06T21:00:00.000Z', beatsPerMinute: 80 },
           { time: '2026-07-07T02:00:00.000Z', beatsPerMinute: 100 },
+        ]);
+        // HRV records flattened to { time, hrvMillis }.
+        expect(res.hrvSamples).toEqual([
+          { time: '2026-07-06T22:00:00.000Z', hrvMillis: 45 },
+          { time: '2026-07-07T03:00:00.000Z', hrvMillis: 52 },
+        ]);
+      }
+    );
+  });
+
+  it('readHealthForRange paginates each record type via pageToken until exhausted', async () => {
+    // Health Connect returns at most pageSize records + a continuation token; the
+    // read loops until the token is absent. HeartRate spans 2 pages here.
+    const heartPages: Record<string, { records: unknown[]; pageToken?: string }> = {
+      __first: {
+        records: [{ samples: [{ time: '2026-07-06T10:00:00.000Z', beatsPerMinute: 60 }] }],
+        pageToken: 'tok-2',
+      },
+      'tok-2': {
+        records: [{ samples: [{ time: '2026-07-06T11:00:00.000Z', beatsPerMinute: 70 }] }],
+        // no pageToken → last page
+      },
+    };
+    const readRecords = jest.fn(
+      (recordType: string, options: { pageToken?: string }) => {
+        if (recordType === 'HeartRate') {
+          const page = options.pageToken ? heartPages[options.pageToken] : heartPages.__first;
+          return Promise.resolve(page);
+        }
+        return Promise.resolve({ records: [] });
+      }
+    );
+
+    await withHealthConnect(
+      'android',
+      { readRecords, SdkAvailabilityStatus },
+      async (mod) => {
+        const res = await mod.readHealthForRange(
+          '2026-07-06T00:00:00.000Z',
+          '2026-07-07T00:00:00.000Z'
+        );
+
+        // Two HeartRate reads: page 1 (no token), page 2 (tok-2). Sleep + HRV are
+        // one page each (empty). So HeartRate was called exactly twice.
+        const hrCalls = readRecords.mock.calls.filter((c) => c[0] === 'HeartRate');
+        expect(hrCalls).toHaveLength(2);
+        expect(hrCalls[0][1]).toEqual(expect.objectContaining({ pageSize: expect.any(Number) }));
+        expect(hrCalls[0][1].pageToken).toBeUndefined();
+        expect(hrCalls[1][1].pageToken).toBe('tok-2');
+
+        // BOTH pages' samples accumulated (never truncated to page 1).
+        expect(res.heartRateSamples).toEqual([
+          { time: '2026-07-06T10:00:00.000Z', beatsPerMinute: 60 },
+          { time: '2026-07-06T11:00:00.000Z', beatsPerMinute: 70 },
         ]);
       }
     );
@@ -650,6 +784,7 @@ describe('aggregateHealthByDay', () => {
         sleepStages: { 5: 60 },
         avgHeartRate: 80, // (60+80+100)/3
         minHeartRate: 60,
+        avgHrvMillis: null, // no HRV samples in this fixture
       },
       {
         date: '2026-07-08',
@@ -657,8 +792,48 @@ describe('aggregateHealthByDay', () => {
         sleepStages: {},
         avgHeartRate: 50,
         minHeartRate: 50,
+        avgHrvMillis: null,
       },
     ]);
+  });
+
+  it('buckets HRV samples by their own local day into avgHrvMillis (finite mean)', () => {
+    const rows = aggregateHealthByDay({
+      sleepSessions: [],
+      heartRateSamples: [],
+      hrvSamples: [
+        { time: '2026-07-06T20:30:00.000Z', hrvMillis: 40 }, // Jul07 (Brisbane)
+        { time: '2026-07-07T02:00:00.000Z', hrvMillis: 60 }, // Jul07 → mean 50
+        { time: '2026-07-07T20:00:00.000Z', hrvMillis: 55 }, // Jul08
+      ],
+    });
+    expect(rows).toEqual([
+      {
+        date: '2026-07-07',
+        sleepTotalMinutes: null,
+        sleepStages: {},
+        avgHeartRate: null,
+        minHeartRate: null,
+        avgHrvMillis: 50,
+      },
+      {
+        date: '2026-07-08',
+        sleepTotalMinutes: null,
+        sleepStages: {},
+        avgHeartRate: null,
+        minHeartRate: null,
+        avgHrvMillis: 55,
+      },
+    ]);
+  });
+
+  it('a day with no HRV samples has null avgHrvMillis (and HRV input is optional)', () => {
+    const rows = aggregateHealthByDay({
+      sleepSessions: [{ endTime: '2026-07-06T20:00:00.000Z', durationMinutes: 400, stageMinutes: {} }],
+      heartRateSamples: [],
+      // hrvSamples omitted entirely — must not throw.
+    });
+    expect(rows[0].avgHrvMillis).toBeNull();
   });
 
   it('sums multiple sessions + merges stage maps on the same wake day', () => {
@@ -712,5 +887,158 @@ describe('computeSyncWindow', () => {
   it('falls back to the full lookback when the last-synced value is in the future', () => {
     const res = computeSyncWindow('2026-07-09T05:00:00.000Z', now, 30);
     expect(res.startISO).toBe('2026-06-08T05:00:00.000Z');
+  });
+});
+
+// ─── resolveSyncWindow — backfill vs incremental (Brisbane UTC+10) ────────────
+
+describe('resolveSyncWindow', () => {
+  const now = new Date('2026-07-08T05:00:00.000Z');
+  const BACKFILL_FLOOR = '2025-07-08T05:00:00.000Z'; // now − 365d
+  const base = {
+    now,
+    maxBackfillDays: 365,
+    initialWindowDays: 30,
+  } as const;
+
+  it('(a) first connect with 6 months of mood → backfills to the earliest mood day', () => {
+    // earliest mood 2026-01-08T05:00Z → Brisbane Jan 8 → start of that local day
+    // = 2026-01-07T14:00Z. Nothing stored yet → backfill.
+    const res = resolveSyncWindow({
+      ...base,
+      earliestMoodInstant: '2026-01-08T05:00:00.000Z',
+      lastSyncedAtISO: null,
+      earliestStoredHealthDate: null,
+    });
+    expect(res.isBackfill).toBe(true);
+    expect(res.startISO).toBe('2026-01-07T14:00:00.000Z');
+    expect(res.endISO).toBe('2026-07-08T05:00:00.000Z');
+  });
+
+  it('(b) already-connected but stored covers only 30 days → one-time gap-fill to earliest mood', () => {
+    const res = resolveSyncWindow({
+      ...base,
+      earliestMoodInstant: '2026-01-08T05:00:00.000Z',
+      lastSyncedAtISO: '2026-07-07T00:00:00.000Z',
+      earliestStoredHealthDate: '2026-06-08', // only ~30 days stored
+    });
+    expect(res.isBackfill).toBe(true);
+    expect(res.startISO).toBe('2026-01-07T14:00:00.000Z');
+  });
+
+  it('(c) steady state — stored reaches the earliest mood day → incremental only', () => {
+    // Stored earliest '2026-01-08' == the desired-start local day → no backfill.
+    const res = resolveSyncWindow({
+      ...base,
+      earliestMoodInstant: '2026-01-08T05:00:00.000Z',
+      lastSyncedAtISO: '2026-07-07T00:00:00.000Z',
+      earliestStoredHealthDate: '2026-01-08',
+    });
+    expect(res.isBackfill).toBe(false);
+    // Incremental: from the start of the last-synced local day (Brisbane), never
+    // earlier than the desired start.
+    expect(res.startISO).toBe('2026-07-06T14:00:00.000Z');
+  });
+
+  it('(d) empty DB (no mood) → initialWindowDays fallback, no anchor', () => {
+    const res = resolveSyncWindow({
+      ...base,
+      earliestMoodInstant: null,
+      lastSyncedAtISO: null,
+      earliestStoredHealthDate: null,
+    });
+    // now − 30 days (raw instant fallback).
+    expect(res.startISO).toBe('2026-06-08T05:00:00.000Z');
+    expect(res.isBackfill).toBe(true);
+  });
+
+  it('(e) honors the maxBackfillDays cap for a very old mood history', () => {
+    const res = resolveSyncWindow({
+      ...base,
+      earliestMoodInstant: '2020-01-01T00:00:00.000Z', // years back
+      lastSyncedAtISO: null,
+      earliestStoredHealthDate: null,
+    });
+    // Clamped to the floor (now − 365d), never earlier.
+    expect(res.startISO).toBe(BACKFILL_FLOOR);
+    expect(res.isBackfill).toBe(true);
+  });
+
+  it('(f) guards a future / clock-skewed lastSynced (never start > end, never past now)', () => {
+    const res = resolveSyncWindow({
+      ...base,
+      earliestMoodInstant: '2026-06-01T00:00:00.000Z',
+      lastSyncedAtISO: '2026-07-09T05:00:00.000Z', // in the FUTURE vs now
+      earliestStoredHealthDate: '2026-06-01', // reaches desired → incremental branch
+    });
+    expect(res.isBackfill).toBe(false);
+    expect(Date.parse(res.startISO)).toBeLessThanOrEqual(Date.parse(res.endISO));
+    expect(Date.parse(res.startISO)).toBeLessThanOrEqual(now.getTime());
+  });
+
+  it('never returns start > end and never reaches before the backfill floor', () => {
+    for (const earliestStoredHealthDate of [null, '2026-06-08', '2020-01-01']) {
+      const res = resolveSyncWindow({
+        ...base,
+        earliestMoodInstant: '2019-01-01T00:00:00.000Z',
+        lastSyncedAtISO: '2026-07-06T00:00:00.000Z',
+        earliestStoredHealthDate,
+      });
+      expect(Date.parse(res.startISO)).toBeLessThanOrEqual(Date.parse(res.endISO));
+      expect(Date.parse(res.startISO)).toBeGreaterThanOrEqual(Date.parse(BACKFILL_FLOOR));
+    }
+  });
+});
+
+// ─── splitWindow — chunked, day-aligned, contiguous ──────────────────────────
+
+describe('splitWindow', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it('returns [] for an empty or inverted window', () => {
+    expect(splitWindow('2026-07-08T00:00:00.000Z', '2026-07-08T00:00:00.000Z', 30)).toEqual([]);
+    expect(splitWindow('2026-07-09T00:00:00.000Z', '2026-07-08T00:00:00.000Z', 30)).toEqual([]);
+  });
+
+  it('returns [] for a non-positive chunkDays', () => {
+    expect(splitWindow('2026-01-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z', 0)).toEqual([]);
+    expect(splitWindow('2026-01-01T00:00:00.000Z', '2026-07-01T00:00:00.000Z', -5)).toEqual([]);
+  });
+
+  it('a window ≤ chunkDays is a single chunk spanning exactly [start, end]', () => {
+    const start = '2026-07-01T14:00:00.000Z';
+    const end = '2026-07-20T05:00:00.000Z';
+    expect(splitWindow(start, end, 30)).toEqual([{ startISO: start, endISO: end }]);
+  });
+
+  it('splits a long window into contiguous, day-aligned chunks each ≤ chunkDays', () => {
+    // Start at a Brisbane local midnight; span 90 days; 30-day chunks.
+    const start = '2026-04-09T14:00:00.000Z'; // Brisbane 2026-04-10 00:00
+    const startMs = Date.parse(start);
+    const end = new Date(startMs + 90 * DAY).toISOString();
+
+    const chunks = splitWindow(start, end, 30);
+
+    expect(chunks.length).toBeGreaterThan(1);
+    // Covers the whole window, endpoints exact.
+    expect(chunks[0].startISO).toBe(start);
+    expect(chunks[chunks.length - 1].endISO).toBe(end);
+
+    for (let i = 0; i < chunks.length; i++) {
+      const s = Date.parse(chunks[i].startISO);
+      const e = Date.parse(chunks[i].endISO);
+      // Each chunk is ≤ chunkDays and non-empty.
+      expect(e).toBeGreaterThan(s);
+      expect(e - s).toBeLessThanOrEqual(30 * DAY + 1);
+      // Contiguous with the next chunk.
+      if (i > 0) expect(chunks[i].startISO).toBe(chunks[i - 1].endISO);
+      // Interior boundaries are local-midnight (Brisbane pin) so no day straddles.
+      if (i > 0) {
+        const boundary = new Date(chunks[i].startISO);
+        expect(boundary.getHours()).toBe(0);
+        expect(boundary.getMinutes()).toBe(0);
+        expect(boundary.getSeconds()).toBe(0);
+      }
+    }
   });
 });

@@ -11,9 +11,11 @@
 import {
     buildChartGeometry,
     moodToY,
+    valueToY,
     indexToX,
     MOOD_MIN,
     MOOD_MAX,
+    MOOD_DOMAIN,
     type ChartDims,
 } from '@/components/visualisations/transforms/chartGeometry';
 
@@ -58,6 +60,40 @@ describe('moodToY / indexToX mappings', () => {
         expect(indexToX(3, 7, DIMS)).toBeCloseTo((DIMS.padX + (DIMS.width - DIMS.padX)) / 2, 5);
         // single slot is centered
         expect(indexToX(0, 1, DIMS)).toBeCloseTo(DIMS.width / 2, 5);
+    });
+});
+
+describe('valueToY — generalized domain (mood↔metric overlay reuses this)', () => {
+    it('moodToY is valueToY with the fixed mood domain', () => {
+        expect(moodToY(7, DIMS)).toBeCloseTo(valueToY(7, DIMS, MOOD_DOMAIN), 5);
+        expect(MOOD_DOMAIN).toEqual({ min: MOOD_MIN, max: MOOD_MAX });
+    });
+
+    it('maps a custom domain: min → bottom, max → top, mid → middle', () => {
+        const domain = { min: 40, max: 80 }; // e.g. resting HR bpm
+        expect(valueToY(40, DIMS, domain)).toBeCloseTo(PLOT_BOTTOM, 5);
+        expect(valueToY(80, DIMS, domain)).toBeCloseTo(PLOT_TOP, 5);
+        expect(valueToY(60, DIMS, domain)).toBeCloseTo((PLOT_TOP + PLOT_BOTTOM) / 2, 5);
+    });
+
+    it('clamps out-of-domain values to the plot bounds', () => {
+        const domain = { min: 40, max: 80 };
+        expect(valueToY(20, DIMS, domain)).toBeCloseTo(PLOT_BOTTOM, 5);
+        expect(valueToY(120, DIMS, domain)).toBeCloseTo(PLOT_TOP, 5);
+    });
+
+    it('a degenerate (constant) domain maps everything to the middle, never NaN', () => {
+        const flat = { min: 55, max: 55 };
+        const y = valueToY(55, DIMS, flat);
+        expect(Number.isFinite(y)).toBe(true);
+        expect(y).toBeCloseTo((PLOT_TOP + PLOT_BOTTOM) / 2, 5);
+    });
+
+    it('buildChartGeometry honors a custom domain for point y-mapping', () => {
+        const domain = { min: 40, max: 80 };
+        const g = buildChartGeometry([40, 80], DIMS, domain);
+        expect(g.realPoints[0].y).toBeCloseTo(PLOT_BOTTOM, 5); // 40 → bottom
+        expect(g.realPoints[1].y).toBeCloseTo(PLOT_TOP, 5); // 80 → top
     });
 });
 

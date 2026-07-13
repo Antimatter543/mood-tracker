@@ -3,14 +3,25 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
-## [Unreleased]
+## [2.4.0] - 2026-07-13
 
 ### Added
+- **Explore any activity in detail.** A new "Explore your activities" section on the Statistics tab lets you
+  search for an activity and open a full picture of it — how your mood is distributed on those days, whether
+  it tends to be "reliably good" or "hit or miss," how it compares to your usual mood, and which activities
+  you most often pair it with.
+- **Health Connect does more — and brings in your history.** Alongside sleep and heart rate, SoulSync can now
+  read **heart-rate variability (HRV)** and shows how it and your **resting heart rate** line up with your
+  mood, plus a new overlay chart that plots any of them against your mood day by day. Connecting now **pulls
+  in your whole history at once** (not just the last 30 days), so the patterns show up right away instead of
+  after "a few more days." Still processed on-device only, opt-in, and never shared.
 - **Set the time of an entry, not just the date.** The entry form now has separate "Entry date" and
   "Entry time" fields, so you can log (or back-date) a mood to a specific time of day. Changing the date
   keeps the time you set, and vice versa.
 
 ### Fixed
+- **Health Connect works on Android 14, 15 and 16.** It no longer wrongly reports itself as unsupported on
+  newer Android versions, so you can connect it on modern phones (including the Pixel 8/9 line).
 - **Home updates the moment you log a mood.** Adding a mood while you're on the Home tab now refreshes
   Today's Mood, your streak, and the charts immediately — no more waiting, or switching tabs and back, to
   see it appear.
