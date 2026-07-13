@@ -61,7 +61,6 @@ export type MoodEntry = {
   // Context Types
   export type DataContextType = {
     refetchEntries: () => void;
-    refreshCount: number;
   };
 
 

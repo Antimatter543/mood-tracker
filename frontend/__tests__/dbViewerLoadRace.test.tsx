@@ -94,12 +94,18 @@ jest.mock('@/styles/global', () => ({
     }),
 }));
 
-// ── Data context: the test mutates refreshCount to fire the second focus-load. ─
+// ── Data context: exposes refetchEntries; DBViewer calls it after edits/deletes.
 jest.mock('@/context/DataContext', () => ({
     useDataContext: () => ({
-        refreshCount: mockRefreshCount,
         refetchEntries: jest.fn(),
     }),
+}));
+
+// ── The reload signal is the external data-version store (useDataRefresh reads
+// useDataVersion). The test mutates `mockRefreshCount` to fire the second load,
+// so wire the store's version to that same variable. ───────────────────────────
+jest.mock('@/context/dataRefreshStore', () => ({
+    useDataVersion: () => mockRefreshCount,
 }));
 
 // ── No photos to load for any entry (avoids a second getAllAsync per page). ────

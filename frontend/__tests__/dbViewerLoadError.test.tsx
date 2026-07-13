@@ -54,9 +54,15 @@ jest.mock('@/styles/global', () => ({
 
 jest.mock('@/context/DataContext', () => ({
     useDataContext: () => ({
-        refreshCount: mockRefreshCount,
         refetchEntries: jest.fn(),
     }),
+}));
+
+// The reload signal is the external data-version store (useDataRefresh reads
+// useDataVersion). The test mutates `mockRefreshCount` to fire a refetch, so
+// wire the store's version to that same variable.
+jest.mock('@/context/dataRefreshStore', () => ({
+    useDataVersion: () => mockRefreshCount,
 }));
 
 // getEntriesPage batch-loads photos via getMediaByEntryIds; keep it empty.

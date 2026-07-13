@@ -1,40 +1,30 @@
 /**
- * Unit tests for useDataRefresh — the focus-aware data-reload hook behind every
- * data-reading screen/widget (see hooks/useDataRefresh.ts header).
+ * Unit tests for useDataRefresh — the reload hook behind every data-reading
+ * screen/widget (see hooks/useDataRefresh.ts header).
  *
  * The hook owns TWO refresh vectors, tested here as separate contracts:
  *   VECTOR 1 — FOCUS GAIN: `useFocusEffect` runs the loader on mount/refocus.
- *   VECTOR 2 — DATA-CHANGED-WHILE-FOCUSED: an explicit `useEffect` keyed on
- *              `refreshCount`/`extraDeps`, gated by the reactive `useIsFocused()`,
- *              reloads the CURRENTLY-focused screen the moment data changes.
+ *   VECTOR 2 — DATA CHANGED WHILE MOUNTED: a `useEffect` keyed on the external
+ *              data version reloads a mounted screen the moment data changes.
  *
- * VECTOR 2 exists because relying on `useFocusEffect`'s in-focus re-run (via a
- * changing callback identity) is unreliable for the already-focused screen on
- * expo-router v6 bottom-tabs — the "add a mood on Home, Home doesn't update until
- * you leave and return" bug. The `re-runs the loader when refreshCount changes
- * WHILE FOCUSED` and `does NOT re-run while blurred` cases below are the
- * regression guard for exactly that.
+ * The reload signal is an EXTERNAL store (`useDataVersion`), NOT a context value:
+ * a `refreshCount` threaded through DataContext did not reach the tab screens for
+ * in-place updates (device-proven 2026-07-13 — see context/dataRefreshStore.ts).
+ * Here we mock `useDataVersion` as a test-controlled number and assert: a mounted
+ * screen reloads on every version change, and does not double-load on mount.
+ * (Frozen-tab skipping is the navigator's job via react-freeze — a component that
+ * isn't mounted/committed doesn't run effects — so it's out of scope for a plain
+ * renderHook unit test, which never freezes.)
  *
- * We mock the two expo-router hooks:
- *   - `useFocusEffect` as a faithful FOCUS-GAIN-only stand-in: run once on mount
- *     (deps `[]`), so it does NOT double VECTOR 2 on a refreshCount bump. This
- *     mirrors what we now rely on — useFocusEffect for focus transitions, the
- *     explicit effect for live updates.
- *   - `useIsFocused` as a test-controlled boolean.
+ * `useFocusEffect` is mocked as a faithful FOCUS-GAIN-only stand-in: run once on
+ * mount (deps `[]`), so it does NOT double VECTOR 2 on a version bump.
  */
 import React from 'react';
 import { renderHook, act } from '@testing-library/react-native';
 
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 
-// ── Mocked focus state, flipped per test ─────────────────────────────────────
-let mockIsFocused = true;
-
-// ── Mock expo-router ─────────────────────────────────────────────────────────
-// `useFocusEffect` models FOCUS GAIN only (run the memoized callback once on
-// mount, forward its cleanup on unmount) — it deliberately does NOT re-run on
-// callback-identity change, because VECTOR 2's explicit effect is what we rely on
-// for in-focus data updates. `useIsFocused` returns the test-controlled flag.
+// ── Mock expo-router: useFocusEffect = focus-gain-once ───────────────────────
 jest.mock('expo-router', () => {
     const ReactActual = require('react') as typeof React;
     return {
@@ -44,87 +34,49 @@ jest.mock('expo-router', () => {
             ref.current = cb;
             ReactActual.useEffect(() => ref.current(), []);
         },
-        useIsFocused: () => mockIsFocused,
     };
 });
 
-// ── Mock the data context so we control refreshCount ─────────────────────────
-let mockRefreshCount = 0;
-jest.mock('@/context/DataContext', () => ({
-    useDataContext: () => ({
-        refreshCount: mockRefreshCount,
-        refetchEntries: jest.fn(),
-    }),
+// ── Mock the external data-version store so we control the reload signal ──────
+let mockDataVersion = 0;
+jest.mock('@/context/dataRefreshStore', () => ({
+    useDataVersion: () => mockDataVersion,
 }));
 
 beforeEach(() => {
-    mockRefreshCount = 0;
-    mockIsFocused = true;
+    mockDataVersion = 0;
 });
 
 describe('useDataRefresh', () => {
-    it('runs the loader once on focus (initial mount)', async () => {
+    it('runs the loader exactly once on the initial mount (VECTOR 1 only, no VECTOR 2 double-load)', async () => {
         const load = jest.fn();
         await renderHook(() => useDataRefresh(load, []));
+        // VECTOR 1 loads once on focus-gain; VECTOR 2 skips the initial mount.
         expect(load).toHaveBeenCalledTimes(1);
     });
 
-    it('re-runs the loader when refreshCount changes WHILE FOCUSED (the live in-focus update)', async () => {
+    it('re-runs the loader when the data version changes (the live in-place update — the bug this fixes)', async () => {
         const load = jest.fn();
         const { rerender } = await renderHook(() => useDataRefresh(load, []));
         expect(load).toHaveBeenCalledTimes(1); // mount
 
-        // A write elsewhere bumps the global refreshCount. VECTOR 2 fires because
-        // this screen is focused — this is the exact path the Home-doesn't-update
-        // bug broke (previously it relied on useFocusEffect's flaky in-focus re-run).
+        // A write elsewhere (e.g. adding a mood on Home) bumps the data version.
+        // VECTOR 2 fires because this screen is mounted — the exact path the
+        // Home-doesn't-update bug broke.
         await act(async () => {
-            mockRefreshCount = 1;
+            mockDataVersion = 1;
             rerender({});
         });
         expect(load).toHaveBeenCalledTimes(2);
 
         await act(async () => {
-            mockRefreshCount = 2;
+            mockDataVersion = 2;
             rerender({});
         });
         expect(load).toHaveBeenCalledTimes(3);
     });
 
-    it('does NOT re-run on a refreshCount change while BLURRED (frozen tab stays put)', async () => {
-        mockIsFocused = false;
-        const load = jest.fn();
-        const { rerender } = await renderHook(() => useDataRefresh(load, []));
-        // Mount still calls once via the focus-gain stand-in (models the screen
-        // having been focused at least once); the important assertion is that a
-        // blurred refreshCount bump does NOT reload.
-        const afterMount = load.mock.calls.length;
-
-        await act(async () => {
-            mockRefreshCount = 1;
-            rerender({});
-        });
-        // Blurred: VECTOR 2 is gated off — no extra reload. The screen will pick
-        // the change up via VECTOR 1 (focus gain) when the user returns to it.
-        expect(load).toHaveBeenCalledTimes(afterMount);
-    });
-
-    it('reloads when a blurred screen regains focus (VECTOR 1 covers what VECTOR 2 skipped)', async () => {
-        mockIsFocused = false;
-        const load = jest.fn();
-        const { rerender } = await renderHook(() => useDataRefresh(load, []));
-        load.mockClear();
-
-        // Data changed while blurred (no reload), THEN the screen regains focus.
-        await act(async () => {
-            mockRefreshCount = 1;
-            mockIsFocused = true;
-            rerender({});
-        });
-        // isFocused flipped false→true with a changed refreshCount → VECTOR 2 fires.
-        expect(load).toHaveBeenCalled();
-    });
-
-    it('re-runs when an extraDep changes while focused (e.g. a timeframe prop)', async () => {
+    it('re-runs when an extraDep changes (e.g. a timeframe prop)', async () => {
         const load = jest.fn();
         let timeframe = 'week';
         const { rerender } = await renderHook(() =>
@@ -161,6 +113,24 @@ describe('useDataRefresh', () => {
             unmount();
         });
         expect(cleanup).toHaveBeenCalledTimes(1);
+    });
+
+    it('produces a fresh loader cleanup on each VECTOR 2 reload', async () => {
+        const cleanups: jest.Mock[] = [];
+        const load = jest.fn(() => {
+            const c = jest.fn();
+            cleanups.push(c);
+            return c;
+        });
+        const { rerender } = await renderHook(() => useDataRefresh(load, []));
+        expect(load).toHaveBeenCalledTimes(1); // mount (VECTOR 1)
+
+        await act(async () => {
+            mockDataVersion = 1;
+            rerender({});
+        });
+        expect(load).toHaveBeenCalledTimes(2);
+        expect(cleanups.length).toBeGreaterThanOrEqual(2);
     });
 
     it('swallows a Promise return from an async loader (no Promise as cleanup)', async () => {
