@@ -69,7 +69,23 @@ export function Layout({
     const insets = useSafeAreaInsets();
     const styles = useThemedStyles(colors, insets.top, insets.bottom);
 
-    // Subtle entrance animation: fade in + slide up
+    // Subtle entrance animation (fade in + slide up). Applied ONLY to the
+    // content-sized Animated.View inside the ScrollView (`useScrollView={true}`
+    // branch below).
+    //
+    // It must NOT wrap the `flex: 1` full-height branch (`useScrollView={false}`).
+    // A live `useAnimatedStyle` attached to a `flex: 1` container corrupts that
+    // container's layout on Fabric + reanimated 4 once its children re-lay-out
+    // after mount: on the Statistics screen the ~8 charts each resolve their async
+    // data and re-render over ~3s, and on one of those re-layouts reanimated
+    // applies the animated props against a stale measured frame and shoves the
+    // whole subtree ~1.6k px off-screen — blanking the tab with NO JS re-render at
+    // all. (Verified on-device: the property animated is irrelevant — even an
+    // opacity-only animatedStyle blanks it; only removing the animatedStyle from
+    // the flex:1 view fixes it. Lighter screens like Timeline share the branch but
+    // don't reproduce because their content doesn't repeatedly re-lay-out after
+    // mount.) The full-height branch therefore renders statically. Root-caused
+    // on-device 2026-07-13 — the Statistics blank-screen P0.
     const opacity = useSharedValue(0);
     const translateY = useSharedValue(20);
 
@@ -108,9 +124,12 @@ export function Layout({
                         </Animated.View>
                     </ScrollView>
                 ) : (
-                    <Animated.View style={[styles.fullHeightContent, animatedContentStyle]}>
+                    // Full-height content renders statically — see the entrance-
+                    // animation note above for why a reanimated animatedStyle here
+                    // blanks heavy screens (the Statistics P0).
+                    <View style={styles.fullHeightContent}>
                         {children}
-                    </Animated.View>
+                    </View>
                 )}
 
                 {showFab && <AddEntryButton />}
