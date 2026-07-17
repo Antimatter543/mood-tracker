@@ -36,9 +36,13 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 # 1. Quality gates BEFORE we cut a version.
+# --runInBand: under parallel workers, reanimated's worker-order poisoning makes
+# a handful of DBViewer suites time out FLAKILY (they pass serially — verified
+# 2026-07-17 when the flake aborted the v2.6.0 cut). A release gate must be
+# deterministic, so we trade ~1min of wall clock for zero false aborts.
 echo "==> typecheck + tests"
 npx tsc --noEmit
-npx jest --silent
+npx jest --silent --runInBand
 
 # 2. Bump version (writes app.json version + derived versionCode/buildNumber).
 VERSION="$(node scripts/bump-version.js "$BUMP")"
