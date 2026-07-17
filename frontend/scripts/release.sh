@@ -54,7 +54,11 @@ echo "==> releasing $TAG"
 git add app.json
 git commit -m "release: $TAG"
 git tag "$TAG"
-git push origin main --tags
+# Push ONLY this release's tag, never --tags: the local rolling `main-latest`
+# tag (CI moves it remotely on every main build) makes a blanket --tags push
+# exit 1 AFTER the real pushes land — a phantom failure that aborted the
+# v2.6.0 cut's tail steps (2026-07-17).
+git push origin main "$TAG"
 
 echo "==> pushed $TAG — CI is building + will publish the GitHub Release."
 echo "    watch: gh run watch \$(gh run list -R $REPO --workflow=release-apk.yml --event=push --limit 1 --json databaseId --jq '.[0].databaseId') -R $REPO"

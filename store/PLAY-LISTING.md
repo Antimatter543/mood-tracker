@@ -1,9 +1,16 @@
 # SoulSync — Google Play Store Listing Package
 
 Publisher: Raedus Labs
-Package: com.raeduslabs.soulsync
+Package: com.raeduslabs.soulsyncapp
 Public repo: https://github.com/Antimatter543/mood-tracker
-Last updated: 2026-06-15
+Last updated: 2026-07-17
+
+> **CANONICAL LISTING TEXT LIVES IN `fastlane/metadata/android/en-US/`**
+> (`title.txt` / `short_description.txt` / `full_description.txt`) — pushed to
+> Play via `gplay`. This doc is the strategy/rationale record; the 2026-07-17
+> refresh moved to emoji-led, front-loaded copy (data-viz depth + open-source
+> trust + privacy) and deliberately does NOT mention Health Connect (the Play
+> build ships without it until Google's Health Apps declaration approves).
 
 ---
 
