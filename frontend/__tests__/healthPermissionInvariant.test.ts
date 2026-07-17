@@ -26,6 +26,19 @@ import {
   OPTIONAL_READ_RECORD_TYPES,
 } from '../lib/healthConnectPure';
 
+// @expo/config-plugins is mocked so the config plugin's mods can be observed
+// WITHOUT running the real Expo mod pipeline: each `with*` helper becomes a spy
+// that returns config untouched, so invoking `withHealthConnect(config)` reveals
+// (by call count) whether the plugin APPLIED its manifest/MainActivity mods or
+// short-circuited to a no-op. The factory returns fresh jest.fn()s each time it
+// re-runs (after jest.resetModules), so per-env spy counts never bleed across cases.
+jest.mock('@expo/config-plugins', () => ({
+  withAndroidManifest: jest.fn((config: unknown) => config),
+  withMainActivity: jest.fn((config: unknown) => config),
+  AndroidConfig: { Manifest: { getMainApplicationOrThrow: jest.fn(() => ({})) } },
+  WarningAggregator: { addWarningAndroid: jest.fn() },
+}));
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- plain CJS config plugin; only the exported HEALTH_PERMISSIONS constant is read
 const { HEALTH_PERMISSIONS } = require('../plugins/withHealthConnect');
 
@@ -78,5 +91,90 @@ describe('Health Connect manifest ↔ runtime permission parity', () => {
     expect(HEALTH_PERMISSIONS).toContain(
       'android.permission.health.READ_RESTING_HEART_RATE'
     );
+  });
+});
+
+/**
+ * The EXPO_PUBLIC_HEALTH_CONNECT build knob (Play "no-HC" variant): manifest ⇆
+ * runtime parity must hold in BOTH modes.
+ *   - ENABLED  → the plugin APPLIES its 4 permissions (== the runtime request set),
+ *     and the runtime asks for exactly those 4.
+ *   - DISABLED → the plugin is a NO-OP (declares nothing, emits an info warning)
+ *     AND the runtime requests NOTHING (the shared gate is off). Both empty.
+ *
+ * The plugin reads `process.env.EXPO_PUBLIC_HEALTH_CONNECT` at CALL time and the
+ * flag module reads it at LOAD time, so each case sets the env, resets the module
+ * registry, and re-requires @expo/config-plugins (fresh spies) + the plugin + the
+ * flag. `HEALTH_PERMISSIONS` stays the canonical 4 in every mode (it's the drift
+ * anchor above); what changes is whether the plugin APPLIES them.
+ */
+describe('Health Connect build knob — manifest ⇆ runtime parity in both modes', () => {
+  const ORIG = process.env.EXPO_PUBLIC_HEALTH_CONNECT;
+  afterEach(() => {
+    if (ORIG === undefined) delete process.env.EXPO_PUBLIC_HEALTH_CONNECT;
+    else process.env.EXPO_PUBLIC_HEALTH_CONNECT = ORIG;
+    jest.resetModules();
+  });
+
+  /** The permissions the app actually requests at runtime for a given build. */
+  const runtimeRequestSet = (shouldShow: (os: string) => boolean): string[] =>
+    shouldShow('android')
+      ? [...REQUIRED_READ_RECORD_TYPES, ...OPTIONAL_READ_RECORD_TYPES].map(
+          (t) => RECORD_TYPE_TO_PERMISSION[t]
+        )
+      : [];
+
+  const loadUnderEnv = (val: string | undefined) => {
+    if (val === undefined) delete process.env.EXPO_PUBLIC_HEALTH_CONNECT;
+    else process.env.EXPO_PUBLIC_HEALTH_CONNECT = val;
+    jest.resetModules();
+    /* eslint-disable @typescript-eslint/no-require-imports -- fresh per-env module loads */
+    const cp = require('@expo/config-plugins');
+    const withHealthConnect = require('../plugins/withHealthConnect');
+    const { shouldShowHealthConnect } = require('../lib/healthConnectConfig');
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    return { cp, withHealthConnect, shouldShowHealthConnect };
+  };
+
+  it.each([undefined, '1'])(
+    'ENABLED (env=%s): plugin applies the 4 perms === the runtime request set',
+    (val) => {
+      const { cp, withHealthConnect, shouldShowHealthConnect } =
+        loadUnderEnv(val);
+
+      const out = withHealthConnect({ modResults: {} });
+
+      // The plugin ran BOTH mods (manifest perms/alias + MainActivity delegate).
+      expect(cp.withAndroidManifest).toHaveBeenCalledTimes(1);
+      expect(cp.withMainActivity).toHaveBeenCalledTimes(1);
+      expect(cp.WarningAggregator.addWarningAndroid).not.toHaveBeenCalled();
+      expect(out).toBeTruthy();
+
+      const runtime = runtimeRequestSet(shouldShowHealthConnect);
+      expect(runtime).toHaveLength(4);
+      // manifest (what the plugin declares) === runtime request set, order-free.
+      expect(new Set(withHealthConnect.HEALTH_PERMISSIONS)).toEqual(
+        new Set(runtime)
+      );
+    }
+  );
+
+  it("DISABLED (env='0'): plugin is a NO-OP and the runtime requests NOTHING — both empty", () => {
+    const { cp, withHealthConnect, shouldShowHealthConnect } =
+      loadUnderEnv('0');
+
+    const config = { modResults: { sentinel: true } };
+    const out = withHealthConnect(config);
+
+    // No manifest mod, no MainActivity mod — config returned untouched, plus an
+    // info line explaining the exclusion. This is what makes the generated
+    // manifest carry ZERO android.permission.health.* (CI asserts grep -c == 0).
+    expect(cp.withAndroidManifest).not.toHaveBeenCalled();
+    expect(cp.withMainActivity).not.toHaveBeenCalled();
+    expect(cp.WarningAggregator.addWarningAndroid).toHaveBeenCalledTimes(1);
+    expect(out).toBe(config);
+
+    // Runtime side: the shared gate is off, so no permission is ever requested.
+    expect(runtimeRequestSet(shouldShowHealthConnect)).toEqual([]);
   });
 });

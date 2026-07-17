@@ -12,17 +12,34 @@
 import type { HealthConnectStatus } from './healthConnect';
 
 /**
- * Master feature flag for the Health Connect Settings surface.
+ * Master feature flag for the whole Health Connect feature — the Settings card,
+ * the Insights health↔mood cards + overlay, and (transitively) the runtime
+ * permission request and every sync. When `false`, none of that surfaces and no
+ * Health Connect native call is made.
  *
- * Default `true` on this branch so the section is testable end-to-end.
+ * THE SINGLE KNOB — `EXPO_PUBLIC_HEALTH_CONNECT`:
+ *   - unset / any value other than '0'  → ENABLED  (the default; GitHub APK
+ *     builds are unaffected — this is how every normal build ships HC).
+ *   - '0'                                → DISABLED (the Play "no-HC" variant).
  *
- * PRODUCTION VALUE IS GATED: shipping Health Connect reads on Google Play
- * requires the app-level "Health Apps" declaration + a privacy-policy review.
- * Flip this to `false` (or wire it to a build-time env) until that declaration
- * is approved, so a store build never exposes an unauthorized Health Connect
- * integration.
+ * ONE env var drives BOTH layers because it's an `EXPO_PUBLIC_*` var: Expo/Metro
+ * inlines it into the JS bundle (so this runtime flag bakes in at bundle time),
+ * AND the `plugins/withHealthConnect.js` config plugin reads the same
+ * `process.env` at prebuild (Node), so the manifest and the JS agree by
+ * construction. The CI Play-variant build exports `EXPO_PUBLIC_HEALTH_CONNECT=0`
+ * for the prebuild AND the gradle bundle step (metro bundles the JS during
+ * gradle — the env must be present there too, or the runtime flag bakes in wrong).
+ *
+ * WHY THE KNOB EXISTS (temporary, 2026-07-17): shipping Health Connect reads on
+ * Google Play requires Google's app-level "Health Apps" declaration APPROVED
+ * first (undeclared `android.permission.health.*` risks store removal; approval
+ * takes ~2-3 weeks). That declaration is unfiled, so the Play AAB is built with
+ * this knob OFF — Play users get everything ELSE now, with a manifest carrying
+ * ZERO health permissions. Once the declaration is approved, flip the CI env
+ * line to '1' (or drop it) and Play gets HC too, no code change.
  */
-export const HEALTH_CONNECT_ENABLED = true;
+export const HEALTH_CONNECT_ENABLED =
+  process.env.EXPO_PUBLIC_HEALTH_CONNECT !== '0';
 
 /**
  * Hard cap on how far back a historical backfill reads (≈1 year). A user with

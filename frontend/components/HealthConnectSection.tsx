@@ -85,6 +85,14 @@ export const HealthConnectSection = () => {
   // Health Connect re-checks and updates immediately — no app restart. Only ever
   // runs on Android (the whole section is gated off elsewhere).
   const resolveState = useCallback((): void | (() => void) => {
+    // Feature off for this build (EXPO_PUBLIC_HEALTH_CONNECT=0) or non-Android:
+    // the card renders nothing (see the gate below), so skip the native status
+    // probe entirely — a build that deliberately excludes Health Connect must
+    // make ZERO Health Connect calls. Guarding here (not just at the render gate,
+    // which is post-hooks) keeps getStatus() off the Play no-HC build.
+    if (!shouldShowHealthConnect(Platform.OS, HEALTH_CONNECT_ENABLED)) {
+      return undefined;
+    }
     // A user op is running (e.g. the OS permission dialog blurred us and we just
     // regained focus): skip so a background re-resolve can't race its state writes.
     if (operationInFlight.current) return undefined;

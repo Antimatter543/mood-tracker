@@ -17,6 +17,24 @@
 // Every mutation THIS plugin makes is idempotent (guarded), so re-running
 // prebuild never duplicates one of our entries. Modeled on ./withReleaseAbis.js.
 //
+// BUILD KNOB — EXPO_PUBLIC_HEALTH_CONNECT (TEMPORARY, 2026-07-17): when this env
+// var is '0' at prebuild time, this plugin applies NOTHING — no health
+// <uses-permission>, no ViewPermissionUsageActivity <activity-alias>, no
+// MainActivity delegate edit — so the generated manifest carries ZERO
+// `android.permission.health.*`. That is the Play "no-HC" AAB variant, needed
+// only until Google's "Health Apps" declaration is approved (undeclared health
+// permissions risk Play removal). See lib/healthConnectConfig.ts for the WHY and
+// the matching runtime flag (the SAME env var drives both, so manifest ⇆ JS
+// agree). REVERT once approved: build the AAB with EXPO_PUBLIC_HEALTH_CONNECT=1
+// (or drop the env) and this plugin declares HC exactly as the APK does.
+//   NOTE — harmless residue when disabled: the library's own bundled
+//   app.plugin.js (listed BEFORE us in app.json) still adds a rationale
+//   intent-filter to MainActivity. That is an <intent-filter> (action
+//   `androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE`), NOT a permission — it
+//   contains no `android.permission.health.*`, so it does not trip Play's
+//   health-permission detection. Verified against the generated manifest (the CI
+//   Play-variant build asserts `grep -c android.permission.health == 0`).
+//
 // KNOWN upstream quirk (not ours): the library's bundled app.plugin.js pushes
 // the rationale intent-filter with NO guard, so re-running `expo prebuild` over
 // an existing android/ (without --clean) accumulates duplicate rationale
@@ -174,9 +192,26 @@ const withHealthConnectMainActivity = (config) =>
 /**
  * Root plugin: applies the manifest + MainActivity mods. Order within is
  * irrelevant (independent mods); both are idempotent.
+ *
+ * BUILD KNOB: `EXPO_PUBLIC_HEALTH_CONNECT === '0'` → apply NOTHING (the Play
+ * no-HC variant). Read at CALL time (prebuild invocation), not module-load, so a
+ * single required copy of this plugin honours the env of the prebuild that runs
+ * it. Falls SAFE toward "declare HC" — only the exact string '0' disables it, so
+ * a missing/typo'd env can never silently strip HC from the normal GitHub build.
  */
-const withHealthConnect = (config) =>
-  withHealthConnectMainActivity(withHealthConnectManifest(config));
+const withHealthConnect = (config) => {
+  if (process.env.EXPO_PUBLIC_HEALTH_CONNECT === '0') {
+    WarningAggregator.addWarningAndroid(
+      'withHealthConnect',
+      'Health Connect EXCLUDED from this build (EXPO_PUBLIC_HEALTH_CONNECT=0): ' +
+        'no health uses-permissions, no ViewPermissionUsageActivity activity-alias, ' +
+        'no MainActivity permission delegate. This is the Google Play no-HC variant, ' +
+        'temporary until the "Health Apps" declaration is approved.'
+    );
+    return config;
+  }
+  return withHealthConnectMainActivity(withHealthConnectManifest(config));
+};
 
 module.exports = withHealthConnect;
 // Exported for the manifest-vs-runtime permission-drift invariant test

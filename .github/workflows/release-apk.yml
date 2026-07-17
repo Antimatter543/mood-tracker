@@ -86,7 +86,33 @@ jobs:
         # android/ is gitignored; this regenerates it with the config plugins applied
         # (withReleaseAbis -> arm-only ABIs in gradle.properties; expo-build-properties
         # -> R8 minify + resource shrink in the release build).
+        # DEFAULT env (no EXPO_PUBLIC_HEALTH_CONNECT) -> Health Connect ENABLED, so the
+        # APK/AAB-source tree here declares the health permissions. The Play AAB is
+        # regenerated separately below with the feature EXCLUDED.
         run: npx expo prebuild --platform android --no-install
+
+      - name: Assert health permissions PRESENT (GitHub APK lane guard)
+        # Fail LOUDLY if the default build ever silently drops Health Connect (e.g. a
+        # stray EXPO_PUBLIC_HEALTH_CONNECT=0 in the environment, or a plugin regression).
+        # The GitHub APK must keep HC fully enabled — this is the complement to the
+        # Play-variant zero-permission assertion further down.
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          echo "android.permission.health entries in the default (APK) manifest:"
+          grep -n "android.permission.health" "$MANIFEST" || true
+          COUNT=$(grep -c "android.permission.health" "$MANIFEST" || true)
+          MISSING=0
+          for p in READ_SLEEP READ_HEART_RATE READ_HEART_RATE_VARIABILITY READ_RESTING_HEART_RATE; do
+            if ! grep -q "android.permission.health.$p" "$MANIFEST"; then
+              echo "::error::Default manifest is MISSING android.permission.health.$p — the GitHub APK silently lost Health Connect" >&2
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" -ne 0 ] || [ "$COUNT" -ne 4 ]; then
+            echo "::error::Expected exactly 4 android.permission.health entries in the APK manifest, found $COUNT" >&2
+            exit 1
+          fi
+          echo "OK: all 4 Health Connect permissions present in the APK manifest."
 
       - name: Decode keystore
         # The release signing keystore (parity-verified == EAS == v1.2.2). Written only
@@ -118,12 +144,60 @@ jobs:
           echo "name=SoulSync-${{ steps.ver.outputs.version }}.apk" >> "$GITHUB_OUTPUT"
           ls -la "$DEST"
 
-      # --- AAB (Android App Bundle) for the Play Store. Same signed keystore
-      #     (upload key); always produced as a run artifact (an .aab is not
-      #     directly installable, so it is NOT attached to the GitHub Release). ---
-      - name: Build signed release AAB
+      # ═══════════════════════════════════════════════════════════════════════
+      # AAB (Android App Bundle) = the Google Play "no Health Connect" VARIANT.
+      #
+      # TEMPORARY — until Google's "Health Apps" declaration is APPROVED (added
+      # 2026-07-17). Play publishing is blocked while the app's manifest carries
+      # android.permission.health.* (undeclared health access risks removal;
+      # approval takes ~2-3 weeks). So the AAB is rebuilt from a FRESH prebuild
+      # with EXPO_PUBLIC_HEALTH_CONNECT=0 — the config plugin then declares NO
+      # health permissions (manifest carries zero) AND the inlined runtime flag
+      # hides every Health Connect surface. Play users get everything else NOW.
+      #
+      # The APK above (GitHub lane) is built from the DEFAULT tree and keeps HC
+      # fully enabled — unchanged. The AAB must NOT reuse that tree, hence the
+      # `--clean` re-prebuild here.
+      #
+      # ONE-LINE REVERT once the declaration is approved: set
+      # EXPO_PUBLIC_HEALTH_CONNECT to '1' (or delete the `env:` from BOTH the
+      # prebuild and the bundleRelease steps) and the AAB ships HC like the APK.
+      #
+      # The signed keystore (upload key) is the same; the .aab is always a run
+      # artifact (not installable, so it is NOT attached to the GitHub Release).
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: Prebuild Play variant (Health Connect EXCLUDED)
+        # FRESH --clean regen so the AAB does not inherit the APK's HC-enabled
+        # android/. --no-install: adds no deps (the react-native-health-connect
+        # native module stays autolinked as harmless dead code).
+        env:
+          EXPO_PUBLIC_HEALTH_CONNECT: '0'
+        run: npx expo prebuild --platform android --clean --no-install
+
+      - name: Assert ZERO health permissions (Play AAB variant)
+        # Hard gate: the Play manifest MUST carry no android.permission.health.*,
+        # or the AAB would be rejected/removed pending the Health Apps declaration.
+        # (The library's bundled app.plugin.js still adds a rationale intent-filter
+        # to MainActivity — that is an <intent-filter>, NOT a permission, so it does
+        # not match this grep and is harmless.)
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          COUNT=$(grep -c "android.permission.health" "$MANIFEST" || true)
+          echo "android.permission.health occurrences in the Play manifest: $COUNT"
+          if [ "$COUNT" -ne 0 ]; then
+            echo "::error::Play AAB manifest STILL declares $COUNT health permission(s) — HC exclusion FAILED; do NOT ship to Play until the Health Apps declaration is approved" >&2
+            grep -n "android.permission.health" "$MANIFEST" >&2 || true
+            exit 1
+          fi
+          echo "OK: Play AAB manifest carries ZERO android.permission.health permissions."
+
+      - name: Build signed release AAB (Play no-HC variant)
         working-directory: frontend/android
         env:
+          # Must ALSO be '0' here: gradle bundleRelease runs metro to bundle the JS,
+          # so the inlined EXPO_PUBLIC_* runtime flag is baked in at THIS step. Without
+          # it, the manifest would be HC-free but the JS would still try to surface HC.
+          EXPO_PUBLIC_HEALTH_CONNECT: '0'
           SOULSYNC_KEYSTORE_PASSWORD: ${{ secrets.SOULSYNC_KEYSTORE_PASSWORD }}
           SOULSYNC_KEY_ALIAS: ${{ secrets.SOULSYNC_KEY_ALIAS }}
           SOULSYNC_KEY_PASSWORD: ${{ secrets.SOULSYNC_KEY_PASSWORD }}

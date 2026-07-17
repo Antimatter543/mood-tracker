@@ -3,6 +3,20 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.6.0] - 2026-07-17
+
+### Added
+- **Explore any activity in depth:** mood distribution, reliably-good vs hit-or-miss, and how it compares to your usual.
+- **Search your timeline** by text and filter it by mood.
+- **Edit or back-date an entry's date and time.**
+
+### Improved
+- **Smarter mood-driver insights** — what lifts your mood and what keeps it steady.
+- **One-tap backup and restore**, now including your photos.
+
+### Fixed
+- **More reliable saving** (real database transactions); the Statistics tab no longer goes blank.
+
 ## [2.5.0] - 2026-07-13
 
 ### Added

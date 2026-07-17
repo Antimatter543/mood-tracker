@@ -56,6 +56,7 @@ const hRow = (date: string, sleep: number): HealthMetricDay => ({
     sleepTotalMinutes: sleep,
     avgHeartRate: null,
     minHeartRate: null,
+    restingHeartRate: null,
     avgHrvMillis: null,
 });
 
