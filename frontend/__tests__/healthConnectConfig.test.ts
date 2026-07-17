@@ -31,6 +31,57 @@ describe('shouldShowHealthConnect (feature flag + platform gate)', () => {
   });
 });
 
+/**
+ * The build knob: `EXPO_PUBLIC_HEALTH_CONNECT` drives `HEALTH_CONNECT_ENABLED`
+ * (and therefore the default `enabled` arg every UI gate uses). Because the flag
+ * is a module-level const read at load time, each case sets the env, resets the
+ * module registry, and re-requires the module fresh. Under jest, babel-preset-expo
+ * rewrites `process.env.EXPO_PUBLIC_*` to a live read of the virtual env module
+ * (which IS `process.env`), so a runtime env change + resetModules re-derives it —
+ * the same mechanism Metro uses to inline the value into the shipped bundle.
+ */
+describe('HEALTH_CONNECT_ENABLED (EXPO_PUBLIC_HEALTH_CONNECT build knob)', () => {
+  const ORIG = process.env.EXPO_PUBLIC_HEALTH_CONNECT;
+  afterEach(() => {
+    if (ORIG === undefined) delete process.env.EXPO_PUBLIC_HEALTH_CONNECT;
+    else process.env.EXPO_PUBLIC_HEALTH_CONNECT = ORIG;
+    jest.resetModules();
+  });
+
+  const loadEnabled = (): boolean => {
+    jest.resetModules();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- fresh module load per env value
+    return require('../lib/healthConnectConfig').HEALTH_CONNECT_ENABLED;
+  };
+  const loadGate = () => {
+    jest.resetModules();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- fresh module load per env value
+    return require('../lib/healthConnectConfig').shouldShowHealthConnect as (
+      os: string
+    ) => boolean;
+  };
+
+  it("'0' DISABLES the feature (Play no-HC variant)", () => {
+    process.env.EXPO_PUBLIC_HEALTH_CONNECT = '0';
+    expect(loadEnabled()).toBe(false);
+    // The Android gate (used by Settings + Insights via the default arg) is off.
+    expect(loadGate()('android')).toBe(false);
+  });
+
+  it('unset ENABLES the feature (default — normal GitHub build)', () => {
+    delete process.env.EXPO_PUBLIC_HEALTH_CONNECT;
+    expect(loadEnabled()).toBe(true);
+    expect(loadGate()('android')).toBe(true);
+  });
+
+  it("any non-'0' value ENABLES the feature (only the exact '0' disables — fail-safe)", () => {
+    for (const v of ['1', 'true', 'enabled', '']) {
+      process.env.EXPO_PUBLIC_HEALTH_CONNECT = v;
+      expect(loadEnabled()).toBe(true);
+    }
+  });
+});
+
 describe('resolveHealthConnectPhase (SDK status → card phase)', () => {
   it('maps each SDK status to its phase', () => {
     expect(resolveHealthConnectPhase('available')).toBe('available');
