@@ -199,6 +199,21 @@ export const migrations: Migration[] = [
                 `ALTER TABLE health_metrics ADD COLUMN resting_heart_rate REAL`
             );
         }
+    },
+    {
+        // Activity Carryover setting (opt-in, default OFF). user_settings is a
+        // key-value store, so seeding one row is all that's needed — no schema
+        // change. getSetting already falls back to the SETTINGS_REGISTRY default,
+        // so this seed is belt-and-suspenders (materialises the default row),
+        // matching how every prior settings key was added (V3/V4/V7). The
+        // matching SETTINGS_REGISTRY entry lives in databases/settings.ts.
+        version: 10,
+        up: async (db: SQLiteDatabase) => {
+            await db.runAsync(`
+                INSERT OR IGNORE INTO user_settings (key, value)
+                VALUES ('activity_carryover', 'false')
+            `);
+        }
     }
 
     // To add a new migration: create a new entry with the next version number.

@@ -9,12 +9,14 @@ import type { ThemeColors } from '@/styles/global';
 import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
 import { useTimeframe } from '@/context/TimeframeContext';
+import { useSettings } from '@/context/SettingsContext';
 import { getSetting, updateSetting } from '@/databases/user-settings';
 import { ACTIVITY_CORRELATION } from './queries';
 import { computeWindow, type Timeframe } from './transforms/windowHelpers';
 import {
   computeActivityCorrelation,
   aggregateActivityCorrelation,
+  carryoverQueryBounds,
   selectCorrelationView,
   parseExcludedActivities,
   serializeExcludedActivities,
@@ -41,6 +43,7 @@ const CorrelationRow = ({
   svgW,
   positiveColor,
   negativeColor,
+  carryover,
   onLayout,
   onExclude,
 }: {
@@ -50,6 +53,7 @@ const CorrelationRow = ({
   svgW: number;
   positiveColor: string;
   negativeColor: string;
+  carryover: boolean;
   onLayout: (width: number) => void;
   onExclude: (name: string) => void;
 }) => {
@@ -136,7 +140,9 @@ const CorrelationRow = ({
       </View>
 
       <Text style={styles.sample}>
-        n = {item.count_with} with / {item.count_without} without
+        {carryover
+          ? `n ≈ ${Math.round(item.count_with)} with / ${Math.round(item.count_without)} without`
+          : `n = ${item.count_with} with / ${item.count_without} without`}
       </Text>
     </View>
   );
@@ -146,6 +152,8 @@ const ActivityCorrelationChart = () => {
   const colors = useThemeColors();
   const db = useSQLiteContext();
   const { timeframe } = useTimeframe();
+  const { settings } = useSettings();
+  const carryover = settings.activity_carryover;
   const [meaningful, setMeaningful] = useState<ActivityCorrelationResult[]>([]);
   const [barWidth, setBarWidth] = useState(0);
   const [excluded, setExcluded] = useState<string[]>([]);
@@ -198,26 +206,33 @@ const ActivityCorrelationChart = () => {
   const fetchData = useCallback(async () => {
       try {
         // Parameterised local-time window (?start, ?end) — NOT the UTC-anchored
-        // timeframeCondition string the old delta-from-mean chart used.
-        const { start, end } = computeWindow(timeframe as Timeframe);
+        // timeframeCondition string the old delta-from-mean chart used. With
+        // carryover ON the query lower bound is pulled 36h earlier so activities
+        // logged just before the window can decay forward into it; windowStart
+        // marks the TRUE start so those earlier rows stay out of the day universe.
+        const window = computeWindow(timeframe as Timeframe);
+        const { queryStart, queryEnd, windowStart } = carryoverQueryBounds(
+          window,
+          carryover,
+        );
         // Raw joined rows (one per entry×activity) -> day-key + with/without
         // split in JS (the old SQL keyed days with date(e.date) in UTC).
         const rawRows = await db.getAllAsync<ActivityCorrelationRawRow>(
           ACTIVITY_CORRELATION,
-          [start, end],
+          [queryStart, queryEnd],
         );
         const { meaningful: m } = computeActivityCorrelation(
-          aggregateActivityCorrelation(rawRows),
+          aggregateActivityCorrelation(rawRows, { carryover, windowStart }),
         );
         setMeaningful(m);
       } catch (error) {
         console.error('Error fetching activity correlation:', error);
         setMeaningful([]);
       }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframe; setState identities are stable
-    }, [db, timeframe]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframe + carryover; setState identities are stable
+    }, [db, timeframe, carryover]);
   // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe])).
-  useDataRefresh(fetchData, [db, timeframe]);
+  useDataRefresh(fetchData, [db, timeframe, carryover]);
 
   const view = useMemo(
     () => selectCorrelationView(meaningful, { excluded, expanded }),
@@ -254,6 +269,7 @@ const ActivityCorrelationChart = () => {
       svgW={svgW}
       positiveColor={positiveColor}
       negativeColor={negativeColor}
+      carryover={carryover}
       onLayout={onRowLayout}
       onExclude={handleExclude}
     />
@@ -264,7 +280,12 @@ const ActivityCorrelationChart = () => {
   return (
     <Card>
       <InfoBubble
-        text="Compares your average mood on days you logged an activity ('with') against days you didn't ('without'). A positive delta means the activity lines up with better days — and we only show activities with enough days on each side to be meaningful. By default you see the top few that lift and weigh on your mood; tap the eye to hide an activity (the next-strongest takes its place), or expand to see them all."
+        text={
+          "Compares your average mood on days you logged an activity ('with') against days you didn't ('without'). A positive delta means the activity lines up with better days — and we only show activities with enough days on each side to be meaningful. By default you see the top few that lift and weigh on your mood; tap the eye to hide an activity (the next-strongest takes its place), or expand to see them all." +
+          (carryover
+            ? " Activity Carryover is on, so an activity also counts toward your later entries and the next day with a fading weight — the 'with' amounts are effective (approximate) counts."
+            : '')
+        }
         position="top-right"
       />
       <Text style={styles.title}>Activity Correlation</Text>

@@ -46,6 +46,14 @@ export const SETTINGS_REGISTRY = {
         label: 'Show Mood Benchmarks',
         description: 'Show emoji indicators on the mood scale',
     },
+    activity_carryover: {
+        key: 'activity_carryover',
+        default: false,
+        type: 'switch',
+        label: 'Activity Carryover',
+        description:
+            'Count activities toward your mood for the next ~36 hours, with fading weight — not just the day you log them',
+    },
     reminder_enabled: {
         key: 'reminder_enabled',
         default: false,
@@ -72,6 +80,7 @@ export type SettingValues = {
     theme: '' | 'light' | 'dark' | 'cherry' | 'midnight' | 'forest';  // Empty string means use theme_mode
     mood_precision: 'high' | 'low';
     show_mood_benchmarks: boolean;
+    activity_carryover: boolean;
     reminder_enabled: boolean;
     reminder_time: string;  // "HH:MM" 24-hour local time
 };

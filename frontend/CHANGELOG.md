@@ -3,6 +3,14 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [Unreleased]
+
+### Added
+- **Activity Carryover (optional).** Turn it on in Settings to count an activity toward your mood
+  for its later entries and into the next day — with a weight that fades over about 36 hours — instead
+  of only the day you log it. Off by default; it only shapes the Activity Correlation insight on the
+  Statistics tab.
+
 ## [2.6.0] - 2026-07-17
 
 ### Added

@@ -252,3 +252,20 @@ describe('Migration V7 (Health Connect)', () => {
     expect(seed![0] as string).toContain("'false'");
   });
 });
+
+describe('Migration V10 (Activity Carryover)', () => {
+  it('seeds activity_carryover OFF with INSERT OR IGNORE', async () => {
+    const db = createMockDatabase();
+    const v10 = migrations.find(m => m.version === 10)!;
+    expect(v10).toBeDefined();
+
+    await v10.up(db as any);
+
+    const seed = db.runAsync.mock.calls.find((c: any[]) =>
+      typeof c[0] === 'string' && c[0].includes('activity_carryover')
+    );
+    expect(seed).toBeDefined();
+    expect((seed![0] as string).toUpperCase()).toContain('INSERT OR IGNORE');
+    expect(seed![0] as string).toContain("'false'");
+  });
+});
