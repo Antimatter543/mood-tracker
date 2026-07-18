@@ -76,17 +76,26 @@ staging NOTHING (a deterministic pause for policy gates — see below); (1) asse
 agree; (2) **cheap idempotent guard** — if the versionCode is already on the production track, log "already on
 track — nothing to do" and stop; (3) if CI hasn't built `SoulSync-<version>.aab` yet, log "AAB not built yet —
 will retry" and stop; (4) otherwise delegate to `publish-to-play.sh` (`SOURCE=run`).
-- **Play state (2026-07-08) + the HOLD gate (supersedes the old "v2.3.4 IN_REVIEW / draft-only" note):** the
-  app is LIVE — `gplay status` shows the production track = **2.3.4 completed** (live) + **2.3.6 draft**.
-  **`v2.3.8`** (Health Connect + Back up/Restore + honest filter bands) is **tagged but deliberately HELD from
-  Play** via a local `.play-hold` marker (`~/projects/soulsync/.play-hold`, gitignored): its manifest carries
-  Health Connect permissions (`READ_SLEEP`/`READ_HEART_RATE`) that require Google's **"Health Apps" declaration
-  APPROVED first** (undeclared health access risks store removal; justification drafted in
-  `ops/routes/soulsync/research/health-connect-integration-plan.md`). **To resume Play staging: file + clear the
-  declaration, then `rm ~/projects/soulsync/.play-hold`.** Rollout knobs once un-held (app is already approved,
-  so non-draft is now accepted): `PLAY_STATUS=inProgress PLAY_ROLLOUT=0.2` (20% staged, halt-able) →
-  `PLAY_STATUS=completed PLAY_ROLLOUT=1.0`. Env knobs: `PLAY_STATUS` / `PLAY_ROLLOUT` / `PLAY_TRACK` /
-  `SOULSYNC_PLAY_LOG` / `SOULSYNC_PLAY_HOLD_FILE`.
+- **Play state (2026-07-18, supersedes the 07-08 HOLD-gate note):** production = **v2.6.0 (vc 20600)
+  PUBLISHED** — full new feature set, **built WITHOUT Health Connect permissions**. The `.play-hold` marker is
+  GONE; the HC policy gate moved into the BUILD: CI's AAB lane sets `EXPO_PUBLIC_HEALTH_CONNECT=0` (one env
+  knob — strips the 4 health perms from the manifest via `plugins/withHealthConnect.js` AND hides every HC
+  surface at runtime via `lib/healthConnectConfig.ts`; two loud CI assertions guard both directions). The
+  GitHub APK keeps HC fully enabled. **When Google's "Health Apps" declaration approves** (filed 2026-07-18;
+  4 perms; justification in `ops/routes/soulsync/research/health-connect-integration-plan.md`), flip the CI
+  env to `'1'`/remove it (one line in `.github/workflows/release-apk.yml`, marked TEMPORARY-2026-07-17) and
+  cut a release — Play then gets HC too. The **internal track** holds a `2.5.0 (vc 20500) draft` with the HC
+  perms, uploaded only to surface the declaration form in the Console.
+  **The cron now publishes LIVE:** its crontab line carries `PLAY_STATUS=completed PLAY_ROLLOUT=1.0`
+  (flipped 2026-07-18) — so `scripts/release.sh patch|minor|major` is the ONLY human step: tag → CI builds →
+  within 30 min the cron pushes it straight to Play production (Nudge-parity). Script defaults stay `draft`
+  (safe for ad-hoc manual runs). Env knobs: `PLAY_STATUS` / `PLAY_ROLLOUT` / `PLAY_TRACK` / `SOULSYNC_PLAY_LOG`
+  / `SOULSYNC_PLAY_HOLD_FILE` (hold marker still honored if ever re-created).
+  **Store listing (2026-07-18 refresh):** canonical text = `fastlane/metadata/android/en-US/` (emoji-led copy,
+  no HC mentions until it ships on Play); framed 8-slide screenshot set + feature graphic =
+  `store/play-screenshots/` + `store/feature-graphic.png`, pushed via `gplay listings update` + `gplay images`.
+  Script gotcha, fixed + commented in both publish scripts: `node -p` on a bare NUMBER emits ANSI color codes
+  under `FORCE_COLOR` envs (agent shells) — always `String()`-wrap numeric `node -p` reads.
 - **Layout note:** `publish-on-tag.sh` lives at `frontend/scripts/` but `publish-to-play.sh` lives at the
   **repo-root** `scripts/` (one level up), so the orchestrator references `$REPO_ROOT/scripts/publish-to-play.sh`.
 
@@ -148,7 +157,7 @@ APK is optimized: `eas.json` preview profile = **arm-only ABIs** (via `plugins/w
 drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-properties`). ~45MB, not ~98MB.
 
 ## On-device QA (the only reliable way to verify UI on this app)
-- Pixel 3 at `192.168.1.68:5555`, app `com.raeduslabs.soulsync`, **device PIN `1337`**
+- Pixel 3 via adb-tls (`adb devices` for the current 192.168.1.68:<port>, the port rotates), app `com.raeduslabs.soulsyncapp`, **device PIN `1337`**
   (unlock: `adb shell input keyevent KEYCODE_WAKEUP && adb shell input swipe 540 1600 540 300 && adb shell input text 1337 && adb shell input keyevent 66`).
 - **Iteration loop = Expo Go (Anti-directed, 2026-06-12).** Expo Go 56.0.1 is installed on the Pixel and
   version-matches the project (SDK 56+). This app is vanilla CNG with NO custom native modules, so Go runs
