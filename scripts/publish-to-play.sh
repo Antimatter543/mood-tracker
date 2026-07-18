@@ -88,7 +88,11 @@ VERSION="${1:-$(node -p "require('$APP_JSON').expo.version")}"
 
 # The Android versionCode is the artifact's real identity for the "already uploaded?"
 # check. It is DERIVED MAJOR*10000+MINOR*100+PATCH in this repo; assert app.json agrees.
-VC_APP="$(node -p "require('$APP_JSON').expo.android.versionCode")"
+# String(...) wrap: `node -p` runs bare NUMBERS through util.inspect, which emits ANSI
+# color codes when FORCE_COLOR is set (as it is under some agent shells) — the colored
+# "20600" then fails the equality check against the clean derived value (bit us on the
+# v2.6.0 publish, 2026-07-17). Strings print raw, so force a string.
+VC_APP="$(node -p "String(require('$APP_JSON').expo.android.versionCode)")"
 VC_DERIVED="$(node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); process.stdout.write(String(a*10000+b*100+c))' "$VERSION")"
 [ "$VC_APP" = "$VC_DERIVED" ] \
   || die "app.json versionCode ($VC_APP) != derived from version $VERSION ($VC_DERIVED). Fix app.json (run scripts/bump-version.js)."

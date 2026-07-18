@@ -117,7 +117,7 @@ fi
 VERSION="${1:-$(node -p "require('$APP_JSON').expo.version" 2>/dev/null)}"
 [ -n "$VERSION" ] || { log "could not resolve version from $APP_JSON — skipping tick"; exit 0; }
 
-VC_APP="$(node -p "require('$APP_JSON').expo.android.versionCode" 2>/dev/null)"
+VC_APP="$(node -p "String(require('$APP_JSON').expo.android.versionCode)" 2>/dev/null)"
 # versionCode is DERIVED MAJOR*10000+MINOR*100+PATCH in this repo; assert app.json agrees
 # so the "already uploaded?" check below keys off the right identity.
 VC_DERIVED="$(node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); process.stdout.write(String(a*10000+b*100+c))' "$VERSION" 2>/dev/null)"
