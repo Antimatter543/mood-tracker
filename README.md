@@ -74,6 +74,8 @@ Prefer installing outside Play? Grab the latest signed APK from the [GitHub Rele
 
 Enjoying SoulSync? A [Play Store review](https://play.google.com/store/apps/details?id=com.raeduslabs.soulsyncapp) helps a tiny open-source project a lot.
 
+<a href="https://www.saashub.com/soulsync-by-raedus-labs?utm_source=badge"><img src="https://cdn-b.saashub.com/img/badges/approved-color.png?v=1" alt="SoulSync | Featured on SaaSHub" width="150"></a>
+
 ## Build from source
 
 ```bash
