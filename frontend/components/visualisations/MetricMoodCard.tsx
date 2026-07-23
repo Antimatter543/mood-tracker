@@ -36,7 +36,15 @@ export interface MetricMoodCardConfig {
 }
 
 /**
- * Thin renderer for a health↔mood correlation. Three honest states:
+ * Card-less renderer for a health↔mood correlation — everything INSIDE the card
+ * (InfoBubble + header + the three honest state branches). Extracted so it can
+ * be embedded either in its own {@link MetricMoodCard} `<Card>` (standalone) OR
+ * as a pane inside the swipeable {@link HealthMoodPagerCard} (which owns one
+ * shared Card for all panes). It renders into whatever parent gives it — the
+ * absolutely-positioned InfoBubble anchors to that parent (relative by default),
+ * so a fixed-width pane View is a correct host.
+ *
+ * Three honest states:
  *   - notEnoughData → "keep logging — X more days" (never a number).
  *   - ok + flat     → "no clear link yet" (an honest finding, not an error; and
  *                      we never surface a high/low split that isn't meaningful).
@@ -44,7 +52,7 @@ export interface MetricMoodCardConfig {
  *                      sentence, explicitly "a pattern in your own data, not
  *                      medical advice".
  */
-const MetricMoodCard: React.FC<MetricMoodCardConfig> = ({
+export const MetricMoodCardBody: React.FC<MetricMoodCardConfig> = ({
     icon,
     title,
     metricNoun,
@@ -57,7 +65,7 @@ const MetricMoodCard: React.FC<MetricMoodCardConfig> = ({
     const styles = useStyles(colors);
 
     return (
-        <Card>
+        <>
             {/* InfoBubble is absolutely positioned (top-right) by the component. */}
             <InfoBubble text={methodNote} />
 
@@ -96,9 +104,20 @@ const MetricMoodCard: React.FC<MetricMoodCardConfig> = ({
                     <StatsLine result={correlation} styles={styles} colors={colors} />
                 </>
             )}
-        </Card>
+        </>
     );
 };
+
+/**
+ * Standalone health↔mood card: {@link MetricMoodCardBody} in its own `<Card>`.
+ * The four thin per-metric wrappers (Sleep / HeartRate / RestingHeartRate /
+ * Hrv) render through this.
+ */
+const MetricMoodCard: React.FC<MetricMoodCardConfig> = (props) => (
+    <Card>
+        <MetricMoodCardBody {...props} />
+    </Card>
+);
 
 type KeepLoggingProps = {
     remaining: number;

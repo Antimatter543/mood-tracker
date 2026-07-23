@@ -40,10 +40,7 @@ import {
     type MoodDriversData,
 } from '@/components/visualisations/transforms/moodDrivers';
 import MoodDriversCard from '@/components/visualisations/MoodDriversCard';
-import SleepMoodCard from '@/components/visualisations/SleepMoodCard';
-import HeartRateMoodCard from '@/components/visualisations/HeartRateMoodCard';
-import RestingHeartRateMoodCard from '@/components/visualisations/RestingHeartRateMoodCard';
-import HrvMoodCard from '@/components/visualisations/HrvMoodCard';
+import HealthMoodPagerCard from '@/components/visualisations/HealthMoodPagerCard';
 import MoodMetricOverlayCard from '@/components/visualisations/MoodMetricOverlayCard';
 import {
     sleepMoodCorrelation,
@@ -425,22 +422,28 @@ export default function InsightsScreen() {
             {/* State-conditioned, forward-looking drivers */}
             <MoodDriversCard data={d.drivers} />
 
-            {/* Health Connect: sleep / heart-rate / resting-HR / HRV ↔ mood
-                (Android + opt-in only). Each card renders only when that metric
-                has on-device data, so Insights stays uncluttered for non-health
-                users. */}
-            {d.showHealth && d.hasSleepData && (
-                <SleepMoodCard correlation={d.sleepMood} />
-            )}
-            {d.showHealth && d.hasHeartRateData && (
-                <HeartRateMoodCard correlation={d.heartRateMood} />
-            )}
-            {d.showHealth && d.hasRestingHrData && (
-                <RestingHeartRateMoodCard correlation={d.restingHeartRateMood} />
-            )}
-            {d.showHealth && d.hasHrvData && (
-                <HrvMoodCard correlation={d.hrvMood} />
-            )}
+            {/* Health Connect: ONE swipeable card cycling sleep / heart-rate /
+                resting-HR / HRV ↔ mood (Android + opt-in only). Only metrics
+                WITH on-device data get a pane — panes with no data are excluded
+                entirely, so Insights stays uncluttered for non-health users (a
+                single available metric shows as one static card, no pager
+                chrome). Gated on ANY metric having data, same as the overlay. */}
+            {d.showHealth &&
+                (d.hasSleepData ||
+                    d.hasHeartRateData ||
+                    d.hasRestingHrData ||
+                    d.hasHrvData) && (
+                    <HealthMoodPagerCard
+                        hasSleepData={d.hasSleepData}
+                        hasHeartRateData={d.hasHeartRateData}
+                        hasRestingHrData={d.hasRestingHrData}
+                        hasHrvData={d.hasHrvData}
+                        sleepMood={d.sleepMood}
+                        heartRateMood={d.heartRateMood}
+                        restingHeartRateMood={d.restingHeartRateMood}
+                        hrvMood={d.hrvMood}
+                    />
+                )}
 
             {/* The mood × metric overlay — plot mood against sleep / resting HR /
                 HRV / avg HR over time, with a metric toggle. Mounts once ANY
