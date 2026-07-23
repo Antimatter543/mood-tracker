@@ -5,11 +5,21 @@ All notable changes to SoulSync are documented here. Versions follow
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-07-23
+
 ### Added
 - **Activity Carryover (optional).** Turn it on in Settings to count an activity toward your mood
   for its later entries and into the next day — with a weight that fades over about 36 hours — instead
   of only the day you log it. Off by default; it only shapes the Activity Correlation insight on the
   Statistics tab.
+- **Explore your activities, right on Home.** The activity explorer moved from Statistics to the
+  bottom of the Home tab — showing your top 10 most-logged activities with a "See all" expander.
+  Search still covers every activity.
+
+### Improved
+- **One swipeable health card.** The separate sleep, heart rate, resting heart rate, and HRV
+  mood cards merged into a single card — swipe or tap the arrows to switch between metrics.
+  Less scrolling, same insights.
 
 ## [2.6.0] - 2026-07-17
 
