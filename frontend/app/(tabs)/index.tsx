@@ -17,6 +17,7 @@ import { startOfLocalDay, endOfLocalDay, localDateString } from '@/databases/dat
 import { dailyAverageMap } from '@/components/visualisations/transforms/dailyAverages';
 import { todaysMoodValue, monthlyOverview, formatAverageDisplay } from '@/components/visualisations/transforms/homeSummary';
 import { currentStreak } from '@/components/visualisations/transforms/streak';
+import ActivityExplorer from '@/components/ActivityExplorer';
 
 // Screen-level error boundary (expo-router convention): re-exporting a symbol
 // named `ErrorBoundary` makes expo-router wrap THIS screen in
@@ -568,6 +569,13 @@ export default function Home() {
                 {totalEntries === 0 && <FirstEntryNudge />}
                 <MonthlyOverviewCard stats={monthlyStats} />
                 <RecentActivitiesCard activities={recentActivities} />
+                {/* Explore your activities — search + tap-through to per-activity
+                    insights. Lives at the very bottom of Home (moved off Stats).
+                    Its browse list is capped at the top 10 with a "See all"
+                    expander; search spans all activities. Renders a plain mapped
+                    View (no FlatList) so it composes safely inside Home's
+                    ScrollView (no nested virtualization). */}
+                <ActivityExplorer />
             </View>
         </Layout>
     );

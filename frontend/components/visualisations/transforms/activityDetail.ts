@@ -363,3 +363,46 @@ export const filterActivitiesByQuery = <T extends { name: string }>(
         (a) => typeof a?.name === 'string' && a.name.toLowerCase().includes(q),
     );
 };
+
+/**
+ * Default number of activities shown in the collapsed browse list before the
+ * "See all" affordance appears. The list is expected already ranked
+ * (withEntryCounts → most-logged first), so the cap keeps the top-N.
+ */
+export const DEFAULT_ACTIVITY_BROWSE_CAP = 10;
+
+/**
+ * The activities to actually render in the "Explore your activities" browse
+ * list. Search ALWAYS wins over the cap:
+ *  - a non-empty query filters across ALL activities and ignores `cap` entirely
+ *    (search must never be limited to the visible top-N);
+ *  - with no query, the collapsed view (`expanded: false`) shows only the top
+ *    `cap`, and `expanded: true` shows every activity.
+ * `all` is assumed pre-ranked; this helper never re-sorts. Total on nullish
+ * input (never throws).
+ */
+export const visibleActivities = <T extends { name: string }>(
+    all: T[],
+    {
+        query,
+        expanded,
+        cap = DEFAULT_ACTIVITY_BROWSE_CAP,
+    }: { query: string; expanded: boolean; cap?: number },
+): T[] => {
+    const list = all ?? [];
+    if ((query ?? '').trim()) return filterActivitiesByQuery(list, query);
+    if (expanded) return list;
+    return list.slice(0, Math.max(0, cap));
+};
+
+/**
+ * Whether the "See all (N) / Show less" toggle should be shown. Only in the
+ * unfiltered browse state (no active query — searching bypasses the cap so a
+ * toggle would be meaningless) AND only when there are more activities than the
+ * cap. `total` is the FULL activity count (N in "See all (N)").
+ */
+export const canToggleSeeAll = (
+    total: number,
+    { query, cap = DEFAULT_ACTIVITY_BROWSE_CAP }: { query: string; cap?: number },
+): boolean =>
+    (query ?? '').trim().length === 0 && (total ?? 0) > Math.max(0, cap);

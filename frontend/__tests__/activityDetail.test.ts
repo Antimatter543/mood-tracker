@@ -7,6 +7,9 @@ import {
     topCoOccurring,
     withEntryCounts,
     filterActivitiesByQuery,
+    visibleActivities,
+    canToggleSeeAll,
+    DEFAULT_ACTIVITY_BROWSE_CAP,
     MIN_VARIABILITY_SAMPLES,
     LOW_THIRD,
     HIGH_THIRD,
@@ -317,5 +320,109 @@ describe('filterActivitiesByQuery', () => {
 
     it('returns empty when nothing matches', () => {
         expect(filterActivitiesByQuery(activities, 'zzz')).toEqual([]);
+    });
+});
+
+describe('visibleActivities (top-N cap + search bypass)', () => {
+    // Pre-ranked names (visibleActivities never re-sorts — it clamps/filters
+    // the list it's given). 15 items so we straddle the default cap of 10.
+    const many = Array.from({ length: 15 }, (_, i) => ({
+        name: `Activity ${String(i + 1).padStart(2, '0')}`,
+    }));
+    const few = many.slice(0, 4); // fewer than the cap
+
+    it('the default cap constant is 10', () => {
+        expect(DEFAULT_ACTIVITY_BROWSE_CAP).toBe(10);
+    });
+
+    it('fewer than the cap: shows all, no clamping', () => {
+        const out = visibleActivities(few, { query: '', expanded: false });
+        expect(out).toHaveLength(4);
+        expect(out).toEqual(few);
+        // ...and the affordance is hidden for a short list.
+        expect(canToggleSeeAll(few.length, { query: '' })).toBe(false);
+    });
+
+    it('more than the cap (collapsed): clamps to the top 10 in order', () => {
+        const out = visibleActivities(many, { query: '', expanded: false });
+        expect(out).toHaveLength(10);
+        expect(out).toEqual(many.slice(0, 10));
+        // N in "See all (N)" is the FULL count, not the clamped one.
+        expect(canToggleSeeAll(many.length, { query: '' })).toBe(true);
+    });
+
+    it('expanded: shows every activity', () => {
+        const out = visibleActivities(many, { query: '', expanded: true });
+        expect(out).toHaveLength(15);
+        expect(out).toEqual(many);
+    });
+
+    it('a non-empty query ignores the cap entirely (collapsed): can return MORE than the cap', () => {
+        // "Activity" matches all 15 even though we're collapsed — a collapsed
+        // browse would have clamped to 10, so >10 results prove the cap is bypassed.
+        const all = visibleActivities(many, { query: 'Activity', expanded: false });
+        expect(all).toHaveLength(15);
+        expect(all.length).toBeGreaterThan(DEFAULT_ACTIVITY_BROWSE_CAP);
+
+        // And it filters correctly by substring: "Activity 1" matches only 10..15
+        // ("Activity 01" contains "activity 0", not "activity 1").
+        const some = visibleActivities(many, { query: 'Activity 1', expanded: false });
+        expect(some.map((a) => a.name)).toEqual([
+            'Activity 10',
+            'Activity 11',
+            'Activity 12',
+            'Activity 13',
+            'Activity 14',
+            'Activity 15',
+        ]);
+    });
+
+    it('a query returns the same set whether collapsed or expanded (cap is irrelevant while searching)', () => {
+        const collapsed = visibleActivities(many, { query: 'Activity 0', expanded: false });
+        const expanded = visibleActivities(many, { query: 'Activity 0', expanded: true });
+        expect(collapsed).toEqual(expanded);
+        expect(collapsed).toHaveLength(9); // 01..09
+    });
+
+    it('clearing the query returns to the collapsed top-10 (query + collapse interplay)', () => {
+        // A search shows all matches...
+        const searched = visibleActivities(many, { query: 'Activity', expanded: false });
+        expect(searched).toHaveLength(15);
+        // ...then clearing it (still collapsed) snaps back to the top 10.
+        const cleared = visibleActivities(many, { query: '', expanded: false });
+        expect(cleared).toHaveLength(10);
+    });
+
+    it('a whitespace-only query is treated as no query (cap applies)', () => {
+        const out = visibleActivities(many, { query: '   ', expanded: false });
+        expect(out).toHaveLength(10);
+        expect(canToggleSeeAll(many.length, { query: '   ' })).toBe(true);
+    });
+
+    it('honours a custom cap and never throws on nullish / degenerate input', () => {
+        expect(visibleActivities(many, { query: '', expanded: false, cap: 3 })).toHaveLength(3);
+        // A non-positive cap clamps to 0 rather than slicing from the end.
+        expect(visibleActivities(many, { query: '', expanded: false, cap: -5 })).toEqual([]);
+        expect(() =>
+            visibleActivities(null as never, { query: '', expanded: false }),
+        ).not.toThrow();
+        expect(visibleActivities(null as never, { query: '', expanded: false })).toEqual([]);
+    });
+});
+
+describe('canToggleSeeAll', () => {
+    it('is hidden while searching, even with many activities', () => {
+        expect(canToggleSeeAll(50, { query: 'gym' })).toBe(false);
+    });
+
+    it('is shown only when the unfiltered total exceeds the cap', () => {
+        expect(canToggleSeeAll(10, { query: '' })).toBe(false); // exactly at cap
+        expect(canToggleSeeAll(11, { query: '' })).toBe(true);
+        expect(canToggleSeeAll(0, { query: '' })).toBe(false);
+    });
+
+    it('respects a custom cap', () => {
+        expect(canToggleSeeAll(4, { query: '', cap: 3 })).toBe(true);
+        expect(canToggleSeeAll(3, { query: '', cap: 3 })).toBe(false);
     });
 });
