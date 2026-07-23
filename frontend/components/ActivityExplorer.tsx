@@ -12,7 +12,8 @@ import { getActivities } from '@/databases/activities';
 import { ACTIVITY_ENTRY_COUNTS } from '@/components/visualisations/queries';
 import {
     withEntryCounts,
-    filterActivitiesByQuery,
+    visibleActivities,
+    canToggleSeeAll,
     type ActivityWithCount,
 } from '@/components/visualisations/transforms/activityDetail';
 import { OverlayModal } from '@/components/OverlayModal';
@@ -21,9 +22,14 @@ import { ActivityInsightsDetail } from '@/components/ActivityInsightsDetail';
 /**
  * "Explore your activities" — a search box + a tappable, entry-count-sorted list
  * of every activity. Tapping one opens its full-screen insights detail (through
- * the in-tree OverlayModal, never a native <Modal>). Lives on the Statistics
- * screen. Rendered INSIDE the Stats ScrollView, so the list is a plain mapped
- * View (no nested scroll view).
+ * the in-tree OverlayModal, never a native <Modal>). Lives at the BOTTOM of the
+ * Home tab. Rendered INSIDE Home's Layout ScrollView, so the list is a plain
+ * mapped View (no FlatList / no nested scroll view — see visibleActivities: the
+ * default browse view is capped at the top 10, so this maps at most ~dozens).
+ *
+ * The default (collapsed, unsearched) view shows only the top 10 activities; a
+ * "See all (N)" affordance expands to the full list ("Show less" collapses).
+ * Searching bypasses the cap entirely and filters across ALL activities.
  */
 export const ActivityExplorer: React.FC = () => {
     const colors = useThemeColors();
@@ -32,6 +38,7 @@ export const ActivityExplorer: React.FC = () => {
 
     const [items, setItems] = useState<ActivityWithCount<Activity>[]>([]);
     const [query, setQuery] = useState('');
+    const [expanded, setExpanded] = useState(false);
     const [selected, setSelected] = useState<Activity | null>(null);
 
     const load = useCallback(() => {
@@ -54,9 +61,18 @@ export const ActivityExplorer: React.FC = () => {
     }, [db]);
     useDataRefresh(load, [db]);
 
-    const filtered = useMemo(
-        () => filterActivitiesByQuery(items, query),
-        [items, query],
+    // The rows to render: search wins over the cap; otherwise the collapsed
+    // view is the top 10 and `expanded` reveals the rest. (items is pre-ranked
+    // by withEntryCounts — most-logged first.)
+    const visible = useMemo(
+        () => visibleActivities(items, { query, expanded }),
+        [items, query, expanded],
+    );
+    // The "See all (N) / Show less" toggle only makes sense while browsing
+    // (no active query) and only when there are more than the cap.
+    const showSeeAll = useMemo(
+        () => canToggleSeeAll(items.length, { query }),
+        [items.length, query],
     );
 
     return (
@@ -100,13 +116,13 @@ export const ActivityExplorer: React.FC = () => {
                         )}
                     </View>
 
-                    {filtered.length === 0 ? (
+                    {visible.length === 0 ? (
                         <Text style={styles.noMatch}>
                             No activities match &ldquo;{query.trim()}&rdquo;.
                         </Text>
                     ) : (
                         <View style={styles.list}>
-                            {filtered.map((a) => (
+                            {visible.map((a) => (
                                 <Pressable
                                     key={a.id}
                                     onPress={() => setSelected(a)}
@@ -148,6 +164,31 @@ export const ActivityExplorer: React.FC = () => {
                                 </Pressable>
                             ))}
                         </View>
+                    )}
+
+                    {showSeeAll && (
+                        <Pressable
+                            onPress={() => setExpanded((e) => !e)}
+                            style={({ pressed }) => [
+                                styles.seeAll,
+                                pressed && styles.seeAllPressed,
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel={
+                                expanded
+                                    ? 'Show fewer activities'
+                                    : `See all ${items.length} activities`
+                            }
+                        >
+                            <Text style={styles.seeAllText}>
+                                {expanded ? 'Show less' : `See all (${items.length})`}
+                            </Text>
+                            <Feather
+                                name={expanded ? 'chevron-up' : 'chevron-down'}
+                                size={16}
+                                color={colors.accent}
+                            />
+                        </Pressable>
                     )}
                 </>
             )}
@@ -237,6 +278,22 @@ const makeStyles = (colors: ThemeColors) =>
             color: colors.textSecondary,
             marginTop: 14,
             textAlign: 'center',
+        },
+        seeAll: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            marginTop: 10,
+            paddingVertical: 10,
+        },
+        seeAllPressed: {
+            opacity: 0.6,
+        },
+        seeAllText: {
+            fontSize: 14,
+            fontWeight: '600',
+            color: colors.accent,
         },
         emptyState: {
             alignItems: 'center',
