@@ -119,10 +119,12 @@ export async function seedMoodEntries(
       for (let i = 0; i < numberOfEntries; i++) {
         const entry = generateMoodEntry();
 
-        // Insert the mood entry
+        // Insert the mood entry. ~10% of seeded entries come in pre-starred,
+        // so the dev seed data exercises the starred-entries UI/filters too.
+        const starredAt = Math.random() < 0.1 ? new Date().toISOString() : null;
         const result = await txn.runAsync(
-          `INSERT INTO entries (mood, notes, date) VALUES (?, ?, ?)`,
-          [entry.mood, entry.notes, entry.date]
+          `INSERT INTO entries (mood, notes, date, starred_at) VALUES (?, ?, ?, ?)`,
+          [entry.mood, entry.notes, entry.date, starredAt]
         );
 
         const entryId = result.lastInsertRowId;

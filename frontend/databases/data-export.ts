@@ -55,8 +55,8 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
     try {
       // Fetch all the necessary data
       const entries = await db.getAllAsync(`
-        SELECT 
-          e.id, e.mood, e.notes, e.date,
+        SELECT
+          e.id, e.mood, e.notes, e.date, e.starred_at,
           GROUP_CONCAT(a.id) as activity_ids,
           GROUP_CONCAT(a.name) as activity_names
         FROM entries e
@@ -324,10 +324,13 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
               let maxEntryId = 0;
 
               for (const entry of importData.data.entries) {
-                // Upsert entry (merge, don't destroy)
+                // Upsert entry (merge, don't destroy). `starred_at` may be
+                // absent on a legacy (pre-starring) backup — `?? null` covers
+                // both `undefined` and `null` alike, so an old backup imports
+                // its entries as not-starred rather than throwing.
                 await txn.runAsync(
-                  'INSERT OR REPLACE INTO entries (id, mood, notes, date) VALUES (?, ?, ?, ?)',
-                  [entry.id, entry.mood, entry.notes, entry.date]
+                  'INSERT OR REPLACE INTO entries (id, mood, notes, date, starred_at) VALUES (?, ?, ?, ?, ?)',
+                  [entry.id, entry.mood, entry.notes, entry.date, entry.starred_at ?? null]
                 );
                 
                 maxEntryId = Math.max(maxEntryId, entry.id);

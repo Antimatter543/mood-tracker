@@ -195,6 +195,79 @@ describe('importDatabaseData', () => {
     expect(settingInserts).toHaveLength(1);
   });
 
+  it('imports an entry with starred_at, passing it as the 5th INSERT param', async () => {
+    const db = makeDb();
+    const payload = {
+      version: 3,
+      exportDate: '2026-07-20',
+      data: {
+        activityGroups: [{ id: 1, name: 'Sports' }],
+        activities: [],
+        entries: [
+          {
+            id: 1, mood: 7, notes: 'starred', date: '2025-01-01', activity_ids: '',
+            starred_at: '2026-07-20T10:00:00.000Z',
+          },
+        ],
+        settings: [],
+      },
+    };
+
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///mock/starred.json' }],
+    });
+    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce(JSON.stringify(payload));
+
+    db.getAllAsync
+      .mockResolvedValueOnce([]) // existing groups
+      .mockResolvedValueOnce([]); // existing activities
+
+    const result = await importDatabaseData(db as any);
+    expect(result.success).toBe(true);
+
+    const entryInsert = db.runAsync.mock.calls.find((c: any[]) =>
+      /INSERT OR REPLACE INTO entries/i.test(c[0])
+    );
+    expect(entryInsert).toBeDefined();
+    expect(entryInsert![1][4]).toBe('2026-07-20T10:00:00.000Z');
+  });
+
+  it('imports a legacy entry with no starred_at key as NULL (backward compatible)', async () => {
+    const db = makeDb();
+    const payload = {
+      version: 1,
+      exportDate: '2025-01-01',
+      data: {
+        activityGroups: [{ id: 1, name: 'Sports' }],
+        activities: [],
+        entries: [
+          { id: 1, mood: 7, notes: 'legacy, no starred_at key', date: '2025-01-01', activity_ids: '' },
+        ],
+        settings: [],
+      },
+    };
+
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///mock/legacy-no-star.json' }],
+    });
+    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce(JSON.stringify(payload));
+
+    db.getAllAsync
+      .mockResolvedValueOnce([]) // existing groups
+      .mockResolvedValueOnce([]); // existing activities
+
+    const result = await importDatabaseData(db as any);
+    expect(result.success).toBe(true);
+
+    const entryInsert = db.runAsync.mock.calls.find((c: any[]) =>
+      /INSERT OR REPLACE INTO entries/i.test(c[0])
+    );
+    expect(entryInsert).toBeDefined();
+    expect(entryInsert![1][4]).toBeNull();
+  });
+
   it('imports a legacy v2 (path-only) backup without crashing', async () => {
     const db = makeDb();
     const payload = {
@@ -256,6 +329,28 @@ describe('exportDatabaseData', () => {
     const json = getExportedJson();
     expect(json).toHaveProperty('version', 3);
     expect(json).toHaveProperty('exportDate');
+  });
+
+  it('carries starred_at through to the exported entry', async () => {
+    const db = makeDb();
+    db.getAllAsync
+      .mockResolvedValueOnce([
+        { id: 1, mood: 5, notes: 'a', date: '2025-01-01', starred_at: '2026-07-20T10:00:00.000Z' },
+        { id: 2, mood: 6, notes: 'b', date: '2025-01-02', starred_at: null },
+      ]) // entries
+      .mockResolvedValueOnce([]) // entry_media (photos)
+      .mockResolvedValueOnce([]) // activities
+      .mockResolvedValueOnce([]) // activity groups
+      .mockResolvedValueOnce([]); // settings
+
+    const result = await exportDatabaseData(db as any);
+    expect(result.success).toBe(true);
+
+    const json = getExportedJson();
+    const entry1 = json.data.entries.find((e: any) => e.id === 1);
+    const entry2 = json.data.entries.find((e: any) => e.id === 2);
+    expect(entry1.starred_at).toBe('2026-07-20T10:00:00.000Z');
+    expect(entry2.starred_at).toBeNull();
   });
 
   it('embeds each photo as base64 image bytes on the exported entry (v3)', async () => {
