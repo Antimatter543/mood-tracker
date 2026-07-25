@@ -17,6 +17,7 @@ import {
   addMoodEntry,
   getMoodEntries,
   filterValidActivityIds,
+  setEntryStarred,
 } from '@/databases/entries';
 
 // Create a mock DB and route the write transaction onto it, so writes issued via
@@ -306,5 +307,65 @@ describe('addMoodEntry — photos', () => {
       typeof c[0] === 'string' && c[0].includes('INSERT INTO entry_media')
     );
     expect(mediaInserts.length).toBe(0);
+  });
+});
+
+describe('setEntryStarred', () => {
+  // Isolate the UPDATE from the withWriteTransaction BEGIN/COMMIT (which run via
+  // execAsync) — the star write is the one runAsync call.
+  const starUpdate = (db: ReturnType<typeof createMockDatabase>) =>
+    db.runAsync.mock.calls.find(
+      (c: any[]) => typeof c[0] === 'string' && /UPDATE entries SET starred_at/i.test(c[0])
+    );
+
+  it('stars an entry: UPDATE sets starred_at to a UTC ISO instant, keyed by id', async () => {
+    const db = makeDb();
+    db.runAsync.mockResolvedValue({ changes: 1 });
+
+    const before = Date.now();
+    const result = await setEntryStarred(db as any, 5, true);
+    const after = Date.now();
+
+    expect(result.success).toBe(true);
+    const call = starUpdate(db);
+    expect(call).toBeDefined();
+    const [, params] = call!;
+    // [starred_at, id] — the instant is a real ISO string (not null), id is 5.
+    expect(params[1]).toBe(5);
+    expect(typeof params[0]).toBe('string');
+    const t = Date.parse(params[0] as string);
+    expect(Number.isNaN(t)).toBe(false);
+    expect(t).toBeGreaterThanOrEqual(before);
+    expect(t).toBeLessThanOrEqual(after);
+  });
+
+  it('unstars an entry: UPDATE sets starred_at to NULL', async () => {
+    const db = makeDb();
+    db.runAsync.mockResolvedValue({ changes: 1 });
+
+    const result = await setEntryStarred(db as any, 7, false);
+
+    expect(result.success).toBe(true);
+    const call = starUpdate(db);
+    expect(call).toBeDefined();
+    // Explicit NULL clears the flag (and the when).
+    expect(call![1]).toEqual([null, 7]);
+  });
+
+  it('runs the UPDATE on the injected write connection (txn === db), not the read handle', async () => {
+    // The mock DB IS the injected write connection, so a recorded runAsync for
+    // the UPDATE proves the statement ran on `txn` (the write-transaction
+    // contract), never on some other connection.
+    const db = makeDb();
+    db.runAsync.mockResolvedValue({ changes: 1 });
+    await setEntryStarred(db as any, 1, true);
+    expect(starUpdate(db)).toBeDefined();
+  });
+
+  it('returns failure (never throws) when the write fails', async () => {
+    const db = makeDb();
+    db.runAsync.mockRejectedValue(new Error('disk full'));
+    const result = await setEntryStarred(db as any, 1, true);
+    expect(result.success).toBe(false);
   });
 });

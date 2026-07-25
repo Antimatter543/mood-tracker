@@ -259,7 +259,7 @@ export async function getEntriesPage(
     `
       WITH EntryData AS (
           SELECT
-              e.id, e.mood, e.notes, e.date,
+              e.id, e.mood, e.notes, e.date, e.starred_at,
               GROUP_CONCAT(a.id) as activity_ids,
               GROUP_CONCAT(a.name) as activity_names,
               GROUP_CONCAT(a.group_id) as activity_group_ids,
@@ -291,6 +291,7 @@ export async function getEntriesPage(
       mood: row.mood,
       notes: row.notes,
       date: row.date,
+      starred_at: row.starred_at ?? null,
       activities: row.activity_ids
         ? row.activity_ids.split(',').map((id: string, index: number) => ({
             id: parseInt(id),
@@ -395,6 +396,41 @@ export async function updateMoodEntry(
   } catch (error) {
     console.error('Error updating entry:', error);
     return { success: false, message: 'Error updating entry' };
+  }
+}
+
+/**
+ * Star or unstar a single entry. Sets `entries.starred_at` to the current UTC
+ * ISO instant when starring (so the column also records WHEN it was starred) or
+ * to NULL when unstarring — the one nullable column is both the flag and the
+ * timestamp. A single-statement write, but it still goes through
+ * `withWriteTransaction` so it runs on the singleton write connection under the
+ * write mutex (never the read connection) — consistent with every other mutation
+ * and the databases/CLAUDE.md contract. Returns a DatabaseResult; never throws.
+ *
+ * `_db` is intentionally unused: the UPDATE runs on the singleton write
+ * connection (`withWriteTransaction`), not the caller's read handle. The param
+ * stays for the uniform CRUD signature.
+ */
+export async function setEntryStarred(
+  _db: SQLiteDatabase,
+  entryId: number,
+  starred: boolean
+): Promise<DatabaseResult> {
+  try {
+    await withWriteTransaction(async (txn) => {
+      await txn.runAsync(
+        `UPDATE entries SET starred_at = ? WHERE id = ?`,
+        [starred ? new Date().toISOString() : null, entryId]
+      );
+    });
+    return {
+      success: true,
+      message: starred ? 'Entry starred' : 'Entry unstarred',
+    };
+  } catch (error) {
+    console.error('Error setting entry starred state:', error);
+    return { success: false, message: 'Error updating star' };
   }
 }
 

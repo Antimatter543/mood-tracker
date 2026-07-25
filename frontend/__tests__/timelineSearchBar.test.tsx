@@ -35,13 +35,16 @@ const colors: ThemeColors = {
 type Overrides = {
     query?: string;
     moodPresetKey?: MoodPresetKey;
+    starredOnly?: boolean;
     onQueryChange?: (t: string) => void;
     onMoodPresetChange?: (k: MoodPresetKey) => void;
+    onStarredChange?: (v: boolean) => void;
 };
 
 const renderBar = async (over: Overrides = {}) => {
     const onQueryChange = over.onQueryChange ?? jest.fn();
     const onMoodPresetChange = over.onMoodPresetChange ?? jest.fn();
+    const onStarredChange = over.onStarredChange ?? jest.fn();
     // RNTL 14 render() is async — await it before spreading its queries.
     const result = await render(
         <TimelineSearchBar
@@ -49,10 +52,12 @@ const renderBar = async (over: Overrides = {}) => {
             onQueryChange={onQueryChange}
             moodPresetKey={over.moodPresetKey ?? 'all'}
             onMoodPresetChange={onMoodPresetChange}
+            starredOnly={over.starredOnly ?? false}
+            onStarredChange={onStarredChange}
             colors={colors}
         />
     );
-    return { ...result, onQueryChange, onMoodPresetChange };
+    return { ...result, onQueryChange, onMoodPresetChange, onStarredChange };
 };
 
 describe('TimelineSearchBar', () => {
@@ -94,5 +99,40 @@ describe('TimelineSearchBar', () => {
         expect(getByTestId('mood-filter-mid').props.accessibilityState.selected).toBe(true);
         expect(getByTestId('mood-filter-all').props.accessibilityState.selected).toBe(false);
         expect(getByTestId('mood-filter-low').props.accessibilityState.selected).toBe(false);
+    });
+
+    describe('starred filter chip', () => {
+        it('renders the "Starred" chip alongside the mood chips', async () => {
+            const { getByTestId, getByText } = await renderBar();
+            expect(getByTestId('timeline-filter-starred')).toBeTruthy();
+            expect(getByText('Starred')).toBeTruthy();
+        });
+
+        it('toggles ON: fires onStarredChange(true) when it is currently off', async () => {
+            const { getByTestId, onStarredChange } = await renderBar({ starredOnly: false });
+            fireEvent.press(getByTestId('timeline-filter-starred'));
+            expect(onStarredChange).toHaveBeenCalledWith(true);
+        });
+
+        it('toggles OFF: fires onStarredChange(false) when it is currently on', async () => {
+            const { getByTestId, onStarredChange } = await renderBar({ starredOnly: true });
+            fireEvent.press(getByTestId('timeline-filter-starred'));
+            expect(onStarredChange).toHaveBeenCalledWith(false);
+        });
+
+        it('reflects starredOnly in accessibilityState.selected', async () => {
+            const on = await renderBar({ starredOnly: true });
+            expect(on.getByTestId('timeline-filter-starred').props.accessibilityState.selected).toBe(true);
+            const off = await renderBar({ starredOnly: false });
+            expect(off.getByTestId('timeline-filter-starred').props.accessibilityState.selected).toBe(false);
+        });
+
+        it('is INDEPENDENT of the mood presets (a mood chip stays selectable while starred is on)', async () => {
+            // Composition guard: starred active must not disable / hijack the mood
+            // chip taps — the two filters combine.
+            const { getByTestId, onMoodPresetChange } = await renderBar({ starredOnly: true });
+            fireEvent.press(getByTestId('mood-filter-high'));
+            expect(onMoodPresetChange).toHaveBeenCalledWith('high');
+        });
     });
 });

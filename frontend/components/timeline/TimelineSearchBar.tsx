@@ -8,6 +8,7 @@ import {
     StyleSheet,
 } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { ThemeColors } from '@/styles/global';
 import { MOOD_PRESETS, MoodPresetKey } from './entryFilter';
 
@@ -16,6 +17,10 @@ type TimelineSearchBarProps = {
     onQueryChange: (t: string) => void;
     moodPresetKey: MoodPresetKey;
     onMoodPresetChange: (k: MoodPresetKey) => void;
+    /** Whether the "Starred only" filter chip is active. */
+    starredOnly: boolean;
+    /** Toggle the "Starred only" filter (independent of search + mood presets). */
+    onStarredChange: (v: boolean) => void;
     colors: ThemeColors;
 };
 
@@ -78,6 +83,13 @@ const useStyles = (colors: ThemeColors) =>
                     fontSize: 13,
                     fontWeight: '600',
                 },
+                // The starred chip pairs a small star glyph with its label, so
+                // its inner content lays out as a row (mood chips are text-only).
+                starChipContent: {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                },
             }),
         [colors]
     );
@@ -93,6 +105,8 @@ export function TimelineSearchBar({
     onQueryChange,
     moodPresetKey,
     onMoodPresetChange,
+    starredOnly,
+    onStarredChange,
     colors,
 }: TimelineSearchBarProps) {
     const styles = useStyles(colors);
@@ -138,6 +152,42 @@ export function TimelineSearchBar({
                 contentContainerStyle={styles.chipScrollContent}
                 keyboardShouldPersistTaps="handled"
             >
+                {/* "Starred" toggle at the FRONT of the row — an independent
+                    filter that composes with search + the mood presets. */}
+                <Pressable
+                    testID="timeline-filter-starred"
+                    onPress={() => onStarredChange(!starredOnly)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: starredOnly }}
+                    accessibilityLabel="Filter starred entries"
+                    style={[
+                        styles.chip,
+                        {
+                            backgroundColor: starredOnly
+                                ? colors.accentLight
+                                : colors.overlays.tag,
+                            borderColor: starredOnly
+                                ? colors.accent
+                                : colors.overlays.tagBorder,
+                        },
+                    ]}
+                >
+                    <View style={styles.starChipContent}>
+                        <MaterialCommunityIcons
+                            name={starredOnly ? 'star' : 'star-outline'}
+                            size={14}
+                            color={starredOnly ? colors.accent : colors.textSecondary}
+                        />
+                        <Text
+                            style={[
+                                styles.chipText,
+                                { color: starredOnly ? colors.accent : colors.textSecondary },
+                            ]}
+                        >
+                            Starred
+                        </Text>
+                    </View>
+                </Pressable>
                 {MOOD_PRESETS.map(preset => {
                     const selected = preset.key === moodPresetKey;
                     return (

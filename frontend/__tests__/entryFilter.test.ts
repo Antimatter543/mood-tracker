@@ -25,10 +25,12 @@ const TEXT_CLAUSE =
     "AND a2.name LIKE ? ESCAPE '\\'))";
 
 const MOOD_CLAUSE = 'e.mood >= ? AND e.mood <= ?';
+const STARRED_CLAUSE = 'e.starred_at IS NOT NULL';
 
 const filters = (over: Partial<EntryFilters> = {}): EntryFilters => ({
     query: '',
     moodRange: null,
+    starredOnly: false,
     ...over,
 });
 
@@ -111,6 +113,43 @@ describe('buildEntryFilter — combined query + mood', () => {
             filters({ query: 'run', moodRange: { min: 7, max: 10 } })
         );
         expect(built.where).toBe(`${TEXT_CLAUSE} AND ${MOOD_CLAUSE}`);
+        expect(built.params).toEqual(['%run%', '%run%', 7, 10]);
+    });
+});
+
+describe('buildEntryFilter — starred only', () => {
+    it('emits the bare IS NOT NULL clause with NO params when starred alone', () => {
+        const built = buildEntryFilter(filters({ starredOnly: true }));
+        expect(built.where).toBe(STARRED_CLAUSE);
+        expect(built.params).toEqual([]);
+    });
+
+    it('starredOnly:false is a no-op (contributes nothing)', () => {
+        const built = buildEntryFilter(filters({ starredOnly: false }));
+        expect(built.where).toBe('');
+        expect(built.params).toEqual([]);
+    });
+
+    it('appends AFTER the text clause and adds no params', () => {
+        const built = buildEntryFilter(filters({ query: 'foo', starredOnly: true }));
+        expect(built.where).toBe(`${TEXT_CLAUSE} AND ${STARRED_CLAUSE}`);
+        // Star adds no param, so the query params are untouched.
+        expect(built.params).toEqual(['%foo%', '%foo%']);
+    });
+
+    it('appends AFTER the mood clause and adds no params', () => {
+        const built = buildEntryFilter(
+            filters({ moodRange: { min: 7, max: 10 }, starredOnly: true })
+        );
+        expect(built.where).toBe(`${MOOD_CLAUSE} AND ${STARRED_CLAUSE}`);
+        expect(built.params).toEqual([7, 10]);
+    });
+
+    it('joins all three in order (text, mood, starred) — star last, no extra params', () => {
+        const built = buildEntryFilter(
+            filters({ query: 'run', moodRange: { min: 7, max: 10 }, starredOnly: true })
+        );
+        expect(built.where).toBe(`${TEXT_CLAUSE} AND ${MOOD_CLAUSE} AND ${STARRED_CLAUSE}`);
         expect(built.params).toEqual(['%run%', '%run%', 7, 10]);
     });
 });
