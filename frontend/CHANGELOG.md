@@ -5,6 +5,16 @@ All notable changes to SoulSync are documented here. Versions follow
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-07-25
+
+### Added
+- **Star your favorite moments.** Tap the star on any timeline entry to pin it. A new "Starred"
+  filter in the Timeline shows just your starred entries — and it works together with search and
+  the mood filters. Stars are kept in backups too.
+- **Mood calendar.** A new calendar on the Statistics tab shows each day colored by your mood —
+  browse any month, not just this one. Pick an activity to see dots on the days you logged it,
+  and tap a day to see that day's entries.
+
 ## [2.7.0] - 2026-07-23
 
 ### Added
