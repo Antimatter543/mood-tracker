@@ -21,15 +21,17 @@ import { dailyAverageRows } from './transforms/dailyAverages';
 import {
   buildCalendarMarkers,
   mergeActivityDots,
+  calendarThemeKey,
   type MarkedDates,
   type CalendarMarkerColors,
 } from './transforms/calendarMarkers';
 import { activityDaySet } from './transforms/activityDays';
 import {
   monthKey,
-  monthWindowBounds,
+  gridWindowBounds,
   monthCurrentString,
   visibleMonthOf,
+  CALENDAR_FIRST_DAY,
   type VisibleMonth,
 } from './transforms/monthWindow';
 import { startOfLocalDay, endOfLocalDay } from './transforms/dateHelpers';
@@ -62,8 +64,10 @@ const ON_ACCENT = '#FFFFFF';
  * - Tap a day for a compact summary of that day's entries (via the in-tree
  *   OverlayModal — never a native <Modal>, which is broken on this Fabric build).
  *
- * DATE DOCTRINE: SQL only range-filters raw UTC instants (monthWindowBounds);
- * all day-keying is JS (dailyAverageRows / activityDaySet / localDateString).
+ * DATE DOCTRINE: SQL only range-filters raw UTC instants (gridWindowBounds —
+ * the whole WEEK-ALIGNED rendered grid, not just the calendar month, so the
+ * leading/trailing adjacent-month cells are colored on first render too); all
+ * day-keying is JS (dailyAverageRows / activityDaySet / localDateString).
  */
 const MoodCalendar = () => {
   const db = useSQLiteContext();
@@ -142,7 +146,10 @@ const MoodCalendar = () => {
     const month = visibleMonth;
     const activityId = selectedActivityId;
     const key = monthKey(month);
-    const { start, end } = monthWindowBounds(month);
+    // The WHOLE rendered grid (month + week-aligned adjacent-month spill-over),
+    // so first-mount fetches those leading/trailing cells too — same widened
+    // window feeds BOTH the mood layer and the activity-dot query below.
+    const { start, end } = gridWindowBounds(month);
     (async () => {
       try {
         const raw = await db.getAllAsync<{ date: string; mood: number }>(
@@ -272,10 +279,16 @@ const MoodCalendar = () => {
       )}
 
       <Calendar
-        // Initial month only — the calendar owns navigation and reports it via
-        // onMonthChange; passing a live `current` would fight its arrows.
-        current={INITIAL_MONTH}
-        firstDay={1}
+        // Remount on a theme switch so react-native-calendars re-bakes its grid
+        // stylesheet (it's built once in a useRef at mount and never re-styled on
+        // a theme prop change — see calendarThemeKey / calendar/style.js). The
+        // `current` seed is read ONLY at mount in this lib version (no effect
+        // watches it, unlike `initialDate`), so pointing it at the LIVE visible
+        // month never fights the arrows AND makes the remount reopen on the month
+        // the user was viewing (instead of snapping back to today).
+        key={calendarThemeKey(colors)}
+        current={monthCurrentString(visibleMonth)}
+        firstDay={CALENDAR_FIRST_DAY}
         markingType="custom"
         markedDates={markedDates}
         onMonthChange={(m) => setVisibleMonth({ year: m.year, month: m.month })}
@@ -297,10 +310,6 @@ const MoodCalendar = () => {
     </Card>
   );
 };
-
-// Computed once at module load — the calendar's initial month. Navigation from
-// here is internal to the library; visibleMonth state tracks it for data loads.
-const INITIAL_MONTH = monthCurrentString(visibleMonthOf());
 
 type Styles = ReturnType<typeof makeStyles>;
 

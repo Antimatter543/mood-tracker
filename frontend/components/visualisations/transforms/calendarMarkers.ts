@@ -175,3 +175,31 @@ export const mergeActivityDots = (
   }
   return out;
 };
+
+/** The theme tokens the calendar's grid/header/day styles are built from. */
+export type CalendarThemeTokens = {
+  cardBackground: string;
+  text: string;
+  textSecondary: string;
+  accent: string;
+};
+
+/**
+ * Remount identity for the `<Calendar>` across a theme switch.
+ *
+ * react-native-calendars builds its grid stylesheet ONCE at mount
+ * (`const style = useRef(styleConstructor(theme))` in calendar/index.js) and
+ * never re-runs it when the `theme` prop later changes — so on a theme switch
+ * the day-GRID background/dividers keep the OLD theme's colors (from
+ * calendar/style.js's `calendarBackground`) until the component remounts. The
+ * markers themselves DO restyle (they flow through `markedDates`, rebuilt on
+ * every theme change), which is why ONLY the grid area lags. MoodCalendar keys
+ * the `<Calendar>` on this string; it changes iff any theme token the grid is
+ * built from changes, forcing React to remount and re-bake the stylesheet.
+ * Verified against the installed v1.1314 source.
+ *
+ * Structural param (not the app's full ThemeColors) so this stays a pure,
+ * RN-free unit.
+ */
+export const calendarThemeKey = (colors: CalendarThemeTokens): string =>
+  `${colors.cardBackground}|${colors.text}|${colors.textSecondary}|${colors.accent}`;

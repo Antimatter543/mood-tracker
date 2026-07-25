@@ -2,10 +2,12 @@ import {
   buildCalendarMarkers,
   moodMarkerStyle,
   mergeActivityDots,
+  calendarThemeKey,
   type MoodMarkerRow,
   type CalendarMarkerColors,
 } from '@/components/visualisations/transforms/calendarMarkers';
 import { moodColor } from '@/components/timeline/moodColor';
+import { themeColors, type ThemeName } from '@/styles/global';
 
 // Representative palettes from styles/global.ts — a dark theme and a light theme
 // (the spec requires day-number readability in BOTH).
@@ -184,5 +186,38 @@ describe('mergeActivityDots — mood marking + activity dot compose on one day',
     const merged = mergeActivityDots(mood, ['2026-07-01'], FALLBACK);
     expect(merged['2026-07-02'].marked).toBeUndefined();
     expect(merged['2026-07-02'].dotColor).toBeUndefined();
+  });
+});
+
+// Bug B: react-native-calendars bakes its grid stylesheet once at mount and
+// ignores later `theme` prop changes, so MoodCalendar remounts the <Calendar>
+// via key={calendarThemeKey(colors)} on a theme switch. This tests the KEY —
+// the mechanism that drives the remount — changes iff the theme changes.
+describe('calendarThemeKey — <Calendar> remount identity across themes', () => {
+  const names = Object.keys(themeColors) as ThemeName[];
+
+  it('every named theme yields a DISTINCT key (a theme switch forces a remount)', () => {
+    const keys = names.map((n) => calendarThemeKey(themeColors[n]));
+    expect(new Set(keys).size).toBe(names.length);
+  });
+
+  it('is stable for the same theme (no needless remount on unrelated re-renders)', () => {
+    for (const n of names) {
+      expect(calendarThemeKey(themeColors[n])).toBe(calendarThemeKey(themeColors[n]));
+    }
+  });
+
+  it('changes when the grid background (cardBackground) changes — the reported symptom', () => {
+    const dark = themeColors.dark;
+    expect(calendarThemeKey(dark)).not.toBe(
+      calendarThemeKey({ ...dark, cardBackground: '#000000' }),
+    );
+  });
+
+  it('changes when any other calendar-relevant token changes (text / textSecondary / accent)', () => {
+    const dark = themeColors.dark;
+    expect(calendarThemeKey(dark)).not.toBe(calendarThemeKey({ ...dark, text: '#123456' }));
+    expect(calendarThemeKey(dark)).not.toBe(calendarThemeKey({ ...dark, textSecondary: '#123456' }));
+    expect(calendarThemeKey(dark)).not.toBe(calendarThemeKey({ ...dark, accent: '#123456' }));
   });
 });
