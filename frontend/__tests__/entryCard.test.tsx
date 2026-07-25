@@ -15,7 +15,7 @@
  * deps (OverlayModal / image picker) are mocked to keep the render cheap.
  */
 import React from 'react';
-import { render } from '@testing-library/react-native';
+import { render, fireEvent } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 // Minimal theme so useThemeColors works without SettingsProvider (Card reads it).
@@ -88,7 +88,7 @@ describe('EntryCard — structure', () => {
     it('shows the mood number and "/10", not "Mood:" label prose', async () => {
         const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
         const view = await render(
-            <EntryCard entry={baseEntry({ mood: 7 })} onEdit={noop} onDelete={noop} colors={colors} />
+            <EntryCard entry={baseEntry({ mood: 7 })} onEdit={noop} onDelete={noop} onToggleStar={noop} colors={colors} />
         );
         expect(view.getByText('7')).toBeTruthy();
         expect(view.getByText('/10')).toBeTruthy();
@@ -99,7 +99,7 @@ describe('EntryCard — structure', () => {
         const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
         const expected = moodColor(7, THEME_ACCENT, TAG); // rgba(76,175,80, 0.76)
         const view = await render(
-            <EntryCard entry={baseEntry({ mood: 7 })} onEdit={noop} onDelete={noop} colors={colors} />
+            <EntryCard entry={baseEntry({ mood: 7 })} onEdit={noop} onDelete={noop} onToggleStar={noop} colors={colors} />
         );
         // The bar is the View whose backgroundColor is the mood color AND is
         // absolutely positioned (the shape of the fix).
@@ -116,7 +116,7 @@ describe('EntryCard — structure', () => {
     it('preserves the exact edit/delete accessibility labels', async () => {
         const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
         const view = await render(
-            <EntryCard entry={baseEntry()} onEdit={noop} onDelete={noop} colors={colors} />
+            <EntryCard entry={baseEntry()} onEdit={noop} onDelete={noop} onToggleStar={noop} colors={colors} />
         );
         expect(view.getByLabelText('Edit entry')).toBeTruthy();
         expect(view.getByLabelText('Delete entry')).toBeTruthy();
@@ -133,6 +133,7 @@ describe('EntryCard — structure', () => {
                 })}
                 onEdit={noop}
                 onDelete={noop}
+                onToggleStar={noop}
                 colors={colors}
             />
         );
@@ -140,5 +141,59 @@ describe('EntryCard — structure', () => {
         // label (the multi-photo strip would have no stretched wrapper).
         const heroBtn = view.getByLabelText('View photo 1');
         expect(styleOf(heroBtn).alignSelf).toBe('stretch');
+    });
+});
+
+describe('EntryCard — star toggle', () => {
+    const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
+
+    it('shows an UNSTARRED (outline) star when starred_at is null: "Star entry", not selected', async () => {
+        const view = await render(
+            <EntryCard
+                entry={baseEntry({ starred_at: null })}
+                onEdit={noop}
+                onDelete={noop}
+                onToggleStar={noop}
+                colors={colors}
+            />
+        );
+        const btn = view.getByTestId('entry-star-toggle');
+        expect(view.getByLabelText('Star entry')).toBeTruthy();
+        expect(view.queryByLabelText('Unstar entry')).toBeNull();
+        expect(btn.props.accessibilityState).toMatchObject({ selected: false });
+    });
+
+    it('shows a STARRED (filled, accent-tinted) star when starred_at is set: "Unstar entry", selected', async () => {
+        const view = await render(
+            <EntryCard
+                entry={baseEntry({ starred_at: '2026-07-20T10:00:00.000Z' })}
+                onEdit={noop}
+                onDelete={noop}
+                onToggleStar={noop}
+                colors={colors}
+            />
+        );
+        const btn = view.getByTestId('entry-star-toggle');
+        expect(view.getByLabelText('Unstar entry')).toBeTruthy();
+        expect(btn.props.accessibilityState).toMatchObject({ selected: true });
+        // The filled star is the only glyph tinted with the pure accent color —
+        // proves the starred branch renders the accent-colored (filled) icon.
+        const accentGlyphs = collectByStyle(view.toJSON(), (s) => s.color === THEME_ACCENT);
+        expect(accentGlyphs.length).toBeGreaterThan(0);
+    });
+
+    it('fires onToggleStar exactly once when the star button is pressed', async () => {
+        const onToggleStar = jest.fn();
+        const view = await render(
+            <EntryCard
+                entry={baseEntry()}
+                onEdit={noop}
+                onDelete={noop}
+                onToggleStar={onToggleStar}
+                colors={colors}
+            />
+        );
+        fireEvent.press(view.getByTestId('entry-star-toggle'));
+        expect(onToggleStar).toHaveBeenCalledTimes(1);
     });
 });

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Card } from '../Card';
 import { MoodEntry } from '../types';
 import { ThemeColors } from '@/styles/global';
@@ -12,6 +13,8 @@ type EntryCardProps = {
     entry: MoodEntry;
     onEdit: () => void;
     onDelete: (id: number) => void;
+    /** Toggle this entry's starred state (the parent binds the entry). */
+    onToggleStar: () => void;
     colors: ThemeColors;
 };
 
@@ -100,10 +103,14 @@ const useStyles = (colors: ThemeColors) =>
  * number, NOT label prose. Quiet ghost icon-buttons for edit/delete; a compact
  * wrapping activity row; plain notes; and photos that hero when there's one.
  */
-export const EntryCard: React.FC<EntryCardProps> = ({ entry, onEdit, onDelete, colors }) => {
+export const EntryCard: React.FC<EntryCardProps> = ({ entry, onEdit, onDelete, onToggleStar, colors }) => {
     const styles = useStyles(colors);
     const accent = moodColor(entry.mood, colors.accent, colors.overlays.tag);
     const time = formatTime(entry.date);
+    // NULL/absent = not starred; any instant = starred. Filled star (accent)
+    // vs outline (muted) — Feather has no filled star, so the star glyph comes
+    // from MaterialCommunityIcons ('star' / 'star-outline').
+    const starred = entry.starred_at != null;
 
     return (
         <Card style={styles.card} variant="flat">
@@ -116,6 +123,21 @@ export const EntryCard: React.FC<EntryCardProps> = ({ entry, onEdit, onDelete, c
                     </View>
                     <View style={styles.headerRight}>
                         {time ? <Text style={styles.time}>{time}</Text> : null}
+                        <Pressable
+                            testID="entry-star-toggle"
+                            style={styles.iconButton}
+                            onPress={onToggleStar}
+                            accessibilityRole="button"
+                            accessibilityLabel={starred ? 'Unstar entry' : 'Star entry'}
+                            accessibilityState={{ selected: starred }}
+                            hitSlop={10}
+                        >
+                            <MaterialCommunityIcons
+                                name={starred ? 'star' : 'star-outline'}
+                                color={starred ? colors.accent : colors.textSecondary}
+                                size={18}
+                            />
+                        </Pressable>
                         <Pressable
                             style={styles.iconButton}
                             onPress={onEdit}

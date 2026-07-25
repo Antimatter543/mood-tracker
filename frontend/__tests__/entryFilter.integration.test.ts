@@ -36,7 +36,7 @@ const ITEMS_PER_PAGE = 20;
 // `name` GROUP_CONCAT needed to assert identity; the filterable shape is exact).
 const pageQuery = (where: string) => `
     WITH EntryData AS (
-        SELECT e.id, e.mood, e.notes, e.date,
+        SELECT e.id, e.mood, e.notes, e.date, e.starred_at,
                GROUP_CONCAT(a.name) as activity_names
         FROM entries e
         LEFT JOIN entry_activities ea ON e.id = ea.entry_id
@@ -48,7 +48,11 @@ const pageQuery = (where: string) => `
     )
     SELECT * FROM EntryData`;
 
-const F = (query = '', moodRange: MoodRange | null = null): EntryFilters => ({ query, moodRange });
+const F = (query = '', moodRange: MoodRange | null = null, starredOnly = false): EntryFilters => ({
+    query,
+    moodRange,
+    starredOnly,
+});
 
 describeIfSqlite('entryFilter — real SQLite execution', () => {
     let db: any;
@@ -64,22 +68,24 @@ describeIfSqlite('entryFilter — real SQLite execution', () => {
         db = new DatabaseSync(':memory:');
         db.exec(`
             CREATE TABLE activities (id INTEGER PRIMARY KEY, name TEXT, group_id INTEGER);
-            CREATE TABLE entries (id INTEGER PRIMARY KEY, mood REAL, notes TEXT, date TEXT);
+            CREATE TABLE entries (id INTEGER PRIMARY KEY, mood REAL, notes TEXT, date TEXT, starred_at TEXT);
             CREATE TABLE entry_activities (id INTEGER PRIMARY KEY, entry_id INTEGER, activity_id INTEGER);
         `);
         db.exec(`INSERT INTO activities (id,name,group_id) VALUES
             (1,'Running',1),(2,'Work',1),(3,'Gym',1),(4,'Reading',1),(5,'50% Sale',1);`);
-        // [id, mood, notes, date, activityIds]
-        const seed: [number, number, string | null, string, number[]][] = [
-            [1, 2,   'Felt tired after work',       '2026-07-01T09:00:00Z', [1]],
-            [2, 8,   'Great day overall',           '2026-07-02T09:00:00Z', [2, 3]],
-            [3, 5,   null,                          '2026-07-03T09:00:00Z', [4]],
-            [4, 9,   'Bought at 50% off, big win',  '2026-07-04T09:00:00Z', []],
-            [5, 3.5, 'boundary case',               '2026-07-05T09:00:00Z', []],
-            [6, 4,   'boundary case two',           '2026-07-06T09:00:00Z', []],
+        // [id, mood, notes, date, activityIds, starredAt]. Star flag lives on
+        // E2, E4, E6 (a non-null instant); the rest are NULL (not starred).
+        const seed: [number, number, string | null, string, number[], string | null][] = [
+            [1, 2,   'Felt tired after work',       '2026-07-01T09:00:00Z', [1],    null],
+            [2, 8,   'Great day overall',           '2026-07-02T09:00:00Z', [2, 3], '2026-07-02T12:00:00Z'],
+            [3, 5,   null,                          '2026-07-03T09:00:00Z', [4],    null],
+            [4, 9,   'Bought at 50% off, big win',  '2026-07-04T09:00:00Z', [],     '2026-07-04T12:00:00Z'],
+            [5, 3.5, 'boundary case',               '2026-07-05T09:00:00Z', [],     null],
+            [6, 4,   'boundary case two',           '2026-07-06T09:00:00Z', [],     '2026-07-06T12:00:00Z'],
         ];
-        for (const [id, mood, notes, date] of seed)
-            db.prepare('INSERT INTO entries (id,mood,notes,date) VALUES (?,?,?,?)').run(id, mood, notes, date);
+        for (const [id, mood, notes, date, , starredAt] of seed)
+            db.prepare('INSERT INTO entries (id,mood,notes,date,starred_at) VALUES (?,?,?,?,?)')
+                .run(id, mood, notes, date, starredAt);
         for (const [id, , , , acts] of seed)
             for (const aid of acts)
                 db.prepare('INSERT INTO entry_activities (entry_id,activity_id) VALUES (?,?)').run(id, aid);
@@ -131,5 +137,34 @@ describeIfSqlite('entryFilter — real SQLite execution', () => {
         // land in Mid [3.5–6.5], and NEITHER falls in Low (0–3) — regression guard.
         expect(idsFor(F('case', moodPresetToRange('mid')))).toEqual([5, 6]);
         expect(idsFor(F('case', moodPresetToRange('low')))).toEqual([]);
+    });
+
+    it('starred-only pages just the starred entries (starred_at IS NOT NULL)', () => {
+        // Only E2, E4, E6 carry a non-null starred_at.
+        expect(idsFor(F('', null, true))).toEqual([2, 4, 6]);
+    });
+
+    it('starredOnly:false leaves the result unfiltered (bare no-op clause)', () => {
+        expect(idsFor(F('', null, false))).toEqual([1, 2, 3, 4, 5, 6]);
+    });
+
+    it('combines starred with a text query (intersection)', () => {
+        // "case" hits E5 & E6; only E6 is starred.
+        expect(idsFor(F('case', null, true))).toEqual([6]);
+        // "tired" hits E1, which is NOT starred -> empty.
+        expect(idsFor(F('tired', null, true))).toEqual([]);
+    });
+
+    it('combines starred with a mood band (intersection)', () => {
+        // High band {2:8, 4:9}; both are starred.
+        expect(idsFor(F('', moodPresetToRange('high'), true))).toEqual([2, 4]);
+        // Low band {1:2}; E1 is not starred -> empty.
+        expect(idsFor(F('', moodPresetToRange('low'), true))).toEqual([]);
+    });
+
+    it('combines starred + text + mood (all three constraints, no param drift)', () => {
+        // note "day" (E2), mood-high, AND starred -> [2]. Proves the bare
+        // starred clause never shifts the query/mood bind positions.
+        expect(idsFor(F('day', moodPresetToRange('high'), true))).toEqual([2]);
     });
 });

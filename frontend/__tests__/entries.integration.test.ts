@@ -32,6 +32,7 @@ import {
   addMoodEntry,
   updateMoodEntry,
   deleteMoodEntry,
+  setEntryStarred,
 } from '@/databases/entries';
 
 // Load Node's built-in SQLite; skip the whole suite if unavailable.
@@ -67,7 +68,7 @@ const SCHEMA = `
     icon_family TEXT DEFAULT 'Feather', icon_name TEXT DEFAULT 'circle', position INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY(group_id) REFERENCES activity_groups(id) ON DELETE CASCADE
   );
-  CREATE TABLE entries (id INTEGER PRIMARY KEY AUTOINCREMENT, mood REAL NOT NULL, notes TEXT, date TIMESTAMP);
+  CREATE TABLE entries (id INTEGER PRIMARY KEY AUTOINCREMENT, mood REAL NOT NULL, notes TEXT, date TIMESTAMP, starred_at TEXT);
   CREATE TABLE entry_media (
     id INTEGER PRIMARY KEY AUTOINCREMENT, entry_id INTEGER NOT NULL, file_path TEXT NOT NULL,
     media_type TEXT NOT NULL DEFAULT 'image',
@@ -172,5 +173,51 @@ describeIfSqlite('write layer — real SQLite atomicity + FK cascade', () => {
       .all(entryId)
       .map((r: any) => r.activity_id);
     expect(links).toEqual([2]);
+  });
+
+  const starredAtOf = (id: number): string | null =>
+    (db.prepare('SELECT starred_at FROM entries WHERE id = ?').get(id) as { starred_at: string | null })
+      .starred_at;
+
+  it('setEntryStarred stars a row: writes a real UTC ISO instant to starred_at', async () => {
+    await addMoodEntry(adapter, 6, [], 'to star', '2026-07-13T10:00:00.000Z');
+    const entryId = (db.prepare('SELECT id FROM entries').get() as { id: number }).id;
+    expect(starredAtOf(entryId)).toBeNull(); // starts unstarred
+
+    const before = Date.now();
+    const result = await setEntryStarred(adapter, entryId, true);
+    const after = Date.now();
+
+    expect(result.success).toBe(true);
+    const stamp = starredAtOf(entryId);
+    expect(stamp).not.toBeNull();
+    const t = Date.parse(stamp as string);
+    expect(Number.isNaN(t)).toBe(false);
+    expect(t).toBeGreaterThanOrEqual(before);
+    expect(t).toBeLessThanOrEqual(after);
+  });
+
+  it('setEntryStarred unstars a row: resets starred_at back to NULL', async () => {
+    await addMoodEntry(adapter, 6, [], 'star then clear', '2026-07-13T10:00:00.000Z');
+    const entryId = (db.prepare('SELECT id FROM entries').get() as { id: number }).id;
+
+    await setEntryStarred(adapter, entryId, true);
+    expect(starredAtOf(entryId)).not.toBeNull(); // sanity: now starred
+
+    const result = await setEntryStarred(adapter, entryId, false);
+    expect(result.success).toBe(true);
+    expect(starredAtOf(entryId)).toBeNull();
+  });
+
+  it('setEntryStarred only touches the target row (id-scoped UPDATE)', async () => {
+    await addMoodEntry(adapter, 5, [], 'first', '2026-07-13T10:00:00.000Z');
+    await addMoodEntry(adapter, 5, [], 'second', '2026-07-13T11:00:00.000Z');
+    const ids = db.prepare('SELECT id FROM entries ORDER BY id').all().map((r: any) => r.id);
+    expect(ids).toHaveLength(2);
+
+    await setEntryStarred(adapter, ids[0], true);
+    expect(starredAtOf(ids[0])).not.toBeNull();
+    // The sibling entry is untouched.
+    expect(starredAtOf(ids[1])).toBeNull();
   });
 });

@@ -42,6 +42,12 @@ export type MoodEntry = {
   // Optional so existing constructors that don't know about photos still
   // type-check. Populated by getMoodEntries / DBViewer.fetchEntriesPage.
   photos?: EntryPhoto[];
+  // Star / pin state. NULL/absent = not starred; a UTC ISO-8601 instant = when
+  // the entry was starred (the one column carries both the flag AND the when).
+  // Optional so existing constructors that predate starring still type-check,
+  // mirroring how `photos` was added. Populated by getMoodEntries /
+  // getEntriesPage; toggled via setEntryStarred.
+  starred_at?: string | null;
 };
   
   // Database Response Types

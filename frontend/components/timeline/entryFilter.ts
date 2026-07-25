@@ -10,7 +10,12 @@
  */
 
 export type MoodRange = { min: number; max: number };
-export type EntryFilters = { query: string; moodRange: MoodRange | null };
+export type EntryFilters = {
+    query: string;
+    moodRange: MoodRange | null;
+    /** When true, restrict to starred entries (`e.starred_at IS NOT NULL`). */
+    starredOnly: boolean;
+};
 export type BuiltFilter = { where: string; params: (string | number)[] };
 
 export type MoodPresetKey = 'all' | 'low' | 'mid' | 'high';
@@ -62,7 +67,9 @@ const TEXT_CLAUSE =
  * `{ where: '', params: [] }` when there is nothing to filter.
  *
  * Clause order — and therefore param order — is: text query first, then mood
- * range. Active clauses are joined with ' AND '.
+ * range, then the starred flag. Active clauses are joined with ' AND '. The
+ * starred clause carries NO params (it's a bare `IS NOT NULL`), so it never
+ * shifts the query/mood bind positions.
  */
 export function buildEntryFilter(filters: EntryFilters): BuiltFilter {
     const clauses: string[] = [];
@@ -80,6 +87,12 @@ export function buildEntryFilter(filters: EntryFilters): BuiltFilter {
     if (filters.moodRange) {
         clauses.push('e.mood >= ? AND e.mood <= ?');
         params.push(filters.moodRange.min, filters.moodRange.max);
+    }
+
+    if (filters.starredOnly) {
+        // No param: NULL = not starred, any instant = starred. Appended AFTER
+        // the text + mood clauses so their param positions are untouched.
+        clauses.push('e.starred_at IS NOT NULL');
     }
 
     return { where: clauses.join(' AND '), params };

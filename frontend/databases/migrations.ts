@@ -214,6 +214,30 @@ export const migrations: Migration[] = [
                 VALUES ('activity_carryover', 'false')
             `);
         }
+    },
+    {
+        // Starred / pinned entries: add a nullable `starred_at` column to
+        // `entries`. NULL = not starred; a UTC ISO-8601 instant
+        // (`new Date().toISOString()`) = when the entry was starred — so the ONE
+        // nullable column carries both the flag AND the when-it-was-starred. The
+        // partial index covers only the starred rows (WHERE starred_at IS NOT
+        // NULL) so the "starred only" Timeline filter scans a tiny index instead
+        // of the whole table. Like migrations 8/9, this single ALTER is the SOLE
+        // path for BOTH fresh installs (migration 1's createInitialSchema builds
+        // `entries` without the column, then this adds it) and existing users. Do
+        // NOT also add the column to createInitialSchema / migration 1 — that
+        // would make a fresh install create-then-ALTER the same column
+        // ("duplicate column").
+        version: 11,
+        up: async (db: SQLiteDatabase) => {
+            await db.runAsync(
+                `ALTER TABLE entries ADD COLUMN starred_at TEXT`
+            );
+            await db.runAsync(
+                `CREATE INDEX IF NOT EXISTS idx_entries_starred
+                 ON entries(starred_at) WHERE starred_at IS NOT NULL`
+            );
+        }
     }
 
     // To add a new migration: create a new entry with the next version number.

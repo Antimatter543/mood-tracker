@@ -28,7 +28,7 @@ import { sectionKeyForDate, formatSectionTitle } from './timeline/dateHeader';
 // The DB layer owns ALL SQL now: this component reads pages via getEntriesPage
 // and mutates via updateMoodEntry / deleteMoodEntry (databases/entries.ts). The
 // component is hooks + rendering only — zero SQL, zero transactions.
-import { getEntriesPage, updateMoodEntry, deleteMoodEntry } from '@/databases/entries';
+import { getEntriesPage, updateMoodEntry, deleteMoodEntry, setEntryStarred } from '@/databases/entries';
 
 const ITEMS_PER_PAGE = 20;
 // Debounce the search text before it hits SQL so each keystroke doesn't fire a
@@ -182,6 +182,9 @@ export function DatabaseViewer() {
     // is the selected mood band (no debounce — chip taps filter immediately).
     const [searchQuery, setSearchQuery] = useState('');
     const [moodPresetKey, setMoodPresetKey] = useState<MoodPresetKey>('all');
+    // Independent "starred only" toggle (composes with search + mood presets).
+    // Filters instantly (no debounce), like the mood chips.
+    const [starredOnly, setStarredOnly] = useState(false);
     const [debouncedQuery, setDebouncedQuery] = useState('');
     useEffect(() => {
         const timer = setTimeout(() => setDebouncedQuery(searchQuery), SEARCH_DEBOUNCE_MS);
@@ -191,8 +194,8 @@ export function DatabaseViewer() {
     // The SQL-facing filter state. Recomputed only when the debounced query or
     // the mood preset changes.
     const filters = useMemo<EntryFilters>(
-        () => ({ query: debouncedQuery, moodRange: moodPresetToRange(moodPresetKey) }),
-        [debouncedQuery, moodPresetKey]
+        () => ({ query: debouncedQuery, moodRange: moodPresetToRange(moodPresetKey), starredOnly }),
+        [debouncedQuery, moodPresetKey, starredOnly]
     );
     // The non-memoized loaders (loadMoreData, and fetchEntriesPage which they
     // share) close over stale state; a ref updated every render lets them read
@@ -203,7 +206,10 @@ export function DatabaseViewer() {
 
     // Any active filter switches the empty branch from "add your first entry" to
     // the filter-specific "nothing matched" message (with a reset).
-    const isFiltering = debouncedQuery.trim() !== '' || moodPresetKey !== 'all';
+    const isFiltering = debouncedQuery.trim() !== '' || moodPresetKey !== 'all' || starredOnly;
+    // The starred filter is the ONLY active constraint — drives the dedicated
+    // "no starred entries yet" empty copy (vs the generic "nothing matched").
+    const starredOnlyActive = starredOnly && debouncedQuery.trim() === '' && moodPresetKey === 'all';
 
     // Run-sequence latch — the SAME guard Home's fetchData uses (see
     // app/(tabs)/index.tsx + hooks/useLatestRun.ts). useDataRefresh ignores the
@@ -261,6 +267,41 @@ export function DatabaseViewer() {
         refetchEntries();
     };
 
+    const handleToggleStar = async (entry: MoodEntry) => {
+        const nextStarred = entry.starred_at == null;
+        const nextStarredAt = nextStarred ? new Date().toISOString() : null;
+
+        // Snapshot for revert-on-failure.
+        const prevSections = sections;
+
+        // Optimistic update: reflect the new star state immediately. If the
+        // starred filter is active AND we just UNstarred, the entry no longer
+        // matches, so drop it from the visible list; otherwise update it in
+        // place. Then prune any section left empty.
+        setSections(currentSections =>
+            currentSections
+                .map(section => ({
+                    ...section,
+                    data:
+                        starredOnly && !nextStarred
+                            ? section.data.filter(e => e.id !== entry.id)
+                            : section.data.map(e =>
+                                  e.id === entry.id ? { ...e, starred_at: nextStarredAt } : e
+                              ),
+                }))
+                .filter(section => section.data.length > 0)
+        );
+
+        const result = await setEntryStarred(db, entry.id, nextStarred);
+        if (!result.success) {
+            // Roll the optimistic change back and tell the user.
+            setSections(prevSections);
+            Alert.alert("Couldn't update star", result.message);
+            return;
+        }
+        refetchEntries();
+    };
+
     // Focus-aware reload (replaces useEffect([db, refreshCount])). Runs whenever
     // the Timeline tab regains focus — so an entry added on another tab shows
     // immediately, no app reopen — and re-runs while focused when refreshCount
@@ -306,12 +347,12 @@ export function DatabaseViewer() {
             }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps -- getEntriesPage reads db + filtersRef.current (not closed deps); the filter deps below make this loader re-run (resetting to page 0) on a filter change via useDataRefresh; setState + latch (beginRun/isLatestRun) identities are stable
-    }, [db, debouncedQuery, moodPresetKey]);
+    }, [db, debouncedQuery, moodPresetKey, starredOnly]);
     // A filter change flips these extraDeps -> useDataRefresh re-runs loadInitialData
     // through the SAME run-sequence latch, which resets pagination to page 0 and
     // supersedes any in-flight loadMore (shared beginRun) so it can't append stale
     // pages onto the freshly-filtered list.
-    useDataRefresh(loadInitialData, [db, debouncedQuery, moodPresetKey]);
+    useDataRefresh(loadInitialData, [db, debouncedQuery, moodPresetKey, starredOnly]);
 
     const loadMoreData = async () => {
         if (isLoadingMore || !hasMore) return;
@@ -363,6 +404,7 @@ export function DatabaseViewer() {
                 setEditModalVisible(true);
             }}
             onDelete={handleDelete}
+            onToggleStar={() => handleToggleStar(entry)}
             colors={colors}
         />
     );
@@ -389,6 +431,8 @@ export function DatabaseViewer() {
                 onQueryChange={setSearchQuery}
                 moodPresetKey={moodPresetKey}
                 onMoodPresetChange={setMoodPresetKey}
+                starredOnly={starredOnly}
+                onStarredChange={setStarredOnly}
                 colors={colors}
             />
             {isLoading && sections.length === 0 ? (
@@ -416,13 +460,16 @@ export function DatabaseViewer() {
                 isFiltering ? (
                     <View style={styles.emptyFilterContainer}>
                         <Text style={styles.emptyFilterText}>
-                            No entries match your filters
+                            {starredOnlyActive
+                                ? 'No starred entries yet — tap the star on any entry to keep it here.'
+                                : 'No entries match your filters'}
                         </Text>
                         <Pressable
                             testID="timeline-clear-filters"
                             onPress={() => {
                                 setSearchQuery('');
                                 setMoodPresetKey('all');
+                                setStarredOnly(false);
                             }}
                             accessibilityRole="button"
                             accessibilityLabel="Clear filters"
