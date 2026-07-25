@@ -7,7 +7,19 @@
  */
 import { aggregateDailyAverages } from '@/components/visualisations/transforms/dailyAverages';
 import { buildHeatmapGrid, type HeatmapInput } from '@/components/visualisations/transforms/heatmap';
-import { buildCalendarMarkers } from '@/components/visualisations/transforms/calendarMarkers';
+import {
+  buildCalendarMarkers,
+  type CalendarMarkerColors,
+} from '@/components/visualisations/transforms/calendarMarkers';
+
+// A representative (dark-theme) marker palette — this suite only asserts marker
+// KEYS (which local day a marker lands on), so the exact colors are irrelevant.
+const MARKER_COLORS: CalendarMarkerColors = {
+  accent: '#4CAF50',
+  cardBackground: '#1E1F24',
+  onDark: '#FFFFFF',
+  onLight: '#1A1A1A',
+};
 
 const localMidnight = (y: number, m0: number, d: number) =>
   new Date(y, m0, d, 0, 0, 0).toISOString();
@@ -44,7 +56,7 @@ describe('calendar marks a backdated entry on its LOCAL day', () => {
     const markerRows = aggregateDailyAverages([
       { date: localMidnight(2026, 5, 11), mood: 9 }, // Thu local / Wed UTC
     ]).map((d) => ({ date: d.day, avgMood: d.avg }));
-    const markers = buildCalendarMarkers(markerRows);
+    const markers = buildCalendarMarkers(markerRows, MARKER_COLORS);
     expect(Object.keys(markers)).toEqual(['2026-06-11']);
     expect(markers['2026-06-10']).toBeUndefined(); // not the UTC day
   });

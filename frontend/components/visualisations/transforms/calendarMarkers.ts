@@ -151,19 +151,24 @@ export const buildCalendarMarkers = (
 /**
  * Merge an ACTIVITY-dot layer onto existing mood markers: every day in
  * `activityDays` gets `marked:true`+`dotColor` on top of any mood coloring.
- * Returns a NEW dict (pure — never mutates the input). A day with a dot but no
- * mood marker (defensive; a logged activity always implies an entry) still gets
- * a bare dot so it can never silently drop.
+ * Returns a NEW dict (pure — never mutates the input).
+ *
+ * The dot color is derived PER DAY so it always contrasts: it reuses that day's
+ * mood-marker number color (which `buildCalendarMarkers` already contrast-picked
+ * for the marker background). A day with a dot but no mood marker (defensive; a
+ * logged activity always implies an entry) gets a bare dot in `fallbackDotColor`
+ * (the plain-card text color) so it can never silently drop.
  */
 export const mergeActivityDots = (
   moodMarkers: MarkedDates,
   activityDays: Iterable<string>,
-  dotColor: string,
+  fallbackDotColor: string,
 ): MarkedDates => {
   const out: MarkedDates = {};
   for (const [date, marking] of Object.entries(moodMarkers)) out[date] = marking;
   for (const day of activityDays) {
     const existing = out[day];
+    const dotColor = existing?.customStyles?.text?.color ?? fallbackDotColor;
     out[day] = existing
       ? { ...existing, marked: true, dotColor }
       : { marked: true, dotColor };

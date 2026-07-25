@@ -173,7 +173,6 @@ const MoodCalendar = () => {
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deps mirror useDataRefresh's extraDeps
   }, [db, visibleMonth, selectedActivityId]);
   useDataRefresh(loadCalendarData, [db, monthKey(visibleMonth), selectedActivityId]);
 
