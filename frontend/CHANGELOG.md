@@ -5,7 +5,7 @@ All notable changes to SoulSync are documented here. Versions follow
 
 ## [Unreleased]
 
-## [2.8.0] - 2026-07-25
+## [2.8.0] - 2026-07-26
 
 ### Added
 - **Star your favorite moments.** Tap the star on any timeline entry to pin it. A new "Starred"
