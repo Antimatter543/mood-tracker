@@ -1,0 +1,133 @@
+name: Retry infra-failed Release runs
+
+# WHY THIS WORKFLOW EXISTS
+#
+# On 2026-07-25, "Release APK" run 30156783723 attempt 1 was killed 27 minutes into
+# the Play AAB gradle build:
+#
+#     ##[error]The runner has received a shutdown signal. …
+#     ##[error]The operation was canceled.
+#
+# GitHub reclaimed the hosted runner VM mid-compile. The commit was fine — attempt 2
+# passed unchanged. But SoulSync is LIVE on Google Play and this lane is unattended,
+# so the release lane simply sat RED until a human noticed the failure email and
+# clicked "re-run", blocking staged promotes in the meantime.
+#
+# The in-step backoff added to the publish steps of release-apk.yml cannot cover this
+# class: the runner VM itself dies, taking the whole job with it. The only place to
+# catch it is one level up, at the RUN level — hence this workflow.
+#
+# SAFETY (auto-retry must never launder a real break into "just a flake"):
+#   1. only `conclusion == failure` — a `cancelled` run (concurrency / manual cancel)
+#      is left alone, because cancelling was somebody's intent;
+#   2. only `run_attempt == 1`, read from the REST API — this is the loop stop. A
+#      re-run's completion re-fires `workflow_run: completed`, and that second event
+#      reports attempt 2, so at most ONE automatic retry can ever happen per run;
+#   3. only when .github/scripts/classify-ci-failure.js finds a runner/platform
+#      failure signature and NO real-failure signature. Anything unrecognised stays
+#      red for a human. See that script for the allow/deny lists and their rationale.
+#
+# The whole job is read-mostly and never touches the repo contents, so it needs no
+# secrets — `actions: write` is only to call rerun-failed-jobs.
+
+on:
+  workflow_run:
+    # Matches the upstream workflow's `name:` field, NOT its filename.
+    workflows: ['Release APK']
+    types: [completed]
+
+permissions:
+  actions: write # rerun-failed-jobs
+  contents: read # checkout the classifier script
+
+jobs:
+  retry:
+    # Cheap gate first so the runner is not even provisioned for green runs.
+    if: github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+    steps:
+      - name: Checkout the classifier
+        uses: actions/checkout@v4
+        with:
+          # `workflow_run` always runs the workflow + code from the DEFAULT branch,
+          # never from the head of the run that failed — so this is main's classifier
+          # even when the failed run built some other ref. That is also the safe
+          # choice: a branch can never inject its own retry logic.
+          sparse-checkout: .github/scripts
+
+      - name: Read the authoritative attempt number
+        id: attempt
+        run: |
+          set -euo pipefail
+          # `run_attempt` is NOT a documented field of the workflow_run webhook payload
+          # (GitHub's own docs acknowledge that example is incomplete), so read it from
+          # the documented "Get a workflow run" REST response instead of trusting
+          # github.event.workflow_run.run_attempt. This value is the loop stop — it must
+          # not come from a field that might silently be absent (absent would render as
+          # an empty string, the gate below would never match, and the retry would just
+          # never fire; still fail-safe, but silently useless).
+          ATTEMPT=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" --jq '.run_attempt')
+          echo "Failed run $RUN_ID is attempt $ATTEMPT ($RUN_URL)"
+          echo "run_attempt=$ATTEMPT" >> "$GITHUB_OUTPUT"
+
+      - name: Download the failed attempt's full log
+        id: log
+        if: steps.attempt.outputs.run_attempt == '1'
+        run: |
+          set -uo pipefail
+          # Deliberately the WHOLE attempt archive, not `gh run view --log-failed`.
+          # In the 2026-07-25 incident the `shutdown signal` line existed ONLY in the
+          # job-level log (0_build.txt); the failing step's own log contained nothing
+          # but the generic "The operation was canceled." `--log-failed` prints only
+          # failed steps and would therefore miss the one line that identifies this
+          # entire class of failure.
+          mkdir -p /tmp/failed-log
+          if ! gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/attempts/1/logs" \
+              > /tmp/failed-log/logs.zip; then
+            echo "Could not download logs (they may have expired); leaving the run red."
+            : > /tmp/failed-log/all.txt
+          else
+            unzip -o -q /tmp/failed-log/logs.zip -d /tmp/failed-log/unzipped || true
+            # Concatenate every log file into one blob for the classifier.
+            find /tmp/failed-log/unzipped -type f -name '*.txt' -exec cat {} + \
+              > /tmp/failed-log/all.txt 2>/dev/null || : > /tmp/failed-log/all.txt
+          fi
+          wc -c < /tmp/failed-log/all.txt | xargs -I{} echo "Collected {} bytes of log."
+
+      - name: Classify the failure
+        id: classify
+        if: steps.attempt.outputs.run_attempt == '1'
+        # Always exits 0 — declining to retry must not itself turn red and generate a
+        # second failure email. The verdict travels via the step output.
+        run: node .github/scripts/classify-ci-failure.js /tmp/failed-log/all.txt
+
+      - name: Re-run failed jobs (transient infrastructure only)
+        if: steps.attempt.outputs.run_attempt == '1' && steps.classify.outputs.transient == 'true'
+        run: |
+          set -euo pipefail
+          echo "Re-running failed jobs of $RUN_ID: ${{ steps.classify.outputs.reason }}"
+          gh run rerun "$RUN_ID" --failed
+          {
+            echo "### Auto-retried a transient CI failure"
+            echo ""
+            echo "- Run: [$RUN_ID]($RUN_URL)"
+            echo "- Branch: \`${{ github.event.workflow_run.head_branch }}\`"
+            echo "- Verdict: ${{ steps.classify.outputs.reason }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Explain why no retry happened
+        if: steps.attempt.outputs.run_attempt != '1' || steps.classify.outputs.transient != 'true'
+        run: |
+          {
+            echo "### No automatic retry"
+            echo ""
+            echo "- Run: [$RUN_ID]($RUN_URL)"
+            echo "- Attempt: ${{ steps.attempt.outputs.run_attempt }} (only attempt 1 is ever auto-retried)"
+            echo "- Verdict: ${{ steps.classify.outputs.reason || 'not classified' }}"
+            echo ""
+            echo "This failure needs a human — it does not match a known transient-infrastructure signature."
+          } >> "$GITHUB_STEP_SUMMARY"
