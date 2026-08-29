@@ -245,17 +245,34 @@ jobs:
           APK_PATH: ${{ steps.apk.outputs.path }}
           APK_NAME: ${{ steps.apk.outputs.name }}
         run: |
-          # Idempotent: if scripts/release.sh (or a rerun) already created the release,
-          # just upload/replace the asset; otherwise create it with auto notes.
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$APK_PATH#$APK_NAME" --repo "$GITHUB_REPOSITORY" --clobber
-          else
-            gh release create "$TAG" "$APK_PATH#$APK_NAME" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "SoulSync ${TAG#v}" \
-              --target "$GITHUB_SHA" \
-              --generate-notes
-          fi
+          set -euo pipefail
+          # This step runs LAST — after 30-55 minutes of building and signing — and the
+          # GitHub REST API intermittently returns transient 5xx. Un-retried, one
+          # momentary blip fails the whole run with every artifact already built (that
+          # is how Nudge run 29710052363 died on 2026-07-20). So publish as an
+          # idempotent unit and retry with backoff; a persistent failure still fails
+          # loudly. Release title/notes/asset naming are unchanged.
+          source "$GITHUB_WORKSPACE/.github/scripts/retry.sh"
+
+          publish_tag_release() {
+            # Idempotent: if scripts/release.sh (or a rerun) already created the release,
+            # just upload/replace the asset; otherwise create it with auto notes. The
+            # `|| upload` fallback covers a `view` that failed only TRANSIENTLY — the
+            # release does exist, so `create` reports "already exists" and we upload
+            # instead of burning the remaining attempts on a guaranteed-failing create.
+            if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release upload "$TAG" "$APK_PATH#$APK_NAME" --repo "$GITHUB_REPOSITORY" --clobber
+            else
+              gh release create "$TAG" "$APK_PATH#$APK_NAME" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "SoulSync ${TAG#v}" \
+                --target "$GITHUB_SHA" \
+                --generate-notes \
+              || gh release upload "$TAG" "$APK_PATH#$APK_NAME" --repo "$GITHUB_REPOSITORY" --clobber
+            fi
+          }
+
+          retry_with_backoff 5 10 publish_tag_release "GitHub Release publish"
 
       # --- main push: publish/refresh a rolling "latest main" PRERELEASE carrying
       #     the signed APK, so every merge to main yields an installable dev build at
@@ -270,16 +287,29 @@ jobs:
           APK_PATH: ${{ steps.apk.outputs.path }}
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
+          set -euo pipefail
           TAG="main-latest"
           # Rename to a STABLE filename so the download URL never changes
           # (…/main-latest/SoulSync-main.apk) — the `#label` gh syntax only sets a
           # display label, leaving the asset filename versioned, so copy instead.
           DEV_APK="$RUNNER_TEMP/SoulSync-main.apk"
           cp "$APK_PATH" "$DEV_APK"
-          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
-          gh release create "$TAG" "$DEV_APK" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "SoulSync — latest main (dev build)" \
-            --target "$GITHUB_SHA" \
-            --prerelease \
-            --notes "Automated development build from the latest \`main\` (commit ${GITHUB_SHA::7}, v${VERSION}). Installable signed APK reflecting current main — NOT a versioned release. For stable installs use the Play Store or a \`v*\` release."
+
+          # Same transient-5xx exposure as the tag publish above, on a step that is
+          # pure convenience — a rolling dev prerelease should never be able to sink a
+          # 30-55 minute release run. Retry the delete-then-create as one idempotent
+          # unit: a stale release left behind by a failed create is cleared by the
+          # best-effort delete at the top of the next attempt. Notes text unchanged.
+          source "$GITHUB_WORKSPACE/.github/scripts/retry.sh"
+
+          publish_rolling_build() {
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes 2>/dev/null || true
+            gh release create "$TAG" "$DEV_APK" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "SoulSync — latest main (dev build)" \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --notes "Automated development build from the latest \`main\` (commit ${GITHUB_SHA::7}, v${VERSION}). Installable signed APK reflecting current main — NOT a versioned release. For stable installs use the Play Store or a \`v*\` release."
+          }
+
+          retry_with_backoff 5 10 publish_rolling_build "Rolling dev build publish"
