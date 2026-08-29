@@ -9,7 +9,6 @@ import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
 import { useTimeframe } from '@/context/TimeframeContext';
 import { TIME_OF_DAY_PATTERN } from './queries';
-import { computeWindow, type Timeframe } from './transforms/windowHelpers';
 import {
   aggregateTimeOfDay,
   computeIntradaySwing,
@@ -108,7 +107,7 @@ const SwingInsight = ({
 const TimeOfDayChart = () => {
   const colors = useThemeColors();
   const db = useSQLiteContext();
-  const { timeframe } = useTimeframe();
+  const { periodWindow } = useTimeframe();
   const [data, setData] = useState<TimeOfDayData | null>(null);
   const [swing, setSwing] = useState<IntradaySwing | null>(null);
   const [barWidth, setBarWidth] = useState(0);
@@ -120,7 +119,7 @@ const TimeOfDayChart = () => {
         // Parameterised local-time window (?start, ?end). Raw {date, mood} rows
         // -> JS bucketing by LOCAL hour-of-day + per-LOCAL-day intraday grouping
         // (SQL never extracts the hour/day; that would key it in UTC).
-        const { start, end } = computeWindow(timeframe as Timeframe);
+        const { start, end } = periodWindow;
         const rawRows = await db.getAllAsync<TimeOfDayRow>(TIME_OF_DAY_PATTERN, [start, end]);
         setData(aggregateTimeOfDay(rawRows));
         setSwing(computeIntradaySwing(rawRows));
@@ -129,10 +128,10 @@ const TimeOfDayChart = () => {
         setData(null);
         setSwing(null);
       }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframe; setState identities are stable
-    }, [db, timeframe]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + periodWindow; setState identities are stable
+    }, [db, periodWindow]);
   // Focus-aware refetch (matches the other charts on this screen).
-  useDataRefresh(fetchData, [db, timeframe]);
+  useDataRefresh(fetchData, [db, periodWindow]);
 
   if (!data) {
     return (

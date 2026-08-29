@@ -9,7 +9,6 @@ import { CHART_PADDING, SCREEN_WIDTH, useChartConfig } from './chartUtils';
 import InfoBubble from '../InfoBubble';
 import { useTimeframe } from '@/context/TimeframeContext';
 import { DOW_MOOD_PATTERN } from './queries';
-import { computeWindow, type Timeframe } from './transforms/windowHelpers';
 import {
   buildDowPatternData,
   aggregateDowRows,
@@ -23,7 +22,7 @@ const DailyMoodChart = () => {
   const colors = useThemeColors();
   const chartConfig = useChartConfig();
   const db = useSQLiteContext();
-  const { timeframe } = useTimeframe();
+  const { periodWindow } = useTimeframe();
   const [pattern, setPattern] = useState<DowPatternData | null>(null);
 
   const styles = useMemo(() => StyleSheet.create({
@@ -94,10 +93,10 @@ const DailyMoodChart = () => {
 
   const fetchData = useCallback(async () => {
       try {
-        // Timeframe-scoped, parameterised local-time window (?start, ?end) —
-        // replaces the previous all-time GROUP BY strftime query, which was the
-        // only chart on the screen that ignored the TimeframeSelector.
-        const { start, end } = computeWindow(timeframe as Timeframe);
+        // Parameterised local-time window (?start, ?end) from the context —
+        // it already carries whichever period the header's arrows are on, so
+        // this chart follows the user back through history for free.
+        const { start, end } = periodWindow;
         // Raw {date: instant, mood} rows -> per-LOCAL-weekday aggregation in JS
         // (the old strftime('%w') extracted the weekday in UTC and drifted).
         const rawRows = await db.getAllAsync<DowInstantRow>(DOW_MOOD_PATTERN, [start, end]);
@@ -107,10 +106,10 @@ const DailyMoodChart = () => {
         console.error('Error fetching daily mood data:', error);
         setPattern(null);
       }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframe; setState identities are stable
-    }, [db, timeframe]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + periodWindow; setState identities are stable
+    }, [db, periodWindow]);
   // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe])).
-  useDataRefresh(fetchData, [db, timeframe]);
+  useDataRefresh(fetchData, [db, periodWindow]);
 
   if (!pattern) {
     return (

@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet, ScrollView } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Layout } from '@/components/PageContainer';
 import { EmptyState } from '@/components/EmptyState';
@@ -16,6 +16,7 @@ import TimeOfDayChart from '@/components/visualisations/TimeOfDayChart';
 import ActivityCorrelationChart from '@/components/visualisations/ActivityCorrelationChart';
 import MonthOverMonthCard from '@/components/visualisations/MonthOverMonthCard';
 import TimeframeSelector from '@/components/TimeframeSelector';
+import PeriodNavigator from '@/components/PeriodNavigator';
 import { TimeframeProvider, useTimeframe } from '@/context/TimeframeContext';
 import { useThemeColors } from '@/styles/global';
 
@@ -23,7 +24,7 @@ import { useThemeColors } from '@/styles/global';
 const DEFAULT_HEADER_HEIGHT = 96;
 
 const StatisticsContent = () => {
-  const { timeframe, setTimeframe, timeframeDescription } = useTimeframe();
+  const { timeframe, setTimeframe } = useTimeframe();
   const colors = useThemeColors();
   const db = useSQLiteContext();
   // Whole-DB empty check. `null` = still loading (render nothing to avoid a
@@ -89,11 +90,6 @@ const StatisticsContent = () => {
           elevation: 6,
           alignItems: 'center',
         },
-        description: {
-          color: colors.textSecondary,
-          fontSize: 14,
-          marginTop: 4,
-        },
         content: {
           paddingHorizontal: 16,
           // Measured header height + a small gap, instead of a magic 120.
@@ -131,7 +127,10 @@ const StatisticsContent = () => {
           selectedTimeframe={timeframe}
           onTimeframeChange={setTimeframe}
         />
-        <Text style={styles.description}>{timeframeDescription}</Text>
+        {/* Steps through periods of the selected length. Replaces the old
+            static "Past month" line — that text couldn't stay truthful once the
+            user can page backwards, so the header now shows the real range. */}
+        <PeriodNavigator />
       </View>
 
       <ScrollView

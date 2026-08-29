@@ -8,14 +8,13 @@ import InfoBubble from '../InfoBubble';
 import { MoodEntry } from '../types';
 import { bucketMoodHistogram, NUM_BUCKETS } from './transforms/scatter';
 import { useTimeframe } from '@/context/TimeframeContext';
-import { computeWindow, type Timeframe } from './transforms/windowHelpers';
 
 const PLOT_HEIGHT = 200;
 
 const MoodHistogram = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
-    const { timeframe } = useTimeframe();
+    const { periodWindow } = useTimeframe();
     const [buckets, setBuckets] = useState(Array(NUM_BUCKETS).fill(0));
     const [maxFrequency, setMaxFrequency] = useState(0);
 
@@ -125,7 +124,7 @@ const MoodHistogram = () => {
                 // parameterised local-time UTC ISO strings — NOT the previous
                 // hardcoded UTC date('now', '-30 days'), which ignored the
                 // selector entirely and always showed the last 30 days.
-                const { start, end } = computeWindow(timeframe as Timeframe);
+                const { start, end } = periodWindow;
                 const entries = await db.getAllAsync<MoodEntry>(`
                     SELECT mood FROM entries
                     WHERE date BETWEEN ? AND ?
@@ -139,10 +138,10 @@ const MoodHistogram = () => {
             } catch (error) {
                 console.error('Error fetching mood data:', error);
             }
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframe; setState identities are stable
-        }, [db, timeframe]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + periodWindow; setState identities are stable
+        }, [db, periodWindow]);
     // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe])).
-    useDataRefresh(fetchMoodData, [db, timeframe]);
+    useDataRefresh(fetchMoodData, [db, periodWindow]);
 
     const getBarHeight = (count: number) => {
         if (maxFrequency === 0) return 0;
