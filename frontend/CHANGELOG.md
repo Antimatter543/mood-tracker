@@ -5,6 +5,19 @@ All notable changes to SoulSync are documented here. Versions follow
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-08-29
+
+### Added
+- **Look back through your stats.** New arrows on the Statistics tab let you step back through
+  past weeks, months, 3-month stretches, and years — see how any earlier stretch compared. Tap the
+  date range to jump back to today. Every step is the same length, so your averages stay comparable.
+- When viewing a past period, the streak tile shows your **best streak in that period** instead of
+  a misleading "current" streak.
+
+### Fixed
+- Stat windows are now exactly 7/30/90/365 days — the old "week" quietly covered 8 days, which
+  could push logging consistency above 100%.
+
 ## [2.8.0] - 2026-07-26
 
 ### Added
