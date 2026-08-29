@@ -63,6 +63,18 @@ export const MONTHLY_DAILY_AVERAGES = WEEKLY_MOOD_AVERAGES;
 export const TOTAL_ENTRIES = `SELECT COUNT(*) as count FROM entries`;
 
 // -----------------------------------------------------------------------------
+// The user's earliest entry — the RAW stored instant, never `date(MIN(date))`,
+// so the caller can key it to a LOCAL day via `localDateString` (SQLite's
+// date() would key it in UTC and could shift it a day). `null` when the DB is
+// empty. No parameters.
+//
+// TimeframeContext uses this as the back-bound for period navigation: there is
+// no point letting the user page into windows that end before their first ever
+// entry.
+// -----------------------------------------------------------------------------
+export const EARLIEST_ENTRY_DATE = `SELECT MIN(date) as date FROM entries`;
+
+// -----------------------------------------------------------------------------
 // Raw mood points in a window (rarely used; kept for completeness). Raw instant
 // + mood; day-keying (if any) is the caller's job.
 // -----------------------------------------------------------------------------

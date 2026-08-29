@@ -9,7 +9,7 @@ import InfoBubble from '../InfoBubble';
 import { Card } from '../Card';
 import { useTimeframe } from '@/context/TimeframeContext';
 import { WEEKLY_MOOD_AVERAGES } from './queries';
-import { computeWindow, type Timeframe } from './transforms/windowHelpers';
+import { type Timeframe } from './transforms/windowHelpers';
 import {
   buildWeeklyMoodChartData,
   formatLabel,
@@ -91,7 +91,7 @@ const MoodTrendChart = () => {
   const chartConfig = useChartConfig();
   const chartWidth = SCREEN_WIDTH - (CHART_PADDING + 32);
   const db = useSQLiteContext();
-  const { timeframe } = useTimeframe();
+  const { timeframe, periodWindow } = useTimeframe();
 
   const [series, setSeries] = useState<{
     labels: string[];
@@ -160,7 +160,7 @@ const MoodTrendChart = () => {
   const fetchData = useCallback(async () => {
       setLoading(true);
       try {
-        const { start, end } = computeWindow(tf);
+        const { start, end } = periodWindow;
         // Raw {date: instant, mood} rows -> per-LOCAL-day averages in JS.
         const rawRows = await db.getAllAsync<{ date: string; mood: number }>(
           WEEKLY_MOOD_AVERAGES,
@@ -215,10 +215,10 @@ const MoodTrendChart = () => {
         setSeries(null);
       }
       setLoading(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + tf; formatDateLabel is stable; setState identities are stable
-    }, [db, tf, formatDateLabel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + periodWindow; tf only shapes labels/MA width; formatDateLabel is stable; setState identities are stable
+    }, [db, periodWindow, tf, formatDateLabel]);
   // Focus-aware refetch (replaces useEffect([db, refreshCount, tf, formatDateLabel])).
-  useDataRefresh(fetchData, [db, tf, formatDateLabel]);
+  useDataRefresh(fetchData, [db, periodWindow, tf, formatDateLabel]);
 
   if (loading) {
     return (

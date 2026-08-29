@@ -12,7 +12,6 @@ import { useTimeframe } from '@/context/TimeframeContext';
 import { useSettings } from '@/context/SettingsContext';
 import { getSetting, updateSetting } from '@/databases/user-settings';
 import { ACTIVITY_CORRELATION } from './queries';
-import { computeWindow, type Timeframe } from './transforms/windowHelpers';
 import {
   computeActivityCorrelation,
   aggregateActivityCorrelation,
@@ -151,7 +150,7 @@ const CorrelationRow = ({
 const ActivityCorrelationChart = () => {
   const colors = useThemeColors();
   const db = useSQLiteContext();
-  const { timeframe } = useTimeframe();
+  const { periodWindow } = useTimeframe();
   const { settings } = useSettings();
   const carryover = settings.activity_carryover;
   const [meaningful, setMeaningful] = useState<ActivityCorrelationResult[]>([]);
@@ -210,9 +209,8 @@ const ActivityCorrelationChart = () => {
         // carryover ON the query lower bound is pulled 36h earlier so activities
         // logged just before the window can decay forward into it; windowStart
         // marks the TRUE start so those earlier rows stay out of the day universe.
-        const window = computeWindow(timeframe as Timeframe);
         const { queryStart, queryEnd, windowStart } = carryoverQueryBounds(
-          window,
+          periodWindow,
           carryover,
         );
         // Raw joined rows (one per entry×activity) -> day-key + with/without
@@ -229,10 +227,10 @@ const ActivityCorrelationChart = () => {
         console.error('Error fetching activity correlation:', error);
         setMeaningful([]);
       }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframe + carryover; setState identities are stable
-    }, [db, timeframe, carryover]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + periodWindow + carryover; setState identities are stable
+    }, [db, periodWindow, carryover]);
   // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe])).
-  useDataRefresh(fetchData, [db, timeframe, carryover]);
+  useDataRefresh(fetchData, [db, periodWindow, carryover]);
 
   const view = useMemo(
     () => selectCorrelationView(meaningful, { excluded, expanded }),

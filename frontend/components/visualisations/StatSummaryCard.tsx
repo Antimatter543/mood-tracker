@@ -8,11 +8,7 @@ import { Card } from '@/components/Card';
 import { StatTile } from '@/components/StatTile';
 import { useTimeframe } from '@/context/TimeframeContext';
 import { WINDOW_SUMMARY, RECENT_ENTRY_DATES } from './queries';
-import {
-    computeWindow,
-    daysInTimeframe,
-    type Timeframe,
-} from './transforms/windowHelpers';
+import { daysInTimeframe, type Timeframe } from './transforms/windowHelpers';
 import { startOfLocalDay, addDays, localDateString } from './transforms/dateHelpers';
 import { currentStreak, longestStreak } from './transforms/streak';
 import { computeMovingAverage } from './transforms/movingAverage';
@@ -22,15 +18,26 @@ import { WEEKLY_MOOD_AVERAGES } from './queries';
 import { buildStatSummary, type StatSummaryData } from './transforms/statSummary';
 import { buildMoodState, type MoodState } from './transforms/moodState';
 
+/**
+ * Whether the streak tile is reporting the live "days up to today" streak, or
+ * the best run within a window the user has paged back to. The two are different
+ * statistics and must never wear each other's label.
+ */
+type StreakScope = 'current' | 'period';
+
 /** Material red 300 — semantic "falling" signal, not a brand color. */
 const FALLING_COLOR = '#e57373';
 
 const StatSummaryCard: React.FC = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
-    const { timeframe } = useTimeframe();
+    const { timeframe, periodWindow, offset } = useTimeframe();
     const [summary, setSummary] = useState<StatSummaryData | null>(null);
     const [moodState, setMoodState] = useState<MoodState | null>(null);
+    // Which streak the card is currently reporting. Set in the SAME commit as
+    // `summary`, so the number and its label can never describe different periods
+    // mid-refetch.
+    const [streakScope, setStreakScope] = useState<StreakScope>('current');
 
     const styles = useMemo(
         () =>
@@ -65,7 +72,12 @@ const StatSummaryCard: React.FC = () => {
             (async () => {
                 try {
                     const tf = timeframe as Timeframe;
-                    const { start, end } = computeWindow(tf);
+                    const { start, end } = periodWindow;
+                    // "Current streak" is a claim about TODAY, so it only means
+                    // anything while the user is on the present period. Paged
+                    // back, we report the longest run INSIDE that window instead
+                    // (below) and skip this 60-day lookback entirely.
+                    const isCurrentPeriod = offset === 0;
                     // Streak lookback: 60 days of distinct local entry dates.
                     const streakStart = startOfLocalDay(
                         addDays(localDateString(new Date()), -60)
@@ -76,7 +88,11 @@ const StatSummaryCard: React.FC = () => {
                             WINDOW_SUMMARY,
                             [start, end]
                         ),
-                        db.getAllAsync<{ date: string }>(RECENT_ENTRY_DATES, [streakStart]),
+                        isCurrentPeriod
+                            ? db.getAllAsync<{ date: string }>(RECENT_ENTRY_DATES, [
+                                  streakStart,
+                              ])
+                            : Promise.resolve([] as { date: string }[]),
                         db.getAllAsync<{ date: string; mood: number }>(
                             WEEKLY_MOOD_AVERAGES,
                             [start, end]
@@ -95,6 +111,14 @@ const StatSummaryCard: React.FC = () => {
                     // Per-LOCAL-day averages from the raw rows for the MA slope.
                     const dailyRows: MoodAvgRow[] = dailyAverageRows(rawDailyRows);
 
+                    // Distinct logged days INSIDE the window: the honest streak
+                    // basis for a past period. Free, since rawDailyRows is already
+                    // fetched for the moving average.
+                    const daysLoggedInPeriod = Array.from(
+                        new Set(rawDailyRows.map((r) => localDateString(r.date)))
+                    );
+                    const bestStreakInPeriod = longestStreak(daysLoggedInPeriod);
+
                     // Moving-average slope over the window's gap-filled daily avgs.
                     const built = buildWeeklyMoodChartData(dailyRows, tf);
                     const dense = built.isEmpty
@@ -110,10 +134,15 @@ const StatSummaryCard: React.FC = () => {
                               (ma.length - 1)
                             : 0;
 
+                    setStreakScope(isCurrentPeriod ? 'current' : 'period');
                     setSummary(
                         buildStatSummary({
-                            currentStreak: currentStreak(entryDates, today),
-                            longestStreak: longestStreak(entryDates),
+                            currentStreak: isCurrentPeriod
+                                ? currentStreak(entryDates, today)
+                                : bestStreakInPeriod,
+                            longestStreak: isCurrentPeriod
+                                ? longestStreak(entryDates)
+                                : bestStreakInPeriod,
                             avgMoodInWindow: windowRow?.avg_mood ?? 0,
                             totalEntries: windowRow?.entry_count ?? 0,
                             daysInWindow: daysInTimeframe(tf),
@@ -137,10 +166,10 @@ const StatSummaryCard: React.FC = () => {
             return () => {
                 active = false;
             };
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + timeframe; setState identities are stable
-        }, [db, timeframe]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + periodWindow + offset; timeframe only sets the consistency denominator; setState identities are stable
+        }, [db, periodWindow, offset, timeframe]);
     // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe])).
-    useDataRefresh(fetchSummary, [db, timeframe]);
+    useDataRefresh(fetchSummary, [db, periodWindow, offset, timeframe]);
 
     // The trend chip now carries the richer 2-axis mood-state when classified,
     // falling back to the single trendArrow while still 'building'. The icon
@@ -191,7 +220,10 @@ const StatSummaryCard: React.FC = () => {
             value: `${summary?.streak ?? 0} ${
                 (summary?.streak ?? 0) === 1 ? 'day' : 'days'
             }`,
-            label: `Streak · best ${summary?.longestStreak ?? 0}`,
+            label:
+                streakScope === 'current'
+                    ? `Streak · best ${summary?.longestStreak ?? 0}`
+                    : 'Best streak in period',
         },
         {
             id: 'avg',
