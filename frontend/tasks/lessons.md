@@ -1,5 +1,17 @@
 # SoulSync — Project Lessons
 
+## 2026-08-29: @testing-library/react-native v14 is async-by-default — an un-awaited `fireEvent` SILENTLY does nothing (reference, cost a debug cycle)
+
+**Context**: hit while building `__tests__/periodNavigation.test.tsx` (stats period-navigation feature). In RNTL 14 (this repo's pinned version), `render()` and `fireEvent.*()` return **Promises**:
+- An un-awaited `render()` fails **loudly** — `result.getByTestId is not a function` (you're calling methods on the Promise).
+- An un-awaited `fireEvent.press()` fails **silently** — the event never dispatches, state never changes, and a perfectly correct component reads as a broken one. This masqueraded as a context-provider bug for a full audit cycle before a 10-line scratch test isolated it.
+
+**Rule**: in this repo's component tests, `await` every `render()` and every `fireEvent.*()` call. When a press-assertion "does nothing", suspect the missing `await` BEFORE suspecting the component. Useful corollary: a `disabled` `Pressable` correctly ignores `fireEvent.press` in v14, so "press the disabled arrow, assert nothing moved" is a genuinely valid bounds test (used in `periodNavigation.test.tsx`).
+
+**Rung**: reference (also captured in the dev agent's cross-project memory)
+
+**Date**: 2026-08-29
+
 ## 2026-07-25: Mood Calendar (Stats) — react-native-calendars custom+dot marking composition (reference, not a mistake)
 
 **Context**: `components/visualisations/MoodCalendar.tsx` (was dead code) is now the real month view on Stats → Patterns, after the heatmap. Facts worth keeping so nobody re-guesses the library:
