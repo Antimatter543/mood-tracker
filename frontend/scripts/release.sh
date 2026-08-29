@@ -49,6 +49,20 @@ VERSION="$(node scripts/bump-version.js "$BUMP")"
 TAG="v$VERSION"
 echo "==> releasing $TAG"
 
+# 2b. CHANGELOG gate — refuse to tag a version with no changelog entry.
+# publish-to-play.sh sources Play's "What's new" from the `## [x.y.z]` section;
+# with no entry it silently ships the generic "Bug fixes and improvements"
+# fallback (exactly what happened on the v2.9.0 cut, 2026-08-29 — the live
+# release's notes had to be patched after the fact via the edits API). Gate
+# AFTER the bump so we can grep for the real version, revert the bump on abort
+# so the tree stays clean for the rerun.
+if ! grep -q "^## \[$VERSION\]" CHANGELOG.md; then
+  echo "ERROR: frontend/CHANGELOG.md has no '## [$VERSION]' entry — Play release" >&2
+  echo "notes would ship as the generic fallback. Write the entry, then rerun." >&2
+  git checkout -- app.json   # undo the bump; tree back to pre-release state
+  exit 1
+fi
+
 # 3. Commit + tag + push. The tag push fires the CI build lane, which builds,
 #    signs, and creates/updates the GitHub Release with SoulSync-$VERSION.apk.
 git add app.json
