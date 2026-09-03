@@ -433,23 +433,9 @@ async function applyReminderSchedulePlan(plan: ReminderSchedulePlan): Promise<vo
   }
 }
 
-/**
- * Cancel every reminder this module owns (both the list identifiers the OS
- * currently holds and the legacy one). Used when reminders are wiped.
- */
-export async function cancelAllReminders(): Promise<void> {
-  const Notifications = getNotifications();
-  if (!Notifications) return; // nothing was scheduled where there's no module
-  await applyReminderSchedulePlan({
-    toCancel: [
-      LEGACY_DAILY_REMINDER_IDENTIFIER,
-      ...(await getScheduledIdentifiers()).filter(
-        id => isManagedNotificationIdentifier(id) && id !== LEGACY_DAILY_REMINDER_IDENTIFIER
-      ),
-    ],
-    toSchedule: [],
-  });
-}
+// NOTE: there is deliberately no "cancel everything" export. Reconciling with an
+// empty (or all-disabled) list already cancels every reminder we own, so a second
+// way to do it would be a second thing to keep correct.
 
 // ─── "Already logged today" guard ─────────────────────────────────────────────
 
