@@ -1,5 +1,43 @@
 # SoulSync — Project Lessons
 
+## 2026-09-03: Two header SYSTEMS (navigator bar + in-page title) drifted the five tabs apart — and no per-screen test could see it
+
+**Mistake**: `headerShown: false` was set on the Settings screen ONLY, so the other four tabs
+rendered react-navigation's header bar pinned to the top of the display. Insights then drew its
+OWN title underneath it (two competing headers); Timeline and Statistics got the bar and no
+in-page title at all; Settings drew its title from a bespoke `globalStyles.header` /`headerText`
+pair. Three different page-header shapes across five tabs, every one of them type-correct, all
+1648 tests green. Anti had to report it by eye.
+
+**Rule**:
+- **ONE page title component: `components/PageHeader.tsx`** (glyph + title + optional subtitle),
+  rendered by every tab screen inside `<Layout>`; the navigator header is OFF in the SHARED
+  `screenOptions` of `app/(tabs)/_layout.tsx`, never per screen. Per-screen `title` stays — with
+  the header hidden it only labels the TAB. The glyph is a **render prop**
+  (`icon={p => <Ionicons name="…" {...p} />}`) so PageHeader owns size + colour and a screen can
+  only choose which glyph — that's what stops five screens picking five icon sizes.
+- **With the navigator header gone, top safe-area is the PAGE's job.** `Layout` already does it
+  for normal renders, but anything that REPLACES a screen's content renders outside `Layout` and
+  must claim the inset itself — `ScreenErrorFallback` silently lost its clearance this way (it had
+  been inheriting it from the header bar), which is the general trap: removing chrome removes
+  whatever padding that chrome was accidentally providing. Grep for what else renders outside the
+  container before deleting a navigator-level element.
+- **One gutter**: `LAYOUT_CONTENT_PADDING` (`styles/layout.ts`, dependency-free so importing it
+  can't drag reanimated into a leaf component). Screens that opt out of `Layout`'s ScrollView
+  (`useScrollView={false}`: Statistics, Timeline) get NO padding from it and must apply it —
+  they'd been eyeballing 16 against the scrolling screens' 20, which showed up as a 4dp seam the
+  moment a title sat above that content.
+
+**Rung**: hook-grade — `__tests__/pageHeaderUniformity.test.ts` is a CLASS-level invariant over the
+source of every file in `app/(tabs)/`: each screen must import + render `<PageHeader/>`, none may
+re-enable the navigator header, none may define a bespoke page-title style, and the layout must
+carry no dead header-styling options. A NEW tab screen fails the build until it adopts the
+convention. Negative-tested (reverting `headerShown` + dropping one screen's PageHeader → 3
+failures). Per-screen render tests could never have caught this: the defect was the DIFFERENCE
+between screens, which only a test that enumerates them all can see.
+
+**Date**: 2026-09-03
+
 ## 2026-09-03: Soft delete is a WHOLE-CODEBASE read hazard, and the dangerous queries are the ones that never named `entries`
 
 **Context**: migration 12 turned "delete an entry" into a stamp on `entries.deleted_at` (recycle bin + undo). The schema change is trivial; the risk is entirely in the READ audit. Every pre-existing query silently started including binned entries, and a miss is invisible to `tsc`, invisible to `jest`, and invisible on a device with an empty bin. It only surfaces weeks later as a deleted entry haunting the heatmap.
