@@ -5,6 +5,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { useOverlay } from '@/context/OverlayHost';
 import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
+import { useThemeColors } from '@/styles/global';
 
 /**
  * Drop-in replacement for a transparent, centered `<Modal>` (dialog style).
@@ -78,6 +79,7 @@ const OverlayModalContent: React.FC<{
     fullScreen: boolean;
     children: React.ReactNode;
 }> = ({ onClose, dismissOnBackdropPress, fullScreen, children }) => {
+    const colors = useThemeColors();
     const insets = useSafeAreaInsets();
     // Live keyboard height (0 when hidden). Under enforced edge-to-edge
     // (SDK 56 / RN 0.85 / targetSdk 36), Android's adjustResize no longer
@@ -96,13 +98,38 @@ const OverlayModalContent: React.FC<{
     }, [onClose]);
 
     if (fullScreen) {
-        // Edge-to-edge panel: children fill the window, no backdrop / centering.
-        // The inner wrapper pads its bottom by the safe-area inset (so footers
-        // clear the nav bar) PLUS the keyboard height (so any TextInput inside —
-        // e.g. IconPicker's search / custom-emoji fields — gains room to scroll
-        // above the keyboard).
+        // Edge-to-edge panel: children fill the window, no dimmed dialog backdrop
+        // / centering. The inner wrapper pads its bottom by the safe-area inset
+        // (so footers clear the nav bar) PLUS the keyboard height (so any
+        // TextInput inside — e.g. IconPicker's search / custom-emoji fields —
+        // gains room to scroll above the keyboard).
+        //
+        // The OPAQUE SURFACE IS A SEPARATE, UNPADDED LAYER — do not "simplify" it
+        // away by relying on the child panel's own background. `paddingBottom`
+        // shrinks the inner box, and the child's `flex: 1` background therefore
+        // stops short of the window's bottom edge. Painting the surface only from
+        // the child left a transparent, touch-permeable strip there: the screen
+        // BEHIND the panel showed through and stayed tappable — always the
+        // safe-area inset (~48dp), and the full keyboard height (~300dp+) whenever
+        // the IME was up. Device-QA'd 2026-09-03: the Timeline's cards, its delete
+        // icons and the FAB were all visible under the open "Recently deleted"
+        // panel. A full-screen panel is modal over the WHOLE window, so its
+        // surface must be sized by the window, never by the padded content box.
         return (
             <Animated.View entering={FadeIn.duration(150)} style={StyleSheet.absoluteFill}>
+                <Pressable
+                    testID="overlay-fullscreen-surface"
+                    // A Pressable (not a bare View) so the layer is a real touch
+                    // responder and provably swallows every tap that misses the
+                    // panel's own controls, instead of relying on hit-test
+                    // fall-through semantics. It does NOT close: a full-screen
+                    // panel has explicit close affordances (its back arrow and the
+                    // Android hardware-back wired above), and dismissing it from a
+                    // stray tap on the nav-bar strip would be a surprise.
+                    onPress={() => {}}
+                    accessible={false}
+                    style={[StyleSheet.absoluteFill, { backgroundColor: colors.background }]}
+                />
                 <View
                     testID="overlay-fullscreen-inner"
                     style={[styles.flexFill, { paddingBottom: insets.bottom + keyboardHeight }]}

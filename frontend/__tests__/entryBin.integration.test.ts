@@ -28,7 +28,13 @@ import {
   __setWriteConnectionForTests,
   __resetWriteTransactionForTests,
 } from '@/databases/writeTransaction';
-import { addMoodEntry, deleteMoodEntry, getMoodEntries } from '@/databases/entries';
+import {
+  addMoodEntry,
+  deleteMoodEntry,
+  getEntriesPage,
+  getMoodEntries,
+} from '@/databases/entries';
+import { WINDOW_SUMMARY } from '@/components/visualisations/queries';
 import {
   BIN_RETENTION_DAYS,
   getBinCount,
@@ -352,5 +358,98 @@ describeIfSqlite('recycle bin — real SQLite lifecycle', () => {
     // white screen. Simulate the worst case: the table is gone.
     db.exec('DROP TABLE entry_activities; DROP TABLE entry_media; DROP TABLE entries;');
     await expect(purgeExpiredBinEntries(adapter, BIN_RETENTION_DAYS)).resolves.toBe(0);
+  });
+
+  // ── The QA "restore corrupts the entry" report, at the DATA layer ─────────
+  //
+  // On-device QA (2026-09-03) reported a restored entry rendering with ONLY its
+  // note — no mood, no time, no activity chips — and Statistics showing 0.0
+  // average with it present. Two candidate root causes: the restore WRITES
+  // something wrong, or the read path is fine and the SCREEN is lying.
+  //
+  // These pin the data layer down so that question can only ever be answered
+  // once. They drive the exact reads the two accusing screens use — the
+  // Timeline's `getEntriesPage` (NOT `getMoodEntries`, which is a different
+  // query and was the only one previously covered) and Statistics' real
+  // `WINDOW_SUMMARY` — over the exact QA sequence: mood + activities + a
+  // specific time in, soft delete, restore, read back.
+  //
+  // (They pass: the data is clean, which is what pushed the fix into the
+  //  Timeline's scroll anchoring — see components/DBViewer.tsx.)
+
+  const timelineFilters = { query: '', moodRange: null, starredOnly: false };
+
+  it('restore round-trips the FULL row through getEntriesPage (the Timeline read)', async () => {
+    const when = '2026-09-03T06:28:00.000Z';
+    await addMoodEntry(adapter, 2, [1, 2], 'Rough day, work stress piling up.', when);
+    const id = (db.prepare('SELECT MAX(id) AS id FROM entries').get() as { id: number }).id;
+
+    await deleteMoodEntry(adapter, id);
+    expect(await getEntriesPage(adapter, timelineFilters, 0, 20)).toHaveLength(0);
+
+    await restoreMoodEntry(adapter, id);
+
+    const [entry] = await getEntriesPage(adapter, timelineFilters, 0, 20);
+    expect(entry).toBeDefined();
+    // Every field the card renders, individually — a card that shows only the
+    // note is precisely "mood/date/activities came back empty", so assert each
+    // rather than a single deep-equal that could pass on a partial object.
+    expect(entry.id).toBe(id);
+    expect(entry.mood).toBe(2);
+    expect(entry.date).toBe(when);
+    expect(entry.notes).toBe('Rough day, work stress piling up.');
+    expect(entry.starred_at).toBeNull();
+    expect(entry.activities.map((a) => a.name).sort()).toEqual(['Reading', 'Running']);
+    expect(entry.activities.every((a) => Number.isInteger(a.id))).toBe(true);
+  });
+
+  it('restore clears deleted_at to real NULL, not an empty string', async () => {
+    // `deleted_at = ''` is NOT NULL in SQL, so it would satisfy neither
+    // `IS NULL` (every live-entry read) nor a human eyeball on the row. It is
+    // the classic way a "restored" entry stays invisible everywhere. Assert the
+    // TYPE, not just falsiness — `expect('').toBeFalsy()` would pass on the bug.
+    const id = await seedEntry('type check');
+    await deleteMoodEntry(adapter, id);
+    await restoreMoodEntry(adapter, id);
+
+    expect(deletedAtOf(id)).toBeNull();
+    const matched = db
+      .prepare('SELECT COUNT(*) AS n FROM entries WHERE id = ? AND deleted_at IS NULL')
+      .get(id) as { n: number };
+    expect(matched.n).toBe(1);
+  });
+
+  it('an empty-string deleted_at WOULD hide the entry (negative control)', async () => {
+    // Proves the assertions above have teeth: if restore ever wrote `''`, the
+    // Timeline read really does drop the entry — the test would fail loudly
+    // instead of quietly passing on a truthy-ish value.
+    const id = await seedEntry('ghost');
+    db.prepare(`UPDATE entries SET deleted_at = '' WHERE id = ?`).run(id);
+
+    expect(await getEntriesPage(adapter, timelineFilters, 0, 20)).toHaveLength(0);
+    expect(await getBinCount(adapter)).toBe(1);
+  });
+
+  it('a restored entry is counted again by the Statistics window aggregate', async () => {
+    const when = '2026-09-03T06:28:00.000Z';
+    await addMoodEntry(adapter, 2, [1], 'in the window', when);
+    const id = (db.prepare('SELECT MAX(id) AS id FROM entries').get() as { id: number }).id;
+    const summary = () =>
+      db
+        .prepare(WINDOW_SUMMARY)
+        .get('2026-09-03T00:00:00.000Z', '2026-09-03T23:59:59.999Z') as {
+        avg_mood: number | null;
+        entry_count: number;
+      };
+
+    expect(summary()).toEqual({ avg_mood: 2, entry_count: 1 });
+
+    await deleteMoodEntry(adapter, id);
+    // Binned: excluded, and the aggregate over zero rows yields NULL — the
+    // empty-database code path the Stats screen renders as 0.0.
+    expect(summary()).toEqual({ avg_mood: null, entry_count: 0 });
+
+    await restoreMoodEntry(adapter, id);
+    expect(summary()).toEqual({ avg_mood: 2, entry_count: 1 });
   });
 });
