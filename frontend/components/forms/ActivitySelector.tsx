@@ -86,8 +86,12 @@ type ActivityGroupSectionProps = {
     onReorderActivities: (activities: Activity[]) => void;
     /** Whether THIS group's "..." menu is the one currently open. */
     menuOpen: boolean;
-    /** Open this group's menu, anchored to the measured "..." button. */
-    onOpenMenu: (anchor: PopoverAnchor) => void;
+    /**
+     * Open this group's menu (closing any other). Takes no anchor: the anchor is
+     * this section's own state, refined by an async measurement — see
+     * `handleMenuPress`.
+     */
+    onOpenMenu: () => void;
     /** Close any open menu. */
     onCloseMenu: () => void;
     /** Enclosing scroll container for the drag grid's auto-scroll (optional). */
@@ -529,17 +533,15 @@ const ActivityGroupSection = ({
     const keyExtractor = useCallback((item: Activity) => String(item.id), []);
 
     const handleMenuPress = () => {
-        // Measure the "..." button in window coords so the popover can anchor to
-        // it, then ask the parent to open THIS group's menu (closing any other).
-        const node = menuButtonRef.current;
-        if (!node) {
-            onOpenMenu({ x: 0, y: 0, width: 0, height: 0 });
-            return;
-        }
-        node.measureInWindow((x, y, width, height) => {
-            const a = { x, y, width, height };
-            setAnchor(a);
-            onOpenMenu(a);
+        // Open FIRST, measure second. `measureInWindow` is asynchronous and is
+        // not guaranteed to invoke its callback at all (an unmounted or
+        // not-yet-laid-out node simply never fires it) — gating the open on that
+        // callback means a tap can silently do nothing, which reads as a dead
+        // button. So the menu opens immediately with the last-known anchor and
+        // the fresh measurement refines the position in place.
+        onOpenMenu();
+        menuButtonRef.current?.measureInWindow((x, y, width, height) => {
+            setAnchor({ x, y, width, height });
         });
     };
 

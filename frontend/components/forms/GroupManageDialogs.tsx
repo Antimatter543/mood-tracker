@@ -5,6 +5,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import type { GroupDeletionImpact } from '@/databases/groups';
+import { describeGroupDeletion } from '@/lib/groupDeletionCopy';
 import { ActivityGroup } from '../types';
 import { OverlayModal } from '../OverlayModal';
 
@@ -108,35 +109,6 @@ type GroupDeleteDialogProps = {
     /** Error from the parent's last move/delete attempt ('' = none). */
     error: string;
 };
-
-/**
- * Human-readable statement of exactly what a delete destroys.
- *
- * Exported and pure so the wording is unit-testable without mounting anything —
- * this copy is the ONLY thing standing between a user and irreversibly losing
- * activity history, so its edge cases (empty group, unused activities,
- * singular/plural) are worth pinning down in tests.
- */
-export function describeGroupDeletion(impact: GroupDeletionImpact | null): string {
-    if (!impact || !impact.exists) {
-        return 'Checking what this would delete…';
-    }
-
-    const { activityCount, entryCount } = impact;
-
-    if (activityCount === 0) {
-        return 'This group is empty, so deleting it affects nothing else.';
-    }
-
-    const activities = `${activityCount} ${activityCount === 1 ? 'activity' : 'activities'}`;
-
-    if (entryCount === 0) {
-        return `This permanently deletes ${activities}. They aren't used in any entries yet.`;
-    }
-
-    const entries = `${entryCount} ${entryCount === 1 ? 'entry' : 'entries'}`;
-    return `This permanently deletes ${activities} and removes their history from ${entries}. Your ${entryCount === 1 ? 'entry stays' : 'entries stay'}, but those activity tags are gone for good.`;
-}
 
 export const GroupDeleteDialog = ({
     visible,
