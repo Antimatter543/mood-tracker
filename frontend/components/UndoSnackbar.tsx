@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { useOverlay } from '@/context/OverlayHost';
 import { useThemeColors, ThemeColors } from '@/styles/global';
@@ -25,10 +25,44 @@ import {
  *
  * The overlay slot is `pointerEvents="box-none"` and this content only occupies
  * the bar itself, so the rest of the screen stays fully interactive underneath.
+ *
+ * TOUCH RELIABILITY — read before restyling this (device QA 2026-09-03 found the
+ * UNDO button unresponsive to real taps at uiautomator-verified coordinates,
+ * while the JS callback chain tested green end-to-end). Three things here are
+ * load-bearing, not decoration:
+ *
+ *  1. The action's touch target is at least MIN_TOUCH_TARGET (48dp) in BOTH
+ *     axes. It used to be ~60x28dp — under every platform minimum — so a tap
+ *     aimed at the label's own bounds could legitimately land outside the
+ *     pressable box. Keep the explicit minWidth/minHeight; padding around a
+ *     14px label does not get you there on its own.
+ *  2. `pointerEvents="box-none"` sits on a PLAIN `View`, never on the
+ *     reanimated `Animated.View`. Every other overlay in this app that works
+ *     (OverlayModal's card layer, the OverlayHost slot) declares it on a plain
+ *     View; the snackbar was the sole exception and the sole dead control.
+ *  3. There is NO `exiting` layout animation. `exiting` makes reanimated own the
+ *     view's removal and keep it alive past unmount, and this app already has a
+ *     scar from reanimated-4-on-Fabric mangling layout (see the Statistics
+ *     blank-screen note in components/PageContainer.tsx). A snackbar fading out
+ *     is not worth a view that may outlive its own React tree on top of the UI.
  */
 
-/** How long the snackbar stays up before auto-dismissing. */
-export const UNDO_SNACKBAR_DURATION_MS = 6000;
+/**
+ * How long the snackbar stays up before auto-dismissing.
+ *
+ * Material puts a snackbar-with-action at 4–10s; an undo for a DESTRUCTIVE
+ * action belongs at the long end. It was 6s, which is a real race for anyone who
+ * has to read the message, find the button and aim — and it silently expires
+ * mid-attempt rather than failing visibly.
+ */
+export const UNDO_SNACKBAR_DURATION_MS = 8000;
+
+/**
+ * Minimum side of an interactive target, in dp. Android's own guidance is 48dp
+ * (WCAG 2.5.5 says 44); we take the larger. Exported so a test can assert it
+ * rather than re-hardcoding the number.
+ */
+export const MIN_TOUCH_TARGET = 48;
 
 /** Clearance between the snackbar and the top of the floating tab bar. */
 const GAP_ABOVE_TAB_BAR = 12;
@@ -124,14 +158,14 @@ const SnackbarContent: React.FC<{
         GAP_ABOVE_TAB_BAR;
 
     return (
-        <Animated.View
-            testID="undo-snackbar"
-            entering={FadeInDown.duration(180)}
-            exiting={FadeOutDown.duration(150)}
+        // Plain View, not the animated one: `pointerEvents` belongs on a host
+        // View here — see the TOUCH RELIABILITY note at the top of the file.
+        <View
+            testID="undo-snackbar-slot"
             style={[styles.wrapper, { bottom }]}
             pointerEvents="box-none"
         >
-            <View style={styles.bar}>
+            <Animated.View testID="undo-snackbar" entering={FadeInDown.duration(180)} style={styles.bar}>
                 <Text style={styles.message} numberOfLines={2}>
                     {message}
                 </Text>
@@ -140,13 +174,18 @@ const SnackbarContent: React.FC<{
                     onPress={onAction}
                     accessibilityRole="button"
                     accessibilityLabel={actionLabel}
-                    hitSlop={10}
+                    // Generous, ASYMMETRIC slop: the bar's own padding is the only
+                    // thing between this button and the screen edge, and a thumb
+                    // reaching the bottom-right corner of the screen consistently
+                    // undershoots. Slop costs nothing — there is no other target
+                    // inside the bar to steal from.
+                    hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
                     style={styles.action}
                 >
                     <Text style={styles.actionText}>{actionLabel}</Text>
                 </Pressable>
-            </View>
-        </Animated.View>
+            </Animated.View>
+        </View>
     );
 };
 
@@ -187,9 +226,16 @@ const useStyles = (colors: ThemeColors) =>
                     fontSize: 14,
                     lineHeight: 19,
                 },
+                // A REAL touch target, not just padding around a 14px label: at
+                // least 48dp on both axes (see MIN_TOUCH_TARGET). The label is
+                // centred inside it, so the button looks the same as before while
+                // the box a finger actually has to hit is ~2.5x taller.
                 action: {
+                    minWidth: MIN_TOUCH_TARGET,
+                    minHeight: MIN_TOUCH_TARGET,
+                    alignItems: 'center',
+                    justifyContent: 'center',
                     paddingHorizontal: 12,
-                    paddingVertical: 6,
                 },
                 actionText: {
                     color: colors.accent,

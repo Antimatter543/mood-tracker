@@ -1,5 +1,68 @@
 # SoulSync — Project Lessons
 
+## 2026-09-03: A list that hid every new entry, and an overlay that wasn't opaque — two bugs the DB got blamed for
+
+**Mistake**: on-device QA of the recycle bin reported "restoring an entry CORRUPTS it — the card
+shows only the note, no mood, no time, no activity chips, and Statistics excludes it". That reads
+like a broken write, and the obvious next move is to go hunting in `restoreMoodEntry` for a
+`deleted_at = ''`. The data was fine. The Timeline's `SectionList` carried
+`maintainVisibleContentPosition={{ minIndexForVisible: 0 }}` (since the initial open-source
+release). That prop anchors the scroll offset to the *view* of the first visible row and scrolls to
+hold it still whenever a layout pass moves it. This list is date-DESC, so the restored entry was
+PREPENDED, pushed the anchor row down, and the list obediently scrolled the new card
+three-quarters off the top — leaving exactly its trailing note line visible under the sticky date
+header. Same prop, same mechanism, is the long-standing "new entries don't appear until you pull to
+refresh".
+
+Separately, the "Recently deleted" panel showed the live Timeline through its lower half. Its own
+styles were right (`flex: 1` + `colors.background`); the hole was in `OverlayModal`'s `fullScreen`
+variant, which had **no surface of its own** and let the child panel's background be the only
+opaque layer — inside a wrapper carrying `paddingBottom: insets.bottom + keyboardHeight`. Padding
+shrinks the child's box, so the bottom strip of the WINDOW stayed transparent and touch-permeable:
+~48dp always, the whole keyboard height whenever the IME was up.
+
+**Rule**:
+- **Never put `maintainVisibleContentPosition` on a newest-first list.** It exists for chat logs
+  that prepend history while the user reads something below. On a feed whose newest item is at the
+  top it does the precise opposite of what anyone wants: it guarantees the item the user just
+  created is the one they cannot see. Pagination does not need it — `loadMoreData` appends, and
+  appending never moves anything above it.
+- **A full-screen overlay's opaque surface must be sized by the WINDOW, never by the padded
+  content box.** Keep the safe-area/keyboard padding on the content (footers do have to clear the
+  nav bar), but paint the surface on a separate unpadded `absoluteFill` layer, and make it a
+  `Pressable` so it demonstrably swallows taps instead of depending on hit-test fall-through.
+- **"The screen shows wrong data" is a claim about the SCREEN, not about the database.** Settle it
+  at the data layer FIRST — it is minutes of work and it either finds the bug or removes half the
+  search space. Here the real-SQLite test drove the exact QA sequence and came back clean, which is
+  what turned the search toward the list.
+- **Cover the read the SCREEN actually calls.** `entryBin.integration.test.ts` round-tripped a
+  restore through `getMoodEntries` and was green — but the Timeline reads `getEntriesPage`, a
+  different query (a `GROUP_CONCAT` CTE), and Statistics reads `WINDOW_SUMMARY`. Neither was
+  exercised on a restored row. A restore test that doesn't use the accused screen's own query
+  cannot exonerate it.
+
+**Still open**: the undo snackbar's UNDO button did not respond to real taps at
+uiautomator-verified coordinates, while the JS callback chain tests green end-to-end — i.e. the
+failure is below JS, in Android touch dispatch. Not root-caused (the diagnostic device pass failed
+to collect). Three structural risks were removed and locked by `undoSnackbar.test.tsx`: the
+action's touch target was ~60x28dp (under the 48dp minimum, and the miss axis is the vertical one);
+`pointerEvents="box-none"` sat on a reanimated `Animated.View` — the only overlay in the app that
+did that, and the only dead one; and an `exiting` layout animation let reanimated own the view's
+removal and keep it alive past unmount. The 6s auto-dismiss was also widened to 8s (Material's long
+end for a destructive undo) because a window that expires mid-attempt fails silently and is
+indistinguishable from a dead button. **Re-verify on device before shipping.**
+
+**Rung**: test-grade. `timelineUndoDelete.test.tsx` asserts the list carries no scroll anchor
+(read off the host `RCTScrollView`, verified against RNTL 14 to read back a real value when the
+prop IS set — a testID-based assertion on a prop the host doesn't receive is vacuous and passes
+forever); `overlayKeyboardSafeArea.test.tsx` asserts the fullScreen surface is `absoluteFill`,
+opaque, and carries none of the content's padding; `entryBin.integration.test.ts` drives restore
+through `getEntriesPage` + `WINDOW_SUMMARY` and includes a NEGATIVE control proving an empty-string
+`deleted_at` really would hide the entry (so the `toBeNull()` assertions have teeth —
+`expect('').toBeFalsy()` would have passed on the bug).
+
+**Date**: 2026-09-03
+
 ## 2026-09-03: Two header SYSTEMS (navigator bar + in-page title) drifted the five tabs apart — and no per-screen test could see it
 
 **Mistake**: `headerShown: false` was set on the Settings screen ONLY, so the other four tabs

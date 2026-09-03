@@ -119,6 +119,7 @@ jest.mock('@/databases/entry-bin', () => ({
 
 import { Alert } from 'react-native';
 import { OverlayProvider } from '@/context/OverlayHost';
+import { UNDO_SNACKBAR_DURATION_MS } from '@/components/UndoSnackbar';
 import { DatabaseViewer } from '@/components/DBViewer';
 
 const entryRow = (id: number, notes: string) => ({
@@ -246,8 +247,12 @@ describe('Timeline delete → undo', () => {
         });
         expect(view.queryByTestId('undo-snackbar')).not.toBeNull();
 
+        // Drive the REAL window, never a copy of the number — re-hardcoding it
+        // here is what made this test fail the moment the window was widened
+        // from 6s to 8s, for no behavioural reason. (The window's own bounds are
+        // asserted in undoSnackbar.test.tsx; this test only cares THAT it ends.)
         await act(async () => {
-            jest.advanceTimersByTime(6001);
+            jest.advanceTimersByTime(UNDO_SNACKBAR_DURATION_MS + 1);
         });
 
         expect(view.queryByTestId('undo-snackbar')).toBeNull();
