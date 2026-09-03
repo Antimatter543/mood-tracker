@@ -1,5 +1,51 @@
 # SoulSync — Project Lessons
 
+## 2026-09-03: `Sortable.Grid` reserves NO layout height until it has measured itself — so a sibling below it gets drawn on
+
+**Symptom** (Pixel 3 QA, worst in light theme): in the entry form's activity selector, each group's
+header ("Emotions", "Social", …) sat ON TOP of the icon row of the group above it. Measured off the
+capture: all five group headers were a uniform 72.7dp apart regardless of whether the group above had
+4 chips or 11 — i.e. every grid contributed **0.7dp** of layout height where one row of chips needs 78dp.
+
+**Root cause**: a regression from `6a120c8`, which replaced the self-sizing flex-wrap `View` of chips
+with `react-native-sortables`' `Sortable.Grid`. That component lays its items out **absolutely** and
+takes its height from a shared value that only exists after a full async measurement pass
+(`containerHeight` starts null; the flip into absolute layout is on a 100ms timer). Its default
+`overflow` is `'visible'`, so in that window it paints chips it is not reserving space for. Two things
+made the window reachable and long-lived:
+1. `loadActivities` awaited `getActivityGroups` and `getActivities` **separately**. React does not
+   batch across an `await`, so there was a committed render with the groups present and their
+   activities missing — every group mounted an EMPTY grid, which is exactly what pins the container
+   height at 0 before the chips arrive.
+2. Chip heights were ragged (a 1-line label vs a 2-line label), so nothing about the layout was
+   derivable without measuring.
+
+**Rules**:
+- **A component that sizes itself asynchronously must not be the only thing holding a section's
+  height open.** Reserve the space at the call site from data you have synchronously.
+  `components/forms/activityGridMetrics.ts` is the single source of truth: the chip's own styles AND
+  the grid's reserved `minHeight` are both built from those constants, so they cannot drift.
+- Reserve with `minHeight`, never `height` — a floor, not a cap.
+- Font scale is part of the reservation: the label box is floored by a dp `minHeight` (which the OS
+  font scale does not grow) and capped by `numberOfLines`, so the reservation scales the label block
+  by `Math.max(1, fontScale)` from the live `useWindowDimensions()`.
+- Row spacing lives in the grid's `rowGap` ONLY. A `marginBottom` on the chip sits outside the
+  measured item and silently desyncs "what we reserved" from "what the grid measured".
+- **Two `setState`s that describe ONE consistent view must share one continuation.** Read with
+  `Promise.all`, then set both. A render of "parents without children" is not a cosmetic blink when a
+  child component treats its first render as a measurement baseline.
+
+**Rung**: tests. `__tests__/activityGridMetrics.test.ts` locks the arithmetic with class-level
+invariants (never shrinks as chips are added, never reserves less than the chips stack into, 0..60).
+`__tests__/activitySelectorGridLayout.test.tsx` locks the wiring: each group's grid carries the
+reserved `minHeight`, the rendered chip styles still match the constants the reservation assumes, and
+— with the activities read deliberately made slower than the groups read — no populated group ever
+mounts an empty grid. All three failed against the pre-fix component and pass after. The overlap
+itself is only observable on a device (it needs the library's real absolute layout); the two causes
+are both structural and are what the tests pin.
+
+**Date**: 2026-09-03
+
 ## 2026-09-03: Soft delete is a WHOLE-CODEBASE read hazard, and the dangerous queries are the ones that never named `entries`
 
 **Context**: migration 12 turned "delete an entry" into a stamp on `entries.deleted_at` (recycle bin + undo). The schema change is trivial; the risk is entirely in the READ audit. Every pre-existing query silently started including binned entries, and a miss is invisible to `tsc`, invisible to `jest`, and invisible on a device with an empty bin. It only surfaces weeks later as a deleted entry haunting the heatmap.
