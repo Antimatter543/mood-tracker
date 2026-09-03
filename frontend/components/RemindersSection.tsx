@@ -209,14 +209,27 @@ export function RemindersSection() {
                         </Text>
 
                         <Text style={styles.fieldLabel}>Name</Text>
+                        {/* `autoFocus` is the app-wide convention for a dialog's
+                            text field (GroupManageDialogs, ActivityEditModal,
+                            ActivitySelector all do it): the keyboard opens WITH
+                            the editor so the first keystroke lands, instead of
+                            the user (or a device-QA harness) having to discover
+                            that the field needs a tap first. The placeholder is
+                            marked "e.g." for the same reason a bare
+                            "Morning check-in" was a trap: an empty field that
+                            reads as a filled one gets saved unnamed, and the row
+                            then shows the generic fallback while the editor
+                            still displays the example. */}
                         <TextInput
                             testID="reminder-editor-label"
                             style={styles.input}
                             value={draft.label}
                             onChangeText={label => setDraft(prev => (prev ? { ...prev, label } : prev))}
-                            placeholder="Morning check-in"
+                            placeholder="e.g. Morning check-in"
                             placeholderTextColor={colors.textSecondary}
                             maxLength={REMINDER_LABEL_MAX_LENGTH}
+                            autoFocus
+                            accessibilityLabel="Reminder name"
                         />
 
                         <Text style={styles.fieldLabel}>Time</Text>
