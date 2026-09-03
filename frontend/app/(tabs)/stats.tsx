@@ -4,6 +4,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Layout } from '@/components/PageContainer';
 import { PageHeader, pageHeaderFullHeightInset } from '@/components/PageHeader';
+import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
 import { EmptyState } from '@/components/EmptyState';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { TOTAL_ENTRIES } from '@/components/visualisations/queries';
@@ -93,7 +94,10 @@ const StatisticsContent = () => {
           alignItems: 'center',
         },
         content: {
-          paddingHorizontal: 16,
+          // Same gutter as the page title above it and as every scrolling
+          // screen's content (Layout's scrollContent padding) — see
+          // styles/layout.ts.
+          paddingHorizontal: LAYOUT_CONTENT_PADDING,
           // Measured header height + a small gap, instead of a magic 120.
           paddingTop: headerHeight + 12,
           paddingBottom: 32,

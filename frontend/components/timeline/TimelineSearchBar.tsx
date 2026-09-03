@@ -10,6 +10,7 @@ import {
 import Feather from '@expo/vector-icons/Feather';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { ThemeColors } from '@/styles/global';
+import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
 import { MOOD_PRESETS, MoodPresetKey } from './entryFilter';
 
 type TimelineSearchBarProps = {
@@ -36,7 +37,9 @@ const useStyles = (colors: ThemeColors) =>
                 // the scrolling entries. Solid theme background so nothing bleeds
                 // through as rows scroll under it.
                 container: {
-                    paddingHorizontal: 16,
+                    // Same gutter as the Timeline page title above it and as the
+                    // entry list below it — see styles/layout.ts.
+                    paddingHorizontal: LAYOUT_CONTENT_PADDING,
                     paddingTop: 8,
                     paddingBottom: 12,
                     backgroundColor: colors.background,

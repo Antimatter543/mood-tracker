@@ -22,7 +22,7 @@
  * CATCHES does not — render() resolves with the fallback shown.
  */
 import React, { Component, type ComponentType } from 'react';
-import { Text } from 'react-native';
+import { Text, StyleSheet } from 'react-native';
 import { render, act, fireEvent, screen } from '@testing-library/react-native';
 
 // Mock the theme so the fallback's useThemeColors() doesn't require a
@@ -35,6 +35,15 @@ jest.mock('@/styles/global', () => ({
     textSecondary: 'rgba(211,212,213,1)',
     accent: '#4CAF50',
   }),
+}));
+
+// The fallback REPLACES the screen's content, so it renders outside `Layout`
+// and claims the top safe-area itself (it used to inherit that clearance from
+// the navigator header bar, which no longer exists — see components/PageHeader).
+// jest-expo does NOT auto-mock safe-area-context and useSafeAreaInsets needs a
+// provider, so stub it with a realistic status-bar inset.
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 24, bottom: 0, left: 0, right: 0 }),
 }));
 
 import {
@@ -95,6 +104,19 @@ describe('ScreenErrorFallback (direct render)', () => {
     expect(button).toBeTruthy();
     fireEvent.press(button);
     expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it('claims the top safe-area itself (it renders outside Layout)', async () => {
+    // Regression guard: while the tabs still showed react-navigation's header
+    // bar, this fallback inherited its top clearance from that bar. The bar is
+    // gone (headerShown: false for every tab — see components/PageHeader.tsx),
+    // so the fallback must pad by the status-bar inset itself or its content
+    // can grow into the notch.
+    const view = await render(
+      <ScreenErrorFallback error={new Error('boom')} retry={() => {}} />,
+    );
+    const root = view.toJSON() as any;
+    expect(StyleSheet.flatten(root.props.style).paddingTop).toBe(24);
   });
 });
 
