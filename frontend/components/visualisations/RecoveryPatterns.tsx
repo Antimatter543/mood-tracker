@@ -99,7 +99,7 @@ const RecoveryAnalysis = () => {
             FROM entries e
             LEFT JOIN entry_activities ea ON e.id = ea.entry_id
             LEFT JOIN activities a ON ea.activity_id = a.id
-            WHERE e.date >= ?
+            WHERE e.deleted_at IS NULL AND e.date >= ?
             GROUP BY e.date
             ORDER BY e.date DESC
           )

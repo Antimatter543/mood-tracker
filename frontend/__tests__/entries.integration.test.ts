@@ -68,7 +68,7 @@ const SCHEMA = `
     icon_family TEXT DEFAULT 'Feather', icon_name TEXT DEFAULT 'circle', position INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY(group_id) REFERENCES activity_groups(id) ON DELETE CASCADE
   );
-  CREATE TABLE entries (id INTEGER PRIMARY KEY AUTOINCREMENT, mood REAL NOT NULL, notes TEXT, date TIMESTAMP, starred_at TEXT);
+  CREATE TABLE entries (id INTEGER PRIMARY KEY AUTOINCREMENT, mood REAL NOT NULL, notes TEXT, date TIMESTAMP, starred_at TEXT, deleted_at TEXT);
   CREATE TABLE entry_media (
     id INTEGER PRIMARY KEY AUTOINCREMENT, entry_id INTEGER NOT NULL, file_path TEXT NOT NULL,
     media_type TEXT NOT NULL DEFAULT 'image',
@@ -131,7 +131,13 @@ describeIfSqlite('write layer — real SQLite atomicity + FK cascade', () => {
     expect(count('entries')).toBe(0);
   });
 
-  it('deleteMoodEntry cascades to entry_activities + entry_media (FK ON)', async () => {
+  it('deleteMoodEntry is a SOFT delete: it stamps deleted_at and destroys nothing', async () => {
+    // CONTRACT CHANGE (migration 12): `deleteMoodEntry` used to hard-delete and
+    // rely on the FK cascade to take the child rows. It now only stamps
+    // `deleted_at` so the entry can be restored losslessly from the recycle bin.
+    // The cascade + media-file behaviour did not disappear — it moved to the
+    // PURGE path, and is asserted in entryBin.integration.test.ts
+    // ('purgeMoodEntry hard-deletes: cascades the child rows AND unlinks the files').
     await addMoodEntry(adapter, 6, [1, 2], 'with links', '2026-07-13T10:00:00.000Z');
     const entryId = (db.prepare('SELECT id FROM entries').get() as { id: number }).id;
     db.prepare(
@@ -143,10 +149,23 @@ describeIfSqlite('write layer — real SQLite atomicity + FK cascade', () => {
 
     const result = await deleteMoodEntry(adapter, entryId);
     expect(result.success).toBe(true);
-    expect(count('entries')).toBe(0);
-    // CASCADE removed the child rows — proves FK enforcement on the write conn.
-    expect(count('entry_activities')).toBe(0);
-    expect(count('entry_media')).toBe(0);
+
+    // The row survives, stamped, and is no longer a LIVE entry.
+    expect(count('entries')).toBe(1);
+    const stamped = db
+      .prepare('SELECT deleted_at FROM entries WHERE id = ?')
+      .get(entryId) as { deleted_at: string | null };
+    expect(stamped.deleted_at).not.toBeNull();
+    expect(
+      (db.prepare('SELECT COUNT(*) AS n FROM entries WHERE deleted_at IS NULL').get() as {
+        n: number;
+      }).n
+    ).toBe(0);
+
+    // Nothing cascaded, because nothing was deleted — that is what makes the
+    // restore lossless.
+    expect(count('entry_activities')).toBe(2);
+    expect(count('entry_media')).toBe(1);
   });
 
   it('updateMoodEntry updates fields and REPLACES the activity links', async () => {

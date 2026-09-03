@@ -2,6 +2,7 @@ import { SQLiteDatabase } from 'expo-sqlite';
 import { initialActivities, initialActivityGroups } from '@/components/seedData';
 import { DatabaseResult } from '@/components/types';
 import { runMigrations } from '@/databases/migrations';
+import { purgeExpiredBinEntries } from '@/databases/entry-bin';
 import { withWriteLock } from '@/databases/writeTransaction';
 
 /**
@@ -46,7 +47,14 @@ export const DATABASE_VERSION = 9;
  *   - `foreign_keys = ON` — per-connection, NOT persisted, so it must be set on
  *     every connection that needs cascades (the write connection sets its own).
  *     Also cannot be changed inside a transaction.
- * Then run any pending migrations.
+ * Then run any pending migrations, then sweep the recycle bin.
+ *
+ * The bin sweep runs LAST, AFTER migrations (it reads `deleted_at`, which
+ * migration 12 adds) and deliberately OUTSIDE the try/catch that rethrows: it is
+ * the one step here that must never be able to block app start.
+ * `purgeExpiredBinEntries` swallows its own errors and returns 0, and on the
+ * common path (fresh install / nothing expired) it costs ONE indexed SELECT over
+ * the partial index and never opens the write connection.
  */
 export async function initializeDatabase(db: SQLiteDatabase): Promise<void> {
   try {
@@ -58,6 +66,10 @@ export async function initializeDatabase(db: SQLiteDatabase): Promise<void> {
     console.error('Error initializing database:', error);
     throw error;
   }
+
+  // Retention sweep for the recycle bin (30 days). Awaited so a test can observe
+  // it deterministically; never throws (see the function's contract).
+  await purgeExpiredBinEntries(db);
 }
 
 /**

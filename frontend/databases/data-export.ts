@@ -53,7 +53,15 @@ async function readPhotoBase64(filePath: string): Promise<string | null> {
 
 export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseResult> {
     try {
-      // Fetch all the necessary data
+      // Fetch all the necessary data.
+      //
+      // SOFT DELETE (migration 12): entries sitting in the recycle bin are
+      // EXCLUDED from the backup. A backup should capture what the user considers
+      // their data — round-tripping an entry they deleted (and would then find
+      // resurrected as LIVE on the new device, since the import writes
+      // deleted_at back as NULL) is the surprising behaviour, not the safe one.
+      // Bin retention is a 30-day local grace period, not something to preserve
+      // across devices.
       const entries = await db.getAllAsync(`
         SELECT
           e.id, e.mood, e.notes, e.date, e.starred_at,
@@ -62,6 +70,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
         FROM entries e
         LEFT JOIN entry_activities ea ON e.id = ea.entry_id
         LEFT JOIN activities a ON ea.activity_id = a.id
+        WHERE e.deleted_at IS NULL
         GROUP BY e.id
         ORDER BY e.date DESC
       `);
@@ -78,7 +87,17 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
         entry_id: number;
         file_path: string;
         media_type: string;
-      }>('SELECT entry_id, file_path, media_type FROM entry_media ORDER BY entry_id, id');
+      }>(
+        // Joined to `entries` for the SAME bin exclusion as the entry query
+        // above — a binned entry keeps its entry_media rows, and without this
+        // join we'd base64-encode megabytes of photos for entries that are then
+        // dropped from the export anyway.
+        `SELECT em.entry_id, em.file_path, em.media_type
+         FROM entry_media em
+         JOIN entries e ON e.id = em.entry_id
+         WHERE e.deleted_at IS NULL
+         ORDER BY em.entry_id, em.id`
+      );
 
       const photosByEntryId: Record<number, ExportPhoto[]> = {};
       for (const p of photoRows) {
@@ -328,6 +347,13 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
                 // absent on a legacy (pre-starring) backup — `?? null` covers
                 // both `undefined` and `null` alike, so an old backup imports
                 // its entries as not-starred rather than throwing.
+                //
+                // `deleted_at` is deliberately NOT in the column list: exports
+                // never contain binned entries, so everything arriving here is
+                // live, and omitting the column lets it take its NULL default.
+                // (If the local DB happened to hold a binned entry at this id,
+                // OR REPLACE resurrects it as live — the right call: the backup
+                // is the user's explicit statement of what should exist.)
                 await txn.runAsync(
                   'INSERT OR REPLACE INTO entries (id, mood, notes, date, starred_at) VALUES (?, ?, ?, ?, ?)',
                   [entry.id, entry.mood, entry.notes, entry.date, entry.starred_at ?? null]

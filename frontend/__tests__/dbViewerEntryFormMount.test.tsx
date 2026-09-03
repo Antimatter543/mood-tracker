@@ -35,6 +35,27 @@ const mockDb = {
         .fn()
         .mockImplementation(async (cb: () => Promise<void>) => cb()),
 };
+// DBViewer now renders the undo snackbar + the bin panel, which import
+// reanimated (its worklets runtime is unavailable under jest).
+jest.mock('react-native-reanimated', () => {
+    const ReactLocal = require('react');
+    const { View } = require('react-native');
+    const anim = { duration: () => anim };
+    return {
+        __esModule: true,
+        default: {
+            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
+        },
+        FadeIn: anim,
+        FadeInDown: anim,
+        FadeOutDown: anim,
+    };
+});
+jest.mock('react-native-safe-area-context', () => ({
+    useSafeAreaInsets: () => ({ top: 0, bottom: 48, left: 0, right: 0 }),
+}));
+jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
+
 jest.mock('expo-sqlite', () => ({
     useSQLiteContext: () => mockDb,
 }));
@@ -107,7 +128,16 @@ jest.mock('@/components/OverlayModal', () => ({
 }));
 
 // Import AFTER mocks are registered.
+import { OverlayProvider } from '@/context/OverlayHost';
 import { DatabaseViewer } from '@/components/DBViewer';
+
+// The Timeline lives inside the app's OverlayProvider (see (tabs)/_layout.tsx);
+// its undo snackbar and bin panel mount through that host.
+const Timeline = () => (
+    <OverlayProvider>
+        <DatabaseViewer />
+    </OverlayProvider>
+);
 
 // render() is async in this project's jest-expo / concurrent-React setup (see
 // activityReorder.test.tsx / overlayPopover.test.tsx) — always `await` it.
@@ -142,7 +172,7 @@ beforeEach(() => {
 describe('DBViewer — EntryFormModal is rendered unconditionally (Task 1b)', () => {
     it('renders the EntryFormModal in the POPULATED-list state', async () => {
         mockDb.getAllAsync.mockResolvedValue([oneEntryRow()]);
-        const view = await render(<DatabaseViewer />);
+        const view = await render(<Timeline />);
         // Wait for the initial focus-load to resolve and the list to render.
         await waitFor(() => expect(formSentinelPresent(view)).toBe(true));
         // The form is present (mounted, visible=false until an edit is tapped).
@@ -151,7 +181,7 @@ describe('DBViewer — EntryFormModal is rendered unconditionally (Task 1b)', ()
 
     it('renders the EntryFormModal in the EMPTY state (no early-return bypass)', async () => {
         mockDb.getAllAsync.mockResolvedValue([]); // empty DB -> EmptyState branch
-        const view = await render(<DatabaseViewer />);
+        const view = await render(<Timeline />);
         await waitFor(() => expect(hasExactText(view, '__EMPTY_STATE__')).toBe(true));
         // Critically: the form is STILL mounted alongside the empty state, not
         // skipped by an early `return <EmptyState/>`.
@@ -161,7 +191,7 @@ describe('DBViewer — EntryFormModal is rendered unconditionally (Task 1b)', ()
     it('keeps the EntryFormModal mounted across an isLoading flip on refetch', async () => {
         // Start populated.
         mockDb.getAllAsync.mockResolvedValue([oneEntryRow()]);
-        const view = await render(<DatabaseViewer />);
+        const view = await render(<Timeline />);
         await waitFor(() => expect(formSentinelPresent(view)).toBe(true));
 
         // Simulate a refetch that re-resolves (the focus hook re-runs the loader
@@ -169,7 +199,7 @@ describe('DBViewer — EntryFormModal is rendered unconditionally (Task 1b)', ()
         // already-mocked getAllAsync resolve again). The form must never drop out
         // of the tree at any committed render.
         await act(async () => {
-            await view.rerender(<DatabaseViewer />);
+            await view.rerender(<Timeline />);
         });
         expect(formSentinelPresent(view)).toBe(true);
 

@@ -134,11 +134,17 @@ export async function checkGroupHasEntries(
       };
     }
 
+    // Scoped to LIVE entries (`e.deleted_at IS NULL`): this gates a warning the
+    // user reads against their own visible history, so a group whose only
+    // remaining entries sit in the recycle bin must NOT block/scare the delete.
+    // (Binned entries do lose these links to the cascade — accepted, same call
+    // as the per-activity usage count in ActivityEditModal.)
     const entriesCount = await db.getFirstAsync<{ count: number }>(
       `SELECT COUNT(*) as count
        FROM entry_activities ea
        JOIN activities a ON ea.activity_id = a.id
-       WHERE a.group_id = ?`,
+       JOIN entries e ON e.id = ea.entry_id
+       WHERE e.deleted_at IS NULL AND a.group_id = ?`,
       [groupId]
     );
 

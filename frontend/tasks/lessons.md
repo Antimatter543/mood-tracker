@@ -1,5 +1,22 @@
 # SoulSync — Project Lessons
 
+## 2026-09-03: Soft delete is a WHOLE-CODEBASE read hazard, and the dangerous queries are the ones that never named `entries`
+
+**Context**: migration 12 turned "delete an entry" into a stamp on `entries.deleted_at` (recycle bin + undo). The schema change is trivial; the risk is entirely in the READ audit. Every pre-existing query silently started including binned entries, and a miss is invisible to `tsc`, invisible to `jest`, and invisible on a device with an empty bin. It only surfaces weeks later as a deleted entry haunting the heatmap.
+
+**The non-obvious half**: the two queries that needed the most thought (`CO_OCCURRING_ACTIVITIES`, `ACTIVITY_ENTRY_COUNTS`) did **not mention the `entries` table at all**. They aggregate `entry_activities`, and a soft delete deliberately PRESERVES those link rows (that is exactly what makes a restore lossless). Grepping `FROM entries` would have missed both. Each needed a 1:1 `JOIN entries e` added purely to carry `e.deleted_at IS NULL`; the join changes no count.
+
+**Rules**:
+- The exclusion is baked into `getEntriesPage`'s CTE (`WHERE e.deleted_at IS NULL AND (<userFilter>)`), NOT into `buildEntryFilter`. A UI filter builder must not be the thing standing between a deleted entry and the Timeline; no filter state can then leak one. The user filter is parenthesised so its internal `OR` can't escape the `AND`.
+- Deliberate INCLUSIONS are documented at the call site: the data export EXCLUDES binned entries; `ActivityEditModal`'s "used in N entries" and `groups.checkGroupHasEntries` count LIVE entries only (the number must match what the user can see); `generateData.clearAllEntries` stays a blanket `DELETE` (dev-only, means to nuke everything).
+- The soft delete carries `AND deleted_at IS NULL`; the restore carries `AND deleted_at IS NOT NULL`. Without the first, a double-tap silently restarts the 30-day countdown.
+- The retention sweep runs from `initializeDatabase` and **can never throw**: it is on the boot path, where an exception is a white screen.
+- The undo/bin UI mounts through `OverlayHost`, never a native `<Modal>` (the standing Fabric rule). The snackbar is NOT built on `OverlayModal`: that adds a dimmed backdrop and swallows hardware-back, both wrong for a passive banner.
+
+**Rung**: hook-grade — two class-level invariant tests, not memory. `__tests__/softDeleteExclusion.test.ts` extracts every string literal in `app/ components/ context/ databases/ hooks/ lib/` and fails any `SELECT ... FROM/JOIN entries` without a `deleted_at IS [NOT] NULL` predicate. `__tests__/softDeleteQueries.integration.test.ts` EXECUTES every exported `queries.ts` constant against real `node:sqlite` over a DB whose only entry is binned, and its param table is asserted exhaustive, so a NEW query fails the build until somebody decides what it does about the bin. Both were negative-tested (predicate removed produced 5 failures).
+
+**Date**: 2026-09-03
+
 ## 2026-08-29: @testing-library/react-native v14 is async-by-default — an un-awaited `fireEvent` SILENTLY does nothing (reference, cost a debug cycle)
 
 **Context**: hit while building `__tests__/periodNavigation.test.tsx` (stats period-navigation feature). In RNTL 14 (this repo's pinned version), `render()` and `fireEvent.*()` return **Promises**:

@@ -77,9 +77,17 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
         if (!activity) return;
 
         try {
-            // Get usage count
+            // Get usage count. Scoped to LIVE entries (`e.deleted_at IS NULL`):
+            // the number in the confirm dialog has to match what the user can
+            // actually SEE, so counting recycle-bin entries here would read as a
+            // bug ("used in 5 entries" over a timeline showing 3). Deleting the
+            // activity does also strip the links off binned entries — a minor,
+            // accepted effect of an already-destructive action.
             const usage = await db.getFirstAsync<{ count: number }>(
-                'SELECT COUNT(*) as count FROM entry_activities WHERE activity_id = ?',
+                `SELECT COUNT(*) as count
+                 FROM entry_activities ea
+                 JOIN entries e ON e.id = ea.entry_id
+                 WHERE e.deleted_at IS NULL AND ea.activity_id = ?`,
                 [activity.id]
             );
 

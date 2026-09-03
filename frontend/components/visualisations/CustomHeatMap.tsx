@@ -76,7 +76,7 @@ const CustomHeatmap: React.FC = () => {
                 // SQL never day-buckets (the old recursive-CTE query joined on
                 // `date(entries.date)` in UTC, mis-placing late-evening entries).
                 const rawRows = await db.getAllAsync<{ date: string; mood: number }>(
-                    `SELECT date, mood FROM entries ORDER BY date`,
+                    `SELECT date, mood FROM entries WHERE deleted_at IS NULL ORDER BY date`,
                 );
 
                 const daily = aggregateDailyAverages(rawRows);

@@ -127,7 +127,7 @@ const MoodHistogram = () => {
                 const { start, end } = periodWindow;
                 const entries = await db.getAllAsync<MoodEntry>(`
                     SELECT mood FROM entries
-                    WHERE date BETWEEN ? AND ?
+                    WHERE deleted_at IS NULL AND date BETWEEN ? AND ?
                     ORDER BY mood
                 `, [start, end]);
 

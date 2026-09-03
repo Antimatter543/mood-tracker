@@ -39,7 +39,7 @@ describeIfSqlite('ENTRIES_FOR_ACTIVITY_IN_RANGE + activityDaySet (real SQLite, B
     db = new DatabaseSync(':memory:');
     db.exec(`
       CREATE TABLE activities (id INTEGER PRIMARY KEY, name TEXT, group_id INTEGER);
-      CREATE TABLE entries (id INTEGER PRIMARY KEY, mood REAL, notes TEXT, date TEXT);
+      CREATE TABLE entries (id INTEGER PRIMARY KEY, mood REAL, notes TEXT, date TEXT, deleted_at TEXT);
       CREATE TABLE entry_activities (id INTEGER PRIMARY KEY, entry_id INTEGER, activity_id INTEGER);
     `);
     db.exec(`INSERT INTO activities (id,name,group_id) VALUES (3,'Running',1),(5,'Coffee',1);`);

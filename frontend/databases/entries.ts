@@ -23,6 +23,14 @@ import { buildEntryFilter, EntryFilters } from '@/components/timeline/entryFilte
  * the singleton write connection, statements on the `txn` argument only. READS
  * (`getMoodEntries`, `getEntriesPage`) take no transaction and run on the caller-
  * supplied connection (the SQLiteProvider's read connection).
+ *
+ * Soft-delete contract (migration 12): `entries.deleted_at` is NULL for a LIVE
+ * entry and a UTC ISO instant for one sitting in the recycle bin. EVERY read that
+ * surfaces entries to the user MUST carry `deleted_at IS NULL` — a binned entry
+ * must not appear in the timeline, the charts, the streak, or an export. The
+ * bin-side reads and the hard-delete/purge path live in `databases/entry-bin.ts`.
+ * The whole exclusion is locked by __tests__/softDeleteExclusion.test.ts (a
+ * source scan) + __tests__/softDeleteQueries.integration.test.ts (real SQLite).
  */
 
 /**
@@ -158,7 +166,9 @@ export async function addMoodEntry(
 }
 
 /**
- * Fetch every mood entry with its activity list, newest first.
+ * Fetch every LIVE mood entry with its activity list, newest first. Entries in
+ * the recycle bin (`deleted_at IS NOT NULL`) are excluded — see the soft-delete
+ * contract in this file's header.
  *
  * Returns an empty array on DB error rather than throwing — callers
  * generally render lists and an empty list is a reasonable failure mode.
@@ -176,7 +186,7 @@ export async function getMoodEntries(db: SQLiteDatabase): Promise<MoodEntry[]> {
     // run in real transactions on the write connection (withWriteTransaction) —
     // under WAL these reads never block on (or corrupt under) a concurrent write.
     const rawEntries = await db.getAllAsync<Omit<MoodEntry, 'activities' | 'photos'>>(
-      'SELECT * FROM entries ORDER BY date DESC'
+      'SELECT * FROM entries WHERE deleted_at IS NULL ORDER BY date DESC'
     );
 
     const entriesWithActivities = await Promise.all(
@@ -217,14 +227,16 @@ export async function getMoodEntries(db: SQLiteDatabase): Promise<MoodEntry[]> {
  * Returning the raw stored instant is doctrine-compliant: SQL only range-filters
  * or returns the raw `date`; it never day-buckets (no `date()`/`strftime()`).
  * `MIN(date)` over an empty table returns one row whose value is `NULL`, so an
- * empty DB yields `null` and never throws. Does NOT swallow errors — the caller
- * (syncHealthMetrics) treats a read failure as a sync failure.
+ * empty DB yields `null` and never throws — and so does a DB whose only entries
+ * are in the recycle bin (they're excluded via `deleted_at IS NULL`, and a
+ * fully-filtered aggregate still returns one NULL row). Does NOT swallow errors —
+ * the caller (syncHealthMetrics) treats a read failure as a sync failure.
  */
 export async function getEarliestEntryInstant(
   db: SQLiteDatabase
 ): Promise<string | null> {
   const row = await db.getFirstAsync<{ earliest: string | null }>(
-    'SELECT MIN(date) AS earliest FROM entries'
+    'SELECT MIN(date) AS earliest FROM entries WHERE deleted_at IS NULL'
   );
   return row?.earliest ?? null;
 }
@@ -241,9 +253,15 @@ export async function getEarliestEntryInstant(
  * state over a full DB. Errors PROPAGATE so the component can show a real
  * "couldn't load" state with a retry (see DBViewer.loadInitialData).
  *
+ * Recycle-bin entries are ALWAYS excluded: `e.deleted_at IS NULL` is baked into
+ * the query itself rather than into `buildEntryFilter`, so it is structurally
+ * impossible for a UI filter state to surface a binned entry. The user filter (if
+ * any) is ANDed on in its own parenthesised group.
+ *
  * INVARIANT: the CTE here is mirrored by __tests__/entryFilter.integration.test.ts
- * (same FROM/JOINs, the `${where && 'WHERE '+where}` splice BEFORE GROUP BY, and
- * the `[...params, LIMIT, OFFSET]` bind order). If this query changes, update it.
+ * (same FROM/JOINs, the base `WHERE e.deleted_at IS NULL` + ` AND (${where})`
+ * splice BEFORE GROUP BY, and the `[...params, LIMIT, OFFSET]` bind order). If
+ * this query changes, update it.
  */
 export async function getEntriesPage(
   db: SQLiteDatabase,
@@ -254,6 +272,8 @@ export async function getEntriesPage(
   const offset = page * pageSize;
   // The WHERE is spliced BEFORE `GROUP BY e.id` so it filters raw rows; its
   // EXISTS subquery uses `ea2`/`a2` aliases distinct from the outer `ea`/`a`.
+  // It is ANDed onto the always-on bin exclusion, parenthesised so an OR inside
+  // the user filter (the notes/activity text clause) can't escape the AND.
   const { where, params } = buildEntryFilter(filters);
   const rows = await db.getAllAsync<any>(
     `
@@ -268,7 +288,7 @@ export async function getEntriesPage(
           FROM entries e
           LEFT JOIN entry_activities ea ON e.id = ea.entry_id
           LEFT JOIN activities a ON ea.activity_id = a.id
-          ${where ? 'WHERE ' + where : ''}
+          WHERE e.deleted_at IS NULL${where ? ' AND (' + where + ')' : ''}
           GROUP BY e.id
           ORDER BY e.date DESC
           LIMIT ? OFFSET ?
@@ -435,28 +455,39 @@ export async function setEntryStarred(
 }
 
 /**
- * Delete an entry and everything that hangs off it. The `DELETE FROM entries`
- * cascades to `entry_activities` + `entry_media` ROWS because the write
- * connection has `foreign_keys = ON` (the read connection's FK state is
- * irrelevant here — the delete runs on the write connection). CASCADE never
- * touches the files on disk, so we capture the photo paths BEFORE the delete and
- * unlink them AFTER commit (so a rollback can't orphan a live row's file).
+ * SOFT delete: move an entry to the recycle bin by stamping `deleted_at` with the
+ * current UTC ISO instant. Since migration 12 this is what "delete" means in the
+ * UI — it is fully reversible.
+ *
+ * Deliberately does NOTHING destructive: no `DELETE FROM entries`, so the FK
+ * cascade never fires and the entry's `entry_activities` / `entry_media` rows
+ * survive; and no `deleteMediaFile`, so the photo FILES survive too. That is
+ * exactly what makes {@link restoreMoodEntry} lossless. The destructive path
+ * (manual "delete forever" + the 30-day retention sweep) lives in
+ * `databases/entry-bin.ts` — see `purgeMoodEntry` / `purgeExpiredBinEntries`.
+ *
+ * `AND deleted_at IS NULL` makes the stamp idempotent: a double-tap (or a retry
+ * after a slow UI) can NOT re-stamp an already-binned entry and silently restart
+ * its 30-day purge countdown.
+ *
+ * Single-statement, but still routed through `withWriteTransaction` so it runs on
+ * the singleton write connection under the write mutex — the databases/CLAUDE.md
+ * contract every other mutation follows. `_db` is unused for the same reason
+ * (kept for the uniform CRUD signature).
  */
 export async function deleteMoodEntry(
-  db: SQLiteDatabase,
+  _db: SQLiteDatabase,
   entryId: number
 ): Promise<DatabaseResult> {
   try {
-    const media = await getMediaByEntryIds(db, [entryId]);
-    const filesToUnlink = (media[entryId] ?? []).map((p) => p.file_path);
-
     await withWriteTransaction(async (txn) => {
-      await txn.runAsync('DELETE FROM entries WHERE id = ?', [entryId]);
+      await txn.runAsync(
+        `UPDATE entries SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`,
+        [new Date().toISOString(), entryId]
+      );
     });
 
-    await Promise.all(filesToUnlink.map((fp) => deleteMediaFile(fp)));
-
-    return { success: true, message: 'Entry deleted successfully' };
+    return { success: true, message: 'Entry moved to the bin' };
   } catch (error) {
     console.error('Error deleting entry:', error);
     return { success: false, message: 'Error deleting entry' };
