@@ -36,7 +36,7 @@
 
 import { Platform } from 'react-native';
 import type { Reminder } from '@/lib/reminders';
-import { enabledReminders, reminderDisplayLabel } from '@/lib/reminders';
+import { enabledReminders } from '@/lib/reminders';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 // Type-only import: erased at compile time, so it never pulls the native module
 // in at runtime (which would re-introduce the Expo-Go module-eval crash).
@@ -360,7 +360,10 @@ export function planReminderSchedule(input: ReminderPlanInput): ReminderSchedule
 
   const toSchedule: PlannedNotification[] = active.map(reminder => {
     const { hour, minute } = parseReminderTime(reminder.time);
-    const copy = buildReminderCopy(reminderDisplayLabel(reminder), streak);
+    // The RAW label, deliberately — an unlabelled reminder should fall through
+    // to the motivating streak title (the pre-list behaviour), NOT to the
+    // generic "Reminder" placeholder the settings list shows.
+    const copy = buildReminderCopy(reminder.label, streak);
     return {
       identifier: reminderNotificationIdentifier(reminder.id),
       hour,
