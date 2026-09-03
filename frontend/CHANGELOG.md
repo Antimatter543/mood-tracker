@@ -5,6 +5,14 @@ All notable changes to SoulSync are documented here. Versions follow
 
 ## [Unreleased]
 
+### Added
+- **Deleted something by accident? Take it back.** Deleting a timeline entry now shows an
+  **Undo** banner, and everything you delete waits in a new **Recently deleted** bin (the
+  trash icon beside the Timeline search box) for 30 days. Restore an entry and it comes back
+  exactly as it was, same photos, same activities. Binned entries stay out of your stats,
+  streaks, charts and backups until you restore them, and "Delete forever" is still there
+  when you really mean it.
+
 ## [2.9.0] - 2026-08-29
 
 ### Added

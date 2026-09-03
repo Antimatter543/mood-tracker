@@ -72,6 +72,27 @@ const mockDb = {
         .fn()
         .mockImplementation(async (cb: () => Promise<void>) => cb()),
 };
+// DBViewer now renders the undo snackbar + the bin panel, which import
+// reanimated (its worklets runtime is unavailable under jest).
+jest.mock('react-native-reanimated', () => {
+    const ReactLocal = require('react');
+    const { View } = require('react-native');
+    const anim = { duration: () => anim };
+    return {
+        __esModule: true,
+        default: {
+            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
+        },
+        FadeIn: anim,
+        FadeInDown: anim,
+        FadeOutDown: anim,
+    };
+});
+jest.mock('react-native-safe-area-context', () => ({
+    useSafeAreaInsets: () => ({ top: 0, bottom: 48, left: 0, right: 0 }),
+}));
+jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
+
 jest.mock('expo-sqlite', () => ({
     useSQLiteContext: () => mockDb,
 }));
@@ -142,7 +163,16 @@ jest.mock('@/components/timeline/EntryCard', () => ({
 }));
 
 // Import AFTER mocks are registered.
+import { OverlayProvider } from '@/context/OverlayHost';
 import { DatabaseViewer } from '@/components/DBViewer';
+
+// The Timeline lives inside the app's OverlayProvider (see (tabs)/_layout.tsx);
+// its undo snackbar and bin panel mount through that host.
+const Timeline = () => (
+    <OverlayProvider>
+        <DatabaseViewer />
+    </OverlayProvider>
+);
 
 const entryRow = (id: number, notes: string) => ({
     id,
@@ -176,14 +206,14 @@ describe('DBViewer — a stale load must not clobber/blank the list (race-latch)
     it('drops a STALE empty load that resolves AFTER a fresh populated load', async () => {
         // Mount: focus run A (refreshCount=0) fires loadInitialData; its page-0
         // read suspends on pendingReads[0]. Nothing has committed yet.
-        const view = await render(<DatabaseViewer />);
+        const view = await render(<Timeline />);
         await waitFor(() => expect(pendingReads.length).toBe(1));
 
         // Bump refreshCount -> the focus hook re-runs the loader: run B fires while
         // A is still in flight; B's page-0 read suspends on pendingReads[1].
         await act(async () => {
             mockRefreshCount = 1;
-            view.rerender(<DatabaseViewer />);
+            view.rerender(<Timeline />);
         });
         await waitFor(() => expect(pendingReads.length).toBe(2));
 
@@ -205,12 +235,12 @@ describe('DBViewer — a stale load must not clobber/blank the list (race-latch)
         // order-of-resolution. Run A starts first then resolves first (populated);
         // run B starts second (the latest) and resolves last (also populated, with
         // a DIFFERENT entry). The final committed state must be B's, never A's.
-        const view = await render(<DatabaseViewer />);
+        const view = await render(<Timeline />);
         await waitFor(() => expect(pendingReads.length).toBe(1));
 
         await act(async () => {
             mockRefreshCount = 1;
-            view.rerender(<DatabaseViewer />);
+            view.rerender(<Timeline />);
         });
         await waitFor(() => expect(pendingReads.length).toBe(2));
 

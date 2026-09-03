@@ -397,9 +397,11 @@ function RecentlyDeletedContent({
                 </Pressable>
                 <Text style={styles.headerTitle}>Recently deleted</Text>
             </View>
+            {/* One interpolated string, not text + {expr} + text: React Native
+                would otherwise split it into three Text children, which reads as
+                three fragments to a screen reader. */}
             <Text style={styles.retentionNote}>
-                Entries you delete stay here for {BIN_RETENTION_DAYS} days, then
-                they&apos;re deleted for good.
+                {`Entries you delete stay here for ${BIN_RETENTION_DAYS} days, then they're deleted for good.`}
             </Text>
 
             {isLoading ? (
@@ -425,8 +427,7 @@ function RecentlyDeletedContent({
                     <Feather name="trash-2" size={32} color={colors.textSecondary} />
                     <Text style={styles.emptyTitle}>Nothing here</Text>
                     <Text style={styles.emptyBody}>
-                        Deleted entries land here for {BIN_RETENTION_DAYS} days, so an
-                        accidental tap is never the end of the story.
+                        {`Deleted entries land here for ${BIN_RETENTION_DAYS} days, so an accidental tap is never the end of the story.`}
                     </Text>
                 </View>
             ) : (

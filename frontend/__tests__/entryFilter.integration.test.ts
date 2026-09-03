@@ -13,10 +13,10 @@
  * new dependency. If the runtime lacks it, the suite skips cleanly rather than
  * failing CI.
  *
- * INVARIANT: the `PAGE_QUERY` below MUST mirror `DBViewer.fetchEntriesPage`'s
- * CTE (same FROM/JOINs, the `${where && 'WHERE '+where}` splice BEFORE GROUP BY,
- * and `[...params, LIMIT, OFFSET]` bind order). If that query changes, update
- * this mirror.
+ * INVARIANT: the `pageQuery` below MUST mirror `getEntriesPage`'s CTE (same
+ * FROM/JOINs, the base `WHERE e.deleted_at IS NULL` + ` AND (${where})` splice
+ * BEFORE GROUP BY, and `[...params, LIMIT, OFFSET]` bind order). If that query
+ * changes, update this mirror.
  */
 import { buildEntryFilter, moodPresetToRange, EntryFilters, MoodRange } from '@/components/timeline/entryFilter';
 
@@ -41,7 +41,7 @@ const pageQuery = (where: string) => `
         FROM entries e
         LEFT JOIN entry_activities ea ON e.id = ea.entry_id
         LEFT JOIN activities a ON ea.activity_id = a.id
-        ${where ? 'WHERE ' + where : ''}
+        WHERE e.deleted_at IS NULL${where ? ' AND (' + where + ')' : ''}
         GROUP BY e.id
         ORDER BY e.date DESC
         LIMIT ? OFFSET ?
@@ -68,7 +68,7 @@ describeIfSqlite('entryFilter — real SQLite execution', () => {
         db = new DatabaseSync(':memory:');
         db.exec(`
             CREATE TABLE activities (id INTEGER PRIMARY KEY, name TEXT, group_id INTEGER);
-            CREATE TABLE entries (id INTEGER PRIMARY KEY, mood REAL, notes TEXT, date TEXT, starred_at TEXT);
+            CREATE TABLE entries (id INTEGER PRIMARY KEY, mood REAL, notes TEXT, date TEXT, starred_at TEXT, deleted_at TEXT);
             CREATE TABLE entry_activities (id INTEGER PRIMARY KEY, entry_id INTEGER, activity_id INTEGER);
         `);
         db.exec(`INSERT INTO activities (id,name,group_id) VALUES
@@ -166,5 +166,51 @@ describeIfSqlite('entryFilter — real SQLite execution', () => {
         // note "day" (E2), mood-high, AND starred -> [2]. Proves the bare
         // starred clause never shifts the query/mood bind positions.
         expect(idsFor(F('day', moodPresetToRange('high'), true))).toEqual([2]);
+    });
+
+    // Recycle bin (migration 12). The exclusion lives in the CTE itself, NOT in
+    // buildEntryFilter, so it has to hold for EVERY filter combination —
+    // including the no-filter case where `where` is empty and the splice
+    // degenerates to the base clause. That is exactly the bug class this block
+    // guards: a binned entry leaking back into the Timeline through some filter
+    // path nobody thought to check.
+    describe('soft-deleted entries are unreachable through any filter', () => {
+        // Bin E2 (starred, mood 8, notes "great day") — it satisfies the starred
+        // filter, the high band AND the "day" text query, so if the exclusion
+        // were missing, every assertion below would fail rather than just one.
+        const bin = () =>
+            db.exec(`UPDATE entries SET deleted_at = '2026-07-20T10:00:00.000Z' WHERE id = 2;`);
+        const unbin = () => db.exec(`UPDATE entries SET deleted_at = NULL WHERE id = 2;`);
+
+        beforeEach(bin);
+        afterEach(unbin);
+
+        it('is gone from the unfiltered page', () => {
+            expect(idsFor(F())).toEqual([1, 3, 4, 5, 6]);
+        });
+
+        it('is gone from the starred filter', () => {
+            expect(idsFor(F('', null, true))).toEqual([4, 6]);
+        });
+
+        it('is gone from a text query that matches it', () => {
+            expect(idsFor(F('day'))).not.toContain(2);
+        });
+
+        it('is gone from a mood band that contains it', () => {
+            expect(idsFor(F('', moodPresetToRange('high')))).toEqual([4]);
+        });
+
+        it('is gone from the all-three-constraints combination that used to return it', () => {
+            expect(idsFor(F('day', moodPresetToRange('high'), true))).toEqual([]);
+        });
+
+        it('comes back the moment deleted_at is cleared (restore is lossless)', () => {
+            unbin();
+            expect(idsFor(F())).toEqual([1, 2, 3, 4, 5, 6]);
+            // Its activity links survived the soft delete, so the activity-name
+            // text search reaches it again too.
+            expect(idsFor(F('day', moodPresetToRange('high'), true))).toEqual([2]);
+        });
     });
 });

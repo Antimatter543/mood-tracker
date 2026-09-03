@@ -37,7 +37,7 @@ describeIfSqlite('per-activity detail queries — real SQLite execution', () => 
                 id INTEGER PRIMARY KEY, name TEXT, group_id INTEGER,
                 icon_family TEXT, icon_name TEXT, position INTEGER
             );
-            CREATE TABLE entries (id INTEGER PRIMARY KEY, mood REAL, notes TEXT, date TEXT);
+            CREATE TABLE entries (id INTEGER PRIMARY KEY, mood REAL, notes TEXT, date TEXT, deleted_at TEXT);
             CREATE TABLE entry_activities (id INTEGER PRIMARY KEY, entry_id INTEGER, activity_id INTEGER);
         `);
         db.exec(`INSERT INTO activities (id,name,group_id,icon_family,icon_name,position) VALUES

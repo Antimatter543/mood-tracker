@@ -31,6 +31,27 @@ const mockDb = {
     getFirstAsync: jest.fn().mockResolvedValue(null),
     runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 }),
 };
+// DBViewer now renders the undo snackbar + the bin panel, which import
+// reanimated (its worklets runtime is unavailable under jest).
+jest.mock('react-native-reanimated', () => {
+    const ReactLocal = require('react');
+    const { View } = require('react-native');
+    const anim = { duration: () => anim };
+    return {
+        __esModule: true,
+        default: {
+            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
+        },
+        FadeIn: anim,
+        FadeInDown: anim,
+        FadeOutDown: anim,
+    };
+});
+jest.mock('react-native-safe-area-context', () => ({
+    useSafeAreaInsets: () => ({ top: 0, bottom: 48, left: 0, right: 0 }),
+}));
+jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
+
 jest.mock('expo-sqlite', () => ({
     useSQLiteContext: () => mockDb,
 }));
@@ -94,7 +115,16 @@ jest.mock('@/components/timeline/EntryCard', () => ({
     },
 }));
 
+import { OverlayProvider } from '@/context/OverlayHost';
 import { DatabaseViewer } from '@/components/DBViewer';
+
+// The Timeline lives inside the app's OverlayProvider (see (tabs)/_layout.tsx);
+// its undo snackbar and bin panel mount through that host.
+const Timeline = () => (
+    <OverlayProvider>
+        <DatabaseViewer />
+    </OverlayProvider>
+);
 
 const entryRow = (id: number, notes: string) => ({
     id,
@@ -118,7 +148,7 @@ describe('DBViewer — a read failure surfaces an error, never the EmptyState', 
     it('shows an inline error + Try again (NOT EmptyState) when the initial load fails with nothing on screen', async () => {
         mockDb.getAllAsync.mockRejectedValue(new Error('read failed'));
 
-        const view = await render(<DatabaseViewer />);
+        const view = await render(<Timeline />);
 
         await waitFor(() =>
             expect(view.queryByText("Couldn't load your entries")).not.toBeNull()
@@ -134,13 +164,13 @@ describe('DBViewer — a read failure surfaces an error, never the EmptyState', 
         // Every later load fails.
         mockDb.getAllAsync.mockRejectedValue(new Error('refetch failed'));
 
-        const view = await render(<DatabaseViewer />);
+        const view = await render(<Timeline />);
         await waitFor(() => expect(view.queryByText('kept-entry')).not.toBeNull());
 
         // Bump refreshCount → the focus loader re-runs and rejects.
         await act(async () => {
             mockRefreshCount = 1;
-            view.rerender(<DatabaseViewer />);
+            view.rerender(<Timeline />);
         });
         await waitFor(() => expect(mockDb.getAllAsync.mock.calls.length).toBeGreaterThan(1));
 
@@ -153,7 +183,7 @@ describe('DBViewer — a read failure surfaces an error, never the EmptyState', 
     it('recovers when Try again succeeds', async () => {
         mockDb.getAllAsync.mockRejectedValueOnce(new Error('read failed'));
 
-        const view = await render(<DatabaseViewer />);
+        const view = await render(<Timeline />);
         await waitFor(() =>
             expect(view.queryByText("Couldn't load your entries")).not.toBeNull()
         );
