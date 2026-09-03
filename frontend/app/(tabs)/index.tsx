@@ -467,7 +467,7 @@ export default function Home() {
                     totals,
                 ] = await Promise.all([
                     db.getFirstAsync<{ mood: number }>(
-                        `SELECT ROUND(AVG(mood), 1) as mood FROM entries WHERE date BETWEEN ? AND ?`,
+                        `SELECT ROUND(AVG(mood), 1) as mood FROM entries WHERE deleted_at IS NULL AND date BETWEEN ? AND ?`,
                         [todayStart, todayEnd]
                     ),
 
@@ -490,7 +490,7 @@ export default function Home() {
                         FROM activities a
                         JOIN entry_activities ea ON ea.activity_id = a.id
                         JOIN entries e ON e.id = ea.entry_id
-                        WHERE e.date BETWEEN ? AND ?
+                        WHERE e.deleted_at IS NULL AND e.date BETWEEN ? AND ?
                         GROUP BY a.id
                         ORDER BY count DESC
                         LIMIT 7

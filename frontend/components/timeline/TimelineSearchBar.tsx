@@ -21,6 +21,10 @@ type TimelineSearchBarProps = {
     starredOnly: boolean;
     /** Toggle the "Starred only" filter (independent of search + mood presets). */
     onStarredChange: (v: boolean) => void;
+    /** How many entries sit in the recycle bin, drives the button's badge. */
+    binCount: number;
+    /** Open the "Recently deleted" panel. */
+    onOpenBin: () => void;
     colors: ThemeColors;
 };
 
@@ -39,7 +43,15 @@ const useStyles = (colors: ThemeColors) =>
                     borderBottomWidth: StyleSheet.hairlineWidth,
                     borderBottomColor: colors.border,
                 },
+                // Search pill + the bin button share one row; the pill flexes so
+                // the bin button keeps a fixed 44x44 tap target on every width.
+                searchRow: {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                },
                 searchPill: {
+                    flex: 1,
                     flexDirection: 'row',
                     alignItems: 'center',
                     height: 44,
@@ -48,6 +60,35 @@ const useStyles = (colors: ThemeColors) =>
                     backgroundColor: colors.secondaryBackground,
                     borderWidth: StyleSheet.hairlineWidth,
                     borderColor: colors.border,
+                },
+                binButton: {
+                    width: 44,
+                    height: 44,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 12,
+                    backgroundColor: colors.secondaryBackground,
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: colors.border,
+                },
+                // Count badge pinned to the button's top-right corner. Only shown
+                // when the bin is non-empty, so an empty bin stays visually quiet.
+                binBadge: {
+                    position: 'absolute',
+                    top: -4,
+                    right: -4,
+                    minWidth: 18,
+                    height: 18,
+                    paddingHorizontal: 4,
+                    borderRadius: 9,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: colors.accent,
+                },
+                binBadgeText: {
+                    color: colors.background,
+                    fontSize: 11,
+                    fontWeight: '700',
                 },
                 searchIcon: {
                     marginRight: 8,
@@ -107,12 +148,15 @@ export function TimelineSearchBar({
     onMoodPresetChange,
     starredOnly,
     onStarredChange,
+    binCount,
+    onOpenBin,
     colors,
 }: TimelineSearchBarProps) {
     const styles = useStyles(colors);
 
     return (
         <View style={styles.container}>
+            <View style={styles.searchRow}>
             <View style={styles.searchPill}>
                 <Feather
                     name="search"
@@ -143,6 +187,32 @@ export function TimelineSearchBar({
                         <Feather name="x" size={18} color={colors.textSecondary} />
                     </Pressable>
                 ) : null}
+            </View>
+            {/* Entry point to the recycle bin. Lives beside the search field
+                rather than in the navigator header so the whole feature stays
+                inside the Timeline's own tree (no shared-layout coupling), and
+                so its badge can react to the same data-version bump the list does. */}
+            <Pressable
+                testID="timeline-open-bin"
+                onPress={onOpenBin}
+                accessibilityRole="button"
+                accessibilityLabel={
+                    binCount > 0
+                        ? `Recently deleted, ${binCount} ${binCount === 1 ? 'entry' : 'entries'}`
+                        : 'Recently deleted'
+                }
+                style={styles.binButton}
+                hitSlop={4}
+            >
+                <Feather name="trash-2" size={18} color={colors.textSecondary} />
+                {binCount > 0 ? (
+                    <View style={styles.binBadge}>
+                        <Text style={styles.binBadgeText}>
+                            {binCount > 99 ? '99+' : binCount}
+                        </Text>
+                    </View>
+                ) : null}
+            </Pressable>
             </View>
 
             <ScrollView

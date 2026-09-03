@@ -36,7 +36,7 @@ export const WEEKLY_MOOD_AVERAGES = `
     date,
     mood
   FROM entries
-  WHERE date BETWEEN ? AND ?
+  WHERE deleted_at IS NULL AND date BETWEEN ? AND ?
   ORDER BY date
 `;
 
@@ -60,7 +60,7 @@ export const MONTHLY_DAILY_AVERAGES = WEEKLY_MOOD_AVERAGES;
 // All-time entry count. The single source of truth for "is the DB empty?" used
 // by the Home + Statistics empty states. No parameters.
 // -----------------------------------------------------------------------------
-export const TOTAL_ENTRIES = `SELECT COUNT(*) as count FROM entries`;
+export const TOTAL_ENTRIES = `SELECT COUNT(*) as count FROM entries WHERE deleted_at IS NULL`;
 
 // -----------------------------------------------------------------------------
 // The user's earliest entry — the RAW stored instant, never `date(MIN(date))`,
@@ -72,7 +72,7 @@ export const TOTAL_ENTRIES = `SELECT COUNT(*) as count FROM entries`;
 // no point letting the user page into windows that end before their first ever
 // entry.
 // -----------------------------------------------------------------------------
-export const EARLIEST_ENTRY_DATE = `SELECT MIN(date) as date FROM entries`;
+export const EARLIEST_ENTRY_DATE = `SELECT MIN(date) as date FROM entries WHERE deleted_at IS NULL`;
 
 // -----------------------------------------------------------------------------
 // Raw mood points in a window (rarely used; kept for completeness). Raw instant
@@ -83,7 +83,7 @@ export const MOOD_POINTS_IN_RANGE = `
     date,
     mood
   FROM entries
-  WHERE date BETWEEN ? AND ?
+  WHERE deleted_at IS NULL AND date BETWEEN ? AND ?
   ORDER BY date
 `;
 
@@ -100,7 +100,7 @@ export const MOOD_POINTS_IN_RANGE = `
 export const RECENT_ENTRY_DATES = `
   SELECT date
   FROM entries
-  WHERE date >= ?
+  WHERE deleted_at IS NULL AND date >= ?
   ORDER BY date DESC
 `;
 
@@ -119,7 +119,7 @@ export const DOW_MOOD_PATTERN = `
     date,
     mood
   FROM entries
-  WHERE date BETWEEN ? AND ?
+  WHERE deleted_at IS NULL AND date BETWEEN ? AND ?
   ORDER BY date
 `;
 
@@ -139,7 +139,7 @@ export const TIME_OF_DAY_PATTERN = `
     date,
     mood
   FROM entries
-  WHERE date BETWEEN ? AND ?
+  WHERE deleted_at IS NULL AND date BETWEEN ? AND ?
   ORDER BY date
 `;
 
@@ -158,7 +158,7 @@ export const WINDOW_SUMMARY = `
     ROUND(AVG(mood), 2) as avg_mood,
     COUNT(*) as entry_count
   FROM entries
-  WHERE date BETWEEN ? AND ?
+  WHERE deleted_at IS NULL AND date BETWEEN ? AND ?
 `;
 
 // -----------------------------------------------------------------------------
@@ -191,7 +191,7 @@ export const ACTIVITY_CORRELATION = `
   FROM entries e
   LEFT JOIN entry_activities ea ON ea.entry_id = e.id
   LEFT JOIN activities a ON a.id = ea.activity_id
-  WHERE e.date BETWEEN ? AND ?
+  WHERE e.deleted_at IS NULL AND e.date BETWEEN ? AND ?
   ORDER BY e.date
 `;
 
@@ -209,7 +209,7 @@ export const ENTRIES_FOR_ACTIVITY = `
   SELECT e.id, e.date, e.mood
   FROM entries e
   JOIN entry_activities ea ON ea.entry_id = e.id
-  WHERE ea.activity_id = ?
+  WHERE e.deleted_at IS NULL AND ea.activity_id = ?
   ORDER BY e.date
 `;
 
@@ -221,7 +221,7 @@ export const ENTRIES_FOR_ACTIVITY_IN_RANGE = `
   SELECT e.id, e.date, e.mood
   FROM entries e
   JOIN entry_activities ea ON ea.entry_id = e.id
-  WHERE ea.activity_id = ? AND e.date BETWEEN ? AND ?
+  WHERE e.deleted_at IS NULL AND ea.activity_id = ? AND e.date BETWEEN ? AND ?
   ORDER BY e.date
 `;
 
@@ -229,30 +229,43 @@ export const ENTRIES_FOR_ACTIVITY_IN_RANGE = `
 // Co-occurring activities: for one activity, the OTHER activities most often
 // logged on the SAME entries ("often paired with"). One row per other activity
 // with the count of shared entries, most-shared first. No date logic at all —
-// this is a pure structural join over entry_activities.
+// this is a structural join over entry_activities.
+//
+// SOFT DELETE: this used to touch `entries` not at all, which since migration 12
+// is a TRAP — a soft-deleted entry keeps its `entry_activities` rows (that's what
+// makes a restore lossless), so a purely-structural join would keep counting
+// binned entries forever. The `JOIN entries e` is 1:1 on ea1.entry_id, so it
+// changes no count; it exists solely to carry `e.deleted_at IS NULL`.
 //
 // Caller supplies `?activityId`.
 // -----------------------------------------------------------------------------
 export const CO_OCCURRING_ACTIVITIES = `
   SELECT a2.id, a2.name, a2.icon_family, a2.icon_name, COUNT(*) AS n
   FROM entry_activities ea1
+  JOIN entries e ON e.id = ea1.entry_id
   JOIN entry_activities ea2
     ON ea2.entry_id = ea1.entry_id AND ea2.activity_id <> ea1.activity_id
   JOIN activities a2 ON a2.id = ea2.activity_id
-  WHERE ea1.activity_id = ?
+  WHERE e.deleted_at IS NULL AND ea1.activity_id = ?
   GROUP BY a2.id
   ORDER BY n DESC, a2.name
 `;
 
 // -----------------------------------------------------------------------------
-// Entry count per activity — one row per activity that has at least one entry.
-// Backs the "Explore your activities" list (each row shows how many times the
-// activity has been logged, and the list is sorted by it). Activities with zero
-// entries simply don't appear here; the caller left-joins them in at count 0.
-// No parameters.
+// Entry count per activity — one row per activity that has at least one LIVE
+// entry. Backs the "Explore your activities" list (each row shows how many times
+// the activity has been logged, and the list is sorted by it). Activities with
+// zero entries simply don't appear here; the caller left-joins them in at count 0.
+//
+// SOFT DELETE: same trap as CO_OCCURRING_ACTIVITIES above — binned entries keep
+// their `entry_activities` rows, so counting the link table alone would report
+// deleted entries forever. The 1:1 `JOIN entries e` carries the exclusion without
+// changing the count. No parameters.
 // -----------------------------------------------------------------------------
 export const ACTIVITY_ENTRY_COUNTS = `
-  SELECT activity_id, COUNT(*) AS n
-  FROM entry_activities
-  GROUP BY activity_id
+  SELECT ea.activity_id, COUNT(*) AS n
+  FROM entry_activities ea
+  JOIN entries e ON e.id = ea.entry_id
+  WHERE e.deleted_at IS NULL
+  GROUP BY ea.activity_id
 `;

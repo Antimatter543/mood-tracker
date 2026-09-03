@@ -238,6 +238,38 @@ export const migrations: Migration[] = [
                  ON entries(starred_at) WHERE starred_at IS NOT NULL`
             );
         }
+    },
+    {
+        // Recycle bin (soft delete): add a nullable `deleted_at` column to
+        // `entries`. NULL = live; a UTC ISO-8601 instant = when the user deleted
+        // it — so, exactly like `starred_at`, the ONE nullable column carries both
+        // the flag AND the when (which is what drives the "deleted N days ago /
+        // purges in M days" copy and the 30-day auto-purge sweep).
+        //
+        // Deleting no longer destroys anything: `entry_activities` / `entry_media`
+        // rows and the photo FILES all survive a soft delete, so restoring is
+        // lossless. A PURGE (manual "delete forever" or the retention sweep) is
+        // the old hard delete — `DELETE FROM entries` + FK cascade + unlink the
+        // files. See databases/entry-bin.ts.
+        //
+        // The index is PARTIAL (WHERE deleted_at IS NOT NULL) so it covers only
+        // the handful of binned rows the bin view + purge sweep scan, instead of
+        // indexing the overwhelmingly-NULL live column. Like migrations 8/9/11,
+        // this single ALTER is the SOLE path for BOTH fresh installs (migration
+        // 1's createInitialSchema builds `entries` without the column, then this
+        // adds it) and existing users. Do NOT also add the column to
+        // createInitialSchema / migration 1 — that would make a fresh install
+        // create-then-ALTER the same column ("duplicate column").
+        version: 12,
+        up: async (db: SQLiteDatabase) => {
+            await db.runAsync(
+                `ALTER TABLE entries ADD COLUMN deleted_at TEXT`
+            );
+            await db.runAsync(
+                `CREATE INDEX IF NOT EXISTS idx_entries_deleted
+                 ON entries(deleted_at) WHERE deleted_at IS NOT NULL`
+            );
+        }
     }
 
     // To add a new migration: create a new entry with the next version number.

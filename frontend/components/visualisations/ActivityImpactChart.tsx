@@ -154,7 +154,7 @@ const ActivityImpactChart = () => {
                     WITH OverallAvg AS (
                         SELECT AVG(mood) as avg_mood
                         FROM entries
-                        WHERE ${timeframeCondition}
+                        WHERE deleted_at IS NULL AND (${timeframeCondition})
                     )
                     SELECT 
                         a.name as activity_name,
@@ -163,7 +163,7 @@ const ActivityImpactChart = () => {
                     FROM activities a
                     JOIN entry_activities ea ON a.id = ea.activity_id
                     JOIN entries e ON ea.entry_id = e.id
-                    WHERE ${timeframeCondition}
+                    WHERE e.deleted_at IS NULL AND (${timeframeCondition})
                     GROUP BY a.id, a.name
                     HAVING COUNT(DISTINCT e.id) >= 3
                     ORDER BY impact DESC
@@ -172,7 +172,7 @@ const ActivityImpactChart = () => {
                 setImpactData(results);
 
                 const totalResult = await db.getFirstAsync<{ total: number }>(
-                    `SELECT COUNT(*) as total FROM entries WHERE ${timeframeCondition}`
+                    `SELECT COUNT(*) as total FROM entries WHERE deleted_at IS NULL AND (${timeframeCondition})`
                 );
                 setTotalEntries(totalResult?.total || 0);
             } catch (error) {

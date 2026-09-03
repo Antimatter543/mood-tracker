@@ -29,6 +29,12 @@ import { sectionKeyForDate, formatSectionTitle } from './timeline/dateHeader';
 // and mutates via updateMoodEntry / deleteMoodEntry (databases/entries.ts). The
 // component is hooks + rendering only — zero SQL, zero transactions.
 import { getEntriesPage, updateMoodEntry, deleteMoodEntry, setEntryStarred } from '@/databases/entries';
+// Recycle bin (migration 12): `deleteMoodEntry` is now a SOFT delete, so the
+// destructive-looking tap is fully reversible, from the snackbar right after it,
+// or from the "Recently deleted" panel for the next 30 days.
+import { getBinCount, restoreMoodEntry } from '@/databases/entry-bin';
+import { UndoSnackbar } from './UndoSnackbar';
+import { RecentlyDeletedPanel } from './timeline/RecentlyDeletedPanel';
 
 const ITEMS_PER_PAGE = 20;
 // Debounce the search text before it hits SQL so each keystroke doesn't fire a
@@ -176,6 +182,15 @@ export function DatabaseViewer() {
     // failure never blanks a full DB into the EmptyState. Cleared on any
     // successful load.
     const [loadError, setLoadError] = useState(false);
+    // Recycle bin. `binCount` drives the search bar's badge; `pendingUndo` holds
+    // the entry id the snackbar can restore (null = no snackbar). `undoNonce`
+    // makes two consecutive deletes of the SAME entry-less message distinct, so
+    // the snackbar's auto-dismiss timer restarts rather than inheriting the
+    // first one's remaining time.
+    const [binCount, setBinCount] = useState(0);
+    const [binVisible, setBinVisible] = useState(false);
+    const [pendingUndo, setPendingUndo] = useState<{ id: number; nonce: number } | null>(null);
+    const undoNonce = useRef(0);
 
     // Search + mood filter. `searchQuery` is the RAW input (drives the field with
     // zero lag); `debouncedQuery` is what actually reaches SQL. `moodPresetKey`
@@ -226,9 +241,10 @@ export function DatabaseViewer() {
 
     // Event Handlers
     const handleDelete = async (entryId: number) => {
-        // deleteMoodEntry does the DELETE (FK cascade removes activity/media
-        // rows) + unlinks the photo files, returning a DatabaseResult (it never
-        // throws). On failure we keep the row on screen and tell the user.
+        // deleteMoodEntry is a SOFT delete since migration 12: it only stamps
+        // `deleted_at`, so the entry's activities, media rows and photo FILES all
+        // survive and the undo below is lossless. It returns a DatabaseResult
+        // (never throws); on failure we keep the row on screen and tell the user.
         const result = await deleteMoodEntry(db, entryId);
         if (!result.success) {
             Alert.alert("Couldn't delete entry", result.message);
@@ -242,6 +258,20 @@ export function DatabaseViewer() {
                 }))
                 .filter(section => section.data.length > 0)
         );
+        setPendingUndo({ id: entryId, nonce: ++undoNonce.current });
+        refetchEntries();
+    };
+
+    // Undo: put the entry straight back. A full reload (not a local splice) is
+    // what restores it to its correct DATE position in the sections, the entry
+    // may well not belong at the end of the list it was removed from.
+    const handleUndoDelete = async (entryId: number) => {
+        const result = await restoreMoodEntry(db, entryId);
+        if (!result.success) {
+            Alert.alert("Couldn't restore entry", result.message);
+            return;
+        }
+        await loadInitialDataRef.current();
         refetchEntries();
     };
 
@@ -353,6 +383,20 @@ export function DatabaseViewer() {
     // supersedes any in-flight loadMore (shared beginRun) so it can't append stale
     // pages onto the freshly-filtered list.
     useDataRefresh(loadInitialData, [db, debouncedQuery, moodPresetKey, starredOnly]);
+    // Undo (declared ABOVE loadInitialData) needs to re-run the loader; a ref
+    // updated every render lets it call the CURRENT one without hoisting the
+    // whole loader above the handlers or touching the useLatestRun wiring —
+    // the same trick `filtersRef` uses.
+    const loadInitialDataRef = useRef(loadInitialData);
+    loadInitialDataRef.current = loadInitialData;
+
+    // Bin badge count. Rides the SAME focus/data-version signal as the list, so
+    // it re-counts after any delete, undo, restore or purge without its own
+    // plumbing. `getBinCount` never throws (a badge must not break the Timeline).
+    const loadBinCount = useCallback(async () => {
+        setBinCount(await getBinCount(db));
+    }, [db]);
+    useDataRefresh(loadBinCount, [db]);
 
     const loadMoreData = async () => {
         if (isLoadingMore || !hasMore) return;
@@ -433,6 +477,8 @@ export function DatabaseViewer() {
                 onMoodPresetChange={setMoodPresetKey}
                 starredOnly={starredOnly}
                 onStarredChange={setStarredOnly}
+                binCount={binCount}
+                onOpenBin={() => setBinVisible(true)}
                 colors={colors}
             />
             {isLoading && sections.length === 0 ? (
@@ -503,6 +549,30 @@ export function DatabaseViewer() {
                     contentContainerStyle={styles.container}
                 />
             )}
+            {/* Undo affordance for the soft delete. In-tree (mounted through the
+                OverlayHost), never a react-native <Modal>. Keyed by the undo nonce
+                so a second delete restarts the countdown instead of inheriting
+                the first snackbar's remaining time. */}
+            <UndoSnackbar
+                key={pendingUndo?.nonce ?? 'idle'}
+                visible={pendingUndo !== null}
+                message="Entry moved to the bin"
+                actionLabel="Undo"
+                onAction={() => {
+                    if (pendingUndo) handleUndoDelete(pendingUndo.id);
+                }}
+                onDismiss={() => setPendingUndo(null)}
+            />
+            {/* "Recently deleted". Reloading the list on close covers the case
+                where the user restored something from inside the panel. */}
+            <RecentlyDeletedPanel
+                visible={binVisible}
+                onClose={() => setBinVisible(false)}
+                onChanged={() => {
+                    loadInitialDataRef.current();
+                    refetchEntries();
+                }}
+            />
             <EntryFormModal
                 visible={editModalVisible}
                 onClose={() => setEditModalVisible(false)}

@@ -39,12 +39,15 @@ type Overrides = {
     onQueryChange?: (t: string) => void;
     onMoodPresetChange?: (k: MoodPresetKey) => void;
     onStarredChange?: (v: boolean) => void;
+    binCount?: number;
+    onOpenBin?: () => void;
 };
 
 const renderBar = async (over: Overrides = {}) => {
     const onQueryChange = over.onQueryChange ?? jest.fn();
     const onMoodPresetChange = over.onMoodPresetChange ?? jest.fn();
     const onStarredChange = over.onStarredChange ?? jest.fn();
+    const onOpenBin = over.onOpenBin ?? jest.fn();
     // RNTL 14 render() is async — await it before spreading its queries.
     const result = await render(
         <TimelineSearchBar
@@ -54,10 +57,12 @@ const renderBar = async (over: Overrides = {}) => {
             onMoodPresetChange={onMoodPresetChange}
             starredOnly={over.starredOnly ?? false}
             onStarredChange={onStarredChange}
+            binCount={over.binCount ?? 0}
+            onOpenBin={onOpenBin}
             colors={colors}
         />
     );
-    return { ...result, onQueryChange, onMoodPresetChange, onStarredChange };
+    return { ...result, onQueryChange, onMoodPresetChange, onStarredChange, onOpenBin };
 };
 
 describe('TimelineSearchBar', () => {
