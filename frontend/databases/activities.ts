@@ -200,6 +200,203 @@ export async function deleteActivity(
 }
 
 /**
+ * Move ONE activity into another group.
+ *
+ * What is deliberately NOT touched: `entry_activities`. Those rows key on
+ * `activity_id`, so every mood entry that ever tagged this activity keeps that
+ * tag — moving an activity between groups is a pure re-filing, never a history
+ * rewrite. (Verified by an integration test, not just by reading this comment.)
+ *
+ * Validation is up front, on the read connection, so the caller gets a specific
+ * message instead of a raw UNIQUE-constraint error:
+ *  - activity must exist,
+ *  - target group must exist,
+ *  - the name must be free in the target group (`UNIQUE(name, group_id)`).
+ * Moving to the group it's already in is a legal no-op.
+ *
+ * The write is multi-statement (re-file + append position + compact the source
+ * group's positions), so it runs in ONE `withWriteTransaction` — statements on
+ * `txn` only (see databases/writeTransaction.ts). Positions stay contiguous and
+ * 1-indexed in BOTH groups, matching `deleteActivity`'s compaction contract.
+ */
+export async function moveActivityToGroup(
+  db: SQLiteDatabase,
+  activityId: number,
+  targetGroupId: number
+): Promise<DatabaseResult> {
+  try {
+    const activity = await db.getFirstAsync<{
+      name: string;
+      group_id: number;
+      position: number;
+    }>('SELECT name, group_id, position FROM activities WHERE id = ?', [activityId]);
+
+    if (!activity) {
+      return {
+        success: false,
+        message: 'Activity not found',
+      };
+    }
+
+    if (activity.group_id === targetGroupId) {
+      return {
+        success: true,
+        message: 'Activity is already in this group',
+      };
+    }
+
+    const targetGroup = await db.getFirstAsync<{ id: number }>(
+      'SELECT id FROM activity_groups WHERE id = ?',
+      [targetGroupId]
+    );
+
+    if (!targetGroup) {
+      return {
+        success: false,
+        message: 'Target group not found',
+      };
+    }
+
+    const nameClash = await db.getFirstAsync<{ id: number }>(
+      'SELECT id FROM activities WHERE name = ? AND group_id = ?',
+      [activity.name, targetGroupId]
+    );
+
+    if (nameClash) {
+      return {
+        success: false,
+        message: 'An activity with this name already exists in that group',
+      };
+    }
+
+    const maxRow = await db.getFirstAsync<{ maxPosition: number }>(
+      `SELECT COALESCE(MAX(position), 0) as maxPosition
+       FROM activities
+       WHERE group_id = ?`,
+      [targetGroupId]
+    );
+
+    const nextPosition = (maxRow?.maxPosition || 0) + 1;
+
+    await withWriteTransaction(async (txn) => {
+      await txn.runAsync(
+        'UPDATE activities SET group_id = ?, position = ? WHERE id = ?',
+        [targetGroupId, nextPosition, activityId]
+      );
+
+      // Close the gap the move left behind in the SOURCE group.
+      await txn.runAsync(
+        `UPDATE activities
+         SET position = position - 1
+         WHERE group_id = ?
+         AND position > ?`,
+        [activity.group_id, activity.position]
+      );
+    });
+
+    return {
+      success: true,
+      message: 'Activity moved successfully',
+    };
+  } catch (error) {
+    console.error('Error moving activity to group:', error);
+    return {
+      success: false,
+      message: 'Failed to move activity',
+    };
+  }
+}
+
+/**
+ * Move EVERY activity out of one group into another — the safe alternative
+ * offered before a destructive group delete ("move these somewhere first").
+ *
+ * Name clashes are SKIPPED, not fatal: `UNIQUE(name, group_id)` means an
+ * activity whose name already exists in the target can't be moved, and aborting
+ * the whole batch over one collision would strand the user. The skipped names
+ * come back in the result so the UI can say exactly what stayed behind (and the
+ * delete warning, re-measured afterwards, then shows the real remaining cost).
+ *
+ * One transaction for the whole batch: either the moves land together or none
+ * do. Positions are appended after the target group's existing tail and the
+ * source group is left empty (nothing to compact — everything movable left).
+ */
+export async function moveActivitiesToGroup(
+  db: SQLiteDatabase,
+  fromGroupId: number,
+  toGroupId: number
+): Promise<DatabaseResult & { moved: number; skipped: string[] }> {
+  const fail = (message: string) => ({ success: false, message, moved: 0, skipped: [] });
+
+  try {
+    if (fromGroupId === toGroupId) {
+      return fail('Pick a different group to move these activities into');
+    }
+
+    const targetGroup = await db.getFirstAsync<{ id: number }>(
+      'SELECT id FROM activity_groups WHERE id = ?',
+      [toGroupId]
+    );
+
+    if (!targetGroup) {
+      return fail('Target group not found');
+    }
+
+    const sourceActivities = await db.getAllAsync<{ id: number; name: string }>(
+      'SELECT id, name FROM activities WHERE group_id = ? ORDER BY position',
+      [fromGroupId]
+    );
+
+    const targetNames = await db.getAllAsync<{ name: string }>(
+      'SELECT name FROM activities WHERE group_id = ?',
+      [toGroupId]
+    );
+    const taken = new Set(targetNames.map((row) => row.name));
+
+    const movable = sourceActivities.filter((a) => !taken.has(a.name));
+    const skipped = sourceActivities.filter((a) => taken.has(a.name)).map((a) => a.name);
+
+    if (movable.length === 0) {
+      return {
+        success: false,
+        message: skipped.length
+          ? 'Every activity in this group shares a name with one in the target group'
+          : 'This group has no activities to move',
+        moved: 0,
+        skipped,
+      };
+    }
+
+    const maxRow = await db.getFirstAsync<{ maxPosition: number }>(
+      `SELECT COALESCE(MAX(position), 0) as maxPosition
+       FROM activities
+       WHERE group_id = ?`,
+      [toGroupId]
+    );
+    const basePosition = maxRow?.maxPosition || 0;
+
+    await withWriteTransaction(async (txn) => {
+      for (let i = 0; i < movable.length; i++) {
+        await txn.runAsync(
+          'UPDATE activities SET group_id = ?, position = ? WHERE id = ?',
+          [toGroupId, basePosition + i + 1, movable[i].id]
+        );
+      }
+    });
+
+    return {
+      success: true,
+      message: `Moved ${movable.length} ${movable.length === 1 ? 'activity' : 'activities'}`,
+      moved: movable.length,
+      skipped,
+    };
+  } catch (error) {
+    console.error('Error moving activities between groups:', error);
+    return fail('Failed to move activities');
+  }
+}
+
+/**
  * Bulk re-assign positions in the order supplied. Used by drag-and-drop.
  *
  * Position is reassigned to `index + 1` so the result is always contiguous

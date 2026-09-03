@@ -20,6 +20,13 @@ export type Activity = {
 export type ActivityGroup = {
   id: number;
   name: string;
+  /**
+   * User-controlled display order (migration 13). Every group read sorts by
+   * `sort_order, id` — see `GROUP_ORDER_BY` / `getActivityGroups` in
+   * `databases/groups.ts`. Backfilled from `id` on upgrade, so existing
+   * installs keep the exact order they already had.
+   */
+  sort_order: number;
 };
 
 

@@ -26,21 +26,28 @@ export {
   filterValidActivityIds,
 } from '@/databases/entries';
 
-// Activities: per-activity CRUD plus bulk reorder.
+// Activities: per-activity CRUD, bulk reorder, and cross-group moves.
 export {
   getActivities,
   addActivity,
   updateActivity,
   deleteActivity,
   updateActivityPositions,
+  moveActivityToGroup,
+  moveActivitiesToGroup,
 } from '@/databases/activities';
 
-// Activity groups.
+// Activity groups: CRUD, rename, drag-reorder, and delete-impact measurement.
 export {
+  getActivityGroups,
   addActivityGroup,
+  renameActivityGroup,
+  reorderActivityGroups,
   deleteActivityGroup,
+  getGroupDeletionImpact,
   checkGroupHasEntries,
 } from '@/databases/groups';
+export type { GroupDeletionImpact } from '@/databases/groups';
 
 // User-settings table operations. (The settings *registry* lives in
 // `@/databases/settings`; that's a different file on purpose so UI code
