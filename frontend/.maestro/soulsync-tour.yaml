@@ -40,10 +40,16 @@ appId: com.raeduslabs.soulsync
 - assertVisible:
     text: "Appearance & Behavior"
 - takeScreenshot: ss-settings
+# The single "Daily Reminder" switch became a LIST of custom reminders, so
+# anchor on the section header + the always-present Add control rather than on a
+# row label (row labels are user-editable, and an upgraded user's migrated row is
+# named "Daily reminder" while a fresh install may have none at all).
 - scrollUntilVisible:
     element:
-      text: "Daily Reminder"
+      text: "Reminders"
     direction: DOWN
+- assertVisible:
+    text: "Add reminder"
 - takeScreenshot: ss-reminders
 
 # ─── Entry form + photo attachment ───────────────────────────────────────────

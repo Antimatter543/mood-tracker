@@ -75,7 +75,14 @@ describe('expo-notifications lazy guard', () => {
 
     it('does not throw when require fails (functions degrade)', async () => {
         const mod = loadWithThrowingRequire();
-        await expect(mod.cancelDailyReminder()).resolves.toBeUndefined();
+        await expect(
+            mod.reconcileReminders({
+                reminders: [{ id: 'reminder-1', label: '', time: '20:00', enabled: true }],
+                currentStreak: 0,
+                todayKey: '2026-06-12',
+                entryDates: [],
+            })
+        ).resolves.toBeUndefined();
         await expect(mod.ensureAndroidChannel()).resolves.toBeUndefined();
         await expect(mod.requestNotificationPermission()).resolves.toBe(false);
         await expect(mod.getNotificationPermissionStatus()).resolves.toBe('undetermined');
@@ -83,7 +90,7 @@ describe('expo-notifications lazy guard', () => {
 
     it('logs the unavailable notice via console.warn, never console.error', async () => {
         const mod = loadWithThrowingRequire();
-        await mod.cancelDailyReminder(); // triggers the guard
+        await mod.ensureAndroidChannel(); // triggers the guard
 
         expect(warnSpy).toHaveBeenCalledTimes(1);
         expect(errorSpy).not.toHaveBeenCalled();
@@ -96,13 +103,11 @@ describe('expo-notifications lazy guard', () => {
 
     it('logs the notice at most ONCE across many calls (module flag)', async () => {
         const mod = loadWithThrowingRequire();
-        await mod.cancelDailyReminder();
         await mod.ensureAndroidChannel();
         await mod.requestNotificationPermission();
         await mod.getNotificationPermissionStatus();
-        await mod.scheduleOrSkipDailyReminder({
-            enabled: true,
-            reminderTime: '20:00',
+        await mod.reconcileReminders({
+            reminders: [{ id: 'reminder-1', label: 'Morning', time: '08:00', enabled: true }],
             currentStreak: 3,
             todayKey: '2026-06-12',
             entryDates: [],
@@ -137,12 +142,11 @@ describe('expo-notifications lazy guard', () => {
     it('never requires expo-notifications in Expo Go on Android', async () => {
         const { mod, requireSpy } = loadInExpoGoAndroid();
         // Hammer every guarded entry point.
-        await mod.cancelDailyReminder();
+        await mod.ensureAndroidChannel();
         await mod.requestNotificationPermission();
         await mod.getNotificationPermissionStatus();
-        await mod.scheduleOrSkipDailyReminder({
-            enabled: true,
-            reminderTime: '20:00',
+        await mod.reconcileReminders({
+            reminders: [{ id: 'reminder-1', label: 'Morning', time: '08:00', enabled: true }],
             currentStreak: 1,
             todayKey: '2026-06-13',
             entryDates: [],
@@ -173,7 +177,15 @@ describe('expo-notifications lazy guard', () => {
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             const mod = require('@/lib/notifications');
             // Touch a guarded fn so getNotifications() runs its resolution path.
-            void mod.cancelDailyReminder();
+            // reconcileReminders resolves the module SYNCHRONOUSLY (before its
+            // first await) and, with no reminders, only ever calls the one method
+            // the stub above provides.
+            void mod.reconcileReminders({
+                reminders: [],
+                currentStreak: 0,
+                todayKey: '2026-06-13',
+                entryDates: [],
+            });
         });
         expect(requireSpy).toHaveBeenCalledTimes(1);
     });

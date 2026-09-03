@@ -38,9 +38,22 @@ describe('migrations array', () => {
     expect(migrations[0].version).toBe(1);
   });
 
-  it('has sequential version numbers with no gaps', () => {
-    for (let i = 0; i < migrations.length; i++) {
-      expect(migrations[i].version).toBe(i + 1);
+  // The invariant that actually protects users is UNIQUE + STRICTLY ASCENDING,
+  // not dense numbering. runMigrations applies every migration whose version
+  // exceeds the stored user_version and stamps each one's own number, so a gap
+  // (which happens transiently while parallel feature branches hold reserved
+  // version numbers) is harmless. A REUSED or out-of-order number is NOT: it
+  // would let a migration be skipped forever on an already-upgraded device.
+  // Guard the dangerous case; allow the harmless one.
+  it('has unique, strictly ascending, positive integer version numbers', () => {
+    const versions = migrations.map(m => m.version);
+    expect(new Set(versions).size).toBe(versions.length);
+    for (const v of versions) {
+      expect(Number.isInteger(v)).toBe(true);
+      expect(v).toBeGreaterThan(0);
+    }
+    for (let i = 1; i < versions.length; i++) {
+      expect(versions[i]).toBeGreaterThan(versions[i - 1]);
     }
   });
 

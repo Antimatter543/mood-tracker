@@ -54,22 +54,21 @@ export const SETTINGS_REGISTRY = {
         description:
             'Count activities toward your mood for the next ~36 hours, with fading weight — not just the day you log them',
     },
-    reminder_enabled: {
-        key: 'reminder_enabled',
-        default: false,
-        type: 'switch',
-        label: 'Daily Reminder',
-        description: 'Get a nudge to log your mood each day',
-    },
-    reminder_time: {
-        key: 'reminder_time',
-        // "HH:MM" 24-hour local time. type:'text' means the generic SettingRow
-        // renderer skips it — it is controlled by the custom Reminders card
-        // (RemindersSection) with a time picker.
-        default: '20:00',
+    reminders: {
+        key: 'reminders',
+        // A JSON-encoded Reminder[] (see lib/reminders.ts) — the user's list of
+        // named reminders, each with its own time + enabled flag. type:'text'
+        // means the generic SettingRow renderer skips it; the whole list is
+        // owned by the custom Reminders card (components/RemindersSection.tsx).
+        //
+        // This REPLACED the single `reminder_enabled` + `reminder_time` pair in
+        // v2.10 (migration 14 folds those legacy rows into the list). The legacy
+        // rows still exist in user_settings as that migration's source of truth,
+        // but nothing reads them any more, so they are no longer registry keys.
+        default: '[]',
         type: 'text',
-        label: 'Reminder Time',
-        description: 'When to send your daily reminder',
+        label: 'Reminders',
+        description: 'Times you want to be nudged to log your mood',
     }
 } as const;
 
@@ -81,8 +80,7 @@ export type SettingValues = {
     mood_precision: 'high' | 'low';
     show_mood_benchmarks: boolean;
     activity_carryover: boolean;
-    reminder_enabled: boolean;
-    reminder_time: string;  // "HH:MM" 24-hour local time
+    reminders: string;  // JSON-encoded Reminder[] — parse with lib/reminders.parseReminders
 };
 
 export type SettingKey = keyof typeof SETTINGS_REGISTRY;

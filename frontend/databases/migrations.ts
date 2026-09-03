@@ -7,6 +7,10 @@
 import { createInitialSchema, seedActivitiesV1 } from '@/databases/lifecycle';
 import { initializeSettingsTable } from '@/databases/user-settings';
 import { initialActivities } from '@/components/seedData';
+// Pure model helpers (no native deps) — migration 14 folds the legacy single
+// daily reminder into the reminder LIST. Keeping the shape logic in lib/reminders
+// means the migration and the app can never disagree about the stored format.
+import { legacyReminderToList, serializeReminders } from '@/lib/reminders';
 import { SQLiteDatabase } from 'expo-sqlite';
 
 type Migration = {
@@ -268,6 +272,48 @@ export const migrations: Migration[] = [
             await db.runAsync(
                 `CREATE INDEX IF NOT EXISTS idx_entries_deleted
                  ON entries(deleted_at) WHERE deleted_at IS NOT NULL`
+            );
+        }
+    },
+    {
+        // MULTIPLE custom reminders. The single daily reminder (migration 4's
+        // `reminder_enabled` + `reminder_time`) becomes a LIST: a JSON-encoded
+        // Reminder[] in the `reminders` key (model: lib/reminders.ts, registry
+        // entry: databases/settings.ts).
+        //
+        // Backward compat is the whole point of this migration: an existing
+        // user's configured reminder is folded into the list as "Daily
+        // reminder", keeping BOTH their time and their on/off state — a user who
+        // had it switched off keeps their time, disabled, rather than the row
+        // vanishing. On a fresh install migration 4 has just seeded the legacy
+        // defaults ('false' / '20:00'), so this produces one disabled 20:00
+        // reminder — a sensible starting row to toggle on.
+        //
+        // The legacy rows are deliberately LEFT in user_settings: they are this
+        // migration's source of truth (and re-read if the DB is ever reset and
+        // re-migrated from 0). Nothing else reads them.
+        //
+        // `INSERT OR IGNORE` so a re-run can never clobber a real list.
+        //
+        // NOTE ON THE VERSION NUMBER: 12 and 13 belong to sibling feature
+        // branches merged in the same batch. A gap is harmless to runMigrations
+        // (it applies every migration whose version exceeds user_version), but
+        // never REUSE a number — see the duplicate-version guard in
+        // __tests__/migrations.test.ts.
+        version: 14,
+        up: async (db: SQLiteDatabase) => {
+            const enabledRow = await db.getFirstAsync<{ value: string }>(
+                `SELECT value FROM user_settings WHERE key = 'reminder_enabled'`
+            );
+            const timeRow = await db.getFirstAsync<{ value: string }>(
+                `SELECT value FROM user_settings WHERE key = 'reminder_time'`
+            );
+
+            const list = legacyReminderToList(enabledRow?.value, timeRow?.value);
+
+            await db.runAsync(
+                `INSERT OR IGNORE INTO user_settings (key, value) VALUES ('reminders', ?)`,
+                [serializeReminders(list)]
             );
         }
     }
