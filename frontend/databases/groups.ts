@@ -9,8 +9,8 @@ import { withWriteTransaction } from '@/databases/writeTransaction';
  * result on the happy path AND on expected error paths (DB throws,
  * validation failures). Nothing in this module throws to the caller — the
  * UI layer is expected to switch on `success` rather than try/catch.
- * `checkGroupHasEntries` returns the same `{ exists, hasEntries }` shape
- * on DB error so callers can use a single branch.
+ * `getGroupDeletionImpact` returns the same `{ exists: false, …0 }` shape on
+ * DB error as for a missing group, so callers gate destructive UI on one branch.
  *
  * Ordering: groups carry a user-controlled `sort_order` (migration 13).
  * `GROUP_ORDER_BY` below is the SINGLE canonical ordering clause — every
@@ -291,11 +291,6 @@ export async function getGroupDeletionImpact(
       return { exists: false, activityCount: 0, entryCount: 0 };
     }
 
-    // Entry count is queried BEFORE the activity count, preserving the query
-    // ORDER this function inherited from `checkGroupHasEntries` (existence →
-    // entries). Unit tests drive the expo-sqlite mock by call order, so keeping
-    // that order keeps the historic `checkGroupHasEntries` contract tests
-    // meaningful rather than silently re-pointing them at a different query.
     const entryRow = await db.getFirstAsync<{ count: number }>(
       `SELECT COUNT(DISTINCT ea.entry_id) as count
        FROM entry_activities ea
@@ -320,28 +315,4 @@ export async function getGroupDeletionImpact(
     console.error('Error measuring group deletion impact:', error);
     return { exists: false, activityCount: 0, entryCount: 0 };
   }
-}
-
-/**
- * Inspect a group: does it exist, and does it have any mood entries
- * linked through its activities?
- *
- * Thin boolean view over `getGroupDeletionImpact` (kept because callers that
- * only need the yes/no gate read better with it, and its error contract is
- * relied upon). Returns `{ exists: false, hasEntries: false }` on DB error —
- * same shape as the "group not found" case. This is intentional: callers want
- * a single boolean to gate UI ("can the user delete this group without losing
- * entries?"), and surfacing a DB hiccup as "yeah it has entries" is the safer
- * default than throwing or returning `null` and forcing every caller to add
- * error-handling.
- */
-export async function checkGroupHasEntries(
-  db: SQLiteDatabase,
-  groupId: number
-): Promise<{ exists: boolean; hasEntries: boolean }> {
-  const impact = await getGroupDeletionImpact(db, groupId);
-  return {
-    exists: impact.exists,
-    hasEntries: impact.exists && impact.entryCount > 0,
-  };
 }

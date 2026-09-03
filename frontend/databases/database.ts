@@ -45,7 +45,6 @@ export {
   reorderActivityGroups,
   deleteActivityGroup,
   getGroupDeletionImpact,
-  checkGroupHasEntries,
 } from '@/databases/groups';
 export type { GroupDeletionImpact } from '@/databases/groups';
 

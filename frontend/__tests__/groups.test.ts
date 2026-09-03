@@ -7,7 +7,6 @@ jest.mock('@/components/types', () => ({}));
 import {
   addActivityGroup,
   deleteActivityGroup,
-  checkGroupHasEntries,
 } from '@/databases/groups';
 import {
   __setWriteConnectionForTests,
@@ -88,54 +87,5 @@ describe('deleteActivityGroup', () => {
     );
     expect(deleteCalls.length).toBe(1);
     expect(deleteCalls[0][0]).toContain('activity_groups');
-  });
-});
-
-describe('checkGroupHasEntries — exists/hasEntries matrix', () => {
-  it('case A: group does not exist -> {exists:false, hasEntries:false}', async () => {
-    const db = makeDb();
-    db.getFirstAsync.mockResolvedValueOnce(null);
-
-    const result = await checkGroupHasEntries(db as any, 999);
-    expect(result).toEqual({ exists: false, hasEntries: false });
-  });
-
-  it('case B: group exists, no entries -> {exists:true, hasEntries:false}', async () => {
-    const db = makeDb();
-    db.getFirstAsync
-      .mockResolvedValueOnce({ id: 1 })
-      .mockResolvedValueOnce({ count: 0 });
-
-    const result = await checkGroupHasEntries(db as any, 1);
-    expect(result).toEqual({ exists: true, hasEntries: false });
-  });
-
-  it('case C: group exists, has entries -> {exists:true, hasEntries:true}', async () => {
-    const db = makeDb();
-    db.getFirstAsync
-      .mockResolvedValueOnce({ id: 1 })
-      .mockResolvedValueOnce({ count: 5 });
-
-    const result = await checkGroupHasEntries(db as any, 1);
-    expect(result).toEqual({ exists: true, hasEntries: true });
-  });
-
-  it('case D: DB error returns same shape (no throw)', async () => {
-    const db = makeDb();
-    db.getFirstAsync.mockRejectedValue(new Error('disk gone'));
-
-    const result = await checkGroupHasEntries(db as any, 1);
-    expect(result).toEqual({ exists: false, hasEntries: false });
-  });
-
-  it('coerces count row of null to hasEntries:false (defensive)', async () => {
-    const db = makeDb();
-    db.getFirstAsync
-      .mockResolvedValueOnce({ id: 1 })
-      .mockResolvedValueOnce(null);
-
-    const result = await checkGroupHasEntries(db as any, 1);
-    expect(result.exists).toBe(true);
-    expect(result.hasEntries).toBe(false);
   });
 });
