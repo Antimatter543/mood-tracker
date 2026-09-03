@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
+import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
 import { useDataContext } from '@/context/DataContext';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useLatestRun } from '@/hooks/useLatestRun';
@@ -56,7 +57,9 @@ const useThemedStyles = (colors: any) => {
             flex: 1,
         },
         container: {
-            paddingHorizontal: 16,
+            // The entry list's gutter — same as the search bar pinned above it
+            // and the Timeline page title above that (styles/layout.ts).
+            paddingHorizontal: LAYOUT_CONTENT_PADDING,
         },
         loadingContainer: {
             flex: 1,

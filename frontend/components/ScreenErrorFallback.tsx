@@ -1,6 +1,7 @@
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useMemo } from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ErrorBoundaryProps } from 'expo-router';
 
 import { useThemeColors, ThemeColors } from '@/styles/global';
@@ -41,7 +42,13 @@ export function ScreenErrorFallback({
   retry: () => void;
 }) {
   const colors = useThemeColors();
-  const styles = useStyles(colors);
+  // This fallback REPLACES the screen's content, so it renders outside
+  // `Layout` and must claim the top safe-area itself. It used to inherit
+  // clearance from the navigator's header bar; that bar is gone now
+  // (headerShown: false for every tab), so without this the centred block can
+  // grow into the status bar / notch at large font scales.
+  const insets = useSafeAreaInsets();
+  const styles = useStyles(colors, insets.top);
 
   return (
     <View style={styles.container}>
@@ -94,7 +101,7 @@ export function ScreenErrorBoundary({ error, retry }: ErrorBoundaryProps) {
   return <ScreenErrorFallback error={error} retry={retry} />;
 }
 
-const useStyles = (colors: ThemeColors) =>
+const useStyles = (colors: ThemeColors, insetTop: number) =>
   useMemo(
     () =>
       StyleSheet.create({
@@ -103,6 +110,7 @@ const useStyles = (colors: ThemeColors) =>
           alignItems: 'center',
           justifyContent: 'center',
           paddingHorizontal: 32,
+          paddingTop: insetTop,
           gap: 12,
           backgroundColor: colors.background,
         },
@@ -145,5 +153,5 @@ const useStyles = (colors: ThemeColors) =>
           textAlign: 'center',
         },
       }),
-    [colors],
+    [colors, insetTop],
   );

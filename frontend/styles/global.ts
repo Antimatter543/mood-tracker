@@ -232,19 +232,10 @@ export const useGlobalStyles = (colors: ThemeColors) => {
             textTransform: 'uppercase',
             letterSpacing: 1.2,
         },
-        header: {
-            flexDirection: 'row',
-            alignItems: 'center',
-            padding: 16,
-            marginBottom: 16,
-        },
-        headerText: {
-            fontSize: 28,
-            fontWeight: '800',
-            color: colors.text,
-            marginLeft: 12,
-            letterSpacing: -0.5,
-        },
+        // NOTE: a `header` / `headerText` pair used to live here, used by
+        // Settings alone. Page titles are now the job of exactly ONE component —
+        // components/PageHeader.tsx — so every tab renders the same thing. Don't
+        // re-add a page-title style here.
     }), [colors]);
 };
 

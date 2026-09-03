@@ -1,7 +1,10 @@
 import { useMemo, useState, useCallback } from 'react';
 import { View, StyleSheet, ScrollView } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Layout } from '@/components/PageContainer';
+import { PageHeader, pageHeaderFullHeightInset } from '@/components/PageHeader';
+import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
 import { EmptyState } from '@/components/EmptyState';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { TOTAL_ENTRIES } from '@/components/visualisations/queries';
@@ -91,7 +94,10 @@ const StatisticsContent = () => {
           alignItems: 'center',
         },
         content: {
-          paddingHorizontal: 16,
+          // Same gutter as the page title above it and as every scrolling
+          // screen's content (Layout's scrollContent padding) — see
+          // styles/layout.ts.
+          paddingHorizontal: LAYOUT_CONTENT_PADDING,
           // Measured header height + a small gap, instead of a magic 120.
           paddingTop: headerHeight + 12,
           paddingBottom: 32,
@@ -174,6 +180,17 @@ export default function Stats() {
   return (
     <TimeframeProvider>
       <Layout useScrollView={false}>
+        {/* Sits ABOVE StatisticsContent, so the timeframe selector + period
+            navigator (which StatisticsContent pins with `position: absolute;
+            top: 0` inside its own flex:1 box) pin directly under the title
+            rather than under a navigator header bar. Rendering it here — not
+            inside StatisticsContent — also keeps the title on screen through
+            the loading and empty-state branches. */}
+        <PageHeader
+          title="Statistics"
+          style={pageHeaderFullHeightInset}
+          icon={p => <Ionicons name="stats-chart-outline" {...p} />}
+        />
         <StatisticsContent />
       </Layout>
     </TimeframeProvider>
