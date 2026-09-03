@@ -17,7 +17,8 @@ import { SQLiteProvider, useSQLiteContext } from "expo-sqlite";
 import { localDateString, startOfLocalDay } from "@/databases/dateHelpers";
 import { RECENT_ENTRY_DATES } from "@/components/visualisations/queries";
 import { currentStreak } from "@/components/visualisations/transforms/streak";
-import { scheduleOrSkipDailyReminder } from "@/lib/notifications";
+import { reconcileReminders } from "@/lib/notifications";
+import { enabledReminders, parseReminders } from "@/lib/reminders";
 import { OverlayProvider } from "@/context/OverlayHost";
 import { buildTabBarStyle } from "@/lib/tabBarStyle";
 
@@ -53,11 +54,13 @@ export default function RootLayout() {
 }
 
 /**
- * Renders nothing — holds the daily-reminder re-arm effect. Lives inside the
+ * Renders nothing — holds the reminder re-arm effect. Lives inside the
  * SettingsProvider + SQLiteProvider tree so it can read settings + query the DB.
  *
  * Re-arms on mount (cold boot / navigation return) and on every transition to
  * the foreground, because the OS can silently drop scheduled notifications.
+ * Also re-runs whenever the reminder list changes, since `settings.reminders` is
+ * a dependency — that is what makes an edit in Settings take effect immediately.
  * Notifications are non-critical, so all errors are caught and never crash.
  */
 function NotificationReArm() {
@@ -67,7 +70,22 @@ function NotificationReArm() {
 
     const reArm = useCallback(async () => {
         try {
+            const reminders = parseReminders(settings.reminders);
             const todayKey = localDateString(new Date());
+
+            // Nothing to arm: reconcile anyway (it cancels anything stale the OS
+            // still holds) but skip the streak query — the copy it feeds is only
+            // used by notifications we're not scheduling.
+            if (enabledReminders(reminders).length === 0) {
+                await reconcileReminders({
+                    reminders,
+                    currentStreak: 0,
+                    todayKey,
+                    entryDates: [],
+                });
+                return;
+            }
+
             // Recent entry dates (last 90 days is plenty for streak accuracy).
             const since = startOfLocalDay(
                 new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
@@ -82,9 +100,8 @@ function NotificationReArm() {
             const entryDates = Array.from(new Set(rows.map(r => localDateString(r.date))));
             const streak = currentStreak(entryDates, todayKey);
 
-            await scheduleOrSkipDailyReminder({
-                enabled: settings.reminder_enabled,
-                reminderTime: settings.reminder_time,
+            await reconcileReminders({
+                reminders,
                 currentStreak: streak,
                 todayKey,
                 entryDates,
@@ -93,7 +110,7 @@ function NotificationReArm() {
             // Notifications are non-critical; never crash the app.
             console.warn('[notifications] re-arm failed:', e);
         }
-    }, [db, settings.reminder_enabled, settings.reminder_time]);
+    }, [db, settings.reminders]);
 
     useEffect(() => {
         // Re-arm on mount.

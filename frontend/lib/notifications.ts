@@ -17,20 +17,26 @@
  * Full notification behaviour can only be verified on a dev-client/release build.
  *
  * Architecture:
- *   - All scheduling logic lives in pure/mockable functions so the
- *     computation layer is fully unit-testable without a native build.
- *   - scheduleOrSkipDailyReminder() is the single public entry point for
- *     re-arming. Call it on every app foreground (NotificationReArm in
- *     app/(tabs)/_layout.tsx).
+ *   - All scheduling DECISIONS live in pure functions (planReminderSchedule,
+ *     buildReminderCopy, ...) so the computation layer is fully unit-testable
+ *     without a native build. The effectful half only executes a plan.
+ *   - reconcileReminders() is the single public entry point for re-arming. Call
+ *     it on every app foreground (NotificationReArm in app/(tabs)/_layout.tsx).
  *   - Notifications "drift" and can be cleared by the OS; re-arming on every
- *     foreground ensures the reminder always exists.
+ *     foreground ensures every enabled reminder always exists, and that
+ *     deleted/disabled ones are gone.
+ *   - The user can configure SEVERAL reminders (morning / afternoon / ...) —
+ *     see lib/reminders.ts for the model. Each gets its own stable notification
+ *     identifier, so reconciliation is per-reminder, not all-or-nothing.
  *   - This module never requests permissions implicitly. Permission is
- *     requested ONLY in response to a user gesture (toggling the switch).
+ *     requested ONLY in response to a user gesture (adding/enabling a reminder).
  *
  * TODO(v2): weekly-recap — fire every Sunday 10:00 local with week stats.
  */
 
 import { Platform } from 'react-native';
+import type { Reminder } from '@/lib/reminders';
+import { enabledReminders, reminderDisplayLabel } from '@/lib/reminders';
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 // Type-only import: erased at compile time, so it never pulls the native module
 // in at runtime (which would re-introduce the Expo-Go module-eval crash).
@@ -106,7 +112,21 @@ function getNotifications(): typeof NotificationsModule | null {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-export const DAILY_REMINDER_IDENTIFIER = 'soulsync-daily-reminder';
+/**
+ * The identifier used by the pre-v2.10 SINGLE daily reminder. No reminder in the
+ * list model can ever produce it (list identifiers are prefixed below), so it is
+ * only ever CANCELLED — unconditionally, on every reconcile, so an upgrading
+ * user's old notification can't survive alongside the new ones even if listing
+ * the OS schedule fails.
+ */
+export const LEGACY_DAILY_REMINDER_IDENTIFIER = 'soulsync-daily-reminder';
+
+/** Every list-model reminder schedules under `<prefix><reminder.id>`. */
+export const REMINDER_IDENTIFIER_PREFIX = 'soulsync-reminder-';
+
+// The channel ID is PERMANENT: Android keys the user's per-channel preferences
+// (sound, importance, blocked state) to it, so renaming it would orphan them and
+// silently create a second channel. The display name is free to change.
 export const ANDROID_CHANNEL_ID = 'daily-reminder';
 
 // ─── Android channel setup ────────────────────────────────────────────────────
@@ -121,7 +141,7 @@ export async function ensureAndroidChannel(): Promise<void> {
   const Notifications = getNotifications();
   if (!Notifications) return; // no native module (Expo Go) — nothing to register
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
-    name: 'Daily Reminder',
+    name: 'Reminders',
     importance: Notifications.AndroidImportance.DEFAULT,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#4CAF50',
@@ -239,46 +259,193 @@ export function nextTriggerDate(
   return trigger;
 }
 
-// ─── Core scheduling ──────────────────────────────────────────────────────────
+// ─── Identifiers ──────────────────────────────────────────────────────────────
 
-/**
- * Cancel any existing daily reminder (by identifier) and schedule a new one.
- * This is a "replace" operation — safe to call on every app foreground.
- */
-export async function rescheduleDailyReminder(
-  hour: number,
-  minute: number,
-  copy: { title: string; body: string }
-): Promise<void> {
-  const Notifications = getNotifications();
-  if (!Notifications) return; // Expo Go (no native module) — nothing to schedule
-
-  // Cancel previous so we never accumulate duplicates.
-  await Notifications.cancelScheduledNotificationAsync(DAILY_REMINDER_IDENTIFIER);
-
-  await Notifications.scheduleNotificationAsync({
-    identifier: DAILY_REMINDER_IDENTIFIER,
-    content: {
-      title: copy.title,
-      body: copy.body,
-      sound: false, // silent — a mood reminder shouldn't blare
-      ...(Platform.OS === 'android' && { channelId: ANDROID_CHANNEL_ID }),
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DAILY,
-      hour,
-      minute,
-    },
-  });
+/** The OS notification identifier for a reminder. Stable across re-arms. */
+export function reminderNotificationIdentifier(reminderId: string): string {
+  return `${REMINDER_IDENTIFIER_PREFIX}${reminderId}`;
 }
 
 /**
- * Cancel the daily reminder and remove it from the schedule.
+ * Is this scheduled notification one of OURS? Reconciliation only ever cancels
+ * identifiers this returns true for, so a notification scheduled by anything
+ * else (now or in a future feature) is never collaterally cancelled.
  */
-export async function cancelDailyReminder(): Promise<void> {
+export function isManagedNotificationIdentifier(identifier: string): boolean {
+  return (
+    identifier === LEGACY_DAILY_REMINDER_IDENTIFIER ||
+    identifier.startsWith(REMINDER_IDENTIFIER_PREFIX)
+  );
+}
+
+// ─── Copy for one reminder ────────────────────────────────────────────────────
+
+/**
+ * Notification copy for a single reminder.
+ *
+ * The user-set label becomes the TITLE — with several reminders firing on the
+ * same day, "Morning check-in" vs "Evening reflection" is what makes them
+ * distinguishable at a glance in the shade. The streak-aware body keeps the
+ * motivation. An unlabelled reminder falls back to the streak title, i.e. the
+ * pre-list behaviour.
+ * Pure function — unit-testable.
+ */
+export function buildReminderCopy(
+  label: string,
+  streak: number
+): { title: string; body: string } {
+  const base = pickReminderCopy(streak);
+  const trimmed = label.trim();
+  return trimmed ? { title: trimmed, body: base.body } : base;
+}
+
+// ─── Reconciliation (pure planning) ───────────────────────────────────────────
+
+/** One notification the OS should hold, fully resolved. */
+export interface PlannedNotification {
+  identifier: string;
+  hour: number;
+  minute: number;
+  title: string;
+  body: string;
+}
+
+export interface ReminderSchedulePlan {
+  /** Identifiers of OURS to cancel — deleted/disabled reminders + the legacy one. */
+  toCancel: string[];
+  /** One entry per enabled reminder. Executed as cancel-then-schedule. */
+  toSchedule: PlannedNotification[];
+}
+
+export interface ReminderPlanInput {
+  reminders: readonly Reminder[];
+  /**
+   * What the OS currently holds (from getAllScheduledNotificationsAsync). Pass
+   * [] when it can't be read — the plan stays correct, it just can't clean up
+   * identifiers it doesn't know about (the next successful read will).
+   */
+  scheduledIdentifiers?: readonly string[];
+  currentStreak: number;
+  /** Today's YYYY-MM-DD in local time. */
+  todayKey: string;
+  /** Recent local date strings, for the already-logged-today check. */
+  entryDates: readonly string[];
+}
+
+/**
+ * Decide the whole schedule from (reminders x what's currently scheduled).
+ * PURE — no native module, no clock. This is the function the tests drive.
+ *
+ * Rules:
+ *   1. Every ENABLED reminder is scheduled under its own stable identifier. It
+ *      is always re-scheduled (not "scheduled only if missing"), because a
+ *      changed time/label must take effect and cancel-then-schedule by
+ *      identifier is idempotent — re-arming can never accumulate duplicates.
+ *   2. Anything OF OURS that the OS holds but we no longer want (a deleted or
+ *      disabled reminder) is cancelled. Foreign identifiers are left alone.
+ *   3. The legacy single-reminder identifier is ALWAYS cancelled: it can never
+ *      be desired, and cancelling unconditionally means an upgrading user is
+ *      cleaned up even if the OS schedule couldn't be read. Cancelling an
+ *      identifier that isn't scheduled is a no-op.
+ *   4. Streak copy: if the user already logged today, the next fire is
+ *      tomorrow, so the copy uses tomorrow's streak (one more than today's).
+ */
+export function planReminderSchedule(input: ReminderPlanInput): ReminderSchedulePlan {
+  const { reminders, scheduledIdentifiers = [], currentStreak, todayKey, entryDates } = input;
+
+  const active = enabledReminders(reminders);
+  const streak = hasLoggedToday(todayKey, entryDates as string[])
+    ? currentStreak + 1
+    : currentStreak;
+
+  const toSchedule: PlannedNotification[] = active.map(reminder => {
+    const { hour, minute } = parseReminderTime(reminder.time);
+    const copy = buildReminderCopy(reminderDisplayLabel(reminder), streak);
+    return {
+      identifier: reminderNotificationIdentifier(reminder.id),
+      hour,
+      minute,
+      title: copy.title,
+      body: copy.body,
+    };
+  });
+
+  const desired = new Set(toSchedule.map(p => p.identifier));
+  const toCancel = [LEGACY_DAILY_REMINDER_IDENTIFIER];
+  for (const identifier of scheduledIdentifiers) {
+    if (!isManagedNotificationIdentifier(identifier)) continue; // never ours to cancel
+    if (desired.has(identifier)) continue; // about to be re-scheduled
+    if (toCancel.includes(identifier)) continue; // de-dupe (incl. the legacy id)
+    toCancel.push(identifier);
+  }
+
+  return { toCancel, toSchedule };
+}
+
+// ─── Reconciliation (effects) ─────────────────────────────────────────────────
+
+/**
+ * Identifiers the OS currently holds for THIS app. Returns [] (never throws)
+ * when the native module is absent or the query fails — the plan degrades to
+ * "can't clean up unknown identifiers", not to a crash.
+ */
+async function getScheduledIdentifiers(): Promise<string[]> {
+  const Notifications = getNotifications();
+  if (!Notifications) return [];
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    return scheduled.map(request => request.identifier);
+  } catch {
+    return [];
+  }
+}
+
+/** Execute a plan against the OS. No-ops entirely without the native module. */
+async function applyReminderSchedulePlan(plan: ReminderSchedulePlan): Promise<void> {
+  const Notifications = getNotifications();
+  if (!Notifications) return; // Expo Go (no native module) — nothing to schedule
+
+  for (const identifier of plan.toCancel) {
+    await Notifications.cancelScheduledNotificationAsync(identifier);
+  }
+
+  for (const planned of plan.toSchedule) {
+    // Cancel first so a re-arm replaces rather than stacks. (Scheduling with an
+    // existing identifier is not a documented replace on every platform.)
+    await Notifications.cancelScheduledNotificationAsync(planned.identifier);
+    await Notifications.scheduleNotificationAsync({
+      identifier: planned.identifier,
+      content: {
+        title: planned.title,
+        body: planned.body,
+        sound: false, // silent — a mood reminder shouldn't blare
+        ...(Platform.OS === 'android' && { channelId: ANDROID_CHANNEL_ID }),
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DAILY,
+        hour: planned.hour,
+        minute: planned.minute,
+      },
+    });
+  }
+}
+
+/**
+ * Cancel every reminder this module owns (both the list identifiers the OS
+ * currently holds and the legacy one). Used when reminders are wiped.
+ */
+export async function cancelAllReminders(): Promise<void> {
   const Notifications = getNotifications();
   if (!Notifications) return; // nothing was scheduled where there's no module
-  await Notifications.cancelScheduledNotificationAsync(DAILY_REMINDER_IDENTIFIER);
+  await applyReminderSchedulePlan({
+    toCancel: [
+      LEGACY_DAILY_REMINDER_IDENTIFIER,
+      ...(await getScheduledIdentifiers()).filter(
+        id => isManagedNotificationIdentifier(id) && id !== LEGACY_DAILY_REMINDER_IDENTIFIER
+      ),
+    ],
+    toSchedule: [],
+  });
 }
 
 // ─── "Already logged today" guard ─────────────────────────────────────────────
@@ -298,47 +465,40 @@ export function hasLoggedToday(todayKey: string, entryDates: string[]): boolean 
 // ─── Main entry point ─────────────────────────────────────────────────────────
 
 export interface RearmOptions {
-  enabled: boolean;
-  reminderTime: string; // "HH:MM"
+  /** The user's full reminder list (enabled AND disabled — see the model). */
+  reminders: readonly Reminder[];
   currentStreak: number;
   todayKey: string; // YYYY-MM-DD local
   entryDates: string[]; // recent local date strings
 }
 
 /**
- * Top-level re-arm function. Call this on every app foreground.
+ * Top-level re-arm function — the SINGLE public entry point. Call this on every
+ * app foreground (NotificationReArm in app/(tabs)/_layout.tsx).
  *
- * Logic:
- *   1. If reminders disabled → cancel any existing and return.
- *   2. If user already logged today → keep the DAILY reminder armed but with
- *      copy reflecting tomorrow's streak (the OS fires the next slot, which is
- *      tomorrow, since today's H:M has effectively been satisfied).
- *   3. Otherwise → (re)schedule the DAILY reminder with streak-aware copy.
- *
- * The DAILY trigger is idempotent: rescheduleDailyReminder() cancels the prior
- * one by identifier first, so re-arming never accumulates duplicates.
+ * Reads what the OS currently holds, plans the whole schedule purely
+ * (planReminderSchedule — that is where the logic and the tests live), then
+ * executes: cancel what is stale, (re)schedule every enabled reminder.
  *
  * This function does NOT request permissions. Call requestNotificationPermission()
- * separately, triggered by the user toggling the switch.
+ * separately, triggered by the user adding or enabling a reminder.
  */
-export async function scheduleOrSkipDailyReminder(opts: RearmOptions): Promise<void> {
-  if (!opts.enabled) {
-    await cancelDailyReminder();
-    return;
+export async function reconcileReminders(opts: RearmOptions): Promise<void> {
+  const Notifications = getNotifications();
+  if (!Notifications) return; // Expo Go (no native module) — nothing to do
+
+  const plan = planReminderSchedule({
+    reminders: opts.reminders,
+    scheduledIdentifiers: await getScheduledIdentifiers(),
+    currentStreak: opts.currentStreak,
+    todayKey: opts.todayKey,
+    entryDates: opts.entryDates,
+  });
+
+  // Only touch the channel when something will actually be posted to it.
+  if (plan.toSchedule.length > 0) {
+    await ensureAndroidChannel();
   }
 
-  await ensureAndroidChannel();
-
-  const { hour, minute } = parseReminderTime(opts.reminderTime);
-
-  if (hasLoggedToday(opts.todayKey, opts.entryDates)) {
-    // Already logged today — the next DAILY fire is tomorrow, so use the copy
-    // for tomorrow's streak (one more consecutive day than today's count).
-    const copy = pickReminderCopy(opts.currentStreak + 1);
-    await rescheduleDailyReminder(hour, minute, copy);
-    return;
-  }
-
-  const copy = pickReminderCopy(opts.currentStreak);
-  await rescheduleDailyReminder(hour, minute, copy);
+  await applyReminderSchedulePlan(plan);
 }
