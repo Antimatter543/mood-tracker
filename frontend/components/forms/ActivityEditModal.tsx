@@ -270,6 +270,15 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
         groupSelectorContainer: {
             marginBottom: 16,
         },
+        // Pushes the chevron to the right edge while the group name takes the
+        // slack (and ellipsizes rather than shoving the chevron off the row).
+        groupSelectorRow: {
+            justifyContent: 'space-between',
+        },
+        groupSelectorLabel: {
+            flexShrink: 1,
+            flexGrow: 1,
+        },
         // Group picker: a smaller dialog than the edit card itself, since it's
         // just a scrollable list of group names.
         groupPickerContent: {
@@ -352,14 +361,19 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
                     <View style={styles.groupSelectorContainer}>
                         <Text style={styles.label}>Group</Text>
                         <Pressable
-                            style={styles.iconSelector}
+                            style={[styles.iconSelector, styles.groupSelectorRow]}
                             onPress={() => setGroupPickerVisible(true)}
                             accessibilityRole="button"
                             accessibilityLabel="Move activity to another group"
                         >
-                            <Text style={styles.iconSelectorText}>
+                            {/* Leading folder + trailing chevron so this row reads
+                                as an opens-a-picker control, matching the Icon row
+                                above it (which leads with the chosen icon). */}
+                            <Feather name="folder" size={20} color={colors.text} />
+                            <Text style={[styles.iconSelectorText, styles.groupSelectorLabel]} numberOfLines={1}>
                                 {groups.find((g) => g.id === selectedGroupId)?.name ?? 'Select a group'}
                             </Text>
+                            <Feather name="chevron-down" size={20} color={colors.textSecondary} />
                         </Pressable>
                     </View>
 
