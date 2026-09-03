@@ -174,11 +174,9 @@ const SnackbarContent: React.FC<{
                     onPress={onAction}
                     accessibilityRole="button"
                     accessibilityLabel={actionLabel}
-                    // Generous, ASYMMETRIC slop: the bar's own padding is the only
-                    // thing between this button and the screen edge, and a thumb
-                    // reaching the bottom-right corner of the screen consistently
-                    // undershoots. Slop costs nothing — there is no other target
-                    // inside the bar to steal from.
+                    // Slop on every side, on top of the 48dp box. It costs
+                    // nothing: this is the only target inside the bar, so there
+                    // is nothing adjacent for it to steal touches from.
                     hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}
                     style={styles.action}
                 >
@@ -205,7 +203,10 @@ const useStyles = (colors: ThemeColors) =>
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     gap: 12,
-                    paddingVertical: 14,
+                    // The action's 48dp box now sets the bar's height, so this
+                    // padding is trimmed from 14 to keep the bar near its
+                    // original ~56dp rather than ballooning to ~76dp.
+                    paddingVertical: 8,
                     paddingLeft: 16,
                     paddingRight: 8,
                     borderRadius: 14,
