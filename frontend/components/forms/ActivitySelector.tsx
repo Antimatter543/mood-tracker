@@ -7,7 +7,7 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 
 import React, { useMemo, useState, useRef, useCallback } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import type { AnimatedRef } from "react-native-reanimated";
 import type Animated from "react-native-reanimated";
 import Sortable, { type SortableGridDragEndParams } from "react-native-sortables";
@@ -20,6 +20,16 @@ import ActivityReorder from "./ActivityReorder";
 import GroupReorder from "./GroupReorder";
 import { GroupDeleteDialog, GroupRenameDialog } from "./GroupManageDialogs";
 import { hapticDragStart } from "@/lib/haptics";
+import {
+    ACTIVITY_CHIP_CIRCLE_SIZE,
+    ACTIVITY_CHIP_LABEL_BLOCK,
+    ACTIVITY_CHIP_LABEL_GAP,
+    ACTIVITY_CHIP_LABEL_LINE_HEIGHT,
+    ACTIVITY_CHIP_LABEL_LINES,
+    ACTIVITY_GRID_COLUMNS,
+    ACTIVITY_GRID_ROW_GAP,
+    activityGridReservedHeight,
+} from "./activityGridMetrics";
 
 import {
     getActivities,
@@ -152,21 +162,24 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
     },
     // Drag-reorder grid container (react-native-sortables lays out the 5-column
     // grid itself; this just adds the horizontal inset the old wrap-list had).
+    // Its RESERVED HEIGHT is applied per-group at the call site — see
+    // `activityGridMetrics.ts` for why the grid can't be trusted to reserve it.
     sortableGrid: {
         paddingHorizontal: 12,
     },
     activityWrapper: {
-        // The chip fills its grid cell; the grid's `columns={5}` sizes the cell.
+        // The chip fills its grid cell; the grid's `columns` sizes the cell.
+        // Row spacing is owned solely by the grid's `rowGap` (no margin here, so
+        // the chip's measured height is exactly the height we reserve for it).
         width: '100%',
         alignItems: 'center',
-        gap: 4,
-        marginBottom: 4,
+        gap: ACTIVITY_CHIP_LABEL_GAP,
     },
 
     circleButton: {
-        width: 52,  
-        height: 52,  
-        borderRadius: 24,  // Half of width/height
+        width: ACTIVITY_CHIP_CIRCLE_SIZE,
+        height: ACTIVITY_CHIP_CIRCLE_SIZE,
+        borderRadius: ACTIVITY_CHIP_CIRCLE_SIZE / 2,
         backgroundColor: colors.overlays.tag,
         justifyContent: 'center',
         alignItems: 'center',
@@ -176,8 +189,12 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
     activityLabel: {
         color: colors.text,
         fontSize: 11,  // Slightly reduced from 12
+        // Explicit line height + a two-line floor: a one-word chip is exactly as
+        // tall as a two-word one, so rows are uniform and the grid's height is
+        // derivable from the item count instead of from an async measurement.
+        lineHeight: ACTIVITY_CHIP_LABEL_LINE_HEIGHT,
+        minHeight: ACTIVITY_CHIP_LABEL_BLOCK,
         textAlign: 'center',
-        marginTop: 2,  // Reduced from 4
         width: '100%',  // Ensure text takes full width of wrapper
     },
     selectedCircle: {
@@ -344,7 +361,10 @@ const ActivityItem = ({ activity, isSelected, onPress }: ActivityItemProps) => {
             onPress={onPress}
             style={styles.activityWrapper}
         >
-            <View style={[styles.circleButton, isSelected && styles.selectedCircle]}>
+            <View
+                testID={`activity-chip-icon-${activity.id}`}
+                style={[styles.circleButton, isSelected && styles.selectedCircle]}
+            >
                 {activity.icon_family === 'Emoji' ? (
                     <Text style={{
                         fontSize: 24,
@@ -356,7 +376,7 @@ const ActivityItem = ({ activity, isSelected, onPress }: ActivityItemProps) => {
                     renderActivityIcon(activity, colors, 24, isSelected ? '#fff' : colors.text)
                 )}
             </View>
-            <Text style={styles.activityLabel} numberOfLines={2}>{activity.name}</Text>
+            <Text style={styles.activityLabel} numberOfLines={ACTIVITY_CHIP_LABEL_LINES}>{activity.name}</Text>
         </Pressable>
     );
 };
@@ -504,6 +524,9 @@ const ActivityGroupSection = ({
 }: ActivityGroupSectionProps) => {
     const colors = useThemeColors();
     const styles = useStyles(colors);
+    // Reactive (unlike PixelRatio.getFontScale()) so bumping the OS font size
+    // re-reserves the grid height without a remount.
+    const { fontScale } = useWindowDimensions();
     const [isReordering, setIsReordering] = useState(false);
     const [anchor, setAnchor] = useState<PopoverAnchor>({ x: 0, y: 0, width: 0, height: 0 });
     const menuButtonRef = useRef<View>(null);
@@ -630,13 +653,26 @@ const ActivityGroupSection = ({
                 // order. Cross-group drag is out of scope (each group is its own
                 // independent grid). The grid auto-scrolls the enclosing form
                 // ScrollView (scrollableRef) when a chip nears an edge.
-                <View style={styles.sortableGrid}>
+                <View
+                    testID={`activity-grid-${group.id}`}
+                    style={[
+                        styles.sortableGrid,
+                        // RESERVE the grid's height ourselves. Sortable.Grid switches
+                        // to an absolute layout whose height only exists once every
+                        // chip has been measured; until then it occupies ~0dp while
+                        // still painting its chips, which lands them on top of the
+                        // NEXT group's header (the Pixel 3 QA bug). A floor computed
+                        // from the item count is known on the first render, so the
+                        // space is never unreserved. See activityGridMetrics.ts.
+                        { minHeight: activityGridReservedHeight(activities.length, fontScale) },
+                    ]}
+                >
                     <Sortable.Grid
                         data={activities}
                         renderItem={renderActivity}
                         keyExtractor={keyExtractor}
-                        columns={5}
-                        rowGap={8}
+                        columns={ACTIVITY_GRID_COLUMNS}
+                        rowGap={ACTIVITY_GRID_ROW_GAP}
                         columnGap={8}
                         onDragEnd={handleDragEnd}
                         dragActivationDelay={300}
@@ -746,14 +782,20 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
 
     const loadActivities = async () => {
         try {
-            // Groups first, through the ONE canonical ordered read (sort_order,
-            // id) — never a local SELECT, so a reorder shows up on every surface
-            // at once. See databases/groups.ts.
-            const groupsResult = await getActivityGroups(db);
+            // Read BOTH, then commit BOTH in the same tick. Awaiting the groups
+            // and the activities separately published a render in which the
+            // groups existed but their activities did not — every group mounted
+            // an EMPTY Sortable.Grid, which primes the grid's container height at
+            // 0 and flips it into absolute layout; the chips then arrived into a
+            // zero-height container and painted over the next group's header.
+            // React does not batch across an `await`, so the two setState calls
+            // must share one continuation. (Groups still come from the ONE
+            // canonical ordered read — see databases/groups.ts.)
+            const [groupsResult, activitiesResult] = await Promise.all([
+                getActivityGroups(db),
+                getActivities(db),
+            ]);
             setGroups(groupsResult);
-
-            // Use the centralized getActivities function
-            const activitiesResult = await getActivities(db);
             setActivities(activitiesResult);
         } catch (error) {
             console.error('Error loading activities and groups:', error);
