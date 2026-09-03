@@ -19,6 +19,23 @@
  *    `OverlayProvider` (never a mocked-away modal) — that it actually mounts
  *    through the app's own overlay host is part of the contract being locked.
  *
+ * THE GAP THIS SUITE ONCE HAD (device QA, 2026-09-03 — see the round-trip
+ * describe at the bottom): `mockUpdateSetting` is a black hole and
+ * `mockSettings` is static, so nothing here ever fed the component's OWN
+ * persisted output back into it. Every test asserted either "given this stored
+ * list, the rows look right" or "given these gestures, this json is written" —
+ * never "save, then look at the list". A reminder saved with no name therefore
+ * rendered as the generic "Reminder" fallback on the device while the suite was
+ * fully green. `renderLiveSection()` closes that: updateSetting writes back into
+ * the settings value and re-renders, exactly like SettingsProvider does.
+ *
+ * Second half of that gap: `fireEvent.changeText` types into a field whether or
+ * not it could ever hold focus, so a dialog whose input never focuses still
+ * tests as typeable. Hence the explicit autoFocus/placeholder assertions — the
+ * editor's field must be typeable the moment it opens, and its placeholder must
+ * never read as an entered value (a bare "Morning check-in" placeholder was
+ * read as saved data by on-device QA).
+ *
  * Gotcha this repo already paid for once (tasks/lessons.md, 2026-08-29):
  * @testing-library/react-native v14 is async-by-default — `render()` and every
  * `fireEvent.*()` return Promises. An un-awaited `fireEvent.press()` fails
@@ -113,6 +130,46 @@ function renderSection() {
     );
 }
 
+/**
+ * Render with a LIVE settings value: `updateSetting` writes the new json back
+ * into the settings object and re-renders the tree, exactly like the real
+ * SettingsProvider does (it `setSettings`es on every write, which is what makes
+ * an edit show up in the list immediately).
+ *
+ * `renderSection` above deliberately keeps a STATIC settings value — that is the
+ * right shape for asserting "given this stored list, X" — but it means the
+ * component's own output never comes back around, so no test using it can catch
+ * a row that disagrees with what was just saved. This helper is the other half.
+ *
+ * `stored()` decodes the current settings value with `parseReminders`, so
+ * persistence assertions still go through the model, never the raw string.
+ */
+async function renderLiveSection(initial: Partial<Settings> = {}) {
+    let live: Settings = { ...baseSettings, ...initial };
+    let rerender: (() => void) | null = null;
+
+    mockSettings.mockImplementation(() => live);
+    mockUpdateSetting.mockImplementation(async (key: string, value: string) => {
+        live = { ...live, [key]: value } as Settings;
+        rerender?.();
+    });
+
+    function LiveHost() {
+        // Assigning during render is fine for a test host: it only has to be in
+        // place before the first gesture, and every render refreshes it.
+        const [, force] = React.useReducer((n: number) => n + 1, 0);
+        rerender = force;
+        return (
+            <OverlayProvider>
+                <RemindersSection />
+            </OverlayProvider>
+        );
+    }
+
+    const view = await render(<LiveHost />);
+    return { view, stored: () => parseReminders(live.reminders) };
+}
+
 /** The most recent `updateSetting('reminders', <json>)` call, decoded. */
 function lastPersistedReminders(): Reminder[] {
     const calls = mockUpdateSetting.mock.calls;
@@ -123,6 +180,9 @@ function lastPersistedReminders(): Reminder[] {
 
 beforeEach(() => {
     mockUpdateSetting.mockClear();
+    // renderLiveSection installs a write-back implementation; put the black-hole
+    // default back so the static-settings tests below are unaffected by order.
+    mockUpdateSetting.mockImplementation(async () => {});
     mockRequestPermission.mockReset();
     mockRequestPermission.mockResolvedValue(true);
     mockSettings.mockReset();
@@ -348,6 +408,102 @@ describe('RemindersSection — MAX_REMINDERS cap', () => {
         await fireEvent.press(view.getByTestId('reminders-add'));
         expect(view.queryByTestId('reminder-editor')).toBeNull();
         expect(mockUpdateSetting).not.toHaveBeenCalled();
+    });
+});
+
+/**
+ * REGRESSION (device QA, 2026-09-03). Reported as "a new reminder's typed name
+ * doesn't show in the row — it shows the generic 'Reminder'", with the editor
+ * still displaying the name when reopened, i.e. "the data saved fine, the row
+ * displays the wrong field".
+ *
+ * It was neither. The row was right: the saved reminder genuinely had NO name.
+ * The name never reached the field (the editor was the one dialog in the app
+ * without `autoFocus`, so the keyboard never opened on it), and the placeholder
+ * was a plausible value — "Morning check-in" — rendered in the editor both
+ * before and after the save, which is what made an empty field read as a saved
+ * one. (Confirmed from the QA screenshots: the "name" pixels are
+ * `textSecondary`, while a really-typed value in the sibling rename dialog is
+ * `text`/pure white.)
+ *
+ * So these lock the whole loop rather than the reported symptom: what the row
+ * shows must equal what was actually saved (both directions), and the editor
+ * must be typeable the moment it opens with a placeholder that cannot pass for
+ * a value.
+ */
+describe('RemindersSection — round trip: the row shows what was actually saved', () => {
+    it('a newly created reminder shows its TYPED name in the row, not the "Reminder" fallback', async () => {
+        const { view, stored } = await renderLiveSection({ reminders: '[]' });
+
+        await fireEvent.press(view.getByTestId('reminders-add'));
+        await fireEvent.changeText(view.getByTestId('reminder-editor-label'), 'Morning check-in');
+        await fireEvent.press(view.getByTestId('reminder-editor-save'));
+        await waitFor(() => expect(view.getAllByTestId(/^reminder-row-/)).toHaveLength(1));
+
+        expect(stored()[0].label).toBe('Morning check-in');
+        expect(view.getByText('Morning check-in')).toBeTruthy();
+        // 'Reminder' is an exact-match query — the "Reminders" header does not
+        // satisfy it, so this really does assert the fallback is absent.
+        expect(view.queryByText('Reminder')).toBeNull();
+    });
+
+    it('a reminder saved with the name left EMPTY shows the "Reminder" fallback, and reopens with an EMPTY field (the placeholder is not a value)', async () => {
+        const { view, stored } = await renderLiveSection({ reminders: '[]' });
+
+        await fireEvent.press(view.getByTestId('reminders-add'));
+        await fireEvent.press(view.getByTestId('reminder-editor-save'));
+        await waitFor(() => expect(view.getAllByTestId(/^reminder-row-/)).toHaveLength(1));
+
+        expect(stored()[0].label).toBe('');
+        expect(view.getByText('Reminder')).toBeTruthy();
+
+        // The exact trap that made QA call this "saved correctly": reopening it.
+        await fireEvent.press(view.getAllByTestId(/^reminder-row-/)[0]);
+        const input = view.getByTestId('reminder-editor-label');
+        expect(input.props.value).toBe('');
+        expect(input.props.placeholder).toMatch(/^e\.g\. /);
+    });
+
+    it('renaming an existing reminder updates its row immediately', async () => {
+        const { view } = await renderLiveSection({
+            reminders: serializeReminders([makeReminder({ id: 'reminder-1', label: 'Morning check-in' })]),
+        });
+
+        await fireEvent.press(view.getByTestId('reminder-row-reminder-1'));
+        await fireEvent.changeText(view.getByTestId('reminder-editor-label'), 'Morning ritual');
+        await fireEvent.press(view.getByTestId('reminder-editor-save'));
+
+        await waitFor(() => expect(view.getByText('Morning ritual')).toBeTruthy());
+        expect(view.queryByText('Morning check-in')).toBeNull();
+    });
+});
+
+describe('RemindersSection — the editor is typeable the moment it opens', () => {
+    /**
+     * `fireEvent.changeText` types into a field whether or not it could ever
+     * hold focus on a device, so these props are the only thing standing
+     * between "the suite is green" and "the user opens the dialog, types, and
+     * nothing lands". Every other text dialog in this app (GroupManageDialogs,
+     * ActivityEditModal, ActivitySelector) already autoFocuses — the reminder
+     * editor was the lone exception.
+     */
+    it.each([
+        ['a new reminder', async (view: Awaited<ReturnType<typeof renderLiveSection>>['view']) =>
+            fireEvent.press(view.getByTestId('reminders-add'))],
+        ['an existing reminder', async (view: Awaited<ReturnType<typeof renderLiveSection>>['view']) =>
+            fireEvent.press(view.getByTestId('reminder-row-reminder-1'))],
+    ])('focuses the Name field when opened for %s, with an example placeholder', async (_case, open) => {
+        const { view } = await renderLiveSection({
+            reminders: serializeReminders([makeReminder({ id: 'reminder-1' })]),
+        });
+
+        await open(view);
+
+        const input = view.getByTestId('reminder-editor-label');
+        expect(input.props.autoFocus).toBe(true);
+        // An "e.g." prefix is what keeps an empty field from reading as a filled
+        // one; a bare "Morning check-in" is exactly what fooled on-device QA.
+        expect(input.props.placeholder).toMatch(/^e\.g\. /);
     });
 });
 

@@ -1,5 +1,21 @@
 # SoulSync — Project Lessons
 
+## 2026-09-03: A placeholder that looks like a value turned an empty field into a "display bug" — and a mocked settings write hid it
+
+**Mistake**: on-device QA (Pixel 3, Expo Go) reported that a new reminder's typed name never appeared in its list row — the row showed the generic `Reminder` fallback — while "the data saved fine, because reopening the editor shows the name". It was filed as a display bug in `RemindersSection`'s row (wrong field / `reminderDisplayLabel` applied unconditionally). It was neither: the row was correct, and the saved reminder genuinely had NO name. The reminder editor was the only text dialog in this app WITHOUT `autoFocus` (`GroupManageDialogs`, `ActivityEditModal`, `ActivitySelector` all have it), so the keyboard never opened on it and nothing was typed; its placeholder was a plausible value, `"Morning check-in"`, so an empty field read as a filled one both at save time and on reopen. The "proof the data saved" WAS the placeholder.
+
+**How it was settled (reusable)**: the QA screenshots are the source of truth, and colour makes this decidable. Placeholder text renders `colors.textSecondary` (~rgb 211), a real value renders `colors.text` (pure white). Peak-pixel sampling over the field gave 243 in the reminder editor vs 255 for a genuinely typed value in the sibling rename dialog. **Sample the pixels before believing a screenshot's text is data** — "the dialog shows the right name" is exactly the claim a placeholder satisfies.
+
+**Rule**:
+- A dialog whose whole job is capturing one value **autoFocuses that field**. Anything else makes the first keystroke depend on the user finding a tap target — and makes an ADB/Maestro harness (which types without tapping, because every other dialog here autofocuses) silently type into nothing.
+- **Placeholders name the field or start with `e.g.`** (`"Group name"`, `"Activity Name"`, `"e.g. Morning check-in"`). A placeholder that is a plausible value is indistinguishable from data at a glance, in a screenshot, and to a QA agent.
+- A `getByText('X')` render assertion proves a component renders its prop; it says nothing about whether that prop is what the user's gesture produced. When a component's only output is a settings write, **feed the write back**: `renderLiveSection()` in `__tests__/remindersSection.test.tsx` makes `updateSetting` mutate the settings value and re-render (what `SettingsProvider` really does), so "save, then look at the list" is testable. With a static `mockSettings` and a black-hole `mockUpdateSetting`, no test in a green 14-test suite could have caught this.
+- `fireEvent.changeText` types into a field whether or not it could ever hold focus, so focusability is invisible to RNTL — assert the props that make it typeable (`autoFocus`, placeholder shape) explicitly.
+
+**Rung**: rule (locked by `__tests__/remindersSection.test.tsx` — the round-trip describe plus the autoFocus/placeholder cases; all three were negative-tested by reverting the component fix)
+
+**Date**: 2026-09-03
+
 ## 2026-09-03: Soft delete is a WHOLE-CODEBASE read hazard, and the dangerous queries are the ones that never named `entries`
 
 **Context**: migration 12 turned "delete an entry" into a stamp on `entries.deleted_at` (recycle bin + undo). The schema change is trivial; the risk is entirely in the READ audit. Every pre-existing query silently started including binned entries, and a miss is invisible to `tsc`, invisible to `jest`, and invisible on a device with an empty bin. It only surfaces weeks later as a deleted entry haunting the heatmap.
