@@ -1,5 +1,5 @@
 import { SQLiteDatabase } from 'expo-sqlite';
-import { DatabaseResult } from '@/components/types';
+import { ActivityGroup, DatabaseResult } from '@/components/types';
 import { withWriteTransaction } from '@/databases/writeTransaction';
 
 /**
@@ -9,13 +9,50 @@ import { withWriteTransaction } from '@/databases/writeTransaction';
  * result on the happy path AND on expected error paths (DB throws,
  * validation failures). Nothing in this module throws to the caller — the
  * UI layer is expected to switch on `success` rather than try/catch.
- * `checkGroupHasEntries` returns the same `{ exists, hasEntries }` shape
- * on DB error so callers can use a single branch.
+ * `getGroupDeletionImpact` returns the same `{ exists: false, …0 }` shape on
+ * DB error as for a missing group, so callers gate destructive UI on one branch.
+ *
+ * Ordering: groups carry a user-controlled `sort_order` (migration 13).
+ * `GROUP_ORDER_BY` below is the SINGLE canonical ordering clause — every
+ * group read in the app must use `getActivityGroups` (or that constant) so
+ * a reorder shows up everywhere at once.
  */
+
+/**
+ * The canonical display order for groups. `sort_order` is user-controlled;
+ * the `id` tiebreak keeps the order deterministic when two rows share a
+ * value (e.g. rows written by a pre-migration-13 backup import, which all
+ * land on the column default).
+ */
+export const GROUP_ORDER_BY = 'ORDER BY sort_order, id';
+
+/**
+ * Every group in display order. The one read path for group lists —
+ * ActivitySelector, pickers, and anything else must go through this rather
+ * than issuing their own `SELECT ... FROM activity_groups`, so ordering can
+ * never drift between surfaces.
+ *
+ * Returns `[]` on error (mirrors `getActivities`): a group list is UI-facing
+ * and an empty list degrades to "no groups yet" rather than crashing a screen.
+ */
+export async function getActivityGroups(db: SQLiteDatabase): Promise<ActivityGroup[]> {
+  try {
+    return await db.getAllAsync<ActivityGroup>(
+      `SELECT * FROM activity_groups ${GROUP_ORDER_BY}`
+    );
+  } catch (error) {
+    console.error('Error fetching activity groups:', error);
+    return [];
+  }
+}
 
 /**
  * Insert a new group. Rejects empty/whitespace names and pre-existing
  * names (case-sensitive — matches the table's UNIQUE constraint).
+ *
+ * Appends to the END of the user's order (`MAX(sort_order) + 1`) rather than
+ * relying on the column default, so a new group doesn't silently jump to the
+ * top of the list.
  */
 export async function addActivityGroup(
   db: SQLiteDatabase,
@@ -41,9 +78,13 @@ export async function addActivityGroup(
       };
     }
 
+    const orderRow = await db.getFirstAsync<{ maxOrder: number }>(
+      'SELECT COALESCE(MAX(sort_order), 0) as maxOrder FROM activity_groups'
+    );
+
     await db.runAsync(
-      'INSERT INTO activity_groups (name) VALUES (?)',
-      [groupName.trim()]
+      'INSERT INTO activity_groups (name, sort_order) VALUES (?, ?)',
+      [groupName.trim(), (orderRow?.maxOrder || 0) + 1]
     );
 
     return {
@@ -55,6 +96,113 @@ export async function addActivityGroup(
     return {
       success: false,
       message: 'Failed to add group',
+    };
+  }
+}
+
+/**
+ * Rename a group in place. Activities, positions and entry history are
+ * untouched — only `activity_groups.name` changes.
+ *
+ * Validation mirrors `addActivityGroup` (trim, reject empty, reject a name
+ * already taken by ANOTHER group — case-sensitive, matching the table's
+ * UNIQUE constraint) plus an existence check, so the UI gets a specific
+ * message instead of a raw constraint error. Renaming a group to its own
+ * current name is a legal no-op (the duplicate check excludes self).
+ *
+ * ONE statement, so it runs on the read connection in autocommit — same
+ * convention as `addActivityGroup`'s INSERT (see databases/CLAUDE.md: the
+ * write connection is for MULTI-statement writes).
+ */
+export async function renameActivityGroup(
+  db: SQLiteDatabase,
+  groupId: number,
+  newName: string
+): Promise<DatabaseResult> {
+  try {
+    const trimmed = newName.trim();
+
+    if (!trimmed) {
+      return {
+        success: false,
+        message: 'Group name cannot be empty',
+      };
+    }
+
+    const group = await db.getFirstAsync<{ id: number }>(
+      'SELECT id FROM activity_groups WHERE id = ?',
+      [groupId]
+    );
+
+    if (!group) {
+      return {
+        success: false,
+        message: 'Activity group not found',
+      };
+    }
+
+    const duplicate = await db.getFirstAsync<{ id: number }>(
+      'SELECT id FROM activity_groups WHERE name = ? AND id != ?',
+      [trimmed, groupId]
+    );
+
+    if (duplicate) {
+      return {
+        success: false,
+        message: 'A group with this name already exists',
+      };
+    }
+
+    await db.runAsync(
+      'UPDATE activity_groups SET name = ? WHERE id = ?',
+      [trimmed, groupId]
+    );
+
+    return {
+      success: true,
+      message: 'Group renamed successfully',
+    };
+  } catch (error) {
+    console.error('Error renaming activity group:', error);
+    return {
+      success: false,
+      message: 'Failed to rename group',
+    };
+  }
+}
+
+/**
+ * Bulk re-assign `sort_order` in the order supplied — the persistence half of
+ * drag-to-reorder (mirrors `updateActivityPositions` for activities).
+ *
+ * `sort_order` is reassigned to `index + 1`, so the result is always a
+ * contiguous 1-indexed sequence regardless of the input's prior values. ALL
+ * updates land in ONE `withWriteTransaction` so a reader never sees a
+ * half-applied order (statements on `txn` — see databases/writeTransaction.ts).
+ */
+export async function reorderActivityGroups(
+  _db: SQLiteDatabase,
+  groups: Pick<ActivityGroup, 'id'>[]
+): Promise<DatabaseResult> {
+  try {
+    await withWriteTransaction(async (txn) => {
+      for (let i = 0; i < groups.length; i++) {
+        await txn.runAsync(
+          'UPDATE activity_groups SET sort_order = ? WHERE id = ?',
+          [i + 1, groups[i].id]
+        );
+      }
+    });
+
+    return {
+      success: true,
+      message: 'Group order updated successfully',
+    };
+  } catch (error) {
+    console.error('Error reordering activity groups:', error);
+    return {
+      success: false,
+      message: 'Failed to update group order',
     };
   }
 }
@@ -106,21 +254,33 @@ export async function deleteActivityGroup(
   }
 }
 
+/** What deleting a group would destroy. See `getGroupDeletionImpact`. */
+export type GroupDeletionImpact = {
+  exists: boolean;
+  /** Activities that would be CASCADE-deleted with the group. */
+  activityCount: number;
+  /**
+   * DISTINCT mood entries that would lose at least one activity. Counting
+   * entries (not `entry_activities` rows) is what the warning copy needs:
+   * "removes N activities and their history from M entries".
+   */
+  entryCount: number;
+};
+
 /**
- * Inspect a group: does it exist, and does it have any mood entries
- * linked through its activities?
+ * Quantify what deleting a group destroys, so the UI can warn precisely
+ * instead of hand-waving. `ON DELETE CASCADE` removes the group's activities
+ * and, through them, their `entry_activities` history — the mood entries
+ * themselves survive, but they permanently lose those activity tags.
  *
- * Returns `{ exists: false, hasEntries: false }` on DB error — same shape
- * as the "group not found" case. This is intentional: callers want a
- * single boolean to gate UI ("can the user delete this group without
- * losing entries?"), and surfacing a DB hiccup as "yeah it has entries"
- * is the safer default than throwing or returning `null` and forcing
- * every caller to add error-handling.
+ * Returns zeros with `exists: false` on DB error — same shape as the "group
+ * not found" case, deliberately: callers gate destructive UI on this, and a
+ * DB hiccup should read as "can't confirm, don't proceed" rather than throw.
  */
-export async function checkGroupHasEntries(
+export async function getGroupDeletionImpact(
   db: SQLiteDatabase,
   groupId: number
-): Promise<{ exists: boolean; hasEntries: boolean }> {
+): Promise<GroupDeletionImpact> {
   try {
     const group = await db.getFirstAsync<{ id: number }>(
       'SELECT id FROM activity_groups WHERE id = ?',
@@ -128,10 +288,7 @@ export async function checkGroupHasEntries(
     );
 
     if (!group) {
-      return {
-        exists: false,
-        hasEntries: false,
-      };
+      return { exists: false, activityCount: 0, entryCount: 0 };
     }
 
     // Scoped to LIVE entries (`e.deleted_at IS NULL`): this gates a warning the
@@ -139,8 +296,8 @@ export async function checkGroupHasEntries(
     // remaining entries sit in the recycle bin must NOT block/scare the delete.
     // (Binned entries do lose these links to the cascade — accepted, same call
     // as the per-activity usage count in ActivityEditModal.)
-    const entriesCount = await db.getFirstAsync<{ count: number }>(
-      `SELECT COUNT(*) as count
+    const entryRow = await db.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(DISTINCT ea.entry_id) as count
        FROM entry_activities ea
        JOIN activities a ON ea.activity_id = a.id
        JOIN entries e ON e.id = ea.entry_id
@@ -148,18 +305,20 @@ export async function checkGroupHasEntries(
       [groupId]
     );
 
+    const activityRow = await db.getFirstAsync<{ count: number }>(
+      'SELECT COUNT(*) as count FROM activities WHERE group_id = ?',
+      [groupId]
+    );
+
     return {
       exists: true,
-      // Coerce to a plain boolean. `entriesCount` is nullable but
-      // COUNT(*) always returns a row, so this should be safe in practice.
-      hasEntries: !!(entriesCount && entriesCount.count > 0),
+      // COUNT always returns a row, but the rows are typed nullable — coerce
+      // defensively rather than letting `undefined` reach the warning copy.
+      activityCount: activityRow?.count ?? 0,
+      entryCount: entryRow?.count ?? 0,
     };
   } catch (error) {
-    console.error('Error checking group entries:', error);
-    // Consistent shape on error — see fn docs.
-    return {
-      exists: false,
-      hasEntries: false,
-    };
+    console.error('Error measuring group deletion impact:', error);
+    return { exists: false, activityCount: 0, entryCount: 0 };
   }
 }

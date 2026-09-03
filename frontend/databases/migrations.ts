@@ -276,6 +276,36 @@ export const migrations: Migration[] = [
         }
     },
     {
+        // User-orderable activity GROUPS: add `sort_order` to activity_groups.
+        // Before this, every group read was `ORDER BY id` (creation order,
+        // unchangeable) — there was no way to move a group. `sort_order` is the
+        // display order; group reads are `ORDER BY sort_order, id` (the `id`
+        // tiebreak keeps ordering deterministic if two rows ever share a value,
+        // e.g. rows inserted by an older backup import that predates this column).
+        //
+        // BACKFILL: `sort_order = id`. That is EXACTLY the order the app already
+        // displayed, so upgrading is a visual no-op — no user's groups get
+        // shuffled by the migration. (`ALTER TABLE … ADD COLUMN … NOT NULL
+        // DEFAULT 0` is legal in SQLite because the default is a constant; the
+        // UPDATE then replaces those 0s.)
+        //
+        // Like migrations 8/9/11 this single ALTER is the SOLE path for BOTH
+        // fresh installs (migration 1's createInitialSchema builds
+        // `activity_groups` without the column, then this adds it) and existing
+        // users. Do NOT also add the column to createInitialSchema — that would
+        // make a fresh install create-then-ALTER the same column
+        // ("duplicate column").
+        version: 13,
+        up: async (db: SQLiteDatabase) => {
+            await db.runAsync(
+                `ALTER TABLE activity_groups ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`
+            );
+            await db.runAsync(
+                `UPDATE activity_groups SET sort_order = id`
+            );
+        }
+    },
+    {
         // MULTIPLE custom reminders. The single daily reminder (migration 4's
         // `reminder_enabled` + `reminder_time`) becomes a LIST: a JSON-encoded
         // Reminder[] in the `reminders` key (model: lib/reminders.ts, registry
@@ -294,12 +324,6 @@ export const migrations: Migration[] = [
         // re-migrated from 0). Nothing else reads them.
         //
         // `INSERT OR IGNORE` so a re-run can never clobber a real list.
-        //
-        // NOTE ON THE VERSION NUMBER: 12 and 13 belong to sibling feature
-        // branches merged in the same batch. A gap is harmless to runMigrations
-        // (it applies every migration whose version exceeds user_version), but
-        // never REUSE a number — see the duplicate-version guard in
-        // __tests__/migrations.test.ts.
         version: 14,
         up: async (db: SQLiteDatabase) => {
             const enabledRow = await db.getFirstAsync<{ value: string }>(

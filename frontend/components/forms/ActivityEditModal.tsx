@@ -1,12 +1,12 @@
 // ActivityEditModal.tsx
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, Alert } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, Alert, ScrollView } from 'react-native';
 import { useThemeColors } from '@/styles/global';
 import { SQLiteDatabase } from 'expo-sqlite';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Feather from '@expo/vector-icons/Feather';
-import { updateActivity, deleteActivity } from "@/databases/database";
-import { Activity } from '../types';
+import { updateActivity, deleteActivity, moveActivityToGroup } from "@/databases/database";
+import { Activity, ActivityGroup } from '../types';
 import { useDataContext } from '@/context/DataContext';
 import { IconPicker } from '../IconPicker';
 import { ICON_FAMILIES, IconFamilyType } from '../iconRegistry';
@@ -18,6 +18,11 @@ type ActivityEditModalProps = {
     onClose: () => void;
     onUpdate: () => void;
     db: SQLiteDatabase;
+    /**
+     * All activity groups, already in display order (from getActivityGroups).
+     * Powers the "move to another group" picker.
+     */
+    groups: ActivityGroup[];
 };
 
 export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
@@ -25,7 +30,8 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
     activity,
     onClose,
     onUpdate,
-    db
+    db,
+    groups
 }) => {
     const colors = useThemeColors();
     const [activityName, setActivityName] = useState(activity?.name || '');
@@ -38,6 +44,11 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
     );
     const [selectedIconName, setSelectedIconName] = useState(activity?.icon_name || 'circle');
 
+    const [groupPickerVisible, setGroupPickerVisible] = useState(false);
+    const [selectedGroupId, setSelectedGroupId] = useState<number | null>(
+        activity?.group_id ?? null
+    );
+
     // Update state when activity changes or modal becomes visible. Deliberate
     // prop-to-state sync (re-seed the editable fields when a different activity
     // is opened); guarded, runs only on prop change. (react-hooks 7.x's
@@ -47,6 +58,7 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
             setActivityName(activity.name);
             setSelectedIconFamily(activity.icon_family as IconFamilyType);
             setSelectedIconName(activity.icon_name);
+            setSelectedGroupId(activity.group_id);
         }
     }, [activity, visible]);
 
@@ -64,13 +76,32 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
             db, activity.id, activityName, selectedIconFamily, selectedIconName
         );
 
-        if (result.success) {
-            onUpdate();
-            onClose();
-            refetchEntries();
-        } else {
+        if (!result.success) {
             setError(result.message);
+            return;
         }
+
+        // The move (if any) happens AFTER the rename, never before: updateActivity
+        // validates the new name against the activity's CURRENT group, while
+        // moveActivityToGroup re-reads the name from the DB and validates it
+        // against the TARGET group. Moving first would validate the stale
+        // (pre-rename) name against the target group instead of the name the user
+        // actually just saved.
+        if (selectedGroupId !== null && selectedGroupId !== activity.group_id) {
+            const moveResult = await moveActivityToGroup(db, activity.id, selectedGroupId);
+            if (!moveResult.success) {
+                // The rename DID land, so the caller must still refresh — but leave
+                // the dialog open (don't call onClose) so the user sees the group
+                // did not change and can retry or pick a different one.
+                onUpdate();
+                setError(moveResult.message);
+                return;
+            }
+        }
+
+        onUpdate();
+        onClose();
+        refetchEntries();
     };
 
     const checkUsageAndConfirmDelete = async () => {
@@ -244,6 +275,47 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
             fontWeight: '500',
             marginBottom: 8,
         },
+        groupSelectorContainer: {
+            marginBottom: 16,
+        },
+        // Pushes the chevron to the right edge while the group name takes the
+        // slack (and ellipsizes rather than shoving the chevron off the row).
+        groupSelectorRow: {
+            justifyContent: 'space-between',
+        },
+        groupSelectorLabel: {
+            flexShrink: 1,
+            flexGrow: 1,
+        },
+        // Group picker: a smaller dialog than the edit card itself, since it's
+        // just a scrollable list of group names.
+        groupPickerContent: {
+            backgroundColor: colors.cardBackground,
+            width: '90%',
+            maxWidth: 480,
+            maxHeight: '70%',
+            borderRadius: 16,
+            padding: 24,
+            gap: 12,
+        },
+        groupList: {
+            // Cap the visible list height so a long group list scrolls inside the
+            // dialog instead of pushing it off-screen.
+            maxHeight: 360,
+        },
+        groupRow: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: colors.overlays.tag,
+            padding: 12,
+            borderRadius: 8,
+            marginBottom: 8,
+        },
+        groupRowText: {
+            color: colors.text,
+            fontSize: 16,
+        },
     });
 
     return (
@@ -290,6 +362,67 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
                         currentFamily={selectedIconFamily}
                         currentIcon={selectedIconName}
                     />
+
+                    {/* GROUP SELECTOR SECTION — move this activity into another
+                        group. Local state only; nothing is written until Update
+                        is pressed (see handleUpdate for the write ordering). */}
+                    <View style={styles.groupSelectorContainer}>
+                        <Text style={styles.label}>Group</Text>
+                        <Pressable
+                            style={[styles.iconSelector, styles.groupSelectorRow]}
+                            onPress={() => setGroupPickerVisible(true)}
+                            accessibilityRole="button"
+                            accessibilityLabel="Move activity to another group"
+                        >
+                            {/* Leading folder + trailing chevron so this row reads
+                                as an opens-a-picker control, matching the Icon row
+                                above it (which leads with the chosen icon). */}
+                            <Feather name="folder" size={20} color={colors.text} />
+                            <Text style={[styles.iconSelectorText, styles.groupSelectorLabel]} numberOfLines={1}>
+                                {groups.find((g) => g.id === selectedGroupId)?.name ?? 'Select a group'}
+                            </Text>
+                            <Feather name="chevron-down" size={20} color={colors.textSecondary} />
+                        </Pressable>
+                    </View>
+
+                    <OverlayModal
+                        visible={groupPickerVisible}
+                        onClose={() => setGroupPickerVisible(false)}
+                    >
+                        <View style={styles.groupPickerContent}>
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.title}>Select Group</Text>
+                                <Pressable
+                                    style={styles.closeButton}
+                                    onPress={() => setGroupPickerVisible(false)}
+                                >
+                                    <Ionicons name="close" color={colors.text} size={24} />
+                                </Pressable>
+                            </View>
+                            <ScrollView style={styles.groupList}>
+                                {groups.map((group) => {
+                                    const isSelected = group.id === selectedGroupId;
+                                    return (
+                                        <Pressable
+                                            key={group.id}
+                                            style={styles.groupRow}
+                                            onPress={() => {
+                                                setSelectedGroupId(group.id);
+                                                setGroupPickerVisible(false);
+                                            }}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={`Move to ${group.name}`}
+                                        >
+                                            <Text style={styles.groupRowText}>{group.name}</Text>
+                                            {isSelected && (
+                                                <Feather name="check" size={20} color={colors.accent} />
+                                            )}
+                                        </Pressable>
+                                    );
+                                })}
+                            </ScrollView>
+                        </View>
+                    </OverlayModal>
 
                     {error ? <Text style={styles.errorText}>{error}</Text> : null}
 

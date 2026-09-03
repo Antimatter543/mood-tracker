@@ -81,6 +81,17 @@ day-keying via `localDateString`. The entry form now edits BOTH date and time
 (`components/forms/DatePicker.tsx`), so a picked day preserves the time-of-day; the
 local-day key still comes from `localDateString`, never `.slice(0,10)`.
 
+## Group ordering contract (`activity_groups.sort_order`, migration 13)
+
+- **NEVER hand-write a `SELECT ... FROM activity_groups`.** Always `getActivityGroups(db)`
+  (or the exported `GROUP_ORDER_BY` = `ORDER BY sort_order, id`). A local `ORDER BY id`
+  is how a reorder shows on one screen and not another.
+- **Always INSERT groups with an explicit `MAX(sort_order) + 1`** (`addActivityGroup`,
+  backup import). A bare `INSERT (name)` collapses new rows to the default `0` and
+  reshuffles the user's arrangement. The `id` tiebreak keeps pre-column rows ordered.
+- `moveActivityToGroup` never touches `entry_activities` — entry history follows the
+  activity. Positions stay contiguous 1..N in BOTH groups.
+
 ## Testing the SQL layer
 
 - The `expo-sqlite` jest mock is a **no-op stub** — `getAllAsync` resolves `[]`, the

@@ -8,6 +8,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { SQLiteDatabase } from 'expo-sqlite';
 
+import { GROUP_ORDER_BY } from '@/databases/groups';
 import { deriveMediaExt, writeBase64ToMediaDir } from '@/databases/mediaHelpers';
 import { withWriteTransaction } from '@/databases/writeTransaction';
 
@@ -117,7 +118,14 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
       }));
 
       const activities = await db.getAllAsync('SELECT * FROM activities');
-      const activityGroups = await db.getAllAsync('SELECT * FROM activity_groups');
+      // Exported in DISPLAY order, so the array order alone carries the user's
+      // group arrangement — that is what the import replays (see the sort_order
+      // note there). v1/v2 backups predate the column; their array order was
+      // rowid order, which was the display order back then, so import handles
+      // both with one rule.
+      const activityGroups = await db.getAllAsync(
+        `SELECT * FROM activity_groups ${GROUP_ORDER_BY}`
+      );
       const settings = await db.getAllAsync('SELECT * FROM user_settings');
 
       // Create an export object
@@ -263,10 +271,22 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
             'SELECT id, name FROM activity_groups'
           );
           const existingGroupNames = existingGroups.map(g => g.name.toLowerCase());
-          
+
+          // Imported groups are APPENDED after whatever this device already has,
+          // preserving the BACKUP's own order. Without an explicit sort_order
+          // they would all land on the column default (0) and a restored backup
+          // would silently lose the group order the user arranged (migration 13).
+          // `sort_order` is absent from v1/v2 backups (they predate the column),
+          // so the array order is the fallback — which is exactly the order
+          // those older exports were written in (`SELECT * ... ORDER BY rowid`).
+          const maxOrderRow = await txn.getFirstAsync<{ maxOrder: number }>(
+            'SELECT COALESCE(MAX(sort_order), 0) as maxOrder FROM activity_groups'
+          );
+          let nextGroupSortOrder = (maxOrderRow?.maxOrder || 0) + 1;
+
           // Clear existing groups only if we have new ones and user confirms
           const shouldReplaceGroups = importData.data.activityGroups.length > 0;
-          
+
           if (shouldReplaceGroups) {
             // Insert new groups
             for (const group of importData.data.activityGroups) {
@@ -281,12 +301,13 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
                 continue;
               }
               
-              // Insert the new group
+              // Insert the new group, appended to the end of the display order.
               const result = await txn.runAsync(
-                'INSERT INTO activity_groups (name) VALUES (?)',
-                [group.name]
+                'INSERT INTO activity_groups (name, sort_order) VALUES (?, ?)',
+                [group.name, nextGroupSortOrder]
               );
-              
+              nextGroupSortOrder += 1;
+
               // Map old ID to new ID
               groupIdMapping.set(group.id, Number(result.lastInsertRowId));
             }

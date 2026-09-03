@@ -8,12 +8,58 @@
 
 **Rules**:
 - The exclusion is baked into `getEntriesPage`'s CTE (`WHERE e.deleted_at IS NULL AND (<userFilter>)`), NOT into `buildEntryFilter`. A UI filter builder must not be the thing standing between a deleted entry and the Timeline; no filter state can then leak one. The user filter is parenthesised so its internal `OR` can't escape the `AND`.
-- Deliberate INCLUSIONS are documented at the call site: the data export EXCLUDES binned entries; `ActivityEditModal`'s "used in N entries" and `groups.checkGroupHasEntries` count LIVE entries only (the number must match what the user can see); `generateData.clearAllEntries` stays a blanket `DELETE` (dev-only, means to nuke everything).
+- Deliberate INCLUSIONS are documented at the call site: the data export EXCLUDES binned entries; `ActivityEditModal`'s "used in N entries" and `groups.getGroupDeletionImpact` count LIVE entries only (the number must match what the user can see); `generateData.clearAllEntries` stays a blanket `DELETE` (dev-only, means to nuke everything).
 - The soft delete carries `AND deleted_at IS NULL`; the restore carries `AND deleted_at IS NOT NULL`. Without the first, a double-tap silently restarts the 30-day countdown.
 - The retention sweep runs from `initializeDatabase` and **can never throw**: it is on the boot path, where an exception is a white screen.
 - The undo/bin UI mounts through `OverlayHost`, never a native `<Modal>` (the standing Fabric rule). The snackbar is NOT built on `OverlayModal`: that adds a dimmed backdrop and swallows hardware-back, both wrong for a passive banner.
 
 **Rung**: hook-grade — two class-level invariant tests, not memory. `__tests__/softDeleteExclusion.test.ts` extracts every string literal in `app/ components/ context/ databases/ hooks/ lib/` and fails any `SELECT ... FROM/JOIN entries` without a `deleted_at IS [NOT] NULL` predicate. `__tests__/softDeleteQueries.integration.test.ts` EXECUTES every exported `queries.ts` constant against real `node:sqlite` over a DB whose only entry is binned, and its param table is asserted exhaustive, so a NEW query fails the build until somebody decides what it does about the bin. Both were negative-tested (predicate removed produced 5 failures).
+
+**Date**: 2026-09-03
+
+## 2026-09-03: A tap gated on `measureInWindow`'s callback is a SILENTLY DEAD button
+
+**Mistake**: the group "..." menu opened only from INSIDE `measureInWindow`'s callback
+(`node.measureInWindow((x,y,w,h) => { setAnchor(...); onOpenMenu(...) })`). That callback is
+ASYNCHRONOUS and is not guaranteed to fire at all — an unmounted or not-yet-laid-out node
+simply never calls it. When it doesn't, the tap does nothing: no error, nothing in logcat.
+It surfaced here as a test that couldn't open the menu; on a real device it surfaces as an
+intermittently dead button, which is far harder to diagnose.
+
+**Rule**: **never gate a user-visible state change on a measurement callback.** Do the state
+change FIRST (with the last-known geometry) and let the measurement REFINE it:
+```ts
+onOpenMenu();                                   // opens now, always
+ref.current?.measureInWindow((x, y, width, height) => setAnchor({ x, y, width, height }));
+```
+Generalises to any RN measure/layout callback (`measure`, `measureLayout`, `onLayout`-derived
+state) that a press handler waits on. Same family as the async-tap robustness rule: a tap must
+always produce a visible effect on the frame it happens.
+
+**Rung**: rule (locked by `__tests__/activitySelectorGroupManagement.test.tsx`, which drives the
+menu in an environment where `measureInWindow` never fires)
+
+**Date**: 2026-09-03
+
+## 2026-09-03: Adding a column with a DEFAULT silently breaks every INSERT that doesn't name it
+
+**Mistake**: migration 13 added `activity_groups.sort_order INTEGER NOT NULL DEFAULT 0`. Three
+INSERT sites existed (`addActivityGroup`, the backup import, the V1 seed); only the first was
+updated at first — so restoring a backup wrote every group at `sort_order = 0`, silently
+collapsing the group ORDER the user had just arranged. Nothing errored, `tsc` and `jest` were
+green, the data was simply wrong on restore.
+
+**Rule**: when a migration adds a column with a DEFAULT, **grep every `INSERT INTO <table>` in
+the repo before calling it done** and decide, per site, whether the default is actually right
+there. For an ordering column it almost never is — the insert must append (`MAX(col) + 1`).
+Two corollaries this feature depends on:
+- backfill an ordering column from the value the app ALREADY sorted by (here `sort_order = id`)
+  so the upgrade is a visual no-op and no user's arrangement is shuffled by the migration;
+- give the read a tiebreak (`ORDER BY sort_order, id`) so rows still on the default stay
+  deterministically ordered.
+
+**Rung**: rule (regression test: `__tests__/data-export.test.ts` → "restores groups in the backup
+order, appended after the existing ones")
 
 **Date**: 2026-09-03
 

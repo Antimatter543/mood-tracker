@@ -12,6 +12,15 @@ All notable changes to SoulSync are documented here. Versions follow
   exactly as it was, same photos, same activities. Binned entries stay out of your stats,
   streaks, charts and backups until you restore them, and "Delete forever" is still there
   when you really mean it.
+- **Your groups, your order.** Long-press a group name to enter move mode — the list collapses
+  to just the group names so you can drag them into whatever order suits you. Rename groups,
+  and deleting one now tells you exactly what it takes with it ("2 activities and their history
+  from 5 entries") — with the option to move those activities to another group first instead.
+- **Activities can change homes.** Editing an activity now lets you move it to a different
+  group, keeping its whole entry history intact.
+- **Reminders, plural.** The single daily reminder is now a full list — add a morning check-in,
+  an afternoon nudge, an evening wind-down, each with its own name, time and on/off switch
+  (Settings → Reminders). Your existing reminder carries over automatically.
 
 ## [2.9.0] - 2026-08-29
 

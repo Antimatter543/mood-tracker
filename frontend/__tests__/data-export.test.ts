@@ -106,6 +106,58 @@ describe('importDatabaseData', () => {
     expect(result.success).toBe(false);
   });
 
+  // Regression guard for migration 13 (group sort_order). Before the fix, the
+  // import inserted `(name)` only, so every restored group landed on the column
+  // default 0 and a user's arranged group ORDER silently collapsed on restore.
+  it('restores groups in the backup order, appended after the existing ones', async () => {
+    const db = makeDb();
+
+    const importPayload = {
+      version: 3,
+      exportDate: '2026-09-01',
+      data: {
+        // The export writes groups in DISPLAY order, so array order is the
+        // arrangement to replay.
+        activityGroups: [
+          { id: 1, name: 'Chores', sort_order: 3 },
+          { id: 2, name: 'Exercise', sort_order: 1 },
+        ],
+        activities: [],
+        entries: [],
+        settings: [],
+      },
+    };
+
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///mock/data.json' }],
+    });
+    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce(
+      JSON.stringify(importPayload)
+    );
+
+    db.getAllAsync
+      .mockResolvedValueOnce([]) // existing groups (none match by name)
+      .mockResolvedValueOnce([]); // existing activities
+    // This device already has groups occupying sort_order 1..4.
+    db.getFirstAsync.mockResolvedValueOnce({ maxOrder: 4 });
+    db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
+
+    await importDatabaseData(db as any);
+
+    const groupInserts = db.runAsync.mock.calls.filter(
+      (call: any[]) =>
+        typeof call[0] === 'string' && call[0].includes('INSERT INTO activity_groups')
+    );
+
+    expect(groupInserts).toHaveLength(2);
+    // Every insert carries an explicit sort_order — never the bare (name) form.
+    groupInserts.forEach((call: any[]) => expect(call[0]).toContain('sort_order'));
+    // Appended after the existing 4, in the backup's array order.
+    expect(groupInserts[0][1]).toEqual(['Chores', 5]);
+    expect(groupInserts[1][1]).toEqual(['Exercise', 6]);
+  });
+
   it('does NOT delete all existing entries (non-destructive import)', async () => {
     const db = makeDb();
 

@@ -17,14 +17,22 @@ import { ICON_FAMILIES, IconFamilyType, IconPicker } from "../IconPicker";
 import { OverlayModal } from "../OverlayModal";
 import { OverlayPopover, PopoverAnchor } from "../OverlayPopover";
 import ActivityReorder from "./ActivityReorder";
+import GroupReorder from "./GroupReorder";
+import { GroupDeleteDialog, GroupRenameDialog } from "./GroupManageDialogs";
+import { hapticDragStart } from "@/lib/haptics";
 
-import { 
-    getActivities, 
-    addActivity, 
-    addActivityGroup, 
-    deleteActivityGroup, 
+import {
+    getActivities,
+    addActivity,
+    getActivityGroups,
+    addActivityGroup,
+    renameActivityGroup,
+    reorderActivityGroups,
+    deleteActivityGroup,
     updateActivityPositions,
-    checkGroupHasEntries
+    getGroupDeletionImpact,
+    moveActivitiesToGroup,
+    type GroupDeletionImpact,
 } from "@/databases/database";
 
 type ActivitySelectorProps = {
@@ -68,11 +76,22 @@ type ActivityGroupSectionProps = {
     /** Open the edit-activity modal for one activity (from the "Edit Activities" hub). */
     onEditActivity: (activity: Activity) => void;
     onDeleteGroup: () => void;
+    /** Open the rename-group dialog for this group. */
+    onRenameGroup: () => void;
+    /**
+     * Enter GROUP move mode (collapse to name rows + drag to reorder). Fired by
+     * a LONG-PRESS on the group's name, and by the "..." menu's Reorder item.
+     */
+    onEnterGroupMoveMode: () => void;
     onReorderActivities: (activities: Activity[]) => void;
     /** Whether THIS group's "..." menu is the one currently open. */
     menuOpen: boolean;
-    /** Open this group's menu, anchored to the measured "..." button. */
-    onOpenMenu: (anchor: PopoverAnchor) => void;
+    /**
+     * Open this group's menu (closing any other). Takes no anchor: the anchor is
+     * this section's own state, refined by an async measurement — see
+     * `handleMenuPress`.
+     */
+    onOpenMenu: () => void;
     /** Close any open menu. */
     onCloseMenu: () => void;
     /** Enclosing scroll container for the drag grid's auto-scroll (optional). */
@@ -84,6 +103,8 @@ type ActivityGroupSectionProps = {
 type GroupActionMenuProps = {
     onAddActivity: () => void;
     onDeleteGroup: () => void;
+    onRenameGroup: () => void;
+    onReorderGroups: () => void;
     onReorderActivities: () => void;
 };
 
@@ -109,6 +130,14 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
         justifyContent: "space-between",
         alignItems: "center",
         paddingHorizontal: 16,
+    },
+    // Wraps the title so the hold-to-reorder gesture has a comfortably sized
+    // target (a bare Text is a thin strip). flexShrink lets a long group name
+    // ellipsize instead of pushing the "..." button off the row.
+    groupTitlePressable: {
+        flexShrink: 1,
+        paddingVertical: 6,
+        paddingRight: 8,
     },
     groupTitle: {
         color: colors.text,
@@ -465,6 +494,8 @@ const ActivityGroupSection = ({
     onAddActivity,
     onEditActivity,
     onDeleteGroup,
+    onRenameGroup,
+    onEnterGroupMoveMode,
     onReorderActivities,
     menuOpen,
     onOpenMenu,
@@ -502,17 +533,15 @@ const ActivityGroupSection = ({
     const keyExtractor = useCallback((item: Activity) => String(item.id), []);
 
     const handleMenuPress = () => {
-        // Measure the "..." button in window coords so the popover can anchor to
-        // it, then ask the parent to open THIS group's menu (closing any other).
-        const node = menuButtonRef.current;
-        if (!node) {
-            onOpenMenu({ x: 0, y: 0, width: 0, height: 0 });
-            return;
-        }
-        node.measureInWindow((x, y, width, height) => {
-            const a = { x, y, width, height };
-            setAnchor(a);
-            onOpenMenu(a);
+        // Open FIRST, measure second. `measureInWindow` is asynchronous and is
+        // not guaranteed to invoke its callback at all (an unmounted or
+        // not-yet-laid-out node simply never fires it) — gating the open on that
+        // callback means a tap can silently do nothing, which reads as a dead
+        // button. So the menu opens immediately with the last-known anchor and
+        // the fresh measurement refines the position in place.
+        onOpenMenu();
+        menuButtonRef.current?.measureInWindow((x, y, width, height) => {
+            setAnchor({ x, y, width, height });
         });
     };
 
@@ -528,7 +557,22 @@ const ActivityGroupSection = ({
     return (
         <View style={styles.groupContainer}>
             <View style={styles.groupHeader}>
-                <Text style={styles.groupTitle}>{group.name}</Text>
+                {/* HOLD the group NAME to enter group move mode. Safe here (unlike
+                    on an activity chip) because this header sits OUTSIDE every
+                    Sortable.Grid, so no drag gesture competes for the hold — see
+                    tasks/lessons.md 2026-06-12 and the GroupReorder header comment.
+                    A plain tap opens the same "..." menu the button does, so the
+                    whole header is one predictable target. */}
+                <Pressable
+                    style={styles.groupTitlePressable}
+                    onPress={handleMenuPress}
+                    onLongPress={onEnterGroupMoveMode}
+                    delayLongPress={400}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${group.name} group. Hold to reorder groups.`}
+                >
+                    <Text style={styles.groupTitle} numberOfLines={1}>{group.name}</Text>
+                </Pressable>
                 <Pressable
                     ref={menuButtonRef}
                     style={styles.groupActionButton}
@@ -555,6 +599,14 @@ const ActivityGroupSection = ({
                     onReorderActivities={() => {
                         onCloseMenu();
                         handleReorderActivities();
+                    }}
+                    onRenameGroup={() => {
+                        onCloseMenu();
+                        onRenameGroup();
+                    }}
+                    onReorderGroups={() => {
+                        onCloseMenu();
+                        onEnterGroupMoveMode();
                     }}
                     onDeleteGroup={() => {
                         onCloseMenu();
@@ -603,6 +655,8 @@ const ActivityGroupSection = ({
 const GroupActionMenu = ({
     onAddActivity,
     onDeleteGroup,
+    onRenameGroup,
+    onReorderGroups,
     onReorderActivities,
 }: GroupActionMenuProps) => {
     const colors = useThemeColors();
@@ -621,6 +675,28 @@ const GroupActionMenu = ({
             <Pressable style={styles.menuItem} onPress={onReorderActivities}>
                 <MaterialIcons name="edit" size={18} color={colors.text} />
                 <Text style={styles.menuItemText}>Edit Activities</Text>
+            </Pressable>
+
+            <Pressable
+                style={styles.menuItem}
+                onPress={onRenameGroup}
+                accessibilityRole="button"
+                accessibilityLabel="Rename group"
+            >
+                <MaterialIcons name="drive-file-rename-outline" size={18} color={colors.text} />
+                <Text style={styles.menuItemText}>Rename Group</Text>
+            </Pressable>
+
+            {/* Discoverable twin of the hold-the-group-name gesture: the same
+                move mode, reachable without knowing the gesture exists. */}
+            <Pressable
+                style={styles.menuItem}
+                onPress={onReorderGroups}
+                accessibilityRole="button"
+                accessibilityLabel="Reorder groups"
+            >
+                <MaterialIcons name="swap-vert" size={18} color={colors.text} />
+                <Text style={styles.menuItemText}>Reorder Groups</Text>
             </Pressable>
 
             <Pressable style={styles.menuItem} onPress={onDeleteGroup}>
@@ -652,14 +728,28 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
     // group's menu replaces it). null = none open.
     const [openMenuGroupId, setOpenMenuGroupId] = useState<number | null>(null);
 
+    // GROUP MOVE MODE: the whole selector collapses to draggable group-name rows.
+    // Entered by holding a group's name (or via the "..." menu).
+    const [groupMoveMode, setGroupMoveMode] = useState(false);
+
+    // Rename-group dialog: the target group + the last submit's error message.
+    const [renameTarget, setRenameTarget] = useState<ActivityGroup | null>(null);
+    const [renameError, setRenameError] = useState("");
+
+    // Delete-group dialog: the target group, what deleting it would destroy
+    // (measured on open), and the last attempt's error message.
+    const [deleteTarget, setDeleteTarget] = useState<ActivityGroup | null>(null);
+    const [deleteImpact, setDeleteImpact] = useState<GroupDeletionImpact | null>(null);
+    const [deleteError, setDeleteError] = useState("");
+
     const closeMenu = useCallback(() => setOpenMenuGroupId(null), []);
 
     const loadActivities = async () => {
         try {
-            // Load groups first
-            const groupsResult = await db.getAllAsync<ActivityGroup>(
-                'SELECT * FROM activity_groups ORDER BY id'
-            );
+            // Groups first, through the ONE canonical ordered read (sort_order,
+            // id) — never a local SELECT, so a reorder shows up on every surface
+            // at once. See databases/groups.ts.
+            const groupsResult = await getActivityGroups(db);
             setGroups(groupsResult);
 
             // Use the centralized getActivities function
@@ -727,54 +817,113 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
         }
     };
 
-    const handleDeleteGroup = async (groupId: number, groupName: string) => {
-        try {
-            // First check if the group has associated entries
-            const checkResult = await checkGroupHasEntries(db, groupId);
-            
-            if (!checkResult.exists) {
-                Alert.alert("Error", "Activity group not found");
-                return;
-            }
-            
-            // Show a confirmation dialog with appropriate warning
-            const warningMessage = checkResult.hasEntries
-                ? `Are you sure you want to delete "${groupName}" and all its activities? This group has activities that are used in your mood entries. The activities will be removed from those entries.`
-                : `Are you sure you want to delete "${groupName}" and all its activities? This action cannot be undone.`;
-                
-            Alert.alert(
-                "Delete Activity Group",
-                warningMessage,
-                [
-                    {
-                        text: "Cancel",
-                        style: "cancel"
-                    },
-                    {
-                        text: "Delete",
-                        style: "destructive",
-                        onPress: async () => {
-                            try {
-                                const result = await deleteActivityGroup(db, groupId);
-                                
-                                if (result.success) {
-                                    await loadActivities();
-                                } else {
-                                    console.error(result.message);
-                                    Alert.alert("Error", result.message);
-                                }
-                            } catch (error) {
-                                console.error('Error deleting group:', error);
-                                Alert.alert("Error", "Failed to delete activity group");
-                            }
-                        }
-                    }
-                ]
-            );
-        } catch (error) {
-            console.error('Error checking group:', error);
-            Alert.alert("Error", "Failed to check activity group");
+    /**
+     * Open the delete dialog, having first MEASURED what the delete would
+     * destroy. The count is fetched before the dialog opens so the warning is
+     * never a vague "this cannot be undone" — it names the activities and the
+     * entries that lose their history (ON DELETE CASCADE reaches both).
+     */
+    const handleDeleteGroup = async (group: ActivityGroup) => {
+        const impact = await getGroupDeletionImpact(db, group.id);
+
+        if (!impact.exists) {
+            // Either the group vanished (another surface deleted it) or the read
+            // failed — both mean "don't offer a destructive action". Reload so
+            // the list matches reality.
+            Alert.alert("Error", "Activity group not found");
+            await loadActivities();
+            return;
         }
+
+        setDeleteError("");
+        setDeleteImpact(impact);
+        setDeleteTarget(group);
+    };
+
+    const closeDeleteDialog = () => {
+        setDeleteTarget(null);
+        setDeleteImpact(null);
+        setDeleteError("");
+    };
+
+    const handleConfirmDeleteGroup = async () => {
+        if (!deleteTarget) return;
+
+        const result = await deleteActivityGroup(db, deleteTarget.id);
+
+        if (result.success) {
+            closeDeleteDialog();
+            await loadActivities();
+        } else {
+            setDeleteError(result.message);
+        }
+    };
+
+    /**
+     * The safe alternative offered inside the delete dialog: re-file this
+     * group's activities into another group instead of destroying them. The
+     * dialog stays OPEN afterwards with a freshly measured impact, so the user
+     * can see the group is now empty (or what stayed behind) and decide about
+     * the delete with current information rather than the pre-move numbers.
+     */
+    const handleMoveGroupActivities = async (targetGroupId: number) => {
+        if (!deleteTarget) return;
+
+        const result = await moveActivitiesToGroup(db, deleteTarget.id, targetGroupId);
+
+        if (!result.success) {
+            setDeleteError(result.message);
+            return;
+        }
+
+        setDeleteError(
+            result.skipped.length
+                ? `${result.message}. Left behind (a same-named activity already exists there): ${result.skipped.join(', ')}`
+                : ""
+        );
+
+        await loadActivities();
+        setDeleteImpact(await getGroupDeletionImpact(db, deleteTarget.id));
+    };
+
+    const handleRenameGroup = async (name: string) => {
+        if (!renameTarget) return;
+
+        const result = await renameActivityGroup(db, renameTarget.id, name);
+
+        if (result.success) {
+            setRenameTarget(null);
+            setRenameError("");
+            await loadActivities();
+        } else {
+            setRenameError(result.message);
+        }
+    };
+
+    /**
+     * Persist a group drag-drop. Optimistic: the reordered array is pushed into
+     * local state immediately so the rows stay where the finger dropped them,
+     * then the write lands and `loadActivities` re-reads the canonical order. On
+     * failure the reload snaps the list back to what is actually stored.
+     */
+    const handleReorderGroups = async (reordered: ActivityGroup[]) => {
+        setGroups(reordered);
+
+        const result = await reorderActivityGroups(db, reordered);
+
+        if (!result.success) {
+            Alert.alert("Error", result.message);
+        }
+
+        await loadActivities();
+    };
+
+    const enterGroupMoveMode = () => {
+        // The buzz is the confirmation that the hold registered — without it a
+        // long-press that changes the whole screen feels like a glitch.
+        hapticDragStart();
+        closeMenu();
+        setGroupMoveMode(true);
     };
 
     const handleReorderActivities = async (activities: Activity[]) => {
@@ -802,43 +951,62 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
 
     return (
         <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent}>
-            <View style={styles.container}>
-                {groups.map((group) => (
-                    <ActivityGroupSection
-                        key={group.id}
-                        group={group}
-                        activities={groupedActivities[group.id] || []}
-                        selectedActivities={selectedActivities}
-                        onSelectActivity={onSelectActivity}
-                        onAddActivity={() => {
-                            setCurrentGroupId(group.id);
-                            setModals({ ...modals, addActivity: true });
-                        }}
-                        onEditActivity={(activity) => {
-                            setSelectedActivity(activity);
-                            setModals({ ...modals, edit: true });
-                        }}
-                        onDeleteGroup={() => {
-                            handleDeleteGroup(group.id, group.name);
-                        }}
-                        onReorderActivities={(activities) => {
-                            handleReorderActivities(activities);
-                        }}
-                        menuOpen={openMenuGroupId === group.id}
-                        onOpenMenu={() => setOpenMenuGroupId(group.id)}
-                        onCloseMenu={closeMenu}
-                        scrollableRef={scrollableRef}
-                    />
-                ))}
+            {/* MOVE MODE collapses the whole selector to draggable group-name
+                rows — Anti's ask: hold a group name and the chips get out of the
+                way so the order is one uninterrupted gesture. Everything else
+                (chips, add-group) is unmounted rather than hidden, so no stray
+                grid competes for the drag. */}
+            {groupMoveMode ? (
+                <GroupReorder
+                    groups={groups}
+                    onReorder={handleReorderGroups}
+                    onDone={() => setGroupMoveMode(false)}
+                    scrollableRef={scrollableRef}
+                />
+            ) : (
+                <View style={styles.container}>
+                    {groups.map((group) => (
+                        <ActivityGroupSection
+                            key={group.id}
+                            group={group}
+                            activities={groupedActivities[group.id] || []}
+                            selectedActivities={selectedActivities}
+                            onSelectActivity={onSelectActivity}
+                            onAddActivity={() => {
+                                setCurrentGroupId(group.id);
+                                setModals({ ...modals, addActivity: true });
+                            }}
+                            onEditActivity={(activity) => {
+                                setSelectedActivity(activity);
+                                setModals({ ...modals, edit: true });
+                            }}
+                            onDeleteGroup={() => {
+                                handleDeleteGroup(group);
+                            }}
+                            onRenameGroup={() => {
+                                setRenameError("");
+                                setRenameTarget(group);
+                            }}
+                            onEnterGroupMoveMode={enterGroupMoveMode}
+                            onReorderActivities={(activities) => {
+                                handleReorderActivities(activities);
+                            }}
+                            menuOpen={openMenuGroupId === group.id}
+                            onOpenMenu={() => setOpenMenuGroupId(group.id)}
+                            onCloseMenu={closeMenu}
+                            scrollableRef={scrollableRef}
+                        />
+                    ))}
 
-                <Pressable
-                    style={styles.addNewGroupButton}
-                    onPress={() => setModals({ ...modals, addGroup: true })}
-                >
-                    <Feather name="folder-plus" color={colors.text} size={20} />
-                    <Text style={styles.addNewGroupText}>Add New Activity Group</Text>
-                </Pressable>
-            </View>
+                    <Pressable
+                        style={styles.addNewGroupButton}
+                        onPress={() => setModals({ ...modals, addGroup: true })}
+                    >
+                        <Feather name="folder-plus" color={colors.text} size={20} />
+                        <Text style={styles.addNewGroupText}>Add New Activity Group</Text>
+                    </Pressable>
+                </View>
+            )}
 
             <AddActivityModal
                 visible={modals.addActivity}
@@ -857,10 +1025,33 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
                 error={error}
             />
 
+            <GroupRenameDialog
+                visible={!!renameTarget}
+                group={renameTarget}
+                onClose={() => {
+                    setRenameTarget(null);
+                    setRenameError("");
+                }}
+                onSubmit={handleRenameGroup}
+                error={renameError}
+            />
+
+            <GroupDeleteDialog
+                visible={!!deleteTarget}
+                group={deleteTarget}
+                impact={deleteImpact}
+                otherGroups={groups.filter((g) => g.id !== deleteTarget?.id)}
+                onMoveActivities={handleMoveGroupActivities}
+                onConfirmDelete={handleConfirmDeleteGroup}
+                onClose={closeDeleteDialog}
+                error={deleteError}
+            />
+
             {modals.edit && selectedActivity && ( // Making activityedit only exist when it's required to.
                 <ActivityEditModal
                     visible={modals.edit}
                     activity={selectedActivity}
+                    groups={groups}
                     onClose={() => {
                         setModals({ ...modals, edit: false });
                         setSelectedActivity(null);
