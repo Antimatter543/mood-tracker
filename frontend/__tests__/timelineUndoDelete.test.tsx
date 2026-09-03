@@ -254,6 +254,67 @@ describe('Timeline delete → undo', () => {
     });
 });
 
+describe('Timeline list scroll anchoring', () => {
+    // REGRESSION (device QA 2026-09-03). The SectionList carried
+    // `maintainVisibleContentPosition={{ minIndexForVisible: 0 }}` from the
+    // initial release. It pins the scroll offset to the VIEW of the first
+    // visible row, so any layout pass that pushes that row down is compensated
+    // for by scrolling down the same amount. This list is date-DESC: every
+    // insert the user cares about (a new entry, an undone delete, a bin
+    // restore) lands at the TOP and pushes that row down — so the list silently
+    // scrolled the new row off the top of the viewport. It read as "restoring
+    // corrupts the entry" (only the trailing note line showed under the sticky
+    // date header — no mood, no time, no activity chips) and as "new entries
+    // don't appear until you pull to refresh".
+    //
+    // Layout is not simulated in jest, so the observable contract is the prop
+    // itself: this list must not anchor its scroll position. `loadMoreData`
+    // APPENDS, so pagination never needed it.
+    //
+    // SectionList forwards `maintainVisibleContentPosition` all the way down to
+    // its host RCTScrollView, so reading it off the `timeline-list` testID node
+    // is a REAL assertion: it reads back `{ minIndexForVisible: 0 }` when the
+    // prop is set and `undefined` when it isn't (verified against RNTL 14 before
+    // this was written — a vacuous "always undefined" assertion would be worse
+    // than no test).
+    it('does NOT anchor scroll position (a prepended entry must stay visible)', async () => {
+        const view = await renderTimeline();
+        await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
+
+        const list = view.getByTestId('timeline-list');
+        expect(list.props.maintainVisibleContentPosition).toBeUndefined();
+    });
+
+    it('an entry restored to the TOP of the list is rendered first', async () => {
+        // The undo reload returns the restored entry as the NEWEST row — the
+        // exact position the scroll anchor used to hide.
+        const view = await renderTimeline();
+        await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
+
+        await act(async () => {
+            await fireEvent.press(view.getByLabelText('Delete entry'));
+        });
+        await waitFor(() => expect(view.queryByTestId('undo-snackbar')).not.toBeNull());
+
+        mockDb.getAllAsync.mockResolvedValue([
+            { ...entryRow(1, 'delete-me'), date: '2026-06-14T10:00:00.000Z' },
+            entryRow(2, 'older sibling'),
+        ]);
+        await act(async () => {
+            await fireEvent.press(view.getByTestId('undo-snackbar-action'));
+        });
+
+        await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
+        // …and it is the FIRST row in document order, i.e. exactly the position
+        // the scroll anchor used to park above the viewport.
+        const rendered = view.container
+            .queryAll((node) => node.type === 'Text')
+            .map((node) => node.props.children);
+        expect(rendered.indexOf('delete-me')).toBeGreaterThanOrEqual(0);
+        expect(rendered.indexOf('delete-me')).toBeLessThan(rendered.indexOf('older sibling'));
+    });
+});
+
 describe('Timeline bin button', () => {
     it('shows no badge when the bin is empty', async () => {
         const view = await renderTimeline();

@@ -157,7 +157,29 @@ const groupEntriesByDate = (entries: MoodEntry[], now: Date = new Date()): Secti
     }));
 };
 
-// Main Component
+/**
+ * Main Component — the Timeline list.
+ *
+ * NEVER put `maintainVisibleContentPosition` on this SectionList. (It WAS here,
+ * since the initial release, and it is what made the whole "new entries don't
+ * show up" class of bugs.) The prop anchors the scroll offset to the *view* of
+ * the first visible row and, whenever a layout pass moves that row, scrolls by
+ * the delta to hold it still. This list is ordered date-DESC, so EVERY insert
+ * the user cares about — a just-added entry, an undone delete, an entry restored
+ * from the bin — lands at the TOP and pushes that anchor row down. The list then
+ * silently scrolled down by exactly the new row's height, parking the new row
+ * off-screen above the viewport. Device-QA'd 2026-09-03: a restored entry read
+ * as CORRUPTED (only its trailing note line peeked below the sticky date header,
+ * no mood / time / activity chips) because its card was three-quarters scrolled
+ * off the top, and freshly-added entries "only appeared after a pull-to-refresh"
+ * (i.e. after a scroll put the top back in view).
+ *
+ * The prop exists for chat-style lists that prepend HISTORY while the user reads
+ * something below; it is exactly wrong for a list whose newest content is at the
+ * top. Pagination doesn't need it either: `loadMoreData` APPENDS, which never
+ * moves anything above it. Locked by the "Timeline list scroll anchoring" tests
+ * in __tests__/timelineUndoDelete.test.tsx.
+ */
 export function DatabaseViewer() {
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
@@ -531,7 +553,10 @@ export function DatabaseViewer() {
                     <EmptyState />
                 )
             ) : (
+                // NO `maintainVisibleContentPosition` on this list — see the note
+                // above the component for why adding it back hides every prepend.
                 <SectionList
+                    testID="timeline-list"
                     sections={sections}
                     renderItem={renderItem}
                     renderSectionHeader={renderSectionHeader}
@@ -541,9 +566,6 @@ export function DatabaseViewer() {
                     stickySectionHeadersEnabled={true}
                     keyboardDismissMode="on-drag"
                     keyboardShouldPersistTaps="handled"
-                    maintainVisibleContentPosition={{
-                        minIndexForVisible: 0,
-                    }}
                     ListFooterComponent={isLoadingMore ? (
                         <View style={styles.loadingFooter}>
                             <ActivityIndicator size="small" color={colors.accent} />
