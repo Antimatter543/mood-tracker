@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { useOverlay } from '@/context/OverlayHost';
 import { useThemeColors, ThemeColors } from '@/styles/global';
@@ -40,11 +39,18 @@ import {
  *     reanimated `Animated.View`. Every other overlay in this app that works
  *     (OverlayModal's card layer, the OverlayHost slot) declares it on a plain
  *     View; the snackbar was the sole exception and the sole dead control.
- *  3. There is NO `exiting` layout animation. `exiting` makes reanimated own the
- *     view's removal and keep it alive past unmount, and this app already has a
- *     scar from reanimated-4-on-Fabric mangling layout (see the Statistics
- *     blank-screen note in components/PageContainer.tsx). A snackbar fading out
- *     is not worth a view that may outlive its own React tree on top of the UI.
+ *  3. There are NO reanimated layout animations here AT ALL — not `exiting`
+ *     (which keeps the view alive past unmount) and, decisively, not `entering`
+ *     either. Device QA 2026-09-03 proved a reanimated `entering` on the bar
+ *     left the mounted view DEAD to real touches on Fabric: painted correctly,
+ *     uiautomator bounds correct, yet taps fell through to the FAB/list behind
+ *     it and ZERO ReactNativeJS activity fired — while the same restore action
+ *     through OverlayModal's plain-View panel worked every time. Same family as
+ *     the reanimated-4-on-Fabric Statistics scar (components/PageContainer.tsx).
+ *     The fade-in below uses RN core `Animated` on OPACITY ONLY: opacity never
+ *     participates in hit-testing, and with no transform the resting geometry
+ *     is pure layout. Do not reintroduce reanimated entering/exiting/Layout on
+ *     anything in this subtree that must take a tap.
  */
 
 /**
@@ -149,6 +155,16 @@ const SnackbarContent: React.FC<{
     const insets = useSafeAreaInsets();
     const styles = useStyles(colors);
 
+    // Fade-in via RN core Animated, opacity only — see TOUCH RELIABILITY note 3.
+    const fadeIn = useRef(new Animated.Value(0)).current;
+    useEffect(() => {
+        Animated.timing(fadeIn, {
+            toValue: 1,
+            duration: 180,
+            useNativeDriver: true,
+        }).start();
+    }, [fadeIn]);
+
     // Sit just above the floating tab bar, whose real height is its content
     // height PLUS the bottom safe-area inset (see lib/tabBarStyle.ts).
     const bottom =
@@ -165,7 +181,7 @@ const SnackbarContent: React.FC<{
             style={[styles.wrapper, { bottom }]}
             pointerEvents="box-none"
         >
-            <Animated.View testID="undo-snackbar" entering={FadeInDown.duration(180)} style={styles.bar}>
+            <Animated.View testID="undo-snackbar" style={[styles.bar, { opacity: fadeIn }]}>
                 <Text style={styles.message} numberOfLines={2}>
                     {message}
                 </Text>

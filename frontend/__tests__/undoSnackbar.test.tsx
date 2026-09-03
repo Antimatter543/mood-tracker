@@ -154,17 +154,36 @@ describe('UndoSnackbar — overlay structure', () => {
         expect(view.getByTestId('undo-snackbar').props.pointerEvents).toBeUndefined();
     });
 
-    it('has NO exiting layout animation', async () => {
+    it('has NO reanimated layout animations at all (entering OR exiting)', async () => {
         // `exiting` hands the view's removal to reanimated, which keeps it
-        // mounted past unmount — an invisible, reanimated-owned view sitting on
-        // top of the UI. This app already has a reanimated-4-on-Fabric layout
-        // scar (see components/PageContainer.tsx); a fade-out is not worth it.
+        // mounted past unmount. `entering` is WORSE here and is the proven root
+        // cause of the dead Undo button (device QA 2026-09-03): a reanimated
+        // `entering` on this bar left the mounted view painted correctly with
+        // correct uiautomator bounds, yet real taps fell through to views BEHIND
+        // it and zero ReactNativeJS activity fired — Fabric hit-testing broke on
+        // the entering-animated view while the same action through a plain-View
+        // panel worked every time. Fade-in is RN core Animated on opacity only.
         const { view } = await renderSnackbar();
         await waitFor(() => expect(view.queryByTestId('undo-snackbar')).not.toBeNull());
 
         const bar = view.getByTestId('undo-snackbar');
         expect(bar.props.exiting).toBeUndefined();
-        expect(bar.props.entering).toBeDefined();
+        expect(bar.props.entering).toBeUndefined();
+    });
+
+    it('never imports react-native-reanimated (source-level ban for this component)', () => {
+        // Jest is structurally blind to native hit-testing, so the device-proven
+        // bug class is banned at the import layer: nothing in UndoSnackbar may
+        // come from reanimated. The fade-in must stay RN core `Animated`.
+        const fs = require('fs');
+        const path = require('path');
+        const src = fs.readFileSync(
+            path.join(__dirname, '..', 'components', 'UndoSnackbar.tsx'),
+            'utf8'
+        );
+        expect(src).not.toMatch(/react-native-reanimated/);
+        expect(src).not.toMatch(/\bentering\s*=/);
+        expect(src).not.toMatch(/\bexiting\s*=/);
     });
 
     it('mounts through the OverlayHost, never a react-native <Modal>', async () => {
