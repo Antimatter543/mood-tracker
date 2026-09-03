@@ -146,18 +146,24 @@ function TabNavigator() {
 
     // Memoize the screen options to prevent unnecessary re-renders
     const screenOptions = useMemo(() => ({
-        // Header styling
-        headerStyle: {
-            backgroundColor: colors.secondaryBackground,
-
-        },
-        headerShadowVisible: false,
-        headerTintColor: colors.text,
-        headerTitleStyle: {
-            color: colors.text,
-
-            
-        },
+        // NO navigator header on ANY tab. Every screen instead opens with the
+        // in-page <PageHeader/> (glyph + title + optional subtitle, then straight
+        // into content) — see components/PageHeader.tsx.
+        //
+        // Before this, only Settings set `headerShown: false`, so the other four
+        // tabs rendered react-navigation's title bar pinned at the very top of
+        // the screen — and Insights ALSO drew its own in-page title underneath
+        // it (two competing headers), while Timeline/Statistics had the bar and
+        // no in-page title at all. The bottom tab bar already says which page
+        // you're on, so the bar is pure duplication.
+        //
+        // With the navigator header gone, the top safe-area inset is the page's
+        // own responsibility — `Layout` (components/PageContainer.tsx) applies
+        // it, so every screen must render inside a <Layout>.
+        //
+        // Per-screen `title` is kept: with the header hidden it only feeds the
+        // tab bar label.
+        headerShown: false,
         // Style of the view wrapping each tab's screen content — paint it the
         // theme background so no white shows around the floating tab bar or under
         // short screens. NOTE: react-navigation v7 (embedded in expo-router v6 /
@@ -182,38 +188,31 @@ function TabNavigator() {
         // default white window.
         <View style={{ flex: 1, backgroundColor: colors.background }}>
         <Tabs screenOptions={screenOptions}>
+            {/* `title` here only labels the TAB (headerShown is false for all of
+                them); the on-screen page title lives in each screen's
+                <PageHeader/>. Keep the two in step. */}
             <Tabs.Screen name="index" options={{
                 title: 'Home',
-                headerTitleAlign: 'center',
                 tabBarIcon: ({ color, focused }) => (
                     <Ionicons name={focused ? 'home-sharp' : 'home-outline'} color={color} size={30} />
                 ),
-                // headerShown: false,
-
-
             }}
             />
 
             <Tabs.Screen name="stats" options={{
                 title: 'Statistics',
-                headerTitleAlign: 'center',
                 tabBarIcon: ({ color, focused }) => (
                     <Ionicons name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} size={24} />),
-                // headerShown: false,
             }} />
             <Tabs.Screen name="timeline" options={{
                 title: 'Timeline',
-                headerTitleAlign: 'center',
-
                 tabBarIcon: ({ color, focused }) => (
                     <MaterialCommunityIcons name={focused ? 'timeline-text' : 'timeline-text-outline'} color={color} size={30} />
                 ),
-                // headerShown: false,
             }} />
 
             <Tabs.Screen name="insights" options={{
                 title: 'Insights',
-                headerTitleAlign: 'center',
                 tabBarIcon: ({ color, focused }) => (
                     <Ionicons name={focused ? 'bulb' : 'bulb-outline'} color={color} size={28} />
                 ),
@@ -224,8 +223,6 @@ function TabNavigator() {
                 tabBarIcon: ({ color, focused }) => (
                     <Ionicons name={focused ? 'settings-sharp' : 'settings-outline'} color={color} size={30} />
                 ),
-                headerShown: false,
-
             }} />
         </Tabs>
         </View>

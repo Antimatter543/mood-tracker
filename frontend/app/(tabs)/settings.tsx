@@ -1,6 +1,7 @@
 import { resetDatabase } from "@/databases/database";
 import { clearAllEntries, seedMoodEntries } from "@/components/generateData";
 import { Layout } from "@/components/PageContainer";
+import { PageHeader } from "@/components/PageHeader";
 import { useDataContext } from "@/context/DataContext";
 import { useGlobalStyles, useThemeColors } from "@/styles/global";
 import { SQLiteDatabase, useSQLiteContext } from "expo-sqlite";
@@ -173,10 +174,14 @@ function Setting() {
 
     return (
         <View style={globalStyles.container}>
-            <View style={globalStyles.header}>
-                <Ionicons name="settings-outline" color={colors.text} size={24} />
-                <Text style={globalStyles.headerText}>Settings</Text>
-            </View>
+            {/* The pattern every tab now follows — glyph + title, straight into
+                the content. Settings used to be the ONLY screen doing this (via
+                an ad-hoc header in useGlobalStyles); it now shares
+                components/PageHeader.tsx with the other four. */}
+            <PageHeader
+                title="Settings"
+                icon={p => <Ionicons name="settings-outline" {...p} />}
+            />
 
             <SettingsSection />
 

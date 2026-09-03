@@ -2,6 +2,7 @@ import { ThemeColors, useThemeColors } from '@/styles/global';
 import { ViewProps, View, StatusBar, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddEntryButton } from './AddEntryButton';
+import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
 import { useMemo, useEffect } from 'react';
 import Animated, {
     useSharedValue,
@@ -38,7 +39,7 @@ const useThemedStyles = (colors: ThemeColors, insetTop: number, insetBottom: num
                     position: 'relative',
                 },
                 scrollContent: {
-                    padding: 20,
+                    padding: LAYOUT_CONTENT_PADDING,
                     flexGrow: 1,
                     // Pad the bottom past the FAB so the last item scrolls fully
                     // into view above the floating button. The FAB floats at

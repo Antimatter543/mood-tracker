@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Platform } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Layout } from '@/components/PageContainer';
+import { PageHeader } from '@/components/PageHeader';
 import { Card } from '@/components/Card';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
@@ -117,6 +118,20 @@ const EMPTY_DRIVERS: MoodDriversData = {
     hasRecoverySignal: false,
     hasStabilitySignal: false,
 };
+
+/**
+ * Rendered identically by BOTH return branches (empty DB and populated), so the
+ * page never changes shape depending on whether there's data. Hoisted to a
+ * constant element rather than duplicated inline — PageHeader reads the theme
+ * itself, so it needs nothing from the screen's scope.
+ */
+const INSIGHTS_HEADER = (
+    <PageHeader
+        title="Insights"
+        subtitle="What your entries say about you"
+        icon={p => <Ionicons name="bulb-outline" {...p} />}
+    />
+);
 
 const EMPTY: Insights = {
     totalEntries: 0,
@@ -294,6 +309,7 @@ export default function InsightsScreen() {
     if (data && data.totalEntries === 0) {
         return (
             <Layout>
+                {INSIGHTS_HEADER}
                 <EmptyState />
             </Layout>
         );
@@ -303,8 +319,7 @@ export default function InsightsScreen() {
 
     return (
         <Layout>
-            <Text style={styles.heading}>Insights</Text>
-            <Text style={styles.sub}>What your entries say about you</Text>
+            {INSIGHTS_HEADER}
 
             {/* How you've been — 2-axis mood state (only once classified) */}
             {d.moodState.state === 'classified' && (
@@ -471,18 +486,8 @@ const useStyles = (colors: ThemeColors) =>
     useMemo(
         () =>
             StyleSheet.create({
-                heading: {
-                    fontSize: 28,
-                    fontWeight: '800',
-                    color: colors.text,
-                    letterSpacing: -0.5,
-                },
-                sub: {
-                    fontSize: 15,
-                    color: colors.textSecondary,
-                    marginBottom: 20,
-                    marginTop: 2,
-                },
+                // (The old local `heading` / `sub` styles moved into the shared
+                // components/PageHeader.tsx — see INSIGHTS_HEADER above.)
                 row: {
                     flexDirection: 'row',
                     alignItems: 'center',

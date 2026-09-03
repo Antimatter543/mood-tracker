@@ -3,6 +3,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Feather from '@expo/vector-icons/Feather';
 import { useThemeColors, ThemeColors } from '@/styles/global';
 import { Layout } from '../../components/PageContainer';
+import { PageHeader } from '@/components/PageHeader';
+import { greetingForHour, greetingIconForHour } from '@/lib/greeting';
 import { Card } from '@/components/Card';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState, memo, useMemo } from 'react';
@@ -59,12 +61,8 @@ const formatDate = (dateStr: string | null) => {
     };
 };
 
-// Time-of-day greeting based on the local hour.
-const greetingForHour = (hour: number): string => {
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
-};
+// Time-of-day greeting + its glyph live in lib/greeting.ts (pure, unit-tested
+// over all 24 hours — see __tests__/homeGreeting.test.ts).
 
 // Mood icon component — brand rule: no emoji as icons, use Ionicons sized + colored to theme.
 function MoodIcon({ mood }: { mood: number | null }) {
@@ -287,14 +285,8 @@ const useThemedStyles = (colors: ThemeColors) => {
             gap: 8,
             flexGrow: 0,
         },
-        greeting: {
-            fontSize: 26,
-            fontWeight: '700',
-            color: colors.text,
-            letterSpacing: -0.5,
-            marginBottom: 16,
-            marginLeft: 2,
-        },
+        // (The old local `greeting` style is gone — the greeting is now the page
+        // title, rendered by the shared components/PageHeader.tsx.)
         // The ONE section-title convention: sits ABOVE the card's content (the
         // Overview card's "title" style). Replaces the old `subtitle` that was
         // used inconsistently above AND below content.
@@ -422,6 +414,9 @@ export default function Home() {
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
     const db = useSQLiteContext();
+    // Read the clock once per render so the greeting and its glyph can't be
+    // computed from two different hours across a boundary.
+    const hour = new Date().getHours();
     const [todaysMood, setTodaysMood] = useState<number | null>(null);
     const [monthlyStats, setMonthlyStats] = useState<{
         average: number | null;
@@ -563,7 +558,13 @@ export default function Home() {
     return (
         <Layout>
             <View style={styles.container}>
-                <Text style={styles.greeting}>{greetingForHour(new Date().getHours())}</Text>
+                {/* Home's page title IS the greeting — same glyph + title shape
+                    every other tab uses (components/PageHeader.tsx); the tab bar
+                    already says "Home". */}
+                <PageHeader
+                    title={greetingForHour(hour)}
+                    icon={p => <Ionicons name={greetingIconForHour(hour)} {...p} />}
+                />
                 <TodaysMoodCard mood={todaysMood} streak={streak} />
                 <WeeklyChartCard data={weeklyData} />
                 {totalEntries === 0 && <FirstEntryNudge />}
