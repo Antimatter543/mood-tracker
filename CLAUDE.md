@@ -76,7 +76,7 @@ staging NOTHING (a deterministic pause for policy gates — see below); (1) asse
 agree; (2) **cheap idempotent guard** — if the versionCode is already on the production track, log "already on
 track — nothing to do" and stop; (3) if CI hasn't built `SoulSync-<version>.aab` yet, log "AAB not built yet —
 will retry" and stop; (4) otherwise delegate to `publish-to-play.sh` (`SOURCE=run`).
-- **Play state (2026-08-29):** production = **v2.9.0 (vc 20900) PUBLISHED, completed @ 100%** — still
+- **Play state (2026-09-04):** production = **v2.10.0 (vc 21000) PUBLISHED, completed @ 100%** (recycle bin/undo, group management, custom reminders, uniform headers) — still
   **built WITHOUT Health Connect permissions**. The `.play-hold` marker is
   GONE; the HC policy gate moved into the BUILD: CI's AAB lane sets `EXPO_PUBLIC_HEALTH_CONNECT=0` (one env
   knob — strips the 4 health perms from the manifest via `plugins/withHealthConnect.js` AND hides every HC
