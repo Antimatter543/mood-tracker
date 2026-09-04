@@ -3,6 +3,16 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.11.1] - 2026-09-04
+
+### Fixed
+- Long activity names no longer break in the middle of a word. "Unmotivated" and "Overwhelmed"
+  used to render as "Unmotivate / d" and "Overwhelm / ed" in the entry form's activity picker.
+  A name too wide for its chip is now shown a little smaller instead, and only a single
+  unbreakably long word is shortened with an ellipsis. Chips stay the same height either way, so
+  the rows still line up.
+- Activity names keep the same treatment when the system font size is turned up.
+
 ## [2.11.0] - 2026-09-04
 
 ### Added

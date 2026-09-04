@@ -25,9 +25,12 @@ import {
     ACTIVITY_CHIP_LABEL_BLOCK,
     ACTIVITY_CHIP_LABEL_GAP,
     ACTIVITY_CHIP_LABEL_LINE_HEIGHT,
-    ACTIVITY_CHIP_LABEL_LINES,
+    ACTIVITY_CHIP_LABEL_FONT_SIZE,
+    ACTIVITY_GRID_COLUMN_GAP,
     ACTIVITY_GRID_COLUMNS,
     ACTIVITY_GRID_ROW_GAP,
+    activityChipCellWidth,
+    activityChipLabelLayout,
     activityGridReservedHeight,
 } from "./activityGridMetrics";
 
@@ -75,6 +78,10 @@ type ActivityItemProps = {
     activity: Activity;
     isSelected: boolean;
     onPress: () => void;
+    /** Width of one grid cell (dp), the label's shrink budget. */
+    cellWidth: number;
+    /** OS accessibility font scale; a bigger scale eats the same cell. */
+    fontScale: number;
 };
 
 type ActivityGroupSectionProps = {
@@ -188,10 +195,14 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
     },
     activityLabel: {
         color: colors.text,
-        fontSize: 11,  // Slightly reduced from 12
+        // Base size. A label whose longest WORD is too wide for the cell is
+        // rendered a step or two smaller (per chip, via activityChipLabelLayout)
+        // so the word can never be sliced across two lines.
+        fontSize: ACTIVITY_CHIP_LABEL_FONT_SIZE,
         // Explicit line height + a two-line floor: a one-word chip is exactly as
-        // tall as a two-word one, so rows are uniform and the grid's height is
-        // derivable from the item count instead of from an async measurement.
+        // tall as a two-word one (and a SHRUNK one is exactly as tall as both),
+        // so rows are uniform and the grid's height is derivable from the item
+        // count instead of from an async measurement.
         lineHeight: ACTIVITY_CHIP_LABEL_LINE_HEIGHT,
         minHeight: ACTIVITY_CHIP_LABEL_BLOCK,
         textAlign: 'center',
@@ -347,9 +358,15 @@ export const renderActivityIcon = (
     );
 };
 
-const ActivityItem = ({ activity, isSelected, onPress }: ActivityItemProps) => {
+const ActivityItem = ({ activity, isSelected, onPress, cellWidth, fontScale }: ActivityItemProps) => {
     const colors = useThemeColors();
     const styles = useStyles(colors);
+    // A label may never break INSIDE a word ("Unmotivate / d", Pixel 3, 2026-09-04).
+    // The size is computed, not measured: see activityGridMetrics.ts.
+    const label = useMemo(
+        () => activityChipLabelLayout(activity.name, cellWidth, fontScale),
+        [activity.name, cellWidth, fontScale]
+    );
 
     // A plain tap toggles selection. A hold-and-drag is consumed by the
     // enclosing Sortable.Grid to reorder (its drag long-press at 300ms would
@@ -376,7 +393,13 @@ const ActivityItem = ({ activity, isSelected, onPress }: ActivityItemProps) => {
                     renderActivityIcon(activity, colors, 24, isSelected ? '#fff' : colors.text)
                 )}
             </View>
-            <Text style={styles.activityLabel} numberOfLines={ACTIVITY_CHIP_LABEL_LINES}>{activity.name}</Text>
+            <Text
+                style={[styles.activityLabel, { fontSize: label.fontSize }]}
+                numberOfLines={label.numberOfLines}
+                ellipsizeMode="tail"
+            >
+                {activity.name}
+            </Text>
         </Pressable>
     );
 };
@@ -526,7 +549,10 @@ const ActivityGroupSection = ({
     const styles = useStyles(colors);
     // Reactive (unlike PixelRatio.getFontScale()) so bumping the OS font size
     // re-reserves the grid height without a remount.
-    const { fontScale } = useWindowDimensions();
+    const { fontScale, width: windowWidth } = useWindowDimensions();
+    // Chip cell width, derived from the window (the grid lays out 5 fixed
+    // columns). Only the label's font size reads it, see activityGridMetrics.
+    const cellWidth = activityChipCellWidth(windowWidth);
     const [isReordering, setIsReordering] = useState(false);
     const [anchor, setAnchor] = useState<PopoverAnchor>({ x: 0, y: 0, width: 0, height: 0 });
     const menuButtonRef = useRef<View>(null);
@@ -548,9 +574,11 @@ const ActivityGroupSection = ({
                 activity={item}
                 isSelected={selectedActivities.includes(item.id)}
                 onPress={() => onSelectActivity(item.id)}
+                cellWidth={cellWidth}
+                fontScale={fontScale}
             />
         ),
-        [selectedActivities, onSelectActivity]
+        [selectedActivities, onSelectActivity, cellWidth, fontScale]
     );
 
     const keyExtractor = useCallback((item: Activity) => String(item.id), []);
@@ -673,7 +701,7 @@ const ActivityGroupSection = ({
                         keyExtractor={keyExtractor}
                         columns={ACTIVITY_GRID_COLUMNS}
                         rowGap={ACTIVITY_GRID_ROW_GAP}
-                        columnGap={8}
+                        columnGap={ACTIVITY_GRID_COLUMN_GAP}
                         onDragEnd={handleDragEnd}
                         dragActivationDelay={300}
                         scrollableRef={scrollableRef}

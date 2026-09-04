@@ -1,5 +1,41 @@
 # SoulSync — Project Lessons
 
+## 2026-09-04: The chip label that split "Unmotivated" into "Unmotivate / d"
+
+**Mistake**: the entry form's activity chips capped their label at `numberOfLines={2}` and left
+the wrapping to the platform. Android only breaks a word mid-word when the word cannot fit a
+line at all, which is exactly what a ~59dp chip cell does to any name past ~10 characters. Two
+of the SEEDED emotions ("Unmotivated", "Overwhelmed") shipped shredded, and a user-created
+activity name can be any length at all.
+
+**The trap**: `adjustsFontSizeToFit` is the obvious fix and does not work here. Android's
+autosize shrinks text that OVERFLOWS its line budget, and a mid-word break means the text
+already "fits" two lines, so the prop never engages on the one case that is broken. (It also
+has a live history of Android defects with an explicit `lineHeight`: RN #43104 "text missing and
+not resized", #30717, #47045.) Reaching for it would have shipped a no-op that tests green.
+
+**Rule**:
+- **When the platform's own text layout is the thing that is wrong, compute the answer instead
+  of asking the platform nicer.** The shrink is derived in JS from a per-character width
+  estimate (`activityChipLabelLayout` in `components/forms/activityGridMetrics.ts`), synchronous,
+  identical every render, unit-testable against numbers measured off the QA capture, and no
+  measurement pass to arrive a frame late (the same reason that module reserves the grid height).
+- **A shrink must not change the box.** `lineHeight` and the label's two-line `minHeight` are
+  untouched, so a shrunk chip is exactly as tall as its neighbours and the grid's reserved height
+  stays derivable from the item count.
+- **A font-scale floor belongs on the RENDERED size, not the style's.** React Native multiplies
+  `fontSize` by the OS scale, so flooring the style value makes a large-font user's label
+  truncate where a smaller style value would have rendered the same 8.25dp and kept the word.
+- **Test the CLASS**: `activityGridMetrics.test.ts` walks EVERY name in `seedData.ts` at five
+  font scales and fails if any one of them needs a second line for a single word. The instance
+  ("Unmotivated") is one case inside that sweep.
+
+**Rung**: test-grade. `__tests__/activityChipLabelWrap.test.tsx` renders the real selector at
+Pixel 3 dimensions and asserts the rendered label props (host node checked first, an RNTL 14
+prop assertion on a composite passes forever), plus a source-level guard tying
+`ACTIVITY_GRID_HORIZONTAL_INSET` to `EntryForm`'s own content padding, since the cell width is
+derived from the window rather than measured.
+
 ## 2026-09-03: A list that hid every new entry, and an overlay that wasn't opaque — two bugs the DB got blamed for
 
 **Mistake**: on-device QA of the recycle bin reported "restoring an entry CORRUPTS it — the card
