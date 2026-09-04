@@ -88,6 +88,30 @@ export const MOOD_POINTS_IN_RANGE = `
 `;
 
 // -----------------------------------------------------------------------------
+// Entry CONTENT in a window, RAW instants plus what the user actually wrote.
+//
+// The mood-trend chart plots a day's AVERAGE; when the user holds the chart on
+// a day, an average is not what they remember, the entry is. This feeds
+// `latestEntryPerDay` (transforms/latestEntry.ts), which keys the rows to LOCAL
+// days and keeps the most recent one per day for the scrub readout.
+//
+// `notes` (plural) is the real column name, see databases/lifecycle.ts.
+//
+// Caller supplies `?start, ?end` (UTC ISO bounds, same as the averages query,
+// so one window drives both reads).
+// -----------------------------------------------------------------------------
+export const ENTRY_DETAILS_IN_RANGE = `
+  SELECT
+    id,
+    date,
+    mood,
+    notes
+  FROM entries
+  WHERE deleted_at IS NULL AND date BETWEEN ? AND ?
+  ORDER BY date
+`;
+
+// -----------------------------------------------------------------------------
 // Entry instants for streak computation — RAW instants.
 //
 // Was `SELECT DISTINCT date(date)`, which both UTC-keyed the day AND collapsed

@@ -1,73 +1,41 @@
-import { useState, useMemo, useCallback } from 'react';
-import { Text, StyleSheet, View } from 'react-native';
-import { LineChart } from 'react-native-chart-kit';
-import { useThemeColors } from '@/styles/global';
-import { useSQLiteContext } from 'expo-sqlite';
-import { CHART_PADDING, SCREEN_WIDTH, useChartConfig, parseHexColor } from './chartUtils';
-import { useDataRefresh } from '@/hooks/useDataRefresh';
-import InfoBubble from '../InfoBubble';
+import { useCallback, useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+
 import { Card } from '../Card';
+import InfoBubble from '../InfoBubble';
+import { useThemeColors } from '@/styles/global';
 import { useTimeframe } from '@/context/TimeframeContext';
-import { WEEKLY_MOOD_AVERAGES } from './queries';
+import MoodLineChart from './MoodLineChart';
+import MoodTrendExpanded from './MoodTrendExpanded';
+import MoodTrendReadout from './MoodTrendReadout';
+import { TrendLegend } from './MoodTrendLegend';
+import { useMoodTrendData } from './useMoodTrendData';
 import { type Timeframe } from './transforms/windowHelpers';
-import {
-  buildWeeklyMoodChartData,
-  formatLabel,
-  type MoodAvgRow,
-} from './transforms/weeklyMood';
-import { dailyAverageRows } from './transforms/dailyAverages';
-import { computeMovingAverage, type DayAvg } from './transforms/movingAverage';
 
 /**
- * MoodTrendChart — the raw daily-average line PLUS a centred moving-average
- * overlay. The MA turns noisy day-to-day variance into a readable trend.
+ * MoodTrendChart — the Statistics screen's headline chart: the raw daily-average
+ * line plus a centred moving-average overlay, drawn by our OWN SVG primitive
+ * (MoodLineChart). It replaced react-native-chart-kit, whose flat single-colour
+ * bezier was the "not bright enough / I can't see the differences" complaint.
  *
- * The MA window adapts to the timeframe:
- *  - week:      none (a 7-day MA over 7 points is just the data, pointless)
- *  - month:     7-day MA
- *  - 3months+:  14-day MA
+ * Interaction:
+ *  - press and HOLD to scrub: the cursor snaps to real days and the bubble shows
+ *    that day's average plus its most recent entry.
+ *  - TAP (or the expand button) to open the full-screen version.
  *
- * Rendering is done entirely with react-native-chart-kit's native multi-dataset
- * support (two datasets, per-dataset colors) rather than an absolutely-
- * positioned SVG overlay. This avoids depending on chart-kit's private pixel
- * layout (the brittle xOffset magic numbers flagged as a risk in the brief) —
- * chart-kit positions both lines itself, so they always stay aligned.
+ * The card always uses the fixed 0–10 scale so one period's card is comparable
+ * with another's at a glance; the "Fit" zoom lives ONLY in the expanded view,
+ * where the user has explicitly asked for a closer look.
  */
 
-/** Maximum rendered points; beyond this we down-sample to keep the line legible. */
-const MAX_POINTS = 90;
-
-/** MA window (days) per timeframe. 0 = no overlay. */
-const maWindowFor = (tf: Timeframe): number => {
-  switch (tf) {
-    case 'week':
-      return 0;
-    case 'month':
-      return 7;
-    case '3months':
-    case 'year':
-    case 'alltime':
-      return 14;
-    default:
-      return 0;
-  }
-};
-
+/** Card plot height. Taller than the old 220 — the axis labels need the room. */
+const CARD_CHART_HEIGHT = 240;
 /**
- * Down-sample a dense daily-average series to at most `maxPoints` by taking
- * every N-th row (keeping the last). Render-specific, not a domain transform.
+ * Keeps the expand button clear of InfoBubble, which is absolutely positioned
+ * at the card's top-right (32px button at inset 4 — see components/InfoBubble).
  */
-export const sampleDailyAvgs = (rows: DayAvg[], maxPoints: number): DayAvg[] => {
-  if (rows.length <= maxPoints || maxPoints <= 0) return rows;
-  const step = Math.ceil(rows.length / maxPoints);
-  const out: DayAvg[] = [];
-  for (let i = 0; i < rows.length; i += step) out.push(rows[i]);
-  // Always include the final point so the trend's end isn't clipped.
-  if (out[out.length - 1] !== rows[rows.length - 1]) {
-    out.push(rows[rows.length - 1]);
-  }
-  return out;
-};
+const INFO_BUBBLE_RESERVE = 40;
 
 const titleFor = (tf: Timeframe): string => {
   switch (tf) {
@@ -88,224 +56,137 @@ const titleFor = (tf: Timeframe): string => {
 
 const MoodTrendChart = () => {
   const colors = useThemeColors();
-  const chartConfig = useChartConfig();
-  const chartWidth = SCREEN_WIDTH - (CHART_PADDING + 32);
-  const db = useSQLiteContext();
-  const { timeframe, periodWindow } = useTimeframe();
-
-  const [series, setSeries] = useState<{
-    labels: string[];
-    raw: number[];
-    ma: number[] | null;
-    nullIndices: number[];
-  } | null>(null);
-  const [loading, setLoading] = useState(true);
-
+  const { timeframe, periodLabel } = useTimeframe();
   const tf = timeframe as Timeframe;
+  const data = useMoodTrendData();
+  const [expanded, setExpanded] = useState(false);
 
-  const maColor = useMemo(() => {
-    const rgb = parseHexColor(colors.accentDark) ??
-      parseHexColor(colors.accent) ?? { r: 61, g: 139, b: 64 };
-    return (opacity = 1) => `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacity * 0.85})`;
-  }, [colors]);
-
-  const formatDateLabel = useCallback(
-    (dateStr: string, index: number, total: number) =>
-      formatLabel(dateStr, index, total, tf),
-    [tf],
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        titleRow: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          marginBottom: 12,
+          // Room for the InfoBubble that floats over the card's top-right.
+          paddingRight: INFO_BUBBLE_RESERVE,
+        },
+        title: {
+          fontSize: 18,
+          fontWeight: '600',
+          color: colors.text,
+          flex: 1,
+        },
+        expandButton: {
+          width: 36,
+          height: 36,
+          borderRadius: 18,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: colors.overlays.tag,
+        },
+        hint: {
+          color: colors.textSecondary,
+          fontSize: 12,
+          textAlign: 'center',
+          marginTop: 6,
+        },
+        message: {
+          color: colors.textSecondary,
+          textAlign: 'center',
+          padding: 20,
+        },
+      }),
+    [colors],
   );
 
-  const styles = useMemo(() => StyleSheet.create({
-    title: {
-      fontSize: 18,
-      fontWeight: '600',
-      marginBottom: 16,
-      color: colors.text,
-    },
-    chart: {
-      marginVertical: 8,
-      borderRadius: 16,
-    },
-    loadingText: {
-      color: colors.textSecondary,
-      textAlign: 'center',
-      padding: 20,
-    },
-    noDataText: {
-      color: colors.textSecondary,
-      textAlign: 'center',
-      padding: 20,
-    },
-    legend: {
-      flexDirection: 'row',
-      gap: 16,
-      marginTop: 4,
-    },
-    legendItem: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    legendDot: {
-      width: 10,
-      height: 3,
-      borderRadius: 2,
-    },
-    legendText: {
-      color: colors.textSecondary,
-      fontSize: 12,
-    },
-  }), [colors]);
+  const openExpanded = useCallback(() => setExpanded(true), []);
+  const closeExpanded = useCallback(() => setExpanded(false), []);
 
-  const fetchData = useCallback(async () => {
-      setLoading(true);
-      try {
-        const { start, end } = periodWindow;
-        // Raw {date: instant, mood} rows -> per-LOCAL-day averages in JS.
-        const rawRows = await db.getAllAsync<{ date: string; mood: number }>(
-          WEEKLY_MOOD_AVERAGES,
-          [start, end],
-        );
-        const rows: MoodAvgRow[] = dailyAverageRows(rawRows);
+  const xLabelFor = useCallback(
+    (index: number) => data.labels[index] ?? '',
+    [data.labels],
+  );
 
-        const built = buildWeeklyMoodChartData(rows, tf);
-        if (built.isEmpty) {
-          setSeries(null);
-          setLoading(false);
-          return;
-        }
+  const tooltip = useCallback(
+    (index: number) => {
+      const point = data.series[index];
+      if (!point) return null;
+      return (
+        <MoodTrendReadout
+          day={point.date}
+          average={point.value}
+          entry={data.latestEntries.get(point.date) ?? null}
+        />
+      );
+    },
+    [data.series, data.latestEntries],
+  );
 
-        // Dense (gap-filled, interpolated) daily series for the MA window.
-        const dense: DayAvg[] = rows.map((r, i) => ({
-          date: r.date,
-          avgMood: built.data[i],
-        }));
+  const title = titleFor(tf);
 
-        // Down-sample to a legible point count (alltime can be hundreds of days).
-        const sampled = sampleDailyAvgs(dense, MAX_POINTS);
-        const rawData = sampled.map((d) => d.avgMood);
-        const labels = sampled.map((d, i) =>
-          formatDateLabel(d.date, i, sampled.length),
-        );
+  const header = (
+    <View style={styles.titleRow}>
+      <Text style={styles.title}>{title}</Text>
+      {!data.loading && !data.isEmpty && (
+        <Pressable
+          onPress={openExpanded}
+          style={styles.expandButton}
+          testID="mood-trend-expand"
+          accessibilityRole="button"
+          accessibilityLabel="Expand mood trend chart"
+        >
+          <Ionicons name="expand-outline" size={18} color={colors.text} />
+        </Pressable>
+      )}
+    </View>
+  );
 
-        // null-index set, remapped onto the sampled series so missing dots
-        // still render distinctly.
-        const sampledNullSet = new Set<number>();
-        sampled.forEach((d, sampledIdx) => {
-          const origIdx = dense.findIndex((o) => o.date === d.date);
-          if (origIdx >= 0 && built.nullIndices.includes(origIdx)) {
-            sampledNullSet.add(sampledIdx);
-          }
-        });
-
-        const w = maWindowFor(tf);
-        const ma =
-          w > 0
-            ? computeMovingAverage(sampled, w).map((p) => p.value)
-            : null;
-
-        setSeries({
-          labels,
-          raw: rawData,
-          ma,
-          nullIndices: Array.from(sampledNullSet),
-        });
-      } catch (error) {
-        console.error('Error fetching mood trend data:', error);
-        setSeries(null);
-      }
-      setLoading(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + periodWindow; tf only shapes labels/MA width; formatDateLabel is stable; setState identities are stable
-    }, [db, periodWindow, tf, formatDateLabel]);
-  // Focus-aware refetch (replaces useEffect([db, refreshCount, tf, formatDateLabel])).
-  useDataRefresh(fetchData, [db, periodWindow, tf, formatDateLabel]);
-
-  if (loading) {
+  if (data.loading) {
     return (
       <Card>
-        <Text style={styles.title}>{titleFor(tf)}</Text>
-        <Text style={styles.loadingText}>Loading data...</Text>
+        {header}
+        <Text style={styles.message}>Loading data...</Text>
       </Card>
     );
   }
 
-  if (!series) {
+  if (data.isEmpty) {
     return (
       <Card>
-        <Text style={styles.title}>{titleFor(tf)}</Text>
-        <Text style={styles.noDataText}>No data available for this time period.</Text>
+        {header}
+        <Text style={styles.message}>No data available for this time period.</Text>
       </Card>
     );
   }
-
-  // The raw line is the brand accent; the MA (when present) overlays in the
-  // darker accent so the smoothed trend reads as the primary signal.
-  const datasets: {
-    data: number[];
-    color?: (opacity?: number) => string;
-    strokeWidth?: number;
-    withDots?: boolean;
-  }[] = [
-    {
-      data: series.raw,
-      color: (o = 1) => `rgba(${parseHexColor(colors.accent)?.r ?? 76}, ${
-        parseHexColor(colors.accent)?.g ?? 175
-      }, ${parseHexColor(colors.accent)?.b ?? 80}, ${o * (series.ma ? 0.35 : 1)})`,
-      strokeWidth: 2,
-      withDots: !series.ma,
-    },
-  ];
-  if (series.ma) {
-    datasets.push({
-      data: series.ma,
-      color: maColor,
-      strokeWidth: 3,
-      withDots: false,
-    });
-  }
-  // Invisible anchor datasets pin the y-axis to 0..10.
-  datasets.push({ data: [10], color: () => 'transparent', withDots: false });
-  datasets.push({ data: [0], color: () => 'transparent', withDots: false });
 
   return (
     <Card>
       <InfoBubble
-        text="Your daily average mood over the selected timeframe. When the window is long enough, a moving-average line smooths out the day-to-day noise so you can see the underlying trend."
+        text="Your daily average mood over the selected timeframe, on the full 0–10 scale. Press and hold the chart to see any day's mood and the entry behind it; tap it for a bigger version with a zoomed scale. When the window is long enough, a dashed moving-average line smooths out the day-to-day noise so you can see the underlying trend."
         position="top-right"
       />
-      <Text style={styles.title}>{titleFor(tf)}</Text>
-      <LineChart
-        data={{ labels: series.labels, datasets }}
-        width={chartWidth}
-        height={220}
-        yAxisLabel=""
-        yAxisSuffix=""
-        yAxisInterval={2}
-        segments={5}
-        withVerticalLines={false}
-        withDots={!series.ma}
-        getDotColor={(_p, index) =>
-          series.nullIndices.includes(index) ? '#e74c3c' : colors.accent
-        }
-        chartConfig={{ ...chartConfig, strokeWidth: 2 }}
-        bezier
-        fromZero
-        style={styles.chart}
+      {header}
+      <MoodLineChart
+        testID="mood-trend-chart"
+        series={data.series}
+        overlay={data.overlay}
+        height={CARD_CHART_HEIGHT}
+        domain="fixed"
+        xLabelFor={xLabelFor}
+        onPress={openExpanded}
+        tooltip={tooltip}
       />
-      {series.ma && (
-        <View style={styles.legend}>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: colors.accent, opacity: 0.45 }]} />
-            <Text style={styles.legendText}>Daily average</Text>
-          </View>
-          <View style={styles.legendItem}>
-            <View style={[styles.legendDot, { backgroundColor: colors.accentDark }]} />
-            <Text style={styles.legendText}>
-              {maWindowFor(tf)}-day trend
-            </Text>
-          </View>
-        </View>
-      )}
+      <TrendLegend maWindow={data.maWindow} />
+      <Text style={styles.hint}>Hold to inspect a day · tap to expand</Text>
+
+      <MoodTrendExpanded
+        visible={expanded}
+        onClose={closeExpanded}
+        title={title}
+        periodLabel={periodLabel}
+        data={data}
+      />
     </Card>
   );
 };

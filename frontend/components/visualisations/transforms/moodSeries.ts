@@ -20,6 +20,32 @@
 
 import { addDays, daysBetween } from '@/databases/dateHelpers';
 import type { DayAvgRow } from './dailyAverages';
+import type { Timeframe } from './windowHelpers';
+
+/** Maximum rendered points; beyond this we down-sample to keep the line legible. */
+export const MAX_POINTS = 90;
+
+/**
+ * Moving-average window (days) per timeframe. 0 = no overlay: a 7-day average
+ * over a 7-day window is just the data with its ends chewed off.
+ *
+ * Policy, not plumbing — it lives here (pure, importable from a test without
+ * dragging expo-router in) rather than inside the data hook.
+ */
+export const maWindowFor = (tf: Timeframe): number => {
+    switch (tf) {
+        case 'week':
+            return 0;
+        case 'month':
+            return 7;
+        case '3months':
+        case 'year':
+        case 'alltime':
+            return 14;
+        default:
+            return 0;
+    }
+};
 
 /** One plotted slot: a local day, and its average mood or `null` for "not logged". */
 export type MoodSeriesPoint = {
