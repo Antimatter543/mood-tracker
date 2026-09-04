@@ -3,7 +3,7 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
-## [Unreleased]
+## [2.10.0] - 2026-09-04
 
 ### Added
 - **Deleted something by accident? Take it back.** Deleting a timeline entry now shows an
