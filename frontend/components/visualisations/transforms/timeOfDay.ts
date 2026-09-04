@@ -212,3 +212,40 @@ export const computeIntradaySwing = (rows: TimeOfDayRow[]): IntradaySwing => {
         hasEnough: multiLogDayCount >= MIN_MULTI_LOG_DAYS_FOR_SWING,
     };
 };
+
+/**
+ * The card's one-line callout, as DATA rather than as a sentence assembled in
+ * JSX, the component owns the wording and the emphasis spans, this owns the
+ * decision of which sentence is even true.
+ *
+ * BUG (2026-09-04): the callout was rendered whenever both `bestBucket` and
+ * `worstBucket` were non-empty, which is true the moment ANY entry exists. A
+ * user who has only ever logged in the afternoon read "You tend to feel best in
+ * the Afternoon and toughest at Afternoon.", a contrast drawn against nothing.
+ * `best === worst` has two distinct causes and they need different sentences:
+ * one bucket has all the entries, or every bucket that has entries averages the
+ * same (the max and the min both land on the first one).
+ */
+export type TimeOfDayCallout =
+    /** Nothing logged yet, the card says nothing. */
+    | { kind: 'none' }
+    /** Every entry so far sits in one part of the day. */
+    | { kind: 'single'; label: string }
+    /** Two or more parts of the day, all averaging the same. */
+    | { kind: 'flat' }
+    /** The normal case: a real high and a real low. */
+    | { kind: 'contrast'; best: string; worst: string };
+
+export const timeOfDayCallout = (data: TimeOfDayData | null | undefined): TimeOfDayCallout => {
+    const buckets = data?.buckets ?? [];
+    const withEntries = buckets.filter((b) => b.entry_count > 0);
+    if (withEntries.length === 0) return { kind: 'none' };
+    if (withEntries.length === 1) return { kind: 'single', label: withEntries[0].label };
+
+    const best = data?.bestBucket ?? '';
+    const worst = data?.worstBucket ?? '';
+    // Defensive: an aggregate that named neither end can't be contrasted.
+    if (best === '' || worst === '') return { kind: 'none' };
+    if (best === worst) return { kind: 'flat' };
+    return { kind: 'contrast', best, worst };
+};

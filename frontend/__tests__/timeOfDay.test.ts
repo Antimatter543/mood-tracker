@@ -8,10 +8,13 @@
  * critical one: an instant at local 02:00 is the PREVIOUS day in UTC, which is
  * exactly what would mis-bucket if the hour were extracted in SQL/UTC.
  */
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
   aggregateTimeOfDay,
   computeIntradaySwing,
   bucketForHour,
+  timeOfDayCallout,
   TIME_OF_DAY_BUCKETS,
   type TimeOfDayRow,
 } from '@/components/visualisations/transforms/timeOfDay';
@@ -265,5 +268,133 @@ describe('computeIntradaySwing', () => {
     expect(out.multiLogDayCount).toBe(1);
     expect(out.avgDelta).toBe(4);
     expect(out.avgRange).toBe(4);
+  });
+});
+
+/**
+ * timeOfDayCallout, which closing sentence is TRUE for this data.
+ *
+ * REGRESSION (2026-09-04): the card rendered its contrast sentence whenever
+ * `bestBucket` and `worstBucket` were both non-empty, which is true the moment
+ * a single entry exists. A user who had only ever logged in the afternoon read
+ * "You tend to feel best in the Afternoon and toughest at Afternoon.", a
+ * comparison drawn against nothing. `best === worst` has TWO causes and they
+ * are different sentences: one bucket holds every entry, or several buckets
+ * hold entries that all average the same (max and min both land on the first).
+ */
+describe('timeOfDayCallout', () => {
+  const callout = (rows: TimeOfDayRow[]) => timeOfDayCallout(aggregateTimeOfDay(rows));
+
+  it('says nothing at all on an empty database', () => {
+    expect(callout([])).toEqual({ kind: 'none' });
+    // The empty-DB path reaches this before any aggregate exists, too.
+    expect(timeOfDayCallout(null)).toEqual({ kind: 'none' });
+    expect(timeOfDayCallout(undefined)).toEqual({ kind: 'none' });
+  });
+
+  it('never contrasts a single part of the day with itself', () => {
+    const rows = [
+      row(at(2026, 8, 1, 13), 7),
+      row(at(2026, 8, 2, 14), 4),
+      row(at(2026, 8, 3, 15), 9),
+    ];
+    // The bug's exact shape: one bucket, three different moods, so the
+    // aggregate happily names a best AND a worst, both "Afternoon".
+    const data = aggregateTimeOfDay(rows);
+    expect(data.bestBucket).toBe('Afternoon');
+    expect(data.worstBucket).toBe('Afternoon');
+
+    expect(callout(rows)).toEqual({ kind: 'single', label: 'Afternoon' });
+  });
+
+  it('names whichever single bucket it is', () => {
+    expect(callout([row(at(2026, 8, 1, 7), 6)])).toEqual({
+      kind: 'single',
+      label: 'Morning',
+    });
+    // Night wraps midnight, the label still comes from the bucket, not the date.
+    expect(callout([row(at(2026, 8, 1, 2), 6)])).toEqual({
+      kind: 'single',
+      label: 'Night',
+    });
+  });
+
+  it('contrasts as soon as a second bucket disagrees', () => {
+    expect(
+      callout([row(at(2026, 8, 1, 8), 8), row(at(2026, 8, 1, 23), 3)])
+    ).toEqual({ kind: 'contrast', best: 'Morning', worst: 'Night' });
+  });
+
+  it('contrasts the extremes when every bucket has entries', () => {
+    expect(
+      callout([
+        row(at(2026, 8, 1, 8), 6),
+        row(at(2026, 8, 1, 13), 9),
+        row(at(2026, 8, 1, 19), 5),
+        row(at(2026, 8, 1, 23), 2),
+      ])
+    ).toEqual({ kind: 'contrast', best: 'Afternoon', worst: 'Night' });
+  });
+
+  it('claims no high and no low when every logged bucket averages the same', () => {
+    // best and worst both fall on the first bucket here, which is NOT a
+    // "all your entries are in the Morning" situation, three buckets have data.
+    const rows = [
+      row(at(2026, 8, 1, 8), 5),
+      row(at(2026, 8, 1, 13), 5),
+      row(at(2026, 8, 1, 19), 5),
+    ];
+    const data = aggregateTimeOfDay(rows);
+    expect(data.bestBucket).toBe(data.worstBucket);
+    expect(callout(rows)).toEqual({ kind: 'flat' });
+  });
+
+  it('never returns a contrast whose two ends are the same bucket', () => {
+    // The invariant the card's sentence depends on, over every shape above.
+    const shapes: TimeOfDayRow[][] = [
+      [],
+      [row(at(2026, 8, 1, 13), 7)],
+      [row(at(2026, 8, 1, 13), 7), row(at(2026, 8, 2, 14), 2)],
+      [row(at(2026, 8, 1, 8), 5), row(at(2026, 8, 1, 19), 5)],
+      [
+        row(at(2026, 8, 1, 8), 6),
+        row(at(2026, 8, 1, 13), 9),
+        row(at(2026, 8, 1, 19), 5),
+        row(at(2026, 8, 1, 23), 2),
+      ],
+      // Junk rows the aggregate drops: the callout must survive them.
+      [row('not-a-date', 5), row(at(2026, 8, 1, 13), Number.NaN)],
+    ];
+    for (const rows of shapes) {
+      const result = callout(rows);
+      if (result.kind === 'contrast') {
+        expect(result.best).not.toBe(result.worst);
+        expect(result.best).not.toBe('');
+        expect(result.worst).not.toBe('');
+      }
+      if (result.kind === 'single') expect(result.label).not.toBe('');
+    }
+  });
+});
+
+/**
+ * SOURCE-LEVEL GUARD. The decision above is only worth anything if the card
+ * asks it. The old sentence was assembled inline from `data.bestBucket` /
+ * `data.worstBucket` behind a "both are non-empty" gate, which is exactly the
+ * condition that was wrong, so the card must not carry that gate any more.
+ */
+describe('the Time of Day card asks the transform which sentence is true', () => {
+  const source = readFileSync(
+    join(__dirname, '..', 'components', 'visualisations', 'TimeOfDayChart.tsx'),
+    'utf8',
+  );
+
+  it('renders its callout through timeOfDayCallout', () => {
+    expect(source).toContain('timeOfDayCallout');
+  });
+
+  it('no longer gates the sentence on "a best and a worst both exist"', () => {
+    expect(source).not.toMatch(/data\.bestBucket\s*!==\s*''/);
+    expect(source).not.toMatch(/data\.worstBucket\s*!==\s*''/);
   });
 });

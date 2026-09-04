@@ -12,6 +12,7 @@ import { TIME_OF_DAY_PATTERN } from './queries';
 import {
   aggregateTimeOfDay,
   computeIntradaySwing,
+  timeOfDayCallout,
   type TimeOfDayRow,
   type TimeOfDayData,
   type IntradaySwing,
@@ -186,13 +187,7 @@ const TimeOfDayChart = () => {
         />
       ))}
 
-      {data.bestBucket !== '' && data.worstBucket !== '' && (
-        <Text style={styles.callout}>
-          You tend to feel best in the{' '}
-          <Text style={styles.calloutEmphasis}>{data.bestBucket}</Text> and toughest
-          at <Text style={styles.calloutEmphasis}>{data.worstBucket}</Text>.
-        </Text>
-      )}
+      <TimeOfDayCallout data={data} styles={styles} />
 
       {swing?.hasEnough && (
         <SwingInsight
@@ -204,6 +199,40 @@ const TimeOfDayChart = () => {
       )}
     </Card>
   );
+};
+
+/** The card's closing line. Which sentence is true is decided by the pure
+ *  `timeOfDayCallout`, a single logged part of the day cannot be contrasted
+ *  with itself ("best in the Afternoon and toughest at Afternoon"). */
+const TimeOfDayCallout = ({ data, styles }: { data: TimeOfDayData; styles: Styles }) => {
+  const callout = timeOfDayCallout(data);
+
+  switch (callout.kind) {
+    case 'none':
+      return null;
+    case 'single':
+      return (
+        <Text style={styles.callout}>
+          All your entries so far are in the{' '}
+          <Text style={styles.calloutEmphasis}>{callout.label}</Text>, log at other
+          times to compare.
+        </Text>
+      );
+    case 'flat':
+      return (
+        <Text style={styles.callout}>
+          Your mood sits about the same at every time of day you've logged so far.
+        </Text>
+      );
+    case 'contrast':
+      return (
+        <Text style={styles.callout}>
+          You tend to feel best in the{' '}
+          <Text style={styles.calloutEmphasis}>{callout.best}</Text> and toughest
+          at <Text style={styles.calloutEmphasis}>{callout.worst}</Text>.
+        </Text>
+      );
+  }
 };
 
 const makeStyles = (colors: ThemeColors) =>

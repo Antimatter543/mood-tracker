@@ -12,6 +12,10 @@ All notable changes to SoulSync are documented here. Versions follow
   unbreakably long word is shortened with an ellipsis. Chips stay the same height either way, so
   the rows still line up.
 - Activity names keep the same treatment when the system font size is turned up.
+- The **Time of Day** card no longer compares a part of the day with itself. When all your
+  entries so far land in one part of the day it says so and invites you to log at other times,
+  instead of claiming you feel "best in the Afternoon and toughest at Afternoon". If every part
+  of the day you've logged averages the same, it says that too.
 
 ## [2.11.0] - 2026-09-04
 
