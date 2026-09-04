@@ -76,9 +76,25 @@ export function hapticReorderTick(): void {
   safely((h) => h.selectionAsync());
 }
 
+/** The one physical effect behind every "that landed" confirmation below. */
+function lightImpact(): void {
+  safely((h) => h.impactAsync(h.ImpactFeedbackStyle.Light));
+}
+
 /** Drag released. */
 export function hapticDragEnd(): void {
-  safely((h) => h.impactAsync(h.ImpactFeedbackStyle.Light));
+  lightImpact();
+}
+
+/**
+ * A swipe committed and the view stepped to another page/period. Named
+ * separately from `hapticDragEnd` because the two are different events that may
+ * want to diverge; they share the light impact today because both mean the same
+ * thing to the hand: the thing you were moving has arrived.
+ * Used by `hooks/usePeriodSwipe.ts` (Statistics period paging).
+ */
+export function hapticPageStep(): void {
+  lightImpact();
 }
 
 /** Test-only: forget the cached module so a fresh require path can be asserted. */
