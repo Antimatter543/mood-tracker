@@ -3,6 +3,31 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.11.0] - 2026-09-04
+
+### Added
+- **Mood trend charts you can actually read.** The trend line on Statistics is now painted in
+  your mood colours (greens up high, ambers and reds down low) with a full 0–10 scale drawn
+  behind it, so a 5 and a 7 finally look different. Press and hold anywhere on the chart to
+  scrub through it: a cursor snaps from day to day and shows that day's average plus the last
+  entry you wrote, with a gentle tick as you move. Tap the chart (or the expand button) to open
+  it full-screen, where a **Fit** switch zooms the scale to your own range.
+- **Swipe through time on Statistics.** Swipe the charts right to step back one period (week,
+  month, quarter, year), left to come forward. The arrows still work, the swipe is just quicker.
+
+### Changed
+- Every tab's title now sits on the same line. Timeline, Statistics and Settings used to start
+  higher up the screen than Home and Insights.
+- **Average mood by day** is drawn by SoulSync itself now: bars in your mood colours with the
+  value on top, and a day with no entries shows no bar instead of a misleading zero.
+- The trend's x-axis is a real time axis. A week you didn't log is now a dashed gap of the right
+  width, and the "7-day" / "14-day" trend lines are averages over days, as labelled, not over
+  entries.
+
+### Removed
+- The third-party charting library the app started with. Every chart is now our own, which
+  is what made the hold-to-scrub and full-screen views possible.
+
 ## [2.10.0] - 2026-09-04
 
 ### Added
