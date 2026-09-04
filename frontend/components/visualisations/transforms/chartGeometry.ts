@@ -44,7 +44,25 @@ export type ChartDims = {
     padX: number;
     padTop: number;
     padBottom: number;
+    /**
+     * Asymmetric horizontal insets. Both default to `padX` when omitted, so
+     * every existing symmetric caller (the Home week chart, the metric overlay)
+     * is unaffected. A chart that DRAWS its y-axis needs a wider LEFT gutter for
+     * the value labels than it needs on the right, MoodLineChart passes both.
+     */
+    padLeft?: number;
+    padRight?: number;
 };
+
+/** Left plot inset, `padLeft` when given, else the symmetric `padX`. */
+export const leftInset = (dims: ChartDims): number => dims.padLeft ?? dims.padX;
+
+/** Right plot inset, `padRight` when given, else the symmetric `padX`. */
+export const rightInset = (dims: ChartDims): number => dims.padRight ?? dims.padX;
+
+/** Usable plot width after both horizontal insets. Never negative. */
+export const plotWidth = (dims: ChartDims): number =>
+    Math.max(0, dims.width - leftInset(dims) - rightInset(dims));
 
 export type ChartPoint = {
     /** Slot index (0..n-1). */
@@ -110,9 +128,10 @@ export const moodToY = (mood: number, dims: ChartDims): number =>
  * plot width. A single slot is centered. n<=0 returns padX.
  */
 export const indexToX = (index: number, n: number, dims: ChartDims): number => {
-    const plotW = Math.max(0, dims.width - dims.padX * 2);
-    if (n <= 1) return dims.padX + plotW / 2;
-    return dims.padX + (index / (n - 1)) * plotW;
+    const plotW = plotWidth(dims);
+    const left = leftInset(dims);
+    if (n <= 1) return left + plotW / 2;
+    return left + (index / (n - 1)) * plotW;
 };
 
 /** Round to 2dp for compact, stable (snapshot-friendly) path strings. */

@@ -21,6 +21,33 @@ export const MOOD_COLOR_MAX_ALPHA = 1.0;
 const ACCENT_FALLBACK = { r: 76, g: 175, b: 80 }; // the default green accent
 
 /**
+ * The active accent as an `{r,g,b}` triple, with the shared fallback for a
+ * non-hex accent. Exported so the chart gradient builder tints from the SAME
+ * rgb (and the same fallback) this ramp does, one accent authority, not two.
+ */
+export const moodAccentRgb = (accent: string): { r: number; g: number; b: number } =>
+    parseHexColor(accent) ?? ACCENT_FALLBACK;
+
+/**
+ * The ramp's ALPHA for a mood, `MIN_ALPHA + (clamp(mood,0,10)/10) * span`.
+ *
+ * Split out of {@link moodColor} so the vertical chart gradient can build its
+ * stops from the same curve without re-deriving it (and without parsing the
+ * alpha back out of an rgba string). Non-finite / null moods have no place on
+ * the ramp at all, so they are not this function's concern, `moodColor` still
+ * short-circuits those to `emptyColor` before ever calling here.
+ */
+export const moodAlpha = (mood: number): number => {
+    const clamped = Math.min(10, Math.max(0, mood));
+    const intensity = clamped / 10; // 0..1
+    const alpha =
+        MOOD_COLOR_MIN_ALPHA +
+        intensity * (MOOD_COLOR_MAX_ALPHA - MOOD_COLOR_MIN_ALPHA);
+    // Round to 3dp so the output is stable/snapshot-friendly.
+    return Math.round(alpha * 1000) / 1000;
+};
+
+/**
  * Map a mood (0..10) to an accent-tinted rgba string.
  *
  * - `mood === null` (or non-finite) -> the supplied `emptyColor` (a muted
@@ -43,13 +70,6 @@ export const moodColor = (
         return emptyColor;
     }
 
-    const rgb = parseHexColor(accent) ?? ACCENT_FALLBACK;
-    const clamped = Math.min(10, Math.max(0, mood));
-    const intensity = clamped / 10; // 0..1
-    const alpha =
-        MOOD_COLOR_MIN_ALPHA +
-        intensity * (MOOD_COLOR_MAX_ALPHA - MOOD_COLOR_MIN_ALPHA);
-    // Round alpha to 3dp so the output is stable/snapshot-friendly.
-    const a = Math.round(alpha * 1000) / 1000;
-    return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${a})`;
+    const rgb = moodAccentRgb(accent);
+    return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${moodAlpha(mood)})`;
 };

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { useThemeColors } from '@/styles/global';
+import { StyleSheet, View } from 'react-native';
+
+import SegmentedControl, { type SegmentedOption } from '@/components/SegmentedControl';
 
 export type Timeframe = 'week' | 'month' | '3months' | 'year' | 'alltime';
 
@@ -9,70 +10,38 @@ interface TimeframeSelectorProps {
   onTimeframeChange: (timeframe: Timeframe) => void;
 }
 
+const OPTIONS: readonly SegmentedOption<Timeframe>[] = [
+  { value: 'week', label: 'Week' },
+  { value: 'month', label: 'Month' },
+  { value: '3months', label: '3 Months' },
+  { value: 'year', label: 'Year' },
+  { value: 'alltime', label: 'All Time' },
+];
+
+/**
+ * The Statistics period-length pills. A thin wrapper over the shared
+ * SegmentedControl — the pill styling lives there so this row and the chart's
+ * scale toggle stay visually identical.
+ */
 const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
   selectedTimeframe,
-  onTimeframeChange
+  onTimeframeChange,
 }) => {
-  const colors = useThemeColors();
-
-  const styles = useMemo(() => StyleSheet.create({
-    container: {
-      flexDirection: 'row',
-      backgroundColor: colors.overlays.tag,
-      borderRadius: 20,
-      padding: 4,
-      marginBottom: 16,
-      alignSelf: 'center',
-      borderWidth: 1,
-      borderColor: colors.overlays.tagBorder,
-    },
-    option: {
-      paddingVertical: 8,
-      paddingHorizontal: 16,
-      borderRadius: 16,
-    },
-    selectedOption: {
-      backgroundColor: colors.accent,
-    },
-    optionText: {
-      color: colors.textSecondary,
-      fontSize: 14,
-    },
-    selectedOptionText: {
-      color: '#fff',
-      fontWeight: '600',
-    },
-  }), [colors]);
-
-  const options: { value: Timeframe; label: string }[] = [
-    { value: 'week', label: 'Week' },
-    { value: 'month', label: 'Month' },
-    { value: '3months', label: '3 Months' },
-    { value: 'year', label: 'Year' },
-    { value: 'alltime', label: 'All Time' },
-  ];
+  // The gap under the row is this screen's spacing, not the control's, so it
+  // stays here rather than inside the shared component.
+  const styles = useMemo(
+    () => StyleSheet.create({ wrap: { marginBottom: 16 } }),
+    [],
+  );
 
   return (
-    <View style={styles.container}>
-      {options.map((option) => (
-        <Pressable
-          key={option.value}
-          style={[
-            styles.option,
-            selectedTimeframe === option.value && styles.selectedOption,
-          ]}
-          onPress={() => onTimeframeChange(option.value)}
-        >
-          <Text
-            style={[
-              styles.optionText,
-              selectedTimeframe === option.value && styles.selectedOptionText,
-            ]}
-          >
-            {option.label}
-          </Text>
-        </Pressable>
-      ))}
+    <View style={styles.wrap}>
+      <SegmentedControl
+        options={OPTIONS}
+        value={selectedTimeframe}
+        onChange={onTimeframeChange}
+        testID="timeframe-selector"
+      />
     </View>
   );
 };

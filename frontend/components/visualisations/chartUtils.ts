@@ -1,11 +1,11 @@
-// chartConfig.ts
-import { useThemeColors } from '@/styles/global';
-import { useMemo } from 'react';
-import { Dimensions } from 'react-native';
+// chartUtils.ts
+//
+// Shared chart helpers. The chart-kit era's `useChartConfig`, `alternativeConfigs`,
+// `CHART_PADDING` and `SCREEN_WIDTH` were deleted with the library: every chart
+// now MEASURES its width via onLayout and themes itself directly, and leaving a
+// `SCREEN_WIDTH - padding` constant lying around is an invitation for the next
+// chart to guess its size again.
 import { localDateString } from '@/databases/dateHelpers';
-
-export const CHART_PADDING = 48; // 16px container padding × 2 sides + safe margin
-export const SCREEN_WIDTH = Dimensions.get('window').width;
 
 /**
  * Parse a CSS hex (`#RGB` or `#RRGGBB`) into an `{r,g,b}` triple. Returns null
@@ -28,62 +28,6 @@ export const parseHexColor = (
         g: parseInt(h.substring(2, 4), 16),
         b: parseInt(h.substring(4, 6), 16),
     };
-};
-
-// New hook for theme-aware chart config
-export const useChartConfig = () => {
-    const colors = useThemeColors();
-
-    return useMemo(() => {
-        // Derive the chart line/bar color from the active theme's accent so
-        // every theme (dark/light/cherry/midnight/forest) renders its own
-        // accent instead of a hardcoded green.
-        const rgb = parseHexColor(colors.accent) ?? { r: 76, g: 175, b: 80 };
-        const accentColor = (opacity = 1) =>
-            `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${opacity})`;
-
-        return {
-        backgroundColor: colors.cardBackground,
-        backgroundGradientFrom: colors.cardBackground,
-        backgroundGradientTo: colors.cardBackground,
-        decimalPlaces: 1,
-        color: accentColor,
-        labelColor: (opacity = 1) => `rgba(${colors.isDark ? '255, 255, 255' : '0, 0, 0'}, ${opacity})`,
-        propsForLabels: {
-            fontSize: 10,
-            fill: colors.text,
-        },
-        // labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
-        style: {
-            borderRadius: 16,
-        },
-        };
-    }, [colors]);
-};
-
-// Keep other configs for future reference
-export const alternativeConfigs = {
-    blue: {
-        color: (opacity = 1) => `rgba(92, 182, 235, ${opacity})`, // Calming blue
-        backgroundGradientFrom: '#2c3e50',  // Dark blue-gray
-        backgroundGradientTo: '#3498db',    // Soft blue
-        backgroundGradientToOpacity: 0.5,
-        propsForDots: {
-            r: "6",
-            strokeWidth: "2",
-            stroke: "#2980b9"  // Deeper blue
-        },
-    },
-    green: {
-        backgroundGradientFrom: "#1E2923",
-        backgroundGradientFromOpacity: 0,
-        backgroundGradientTo: "#08130D",
-        backgroundGradientToOpacity: 0.5,
-        color: (opacity = 1) => `rgba(26, 255, 146, ${opacity})`,
-        strokeWidth: 2,
-        barPercentage: 0.5,
-        useShadowColorFromDataset: false
-    }
 };
 
 // The last 7 LOCAL days (today + the 6 before it), oldest first, as
