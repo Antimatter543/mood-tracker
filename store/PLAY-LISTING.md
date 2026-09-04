@@ -131,10 +131,17 @@ Play caps the phone rail at 8, so these sit in `store/screenshots/raw/` ready to
 
 ### Rejected
 
-- The entry-form capture. The activity picker wraps labels mid-word ("Unmotivate/d",
-  "Overwhelm/ed") and the bottom row runs under the nav bar. That is a real UI bug; fix it before
-  this screen goes anywhere near the store.
+- The 2026-09-04 entry-form capture. The activity picker wrapped labels mid-word
+  ("Unmotivate/d", "Overwhelm/ed") and the bottom row ran under the nav bar. **That bug is now
+  FIXED** (`0374bee`, activity chip labels never break inside a word), so the screen itself is no
+  longer disqualified. It is simply not recaptured: the tracked raw still shows the old rendering,
+  so re-shoot before using it. It is the one screen that would sell "log a day in seconds", and it
+  would cost one of the eight slots.
 - Anything showing DEV MODE or "Generate N Sample Entries". Debug-only UI, never ships.
+
+**The general rule this came from: never put a screen with a visible UI defect on the store rail.**
+A store screenshot is a promise about the build. If a capture shows a bug, the fix is a code lane,
+not a crop.
 
 ### Specs
 
