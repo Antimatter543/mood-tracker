@@ -107,14 +107,29 @@ const GLOW_OPACITY = 0.18;
  * The canonical mood ramp bottoms out at 0.2 alpha. A fill can live there; a
  * 3px stroke cannot — that faintness IS the "not bright enough" complaint. The
  * ramp's shape is preserved, its floor is raised. See buildMoodGradientStops.
+ *
+ * 0.85 (was 0.55): at 0.55 the stroke visibly DIMMED as it descended, so a bad
+ * week looked like a rendering fault rather than a low mood. The gradient still
+ * hints at mood — the dots carry the real colour — but the whole line now stays
+ * legible top to bottom, on dark themes and light.
  */
-const LINE_MIN_OPACITY = 0.55;
-const AREA_MAX_OPACITY = 0.28;
+const LINE_MIN_OPACITY = 0.85;
+/**
+ * The area is a soft underline of the shape, not a block: now that it spans the
+ * dashed bridges too (see `areaSpansGaps`) it covers far more of the plot, so
+ * its ceiling comes DOWN to keep the line and dots the loudest things on screen.
+ */
+const AREA_MAX_OPACITY = 0.2;
 const AREA_MIN_OPACITY = 0;
 const DOT_R = 3.5;
 const DOT_RING_W = 1.5;
 /** A dash that reads as "bridged, not recorded" (matches MoodWeekChart). */
 const GAP_DASH = '4 4';
+/**
+ * Bridges are secondary to recorded days, but a month with more gaps than
+ * entries is mostly bridge — at 0.5 that month read as a broken chart.
+ */
+const GAP_STROKE_OPACITY = 0.7;
 const OVERLAY_DASH = '7 5';
 const OVERLAY_WIDTH = 2;
 const OVERLAY_OPACITY = 0.6;
@@ -184,7 +199,11 @@ export const MoodLineChart: React.FC<MoodLineChartProps> = ({
     );
 
     const geo = useMemo(
-        () => buildChartGeometry(values, dims, activeDomain),
+        // `areaSpansGaps`: close the fill under the WHOLE connected polyline,
+        // bridges included. Per-run fills (the Home card's default) degenerate
+        // into narrow vertical columns on a sparse month — the fill then reads
+        // as BARS under the few consecutive days instead of as one trend shape.
+        () => buildChartGeometry(values, dims, activeDomain, { areaSpansGaps: true }),
         [values, dims, activeDomain]
     );
     const gridLines = useMemo(
@@ -415,7 +434,11 @@ export const MoodLineChart: React.FC<MoodLineChartProps> = ({
                             ))}
 
                             {geo.areaPath ? (
-                                <Path d={geo.areaPath} fill={`url(#${AREA_GRADIENT_ID})`} />
+                                <Path
+                                    testID={`${testID}-area`}
+                                    d={geo.areaPath}
+                                    fill={`url(#${AREA_GRADIENT_ID})`}
+                                />
                             ) : null}
 
                             {/* Dashed bridges across days with no entry. Never red:
@@ -427,7 +450,7 @@ export const MoodLineChart: React.FC<MoodLineChartProps> = ({
                                     d={d}
                                     stroke={`url(#${LINE_GRADIENT_ID})`}
                                     strokeWidth={2}
-                                    strokeOpacity={0.5}
+                                    strokeOpacity={GAP_STROKE_OPACITY}
                                     strokeDasharray={GAP_DASH}
                                     strokeLinecap="round"
                                     fill="none"

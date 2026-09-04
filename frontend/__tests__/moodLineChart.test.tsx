@@ -157,6 +157,18 @@ describe('MoodLineChart — missing days', () => {
         expect(view.queryAllByTestId('mood-line-chart-gap')).toHaveLength(1);
     });
 
+    it('fills under the WHOLE shape, bridges included, as ONE region', async () => {
+        const view = await renderChart();
+        await measure(view);
+        const d = String(view.getByTestId('mood-line-chart-area').props.d);
+        // Statistics opts into `areaSpansGaps`. Closing the fill under each
+        // solid run instead (the Home card's default) drew a narrow column
+        // under every consecutive pair — a sparse month read as BARS, not as a
+        // trend area. One M/Z pair is the lock on that.
+        expect((d.match(/M/g) ?? [])).toHaveLength(1);
+        expect((d.match(/Z/g) ?? [])).toHaveLength(1);
+    });
+
     it('never colours a missing day red — the gap is drawn in the mood ramp', async () => {
         const view = await renderChart();
         await measure(view);

@@ -237,3 +237,85 @@ describe('buildChartGeometry — degenerate dims never NaN/throw', () => {
         for (const x of xsOf(g.linePath)) expect(Number.isFinite(x)).toBe(true);
     });
 });
+
+describe('buildChartGeometry — areaSpansGaps', () => {
+    // real at 0,1 | gap at 2,3 | real at 4,5,6
+    const SERIES = [5, 6, null, null, 7, 8, 6];
+
+    it('default: the fill is closed under each solid run separately', () => {
+        const g = buildChartGeometry(SERIES, DIMS);
+        // Two runs -> two independent closed regions. This is the Home card's
+        // look and MUST NOT change: only the opt-in caller spans the bridge.
+        expect((g.areaPath.match(/M/g) ?? [])).toHaveLength(2);
+        expect((g.areaPath.match(/Z/g) ?? [])).toHaveLength(2);
+    });
+
+    it('spans the interior gap: ONE region whose top visits every real point', () => {
+        const g = buildChartGeometry(SERIES, DIMS, MOOD_DOMAIN, { areaSpansGaps: true });
+        // One region, not one per run — the "vertical columns" bug was exactly
+        // a per-run fill under a sparse series.
+        expect((g.areaPath.match(/M/g) ?? [])).toHaveLength(1);
+        expect((g.areaPath.match(/Z/g) ?? [])).toHaveLength(1);
+
+        // The top edge walks all 5 real points in order, THEN the two baseline
+        // corners — so the bridged span really is covered, not skipped.
+        const xs = xsOf(g.areaPath);
+        const realXs = g.realPoints.map((p) => p.x);
+        expect(xs.slice(0, realXs.length)).toEqual(realXs.map((x) => Math.round(x * 100) / 100));
+        expect(xs.slice(-2)).toEqual([
+            Math.round(realXs[realXs.length - 1] * 100) / 100,
+            Math.round(realXs[0] * 100) / 100,
+        ]);
+
+        // A point inside the gap span is covered: the fill's x range brackets it.
+        expect(Math.min(...xs)).toBeLessThan(g.points[2].x);
+        expect(Math.max(...xs)).toBeGreaterThan(g.points[3].x);
+    });
+
+    it('spanning fill still closes to the baseline and never overshoots', () => {
+        const g = buildChartGeometry(SERIES, DIMS, MOOD_DOMAIN, { areaSpansGaps: true });
+        expect(g.areaPath.endsWith('Z')).toBe(true);
+        const ys = ysOf(g.areaPath);
+        expect(ys).toContain(Math.round(g.baselineY * 100) / 100);
+        const realYs = g.realPoints.map((p) => p.y);
+        for (const y of ys) {
+            expect(y).toBeGreaterThanOrEqual(Math.min(...realYs) - 0.01);
+            expect(y).toBeLessThanOrEqual(g.baselineY + 0.01);
+        }
+    });
+
+    it('leading + trailing gaps stay EXCLUDED: nothing anchors a fill out there', () => {
+        const g = buildChartGeometry([null, null, 5, 6, 7, null, null], DIMS, MOOD_DOMAIN, {
+            areaSpansGaps: true,
+        });
+        const xs = xsOf(g.areaPath);
+        const realXs = g.realPoints.map((p) => p.x);
+        expect(Math.min(...xs)).toBeCloseTo(Math.min(...realXs), 1);
+        expect(Math.max(...xs)).toBeCloseTo(Math.max(...realXs), 1);
+        // Explicitly: the fill does not reach the empty leading/trailing slots.
+        expect(Math.min(...xs)).toBeGreaterThan(g.points[1].x);
+        expect(Math.max(...xs)).toBeLessThan(g.points[5].x);
+    });
+
+    it('isolated real points: no solid run, but the spanning fill still draws', () => {
+        const values = [5, null, 6, null, 7];
+        const plain = buildChartGeometry(values, DIMS);
+        const spanning = buildChartGeometry(values, DIMS, MOOD_DOMAIN, { areaSpansGaps: true });
+        // No two adjacent real points -> no run of 2 -> the default fill is empty.
+        expect(plain.areaPath).toBe('');
+        // ...but the polyline of real points is real, so the fill follows it.
+        expect(spanning.areaPath).not.toBe('');
+        expect((spanning.areaPath.match(/Z/g) ?? [])).toHaveLength(1);
+    });
+
+    it('fewer than two real points: no fill under either option', () => {
+        const one = [null, 7, null];
+        expect(buildChartGeometry(one, DIMS).areaPath).toBe('');
+        expect(
+            buildChartGeometry(one, DIMS, MOOD_DOMAIN, { areaSpansGaps: true }).areaPath
+        ).toBe('');
+        expect(
+            buildChartGeometry([null, null], DIMS, MOOD_DOMAIN, { areaSpansGaps: true }).areaPath
+        ).toBe('');
+    });
+});

@@ -22,10 +22,15 @@
 //  - dashed gap paths: straight segments BRIDGING a missing span between two
 //    real points (so the eye follows continuity without reading the bridge as
 //    recorded data — and crucially NOT red, which reads as "bad day").
-//  - area path: the solid line closed down to the baseline, for a subtle fill.
+//  - area path: the line closed down to the baseline, for a subtle fill. By
+//    default it closes under each SOLID run independently (the Home card's
+//    look); `areaSpansGaps` closes it under the WHOLE connected polyline,
+//    bridges included, so sparse data reads as one trend shape instead of a
+//    row of narrow columns under the few consecutive days.
 //
 // Leading/trailing missing slots get NO line (nothing to anchor to) — the chart
-// simply starts/ends at the first/last real point.
+// simply starts/ends at the first/last real point. The area never extends
+// there either, under either option: there is nothing to anchor a fill to.
 
 /** Mood domain — fixed, not derived from the data. */
 export const MOOD_MIN = 0;
@@ -73,6 +78,22 @@ export type ChartPoint = {
     value: number | null;
     /** True when this slot had no entry (null input). */
     missing: boolean;
+};
+
+/** Optional shaping of the produced paths. */
+export type ChartGeometryOptions = {
+    /**
+     * When true, the area fill closes under the ENTIRE connected polyline,
+     * across the dashed bridges as well as the solid runs, so sparse data
+     * reads as one continuous trend shape.
+     *
+     * Defaults to FALSE, which closes the fill under each solid run
+     * separately. That is the Home week card's established look (7 slots,
+     * where gaps are rare and short). On a 30-slot Statistics chart with half
+     * the days empty, the per-run fill degenerates into narrow vertical
+     * columns that read as BARS — which is why that screen opts in.
+     */
+    areaSpansGaps?: boolean;
 };
 
 export type ChartGeometry = {
@@ -158,12 +179,16 @@ const polyline = (pts: { x: number; y: number }[]): string => {
  * @param domain  the value range mapped to the plot height. Defaults to the fixed
  *                0..10 mood domain (the Home chart); the mood↔metric overlay
  *                passes a data-derived domain for its second (metric) series.
+ * @param options see {@link ChartGeometryOptions}. The defaults reproduce the
+ *                original behaviour, so every existing caller is unaffected.
  */
 export const buildChartGeometry = (
     values: (number | null)[],
     dims: ChartDims,
-    domain: ValueDomain = MOOD_DOMAIN
+    domain: ValueDomain = MOOD_DOMAIN,
+    options: ChartGeometryOptions = {}
 ): ChartGeometry => {
+    const { areaSpansGaps = false } = options;
     const n = values.length;
     const baselineY = valueToY(domain.min, dims, domain);
 
@@ -214,20 +239,30 @@ export const buildChartGeometry = (
         gapPaths.push(polyline([from, to]));
     }
 
-    // Area = the solid line(s) closed down to the baseline. For multiple runs we
-    // close each run independently so isolated segments each get their own fill.
-    const areaPath = runs
-        .filter((run) => run.length >= 2)
-        .map((run) => {
-            const top = polyline(run);
-            const first = run[0];
-            const last = run[run.length - 1];
-            // line along the top, then down to baseline, across, and close.
-            return `${top} L ${r(last.x)} ${r(baselineY)} L ${r(first.x)} ${r(
-                baselineY
-            )} Z`;
-        })
-        .join(' ');
+    /** Close a top polyline down to the baseline and back — one filled region. */
+    const closeToBaseline = (run: ChartPoint[]): string => {
+        const top = polyline(run);
+        if (!top) return '';
+        const first = run[0];
+        const last = run[run.length - 1];
+        // line along the top, then down to baseline, across, and close.
+        return `${top} L ${r(last.x)} ${r(baselineY)} L ${r(first.x)} ${r(
+            baselineY
+        )} Z`;
+    };
+
+    // Area = the line closed down to the baseline. Default: each solid run
+    // closed independently, so isolated segments each get their own fill.
+    // `areaSpansGaps`: ONE region under every real point in order, bridges
+    // included — leading/trailing missing slots are still excluded, since the
+    // fill can only start at the first real point and end at the last.
+    const areaPath = areaSpansGaps
+        ? closeToBaseline(realPoints)
+        : runs
+              .filter((run) => run.length >= 2)
+              .map(closeToBaseline)
+              .filter(Boolean)
+              .join(' ');
 
     return { points, linePath, gapPaths, areaPath, baselineY, realPoints };
 };
