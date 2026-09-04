@@ -21,6 +21,12 @@ python3 store/make-soulsync-screenshots.py --fastlane  # also the unframed F-Dro
 python3 store/make-soulsync-screenshots.py --check-only # validate what is on disk
 ```
 
+`frontend/__tests__/storeSlides.test.ts` enforces the same invariant without anyone
+having to remember: it fails the jest run that `scripts/release.sh` and CI already gate
+on if any PNG here is not a complete, sequentially numbered 1080x2160 slide, or is
+byte-identical to a raw capture. `--check-only` stays the richer local gate (it decodes
+pixels); the test is the always-on floor.
+
 ## Why this file exists
 
 On 2026-09-04 a parallel agent wrote raw 1000x2000 device captures into this
