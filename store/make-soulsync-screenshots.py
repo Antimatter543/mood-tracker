@@ -409,6 +409,56 @@ def compose(slide, size, font, raw_dir):
     return img, widest, verify(img, slide, widest, font.size, len(slide["lines"]))
 
 
+def check_files(out_dir, slides):
+    """
+    Re-validate the PNGs ON DISK, independently of the render that produced them.
+
+    Why this exists as a separate pass: verify() runs inside compose(), so it only ever sees the
+    image in memory. On 2026-09-04 a parallel capture agent overwrote a finished slide with a raw
+    1000x2000 device capture in the seconds between the render and the Play upload. The upload
+    then "verified" by comparing Play's sha256 against the local file, which PASSED, because one
+    event had corrupted both sides. A==B is worthless when a single write can change A and B
+    together; the only useful check asserts INTRINSIC properties of the artefact.
+
+    Run this immediately before any upload, not just after rendering.
+    """
+    problems = []
+    for slide in slides:
+        f = os.path.join(out_dir, f"{slide['out']}.png")
+        if not os.path.exists(f):
+            problems.append(f"{slide['out']}: missing")
+            continue
+        img = Image.open(f).convert("RGB")
+        W, H = img.size
+
+        # 1. A raw device capture is 1000x2000; a framed slide is exactly OUT_SIZE. This single
+        #    check is what would have caught the 2026-09-04 clobber.
+        if (W, H) != OUT_SIZE:
+            problems.append(f"{slide['out']}: {W}x{H}, expected {OUT_SIZE[0]}x{OUT_SIZE[1]} "
+                            "- this looks like a raw capture, not a framed slide")
+            continue
+
+        px = img.load()
+        # 2. The device is inset, so the outer columns must be dark ground. A full-bleed capture
+        #    has app content (cards, text, a status bar) out at the edges.
+        edge = [px[x, y] for x in (2, W - 3) for y in range(0, H, 17)]
+        if max(sum(c) for c in edge) > 150:
+            problems.append(f"{slide['out']}: content at the canvas edge - not framed")
+
+        # 3. Headline band must carry bright type on dark ground. A slide whose top strip is
+        #    uniformly dark lost its headline.
+        band = [px[x, y] for y in range(int(H * 0.05), int(H * 0.14), 3) for x in range(0, W, 7)]
+        if max(sum(c) for c in band) < 400:
+            problems.append(f"{slide['out']}: no headline text found in the top band")
+
+        # 4. Dither intact (see verify() for why this matters).
+        strip = [px[int(W * 0.02), y] for y in range(int(H * 0.45), int(H * 0.95))]
+        if len(set(strip)) < 40:
+            problems.append(f"{slide['out']}: background has only {len(set(strip))} unique "
+                            "colours - dither is off, this will band on Play")
+    return problems
+
+
 def write_fastlane(slides, raw_dir):
     """Unframed captures for F-Droid: status bar AND nav bar cropped, numbered 1..N."""
     os.makedirs(FASTLANE_DIR, exist_ok=True)
@@ -440,6 +490,9 @@ def main():
     ap.add_argument("--only", nargs="*", help="render only these slide numbers, e.g. --only 03 04")
     ap.add_argument("--fastlane", action="store_true",
                     help="also refresh the unframed fastlane/F-Droid set")
+    ap.add_argument("--check-only", action="store_true",
+                    help="validate the PNGs already on disk and exit; run this immediately "
+                         "before uploading to Play, not just after rendering")
     ap.add_argument("--width", type=int, default=OUT_SIZE[0])
     ap.add_argument("--height", type=int, default=OUT_SIZE[1])
     args = ap.parse_args()
@@ -448,6 +501,14 @@ def main():
     if args.config:
         with open(args.config) as f:
             slides = json.load(f)
+
+    if args.check_only:
+        problems = check_files(args.out_dir, slides)
+        for problem in problems:
+            print(f"  FAIL {problem}", file=sys.stderr)
+        print(f"Checked {len(slides)} slides in {args.out_dir}: "
+              f"{'ALL PASS' if not problems else str(len(problems)) + ' FAILURE(S)'}")
+        sys.exit(1 if problems else 0)
 
     size = (args.width, args.height)
     font = load_font(int(size[0] * HEAD_SIZE_F))
