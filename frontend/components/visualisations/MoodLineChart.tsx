@@ -274,6 +274,11 @@ export const MoodLineChart: React.FC<MoodLineChartProps> = ({
     }, [applyIndex, clearLinger]);
 
     const gesture = useMemo(() => {
+        /* eslint-disable react-hooks/refs -- `handleScrub`/`endScrub` close over
+           `scrubIndexRef`/`lingerTimer`, and the rule cannot tell that RNGH only
+           STORES these callbacks here and invokes them from the gesture handler
+           (touch time), never during render. The refs exist precisely so a pan
+           can dedupe without re-rendering the chart on every pointer sample. */
         const scrub = Gesture.Pan()
             .activateAfterLongPress(SCRUB_ACTIVATE_MS)
             // Callbacks on the JS thread: the readout is React state and the
@@ -282,6 +287,7 @@ export const MoodLineChart: React.FC<MoodLineChartProps> = ({
             .onStart((e) => handleScrub(e.x))
             .onUpdate((e) => handleScrub(e.x))
             .onFinalize(endScrub);
+        /* eslint-enable react-hooks/refs */
 
         if (!onPress) return scrub;
 
