@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback } from 'react';
-import { View, StyleSheet, ScrollView } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Layout } from '@/components/PageContainer';
@@ -20,6 +20,7 @@ import ActivityCorrelationChart from '@/components/visualisations/ActivityCorrel
 import MonthOverMonthCard from '@/components/visualisations/MonthOverMonthCard';
 import TimeframeSelector from '@/components/TimeframeSelector';
 import PeriodNavigator from '@/components/PeriodNavigator';
+import PeriodSwipe from '@/components/PeriodSwipe';
 import { TimeframeProvider, useTimeframe } from '@/context/TimeframeContext';
 import { useThemeColors } from '@/styles/global';
 
@@ -139,33 +140,35 @@ const StatisticsContent = () => {
         <PeriodNavigator />
       </View>
 
-      <ScrollView
+      {/* The charts scroll vertically and PAGE horizontally: a swipe right steps
+          to the previous period, left to the next — the same two moves as the
+          chevrons above, which stay the accessible path. Deliberately wraps only
+          the charts, so the header's pills keep their own touch behaviour. */}
+      <PeriodSwipe
         style={styles.scrollView}
         contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={true}
+        contentStyle={styles.chartsContainer}
       >
-        <View style={styles.chartsContainer}>
-          {/* SECTION 1 — OVERVIEW */}
-          <SectionHeader label="Overview" />
-          <StatSummaryCard />
-          <MoodTrendChart />
+        {/* SECTION 1 — OVERVIEW */}
+        <SectionHeader label="Overview" />
+        <StatSummaryCard />
+        <MoodTrendChart />
 
-          {/* SECTION 2 — PATTERNS */}
-          <SectionHeader label="Patterns" />
-          <DailyMoodChart />
-          <TimeOfDayChart />
-          <MoodHistogram />
-          <CustomHeatmap />
-          <MoodCalendar />
+        {/* SECTION 2 — PATTERNS */}
+        <SectionHeader label="Patterns" />
+        <DailyMoodChart />
+        <TimeOfDayChart />
+        <MoodHistogram />
+        <CustomHeatmap />
+        <MoodCalendar />
 
-          {/* SECTION 3 — ACTIVITIES */}
-          <SectionHeader label="Activities" />
-          <ActivityCorrelationChart />
-          <MonthOverMonthCard />
-          {/* "Explore your activities" (ActivityExplorer) moved to the bottom of
+        {/* SECTION 3 — ACTIVITIES */}
+        <SectionHeader label="Activities" />
+        <ActivityCorrelationChart />
+        <MonthOverMonthCard />
+        {/* "Explore your activities" (ActivityExplorer) moved to the bottom of
               the Home tab — see app/(tabs)/index.tsx. */}
-        </View>
-      </ScrollView>
+      </PeriodSwipe>
     </View>
   );
 };

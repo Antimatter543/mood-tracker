@@ -107,8 +107,11 @@ describe('PageHeader', () => {
         // Guards the reason the constant exists: the full-height screens
         // (Statistics, Timeline) must line their title up with the scrolling
         // screens, which get their padding from Layout.
+        // BOTH axes: Layout's ScrollView pads every side, so restoring only the
+        // gutter left these titles 20px higher than Home / Insights (2026-09-04).
         expect(StyleSheet.flatten(pageHeaderFullHeightInset)).toEqual({
             paddingHorizontal: LAYOUT_CONTENT_PADDING,
+            paddingTop: LAYOUT_CONTENT_PADDING,
         });
     });
 
