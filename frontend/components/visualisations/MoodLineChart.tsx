@@ -11,8 +11,8 @@ import Svg, {
     Stop,
     Text as SvgText,
 } from 'react-native-svg';
-import * as Haptics from 'expo-haptics';
 
+import { hapticScrubTick } from '@/lib/haptics';
 import { moodColor } from '@/components/timeline/moodColor';
 import { useThemeColors } from '@/styles/global';
 import {
@@ -142,18 +142,6 @@ const TOOLTIP_FALLBACK_W = 170;
 const AREA_GRADIENT_ID = 'moodLineArea';
 const LINE_GRADIENT_ID = 'moodLineStroke';
 
-/** Fire a selection tick, tolerating a runtime where haptics don't exist. */
-const pulse = () => {
-    try {
-        const p = Haptics.selectionAsync();
-        // Rejections escape try/catch — expo-haptics is a no-op on some Expo Go
-        // devices and rejects rather than resolving.
-        if (p && typeof p.catch === 'function') p.catch(() => {});
-    } catch {
-        // Haptics are a garnish. Never let their absence break a scrub.
-    }
-};
-
 export const MoodLineChart: React.FC<MoodLineChartProps> = ({
     series,
     overlay = null,
@@ -247,7 +235,7 @@ export const MoodLineChart: React.FC<MoodLineChartProps> = ({
             if (scrubIndexRef.current === index) return;
             scrubIndexRef.current = index;
             setScrubIndex(index);
-            if (index !== null) pulse();
+            if (index !== null) hapticScrubTick();
             onScrub?.(index);
         },
         [onScrub]

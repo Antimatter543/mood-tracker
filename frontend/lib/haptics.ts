@@ -76,6 +76,17 @@ export function hapticReorderTick(): void {
   safely((h) => h.selectionAsync());
 }
 
+/**
+ * A hold-to-scrub cursor moved onto a different data point
+ * (`components/visualisations/MoodLineChart.tsx`). Same selection tick as
+ * `hapticReorderTick` — both mean "the thing under your finger just changed to
+ * the next one" — but named for its own event so the two can diverge. It fires
+ * ONLY on an index change, never per pointer sample, or the hand feels a buzz.
+ */
+export function hapticScrubTick(): void {
+  safely((h) => h.selectionAsync());
+}
+
 /** The one physical effect behind every "that landed" confirmation below. */
 function lightImpact(): void {
   safely((h) => h.impactAsync(h.ImpactFeedbackStyle.Light));
