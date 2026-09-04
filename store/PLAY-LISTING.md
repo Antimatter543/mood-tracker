@@ -3,7 +3,7 @@
 Publisher: Raedus Labs
 Package: com.raeduslabs.soulsyncapp
 Public repo: https://github.com/Antimatter543/mood-tracker
-Last updated: 2026-07-17
+Last updated: 2026-09-04
 
 > **CANONICAL LISTING TEXT LIVES IN `fastlane/metadata/android/en-US/`**
 > (`title.txt` / `short_description.txt` / `full_description.txt`) — pushed to
@@ -11,6 +11,10 @@ Last updated: 2026-07-17
 > refresh moved to emoji-led, front-loaded copy (data-viz depth + open-source
 > trust + privacy) and deliberately does NOT mention Health Connect (the Play
 > build ships without it until Google's Health Apps declaration approves).
+>
+> The 2026-09-04 refresh covered the v2.11 interactive charts (hold-to-scrub,
+> full-screen Fit view, swipe-to-page through periods) and a regenerated
+> 8-slide framed screenshot set produced by `store/make-soulsync-screenshots.py`.
 
 ---
 

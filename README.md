@@ -31,21 +31,22 @@
 - 10-point scale with high/low precision modes
 - Backdate entries with date/time picker
 - Attach activities, notes, and **photos** to each entry
-- Daily reminder notifications at a time you choose
+- Multiple named daily reminders, each with its own time
+- Undo on delete, plus a 30-day "Recently deleted" bin
 
 **Activities**
 - Pre-seeded categories: Emotions, Sleep, Social, Activities, Health
 - Fully customizable with icon picker (Feather, MaterialIcons, Ionicons)
-- Drag-to-reorder support
+- Drag-to-reorder activities and groups; move activities between groups
 
 </td>
 <td width="50%" valign="top">
 
 **Statistics & Insights**
-- Mood trend with adaptive moving average
+- Mood trend chart, hold to scrub day-by-day, tap for a full-screen **Fit**-scale view
+- Swipe (or tap the arrows) to step through weeks, months, quarters, years
 - Day-of-week pattern (your best and toughest days)
 - Rigorous with/without activity correlation
-- Month-over-month comparison + heatmap
 - **Insights tab**: plain-language patterns from your own data
 
 **Customization & Privacy**
@@ -60,10 +61,11 @@
 ## Screenshots
 
 <p align="center">
-  <img src="docs/assets/screenshots/1.png" alt="Home dashboard" width="24%"/>
-  <img src="docs/assets/screenshots/2.png" alt="Insights" width="24%"/>
-  <img src="docs/assets/screenshots/3.png" alt="Statistics heatmap" width="24%"/>
-  <img src="docs/assets/screenshots/4.png" alt="Timeline" width="24%"/>
+  <img src="docs/assets/screenshots/1.png" alt="Home dashboard" width="19%"/>
+  <img src="docs/assets/screenshots/2.png" alt="Hold the trend chart to inspect any day" width="19%"/>
+  <img src="docs/assets/screenshots/3.png" alt="Full-screen chart with the Fit scale toggle" width="19%"/>
+  <img src="docs/assets/screenshots/4.png" alt="Insights in plain English" width="19%"/>
+  <img src="docs/assets/screenshots/5.png" alt="Mood heatmap calendar" width="19%"/>
 </p>
 
 ## Install
@@ -94,7 +96,7 @@ Scan the QR code with [Expo Go](https://expo.dev/go), or press `a` / `i` for an 
 | Routing | [Expo Router](https://docs.expo.dev/router/introduction/) (file-based) |
 | Animation | [Reanimated](https://docs.swmansion.com/react-native-reanimated/) 4 |
 | Database | [SQLite](https://docs.expo.dev/versions/latest/sdk/sqlite/) (local, on-device) |
-| Charts | [react-native-chart-kit](https://github.com/indiespirit/react-native-chart-kit) |
+| Charts | Custom, built in-house on [react-native-svg](https://github.com/react-native-community/react-native-svg) |
 | Calendar | [react-native-calendars](https://github.com/wix/react-native-calendars) |
 | Language | [TypeScript 6](https://www.typescriptlang.org/) (strict mode) |
 

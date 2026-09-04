@@ -7,6 +7,9 @@ Rate your mood on a 0–10 scale (decimals welcome — a 7.5 kind of day is real
 
 📊 CHARTS A DATA NERD DREAMS OF
 • Mood trend lines with adaptive moving averages
+• Hold your finger on any chart to scrub day by day — see that day's average mood and the entry you actually wrote
+• Tap a chart to go full-screen, then flip on Fit to zoom the scale to your own range instead of the full 0–10
+• Swipe left or right on Statistics to step back through weeks, months, quarters, and years
 • A heatmap calendar of your whole year at a glance
 • Day-of-week patterns — when do you really feel best?
 • Distributions, correlations, streaks… it's all in there
@@ -18,10 +21,10 @@ Tap any activity for its own analytics: its mood distribution, whether it's a "h
 "Days with Exercise average +2.0 mood." "When you're in a rough patch, Social is what's usually followed by a lift." SoulSync reads your data back to you: what lifts you, and what drags you down.
 
 🕰️ YOUR WHOLE STORY, SEARCHABLE
-Every entry lives in a timeline you can search by words or activities and filter by mood range.
+Every entry lives in a timeline you can search by words or activities and filter by mood range. Delete something by accident? Undo it, or pull it back from Recently Deleted for 30 days.
 
 🎨 MAKE IT YOURS
-Five themes (Dark, Light, Cherry Blossom, Midnight, Forest), gentle daily reminders, drag-to-reorder activities, custom icons.
+Five themes (Dark, Light, Cherry Blossom, Midnight, Forest), as many gentle daily reminders as you need, drag-to-reorder activities and groups, custom icons.
 
 🔐 PRIVATE BY DESIGN
 Everything stays in a local database on your device. No account, no server, no analytics. Back up to a file anytime; restore on any phone.
