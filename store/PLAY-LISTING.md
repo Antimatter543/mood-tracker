@@ -15,135 +15,132 @@ Last updated: 2026-09-04
 > The 2026-09-04 refresh covered the v2.11 interactive charts (hold-to-scrub,
 > full-screen Fit view, swipe-to-page through periods) and a regenerated
 > 8-slide framed screenshot set produced by `store/make-soulsync-screenshots.py`.
+>
+> **The LIVE Play title wins over this repo, always.** On 2026-09-04 `title.txt`
+> read `SoulSync Mood Tracker` while the shipped listing had been
+> `SoulSync: Mood Tracker & Diary`. `gplay listings update` sets every field and
+> CLEARS any you omit, so pushing the repo's copy would have silently renamed the
+> app on the store. The repo was synced to the live value, not the reverse. Before
+> any listing push: read the live listing first (`gplay edits create` then
+> `gplay listings get`), and pass title + short + full description together.
 
 ---
 
 ## 1. App Title (30 chars max)
 
-Options (pick one):
+**SHIPPED, and this is the source of truth: `SoulSync: Mood Tracker & Diary`** (30 chars,
+exactly at the cap). Verified against the live listing on 2026-09-04.
+
+"Mood Tracker" and "Diary" are the two search terms; "SoulSync" is the brand. Play's title
+field is the highest-weight ranking signal, so both keywords earn their place.
+
+Do not change this casually. A title change resets some of the ranking signal the listing has
+accumulated, and it is the field most likely to be clobbered by accident, since
+`gplay listings update` clears every field you do not pass.
+
+<details>
+<summary>Options considered in the 2026-06 pre-launch pass (historical)</summary>
 
 | Option | Chars | Notes |
 |--------|-------|-------|
-| `SoulSync: Mood & Journal` | 25 | Recommended. Descriptive, hits two keywords, clean. |
-| `SoulSync - Mood Tracker` | 24 | Simpler, works too. |
-| `SoulSync: Private Journal` | 26 | Leans harder on privacy angle. |
+| `SoulSync: Mood & Journal` | 25 | Original recommendation; superseded by the shipped title. |
+| `SoulSync - Mood Tracker` | 24 | Simpler. |
+| `SoulSync: Private Journal` | 26 | Leans harder on privacy. |
 
-**Recommended: `SoulSync: Mood & Journal`**
-
-Reason: "Mood" and "Journal" are the two primary search terms. "SoulSync" is the brand. Play's title field is the single highest-weight ranking signal, so both keywords in the title is the right call.
+</details>
 
 ---
 
 ## 2. Short Description (80 chars max)
 
-**`Track your mood & journal privately. No account, no cloud, no ads.`**
+**SHIPPED: `Private mood tracker with beautiful charts & deep insights. No account. No ads.`**
 
-Character count: 66. Clear benefit + three differentiators. Hits the "why should I trust this" anxiety that stops installs.
+79 chars. Verified against the live listing on 2026-09-04. Leads with what the app IS, then the
+two objections that stop installs (account, ads). The earlier pre-launch draft
+(`Track your mood & journal privately. No account, no cloud, no ads.`) was never shipped.
 
 ---
 
 ## 3. Full Description (4000 chars max)
 
+**Do not read a copy of it here. The canonical text is
+`fastlane/metadata/android/en-US/full_description.txt`** and it is the file that gets pushed.
+This section used to inline the whole thing, which drifted a full rewrite behind the live
+listing and is exactly the trap that nearly renamed the app (see section 1).
+
+Structure as shipped: a one-line hook, then emoji-led sections for logging, charts, activity
+deep-dives, insights, timeline, themes, privacy, and open source. Roughly 2,150 chars against
+the 4,000 cap, so there is room to grow.
+
+Two standing constraints on that file:
+
+- **Exactly one** GitHub link. A second one reads as spam and dilutes the first.
+- **No Health Connect mention** until the Play build actually ships with it. The Play AAB is
+  built with `EXPO_PUBLIC_HEALTH_CONNECT=0` and Google's Health Apps declaration is still
+  pending; describing a feature the shipped binary lacks is a policy problem, not just a
+  copy problem.
+
+To read what is actually live rather than what this repo believes:
+
+```bash
+EID=$(gplay edits create --package com.raeduslabs.soulsyncapp | jq -r .id)
+gplay listings get --package com.raeduslabs.soulsyncapp --edit "$EID" --locale en-US --pretty
 ```
-SoulSync is a mood and journal tracker that keeps everything on your device. No account to create, no data sent to any server, no analytics, no ads. Just you and your entries.
-
-It's also open source. The full code is on GitHub: https://github.com/Antimatter543/mood-tracker — read it, fork it, verify the privacy claims yourself.
-
----
-
-WHAT YOU CAN DO
-
-Log mood entries on a 10-point scale with optional notes, photos, and activities. The scale supports decimal precision if you want it. You can backdate entries too — caught up logging at the end of the day? No problem.
-
-Attach photos to any entry. They stay on your device along with everything else.
-
-Tag entries with activities (Exercise, Sleep, Work, Social, and more) or create your own with a custom icon. Drag to reorder them however you like.
-
----
-
-UNDERSTAND YOUR PATTERNS
-
-The Statistics tab shows where your mood actually goes — not where you think it goes.
-
-- Week-over-week trend line with adaptive moving average
-- Mood heatmap calendar (darker = higher mood, at a glance)
-- Day-of-week breakdown: which day you reliably feel best and worst
-- Mood distribution histogram
-- Activity correlation: what genuinely lifts your mood vs. what doesn't
-
-The Insights tab turns all of that into plain English. Things like "You tend to feel best on Tuesday and toughest on Sunday" or "When you log Work, your mood averages 6.8 — that's +2.0 above without it." No interpretation needed.
-
----
-
-TIMELINE
-
-Every entry lives in the Timeline tab in chronological order: mood score, activities, notes, photos. Scroll back through your own history. Edit or delete any entry.
-
----
-
-REMINDERS
-
-Set a daily reminder at whatever time works for you. Tap the notification, log your mood, done.
-
----
-
-THEMES
-
-5 built-in color themes: Dark, Light, Cherry Blossom, Midnight Blue, and Forest. Switch any time in Settings.
-
----
-
-PRIVACY — THE ACTUAL DETAILS
-
-Everything is stored in a SQLite database on your device. Photos go to on-device file storage. Nothing is synced anywhere. There is no server. There is no account. There is no analytics SDK. The app has no internet permission for user data.
-
-You own your data fully: export it as JSON any time, or import it back. If you delete the app, all your data is gone — because it was only ever on your device.
-
-SoulSync is open source under the GPL-3.0 license. Source code: https://github.com/Antimatter543/mood-tracker
-
----
-
-No subscription. No ads. No account. Free.
-```
-
-Character count: ~1,820 (well within 4,000 limit — room to expand if needed).
 
 ---
 
 ## 4. Screenshots
 
-### Chosen screenshots (6 total, all 1000x2000 px)
+Regenerate the whole rail with one command. Do not hand-edit the outputs:
 
-Copied to `store/screenshots/`:
+```bash
+python3 store/make-soulsync-screenshots.py             # framed 1080x2160 Play set
+python3 store/make-soulsync-screenshots.py --fastlane  # also the unframed F-Droid set
+```
 
-| File | Source | Screen shown | Why chosen |
-|------|---------|--------------|------------|
-| `01-home.png` | `soulsync-21-final-home.png` | Home dashboard, light theme, live data (mood 6.0, streak, 7-day chart) | Best first impression. Light theme + real data shows the app working clearly. |
-| `02-stats-heatmap.png` | `soulsync-stats.png` | Statistics tab — heatmap calendar, dark theme | Heatmap is the most visually distinctive feature. Immediately shows depth. |
-| `03-stats-distribution.png` | `soulsync-02b-stats-patterns.png` | Statistics — Mood Distribution histogram, All Time view | Shows the bar chart / analytics angle. Different from screenshot 2. |
-| `04-timeline.png` | `soulsync-timeline.png` | Timeline tab with two entries, notes + activities visible | Shows the journal/entry side of the app. Real notes, real activities. |
-| `05-insights.png` | `soulsync-03-insights.png` | Insights tab — streak, average, "What lifts your mood" card | Shows the plain-language intelligence layer. Unique differentiator vs. basic mood apps. |
-| `06-themes.png` | `soulsync-14-forest-theme-applied.png` | Settings tab with Forest theme active | Shows customization + proves "5 themes" claim isn't vaporware. Light/green palette contrasts with the dark screenshots above. |
+Inputs are the tracked raw captures in `store/screenshots/raw/`; the slide list, headline copy
+and per-slide crops live in `SLIDES` at the top of that script. It verifies its own output every
+run and exits non-zero naming the slide that failed.
 
-### Resolution check
+### Shipped rail (2026-09-04, 8 slides, 1080x2160)
 
-All 6 are 1000x2000 px. Play requires minimum 1080px on the long edge — these are just below at 1000px on the short edge and 2000px on the long edge. 2000px > 1080px requirement, so these PASS. Play's stated minimum is 1080px on the longest edge; at 2000px long, these are comfortably over.
+| # | Raw | Headline | Why it's here |
+|---|-----|----------|---------------|
+| 01 | `01-home.png` | Your mood, **your phone only** | First impression, and privacy is the whole pitch. |
+| 02 | `02-stats-trend.png` | See patterns **you can't feel** | The hero chart. The emotional promise of the app. |
+| 03 | `03-stats-scrub.png` | Hold to inspect **any day** | v2.11 headline feature; bubble shows day, avg, and the entry you wrote. |
+| 04 | `04-chart-expanded-fit.png` | Zoom into **your own range** | v2.11 full-screen chart with the 0-10 / Fit toggle. |
+| 05 | `05-stats-daily-bars.png` | Which day **lifts you most** | v2.11 own-drawn bars, and the only non-line chart in the rail. |
+| 06 | `06-insights.png` | Insights in **plain English** | The differentiator vs. every basic mood logger. |
+| 07 | `07-stats-heatmap.png` | A whole year **at a glance** | Most visually distinctive single screen. |
+| 08 | `08-timeline.png` | Your whole story, **searchable** | The journal half of the app; real notes, real activities. |
 
-### Recommended screenshot order for the listing
+Bold = the one green accent phrase per slide.
 
-1. Home (light, data visible) — first thing seen
-2. Stats heatmap — most visual
-3. Insights — shows intelligence layer
-4. Timeline — shows journal depth
-5. Stats distribution — more analytics
-6. Themes/Settings — customization
+### Spares (captured, tracked, not in the rail)
 
-### Skipped screenshots and why
+Play caps the phone rail at 8, so these sit in `store/screenshots/raw/` ready to swap:
 
-- `soulsync-home-clean.png` / `soulsync-home-data.png`: dark theme, mostly empty state or similar to chosen home. Less compelling than the light-theme home with live data.
-- `soulsync-seeded.png`: shows DEV MODE button and "Generate 50 Sample Entries" — do NOT use in store. Exposes debug-only UI.
-- Form/modal screenshots: mid-flow states, not great as standalone store shots.
-- `soulsync-12-settings.png`: dark settings without a theme applied. Less interesting than forest theme.
+- `09-stats-swipe.png`, Statistics stepped back to `Jul 7 - Aug 5`, showing the green past-period
+  range, best-streak-in-period and a red "Gently dipping" trend. Its config is in `SPARES` in the
+  generator; move that entry into `SLIDES` and drop one to ship it. It was left out because the
+  rail already carries three line-chart Statistics slides and a fourth reads as repetition in
+  thumbnail view, while slide 05's bar chart adds variety and answers a user benefit rather than
+  demonstrating a capability. Reasonable people could call this the other way.
+- `10-themes.png`, Forest theme, proves the 5-themes claim.
+
+### Rejected
+
+- The entry-form capture. The activity picker wraps labels mid-word ("Unmotivate/d",
+  "Overwhelm/ed") and the bottom row runs under the nav bar. That is a real UI bug; fix it before
+  this screen goes anywhere near the store.
+- Anything showing DEV MODE or "Generate N Sample Entries". Debug-only UI, never ships.
+
+### Specs
+
+1080x2160 (1:2, the Pixel 3 aspect) clears Play's 1080px minimum with room. Feature graphic is
+exactly 1024x500. Max 8 phone screenshots, strongest first: the first two are the only ones most
+people ever see.
 
 ---
 

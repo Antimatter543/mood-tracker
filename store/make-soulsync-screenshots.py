@@ -151,6 +151,31 @@ SLIDES = [
     },
 ]
 
+# Captured, tracked, and ready, but NOT in the rail: Play caps phone screenshots at 8. To ship one
+# of these, move its entry into SLIDES, renumber "out", and drop a slide. Kept here rather than
+# deleted so the next refresh does not have to re-shoot the phone to reconsider the call.
+#
+# The swipe slide is the close call. Statistics stepped back one period shows a green past-period
+# range, best-streak-in-period, and a red "Gently dipping" trend, so it is genuinely a different
+# screen from slide 02. It lost because the rail already carries three line-chart Statistics
+# slides and a fourth reads as repetition at thumbnail size, while slide 05's bar chart adds
+# visual variety AND answers a user benefit ("which day lifts you most") instead of demonstrating
+# a capability ("you can scroll back"). Swap it in if the rail ever loses a chart slide.
+SPARES = [
+    {
+        "out": "09",
+        "raw": "09-stats-swipe.png",
+        "lines": [[["Swipe through", "body"]],
+                  [["weeks and months", "accent"]]],
+    },
+    {
+        "out": "10",
+        "raw": "10-themes.png",
+        "lines": [[["Five themes,", "body"]],
+                  [["pick your mood", "accent"]]],
+    },
+]
+
 
 # ── Fonts ────────────────────────────────────────────────────────────────────
 def load_font(size, weight=700, optical=40):
