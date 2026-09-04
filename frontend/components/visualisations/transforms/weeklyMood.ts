@@ -1,7 +1,11 @@
 // weeklyMood.ts
 //
 // Turns raw "daily-average" rows from SQL into the labels+data+nullIndices
-// shape consumed by react-native-chart-kit's LineChart.
+// shape the charts consume.
+//
+// `formatLabel` is the app's ONE x-axis labelling policy (sparse for long
+// windows, weekday names for a week), MoodLineChart and StatSummaryCard both
+// go through it, so the axes cannot drift apart.
 
 import { interpolateData } from '../chartUtils';
 
@@ -29,11 +33,11 @@ export type WeeklyMoodChartData = {
  *      previous inline `formatDateLabel` captured `timeframe` from render
  *      and was not listed in the effect deps).
  */
-// Non-week timeframes plot one point PER DAY - up to 365+ points. chart-kit
-// draws every label, so returning a label for each point crams overlapping
-// text onto the axis. We instead show only a handful of evenly-spaced index
-// positions (TARGET_AXIS_LABELS total), blanking the rest. Spreading by index
-// guarantees labels stay sparse regardless of calendar density.
+// Non-week timeframes plot one point PER DAY - up to 365+ points. A label per
+// point crams overlapping text onto the axis, so we show only a handful of
+// evenly-spaced index positions (TARGET_AXIS_LABELS total) and blank the rest.
+// Spreading by INDEX guarantees labels stay sparse regardless of calendar
+// density. Renderers must skip an empty label rather than draw a blank.
 const TARGET_AXIS_LABELS = 5;
 
 /**
