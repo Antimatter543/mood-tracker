@@ -2,18 +2,18 @@
   "expo": {
     "name": "Soulsync",
     "slug": "soulsync-mood",
-    "version": "2.10.0",
+    "version": "2.11.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "buildNumber": "21000"
+      "buildNumber": "21100"
     },
     "android": {
       "package": "com.raeduslabs.soulsyncapp",
-      "versionCode": 21000,
+      "versionCode": 21100,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.RECEIVE_BOOT_COMPLETED",
