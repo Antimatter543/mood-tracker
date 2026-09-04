@@ -2,10 +2,13 @@
  * CLASS-LEVEL INVARIANT: no app source imports `react-native-chart-kit`.
  *
  * Every chart in this app is now our own thin react-native-svg renderer over
- * pure, unit-tested geometry. chart-kit is unmaintained; it drew one flat
- * stroke whatever the value, overshot the data range with its bezier, offered
- * no interaction, and sized itself from `Dimensions.get('window')` instead of
- * measuring. Those are the exact defects the replacement exists to fix, so a
+ * pure, unit-tested geometry. This is not a verdict on the library: chart-kit
+ * was revived in April 2026 after four dormant years (6.12.0 shipped Feb 2022,
+ * 6.12.1 not until Apr 2026) and is on v7 now. We left the 6.x we were pinned
+ * to because we wanted to own the geometry and gesture layer outright, it drew
+ * one flat stroke whatever the value, overshot the data range with its bezier,
+ * offered no interaction, and sized itself from `Dimensions.get('window')`
+ * instead of measuring. Those are the exact defects the replacement exists to fix, so a
  * `import { LineChart } from 'react-native-chart-kit'` sneaking back into a NEW
  * chart would silently reintroduce all of them — and would look perfectly fine
  * in review, because it is one familiar-looking line.

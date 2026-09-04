@@ -32,9 +32,11 @@ import {
 /**
  * MoodLineChart — the app's own interactive mood line chart.
  *
- * Replaces react-native-chart-kit (unmaintained; its bezier overshoots the data
- * range, its single flat stroke made every mood look the same, and it offers no
- * way to interrogate a point). It is a THIN renderer: every coordinate, domain,
+ * Replaces react-native-chart-kit 6.x, not because that library is dead (it
+ * was revived in April 2026 and is on v7), but because we wanted to own the
+ * geometry and gesture layer: 6.x's bezier overshoots the data range, its
+ * single flat stroke made every mood look the same, and it offers no way to
+ * interrogate a point. It is a THIN renderer: every coordinate, domain,
  * gridline, gradient stop and hit-test comes from the pure transforms in
  * `transforms/chartGeometry.ts` + `transforms/lineChartGeometry.ts`.
  *
