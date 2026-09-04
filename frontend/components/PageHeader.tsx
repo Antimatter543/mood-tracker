@@ -31,9 +31,19 @@ export const PAGE_HEADER_ICON_SIZE = 26;
  * (`useScrollView={false}` — Statistics, Timeline) and so receive none of its
  * content padding. Derived from `LAYOUT_CONTENT_PADDING` so the title lines up
  * with the scrolling screens' instead of being eyeballed per screen.
+ *
+ * BOTH axes matter. The ScrollView branch pads its content on every side, so a
+ * full-height screen that only restores the horizontal gutter draws its title
+ * `LAYOUT_CONTENT_PADDING` px HIGHER than Home / Insights (the 2026-09-04
+ * "Timeline sits higher than Insights" drift). The top padding here keeps every
+ * page title on one vertical line; `__tests__/pageHeaderUniformity.test.ts`
+ * pins it.
  */
 export const pageHeaderFullHeightInset = StyleSheet.create({
-    inset: { paddingHorizontal: LAYOUT_CONTENT_PADDING },
+    inset: {
+        paddingHorizontal: LAYOUT_CONTENT_PADDING,
+        paddingTop: LAYOUT_CONTENT_PADDING,
+    },
 }).inset;
 
 type PageHeaderProps = {

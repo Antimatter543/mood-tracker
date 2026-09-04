@@ -71,6 +71,57 @@ describe('tab screens — uniform page header', () => {
     });
 });
 
+/**
+ * VERTICAL alignment, the second way the five titles drifted apart.
+ *
+ * Layout's ScrollView branch pads its content on EVERY side (`padding:
+ * LAYOUT_CONTENT_PADDING`), the full-height branch pads nothing. So a title's
+ * top edge is only on the same line across tabs when:
+ *   - a scrolling screen leaves that padding alone (no `paddingTop` override in
+ *     `contentStyle`, Settings used to zero it and sat 20px high), and
+ *   - a full-height screen (`useScrollView={false}`) restores BOTH the gutter
+ *     and the top padding via `pageHeaderFullHeightInset` (which used to be
+ *     horizontal-only, Timeline / Statistics sat 20px high).
+ * Reported by Anti 2026-09-04: "timeline is higher than insights".
+ */
+describe('tab screens, page titles start on the same vertical line', () => {
+    const { pageHeaderFullHeightInset } = require('../components/PageHeader');
+    const { LAYOUT_CONTENT_PADDING } = require('../styles/layout');
+
+    it('the full-height inset restores the top padding the ScrollView branch gives', () => {
+        expect(pageHeaderFullHeightInset).toEqual(
+            expect.objectContaining({
+                paddingTop: LAYOUT_CONTENT_PADDING,
+                paddingHorizontal: LAYOUT_CONTENT_PADDING,
+            })
+        );
+    });
+
+    describe.each(screenFiles)('%s', file => {
+        const source = read(path.join(TABS_DIR, file));
+        const isFullHeight = /useScrollView=\{false\}/.test(source);
+
+        it(
+            isFullHeight
+                ? 'full-height screen passes pageHeaderFullHeightInset to <PageHeader/>'
+                : 'scrolling screen relies on Layout padding (no inset, no paddingTop override)',
+            () => {
+                const headerUsesInset =
+                    /<PageHeader[\s\S]*?style=\{pageHeaderFullHeightInset\}[\s\S]*?\/>/.test(source);
+                if (isFullHeight) {
+                    expect(headerUsesInset).toBe(true);
+                } else {
+                    // Double-padding would push this title 20px LOWER than the rest.
+                    expect(headerUsesInset).toBe(false);
+                    // A contentStyle paddingTop override is how Settings drifted.
+                    expect(source).not.toMatch(/contentStyle=\{\{[^}]*paddingTop/);
+                }
+            }
+        );
+    });
+});
+
+
 describe('(tabs)/_layout.tsx — navigator header', () => {
     const layout = read(LAYOUT_FILE);
 

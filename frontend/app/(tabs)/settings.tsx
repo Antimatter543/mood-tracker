@@ -226,8 +226,11 @@ export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorFa
 export default function SettingsPage() {
     return (
         <Layout contentStyle={{
+            // No top-padding override: Layout's ScrollView padding is what puts
+            // this title on the same vertical line as Home / Insights. Zeroing
+            // it here once sat Settings LAYOUT_CONTENT_PADDING px higher than
+            // them (the 2026-09-04 header-drift report).
             justifyContent: 'flex-start',
-            paddingTop: 0,
             paddingBottom: 0,
         }}>
             <Setting />
