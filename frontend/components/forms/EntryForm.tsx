@@ -26,6 +26,7 @@ import { DatePicker } from './DatePicker';
 import { useSettings } from '@/context/SettingsContext';
 import { useOverlay } from '@/context/OverlayHost';
 import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
+import { useSingleFlight } from '@/hooks/useSingleFlight';
 import { useEntryDraft, EntryDraft } from './hooks/useEntryDraft';
 import { selectPhotosToAdd } from './photoSelection';
 
@@ -255,6 +256,7 @@ const DetailsStep = ({
     onBack,
     onSubmit,
     submitDisabled,
+    submitBusy,
     scrollableRef,
 }: {
     activities: number[];
@@ -269,6 +271,8 @@ const DetailsStep = ({
     onBack: () => void;
     onSubmit: () => void;
     submitDisabled?: boolean;
+    /** In-flight save: the button is disabled AND announced busy. */
+    submitBusy?: boolean;
     scrollableRef?: AnimatedRef<Animated.ScrollView>;
 }) => {
     const colors = useThemeColors();
@@ -316,7 +320,7 @@ const DetailsStep = ({
                     ]}
                     onPress={onSubmit}
                     disabled={submitDisabled}
-                    accessibilityState={{ disabled: !!submitDisabled }}
+                    accessibilityState={{ disabled: !!submitDisabled, busy: !!submitBusy }}
                 >
                     <Text style={styles.buttonText}>Submit</Text>
                 </Pressable>
@@ -449,12 +453,20 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     // the keyboard.
     const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
-    const handleSubmit = async () => {
-        // submit() runs validation again before invoking onSubmit, so we never
-        // hit the DB with a bad mood value — the pre-submit UI guard is
-        // duplicated by the hook for safety.
+    // submit() runs validation again before invoking onSubmit, so we never hit
+    // the DB with a bad mood value - the pre-submit UI guard is duplicated by
+    // the hook for safety.
+    const doSubmit = useCallback(async () => {
         await submit(onSubmit);
-    };
+    }, [submit, onSubmit]);
+
+    // ONE write per gesture. A rapid double-tap delivers both presses before the
+    // `disabled` re-render lands, which is how a single fast double-tap once
+    // produced TWO identical entries (device QA 2026-09-05, count 35 -> 37).
+    // useSingleFlight's synchronous ref gate is what actually stops the second
+    // one; the flag releases on settle, so a FAILED save re-enables the button
+    // and the user can retry.
+    const { inFlight: isSubmitting, run: handleSubmit } = useSingleFlight(doSubmit);
 
     // Scroll the bottom of the form (Notes + photos + Submit) into view above
     // the keyboard. Notes is the last input, so scrollToEnd reliably brings it
@@ -510,7 +522,8 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                     onRemovePhoto={removePhoto}
                     onBack={() => setCurrentStep(1)}
                     onSubmit={handleSubmit}
-                    submitDisabled={!isValid}
+                    submitDisabled={!isValid || isSubmitting}
+                    submitBusy={isSubmitting}
                     scrollableRef={scrollRef}
                 />
             )}
