@@ -1,5 +1,69 @@
 # SoulSync — Project Lessons
 
+## 2026-09-05: Home went blank after Submit, and the fix for the same bug two months earlier had been scoped to the wrong ingredient
+
+**Mistake**: on 2026-07-13 the Statistics tab blanking was root-caused to `Layout`'s reanimated
+entrance animation and fixed by deleting the `useAnimatedStyle` from the `useScrollView={false}`
+branch only. The commit, the comment, and the regression test all recorded the cause as "a live
+animated style on a **`flex: 1`** container", and the test went further and blessed the other
+branch in writing: "the content-sized Animated.View inside the ScrollView is safe to animate
+(Home/Insights)". Two months later Home blanked after submitting an entry, through the same
+wrapper, on the branch that had been declared safe.
+
+`flex: 1` was a property of the first screen that happened to break, not the mechanism. The
+mechanism is a live animatedStyle wrapping children that re-lay-out ASYNCHRONOUSLY after mount:
+reanimated applies the animated props against a stale measured frame and displaces the subtree.
+Statistics qualified because ~8 charts resolve their data over ~3s. Home qualified for a
+different reason nobody re-checked when ActivityExplorer moved onto it: every card, the week
+chart and the explorer each run their own async read, and a post-write refresh re-runs all of
+them at once. Same ingredient, different screen.
+
+**How it was identified without a reproduction.** 26 scripted add-entry attempts across three
+device runs, on the exact reported binary and with a 150-entry dataset restored through the
+app's own import, never reproduced it: the failure is a frame-timing race. Two structural facts
+settled it anyway.
+- **The blank has a boundary, and the boundary names the component.** Everything inside
+  `Layout`'s content wrapper vanished; the FAB and the tab bar, the only Home chrome rendered
+  OUTSIDE that wrapper, survived. That is not "Home failed to render", it is "this exact view
+  subtree is gone".
+- **A tab switch re-renders Home and did not fix it; only a process restart did.** Refocusing
+  runs `useFocusEffect` -> `fetchData` -> `setState`, so any JS-state cause would have healed
+  itself. A blank that survives a re-render but not a fresh mount is below JS, and the only
+  things in Home's tree that write to the native view layer imperatively are reanimated and the
+  ScrollView. The FAB is reanimated too, and it survived: it is outside the wrapper.
+
+**Rule**:
+- **`Layout` owns no reanimated at all, in either branch.** The entrance animation is gone from
+  the app rather than moved; three screens had it and two did not, so removing it also ends that
+  inconsistency. It was verified on-device in 2026-07 that the animated PROPERTY is irrelevant
+  (an opacity-only animatedStyle blanked Statistics just the same), so "just fade it, don't move
+  it" is not a safe re-introduction.
+- **When a bug is root-caused on one screen, state the mechanism, then go find every other
+  instance of the mechanism.** The 2026-07-13 fix was one grep (`useScrollView`) away from
+  covering Home. Writing the narrower cause into a passing test is worse than not writing it: it
+  converted an unexamined assumption into a green check for two months.
+- **A blank screen with a clean logcat is a boundary question, not a data question.** Ask what
+  is INSIDE the missing region and what is outside it, and ask whether a re-render fixes it.
+  Those two answers pick out the responsible component without a reproduction.
+- **Do not spend a fourth device run on a race.** Three runs and 26 attempts bought one genuinely
+  useful fact (it is timing-dependent, not input-dependent) and cost a `pm clear` that destroyed
+  the QA dataset. Past the second non-repro, reason from the structure.
+
+**Rung**: test-grade. `__tests__/layoutContentNotAnimated.test.tsx` (renamed from
+`layoutFullHeightNoTransform.test.tsx`, whose contract explicitly permitted the bug) now asserts
+BOTH branches render with no `transform` and no `opacity` anywhere, and adds a source-level guard
+that `components/PageContainer.tsx` imports nothing from `react-native-reanimated`. The
+rendered-tree assertions rely on the jest mock resolving `useAnimatedStyle` inline, so an
+animation added through `entering`/`useAnimatedProps` would drive the native view without
+surfacing a plain style and would slip past them; the source guard is what makes the rung
+deterministic. Proven to fail on the scrolling branch against the pre-fix file and pass after.
+`__tests__/homeRendersAfterEntryAdded.test.tsx` drives the real `dataRefreshStore` +
+`useDataRefresh` through a 3->4 entry transition (and four more in a row) and asserts the
+greeting and every card are still rendered AND showing the new data, which covers the JS half of
+the claim, the half jest can actually settle.
+
+**Date**: 2026-09-05
+
 ## 2026-09-04: The chip label that split "Unmotivated" into "Unmotivate / d"
 
 **Mistake**: the entry form's activity chips capped their label at `numberOfLines={2}` and left

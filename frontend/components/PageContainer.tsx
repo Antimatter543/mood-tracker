@@ -3,13 +3,7 @@ import { ViewProps, View, StatusBar, ScrollView, StyleSheet } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddEntryButton } from './AddEntryButton';
 import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
-import { useMemo, useEffect } from 'react';
-import Animated, {
-    useSharedValue,
-    useAnimatedStyle,
-    withTiming,
-    Easing,
-} from 'react-native-reanimated';
+import { useMemo } from 'react';
 
 type LayoutProps = {
     children: React.ReactNode;
@@ -70,42 +64,27 @@ export function Layout({
     const insets = useSafeAreaInsets();
     const styles = useThemedStyles(colors, insets.top, insets.bottom);
 
-    // Subtle entrance animation (fade in + slide up). Applied ONLY to the
-    // content-sized Animated.View inside the ScrollView (`useScrollView={true}`
-    // branch below).
+    // NO entrance animation. `Layout` used to fade+slide its content in through a
+    // reanimated `useAnimatedStyle`, and that live animated style is the app's
+    // recurring blank-screen mechanism on Fabric + reanimated 4: once the wrapped
+    // children re-lay-out after mount, reanimated applies the animated props
+    // against a stale measured frame and shoves the whole subtree off-screen,
+    // blanking the page with NO JS re-render, no error, and no recovery short of
+    // a process restart (a tab switch re-renders the screen but the native views
+    // stay displaced). Verified on-device that the animated PROPERTY is
+    // irrelevant: an opacity-only animatedStyle blanked it too.
     //
-    // It must NOT wrap the `flex: 1` full-height branch (`useScrollView={false}`).
-    // A live `useAnimatedStyle` attached to a `flex: 1` container corrupts that
-    // container's layout on Fabric + reanimated 4 once its children re-lay-out
-    // after mount: on the Statistics screen the ~8 charts each resolve their async
-    // data and re-render over ~3s, and on one of those re-layouts reanimated
-    // applies the animated props against a stale measured frame and shoves the
-    // whole subtree ~1.6k px off-screen — blanking the tab with NO JS re-render at
-    // all. (Verified on-device: the property animated is irrelevant — even an
-    // opacity-only animatedStyle blanks it; only removing the animatedStyle from
-    // the flex:1 view fixes it. Lighter screens like Timeline share the branch but
-    // don't reproduce because their content doesn't repeatedly re-lay-out after
-    // mount.) The full-height branch therefore renders statically. Root-caused
-    // on-device 2026-07-13 — the Statistics blank-screen P0.
-    const opacity = useSharedValue(0);
-    const translateY = useSharedValue(20);
-
-    useEffect(() => {
-        opacity.value = withTiming(1, {
-            duration: 300,
-            easing: Easing.out(Easing.cubic),
-        });
-        translateY.value = withTiming(0, {
-            duration: 300,
-            easing: Easing.out(Easing.cubic),
-        });
-    }, [opacity, translateY]);
-
-    const animatedContentStyle = useAnimatedStyle(() => ({
-        opacity: opacity.value,
-        transform: [{ translateY: translateY.value }],
-    }));
-
+    // This was root-caused on Statistics on 2026-07-13 and fixed THERE ONLY, by
+    // removing the animatedStyle from the `useScrollView={false}` branch, on the
+    // theory that `flex: 1` was the ingredient. That reading was too narrow. The
+    // ingredient is a live animatedStyle wrapping children that re-lay-out
+    // asynchronously after mount, and the scrolling branch has exactly that on
+    // Home (its cards, chart, and ActivityExplorer each resolve their own async
+    // reads and re-lay-out again on every post-write refresh). Home blanked the
+    // same way after submitting an entry: everything inside this wrapper vanished
+    // while the FAB and tab bar (the only Home chrome rendered OUTSIDE it)
+    // survived, which is exactly this wrapper's boundary. Both branches are now
+    // static. See __tests__/layoutFullHeightNoTransform.test.tsx.
     return (
         <View style={[styles.container, style]} {...props}>
             <StatusBar
@@ -120,9 +99,10 @@ export function Layout({
                         showsVerticalScrollIndicator={false}
                         keyboardShouldPersistTaps="handled"
                     >
-                        <Animated.View style={animatedContentStyle}>
-                            {children}
-                        </Animated.View>
+                        {/* Plain, unanimated wrapper, see the entrance-animation
+                            note above for why nothing here may carry a live
+                            reanimated style. */}
+                        <View>{children}</View>
                     </ScrollView>
                 ) : (
                     // Full-height content renders statically — see the entrance-

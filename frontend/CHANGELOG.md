@@ -6,6 +6,11 @@ All notable changes to SoulSync are documented here. Versions follow
 ## [2.11.1] - 2026-09-04
 
 ### Fixed
+- **Home no longer goes blank after you add an entry.** Saving a mood could leave Home showing
+  nothing at all, no greeting, no cards, just the tab bar and the + button, and switching tabs
+  didn't bring it back; only closing and reopening the app did. The page's fade-in animation was
+  the cause, and it has been removed from every screen that still had it. Home, Insights and
+  Settings now appear the same way Statistics and Timeline already did.
 - Long activity names no longer break in the middle of a word. "Unmotivated" and "Overwhelmed"
   used to render as "Unmotivate / d" and "Overwhelm / ed" in the entry form's activity picker.
   A name too wide for its chip is now shown a little smaller instead, and only a single
