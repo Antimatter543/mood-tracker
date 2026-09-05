@@ -31,6 +31,7 @@ import {
   type HealthConnectStatus,
 } from '@/lib/healthConnect';
 import { syncHealthMetrics } from '@/lib/healthSync';
+import { useDataContext } from '@/context/DataContext';
 import { clearAllHealthMetrics } from '@/databases/health-metrics';
 import { getSetting, updateSetting } from '@/databases/user-settings';
 import {
@@ -69,6 +70,11 @@ function formatLastSynced(iso: string | null): string {
 export const HealthConnectSection = () => {
   const colors = useThemeColors();
   const db = useSQLiteContext();
+  // Syncing writes health rows and turning the feature off deletes them; both
+  // change what the Statistics and Insights health charts render. Without this
+  // signal those screens keep drawing the old data until the user navigates
+  // away and back (context/dataRefreshStore.ts).
+  const { refetchEntries } = useDataContext();
 
   const [phase, setPhase] = useState<Phase>('loading');
   const [connected, setConnected] = useState(false);
@@ -131,13 +137,14 @@ export const HealthConnectSection = () => {
     const result = await syncHealthMetrics(db);
     if (result.success) {
       setLastSynced(result.syncedAt);
+      refetchEntries();
     } else {
       Alert.alert(
         'Sync failed',
         "We couldn't read from Health Connect just now. Please try again in a moment."
       );
     }
-  }, [db]);
+  }, [db, refetchEntries]);
 
   const handleConnect = useCallback(async () => {
     operationInFlight.current = true;
@@ -192,6 +199,7 @@ export const HealthConnectSection = () => {
               await updateSetting(db, HEALTH_LAST_SYNCED_SETTING_KEY, '');
               setConnected(false);
               setLastSynced(null);
+              refetchEntries();
             } catch {
               Alert.alert('Something went wrong', 'Could not turn off Health Connect.');
             } finally {
@@ -202,7 +210,7 @@ export const HealthConnectSection = () => {
         },
       ]
     );
-  }, [db]);
+  }, [db, refetchEntries]);
 
   const handleInstall = useCallback(async () => {
     // Prefer the Play store app (market://); fall back to the web listing.

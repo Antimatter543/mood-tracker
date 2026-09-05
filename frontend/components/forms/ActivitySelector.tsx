@@ -20,6 +20,7 @@ import ActivityReorder from "./ActivityReorder";
 import GroupReorder from "./GroupReorder";
 import { GroupDeleteDialog, GroupRenameDialog } from "./GroupManageDialogs";
 import { hapticDragStart } from "@/lib/haptics";
+import { useDataContext } from "@/context/DataContext";
 import {
     ACTIVITY_CHIP_CIRCLE_SIZE,
     ACTIVITY_CHIP_LABEL_BLOCK,
@@ -775,6 +776,13 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
     const colors = useThemeColors();
     const styles = useStyles(colors);
     const db = SQLite.useSQLiteContext();
+    // Every write below changes the activity CATALOGUE, which other screens
+    // render (Home's "Recent activities" and "Explore your activities",
+    // Insights' per-activity views). Reloading only this component's own list
+    // left those screens showing the old catalogue until the user navigated
+    // away and back -- the same stale-until-refocus class as the entries path.
+    // See reloadAfterWrite below.
+    const { refetchEntries } = useDataContext();
 
     const [activities, setActivities] = useState<Activity[]>([]);
     const [groups, setGroups] = useState<ActivityGroup[]>([]);
@@ -830,6 +838,19 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
         }
     };
 
+    /**
+     * Reload this component's list AND tell the rest of the app the activity
+     * catalogue changed. Use this after every WRITE; use bare `loadActivities`
+     * only when re-reading state that did not change here (mount, or a
+     * "reality diverged, resync" read). `refetchEntries` bumps the external
+     * data-version store, which is the only signal that reaches the tab screens
+     * (see context/dataRefreshStore.ts for why a context value does not).
+     */
+    const reloadAfterWrite = async () => {
+        await loadActivities();
+        refetchEntries();
+    };
+
     // Load both activities and groups on mount. Declared after loadActivities so
     // the reference is not a temporal-dead-zone access (react-hooks 7.x flags
     // use-before-declaration even though the effect runs post-render).
@@ -851,7 +872,7 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
             );
 
             if (result.success) {
-                await loadActivities();
+                await reloadAfterWrite();
                 setNewActivityName("");
                 setModals({ ...modals, addActivity: false });
             } else {
@@ -878,7 +899,7 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
         const result = await addActivityGroup(db, name.trim());
 
         if (result.success) {
-            await loadActivities();
+            await reloadAfterWrite();
             setNewGroupName("");
             setModals({ ...modals, addGroup: false });
             setError("");
@@ -923,7 +944,7 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
 
         if (result.success) {
             closeDeleteDialog();
-            await loadActivities();
+            await reloadAfterWrite();
         } else {
             setDeleteError(result.message);
         }
@@ -952,7 +973,7 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
                 : ""
         );
 
-        await loadActivities();
+        await reloadAfterWrite();
         setDeleteImpact(await getGroupDeletionImpact(db, deleteTarget.id));
     };
 
@@ -964,7 +985,7 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
         if (result.success) {
             setRenameTarget(null);
             setRenameError("");
-            await loadActivities();
+            await reloadAfterWrite();
         } else {
             setRenameError(result.message);
         }
@@ -985,7 +1006,7 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
             Alert.alert("Error", result.message);
         }
 
-        await loadActivities();
+        await reloadAfterWrite();
     };
 
     const enterGroupMoveMode = () => {
@@ -1001,7 +1022,7 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
             const result = await updateActivityPositions(db, activities);
             
             if (result.success) {
-                await loadActivities();
+                await reloadAfterWrite();
             } else {
                 console.error(result.message);
                 Alert.alert("Error", result.message);

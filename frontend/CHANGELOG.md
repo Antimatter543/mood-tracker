@@ -3,6 +3,21 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [Unreleased]
+
+### Fixed
+- **Changes to your activities show up everywhere straight away.** Creating an activity while
+  logging a mood, or renaming, reordering or deleting an activity group, updated the picker you
+  were looking at but left Home's "Recent activities" and "Explore your activities" showing the
+  old list until you switched tabs and came back. Every screen now updates at once.
+- **Turning Health Connect on or off updates the charts straight away.** Syncing or turning it
+  off used to leave the Statistics and Insights health charts drawing data that had already
+  changed, again until you navigated away and back.
+- **A quick double-tap on Submit no longer saves the same entry twice.** Tapping the entry
+  form's Submit button twice in fast succession could create two identical entries. The button
+  now saves once per tap, greys out while the entry is being written, and comes back if the
+  save fails so you can try again. The same applies to saving an edit to an existing entry.
+
 ## [2.11.1] - 2026-09-04
 
 ### Fixed

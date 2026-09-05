@@ -1,5 +1,59 @@
 # SoulSync — Project Lessons
 
+## 2026-09-05: The stale-screen bug was never one bug, and reviewing call sites had not caught the other two
+
+**Mistake**: "Home shows stale data after Submit" was root-caused and fixed on 2026-07-13 by
+replacing a `refreshCount` threaded through `DataContext` with the external `dataRefreshStore`
+(`bumpDataVersion` + `useSyncExternalStore`), because a context value provably never reached the
+tab screens. That fix was correct and shipped. But it was applied as "fix the entries path", and
+nobody swept the OTHER write paths for the same shape. Two were, and still are, wrong:
+- `components/forms/ActivitySelector.tsx` performed SEVEN catalogue writes (add activity, add /
+  rename / reorder / delete group, move activities between groups, reorder activities) and only
+  ever called its own `loadActivities()`. So creating an activity while logging a mood left
+  Home's "Recent activities" and "Explore your activities" on the old catalogue until the user
+  left the tab and came back. Home is MOUNTED underneath the entry-form overlay the whole time,
+  so this is visible immediately on cancel.
+- `components/HealthConnectSection.tsx` cleared every health row on disconnect, and wrote new
+  ones on sync, with no signal at all, the Statistics and Insights health charts kept drawing
+  rows that no longer existed.
+
+**Also worth recording**: a report that the July fix "never landed" was wrong, and the way to
+settle it was git, not the device. The QA note recording the bug as confirmed on versionCode
+20308 (v2.3.8, tagged 2026-07-08) and the commit that fixed it (`aa4732f`, 2026-07-13) are the
+SAME investigation, the note is the pre-fix half of it. `git show <tag>:<path>` over v2.3.8 /
+v2.10.0 / v2.11.0 / main answered "is the fix in this build" in one command. **A QA memory note
+records what was true when it was written; check the tag before treating it as current.**
+
+**Rule**:
+- **A write that changes rows another screen renders must broadcast, not just reload itself.**
+  Reloading local state is the trap: the component you are looking at looks correct, so the bug
+  only shows on a screen you are not currently testing.
+- **The signal is `refetchEntries()` from `useDataContext()`** (which bumps the external store).
+  Call it after every successful write. Where a component would rather not reach for the
+  context, it may take an `onChanged` prop instead, but then the mounting screen must wire that
+  to a broadcast, `RecentlyDeletedPanel` does exactly this through `DBViewer`.
+- **Reload-only reads stay bare.** `loadActivities()` on mount, or to resync after discovering
+  reality diverged, must NOT broadcast: nothing changed, and bumping there wakes every mounted
+  screen for no reason.
+- **When a bug's fix is "add a call at the call site", the fix is not done until you have swept
+  every other call site.** This is the second time in one day that a correct root-cause was
+  scoped to the one screen that reported it (see the entry above on the reanimated blank).
+
+**Rung**: test-grade, and this one is a real sweep rather than a spot check.
+`__tests__/writesBroadcastDataRefresh.test.ts` DISCOVERS the write functions from the database
+layer itself (any exported async function in `databases/` whose body contains DML or
+`withWriteTransaction`), finds every file under `app/` and `components/` that calls one, and
+fails unless that file broadcasts. A new write path fails the build until it does. Three details
+make it non-vacuous: the discovery step asserts it found >8 writes including four known by name
+(a broken regex would otherwise make the sweep pass trivially); `databases/user-settings.ts` is
+excluded WITH a reason (settings propagate through SettingsContext, so demanding a data bump per
+theme toggle would be wrong); and each exemption is itself asserted, so `RecentlyDeletedPanel`
+must still declare and call `onChanged` and `DBViewer` must still wire it to a broadcast.
+Verified fail-then-pass: against the pre-fix files it names both offenders and every function
+they call, including `renameActivityGroup`, which a hand-written enumeration had missed.
+
+**Date**: 2026-09-05
+
 ## 2026-09-05: Home went blank after Submit, and the fix for the same bug two months earlier had been scoped to the wrong ingredient
 
 **Mistake**: on 2026-07-13 the Statistics tab blanking was root-caused to `Layout`'s reanimated
