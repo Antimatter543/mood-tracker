@@ -198,6 +198,17 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   (`OverlayModal` / `useOverlay`, see On-device QA section). This replaced BOTH the old "Fabric flex-collapse
   blank modal" and "synthetic taps can't drive the modal" gotchas — the overlay has neither problem (it
   renders full-window via `StyleSheet.absoluteFill` and IS synthetically drivable).
+- **No live reanimated `useAnimatedStyle` on a container that wraps a page's content.** On Fabric +
+  reanimated 4, once such children re-lay-out after mount, reanimated applies the animated props
+  against a stale measured frame and shoves the whole subtree off-screen: the page goes blank with
+  no JS re-render, no thrown error and nothing in logcat, a tab switch does NOT fix it (the native
+  views stay displaced), and only a process restart does. It has bitten twice, Statistics 2026-07-13
+  and Home 2026-09-05, and the second time only because the first fix blamed `flex: 1` and left the
+  scrolling branch animated. `Layout` now owns no reanimated at all (`components/PageContainer.tsx`,
+  guarded by `__tests__/layoutContentNotAnimated.test.tsx`), and the FAB's press-scale is the only
+  live animatedStyle left, a leaf button, no async children. Diagnosing a blank screen: ask what is
+  INSIDE the missing region versus outside it (the boundary names the component), and whether a
+  re-render fixes it (if not, the failure is below JS).
 - **Empty-database is a real code path** — a fresh install has zero entries. Date/aggregate logic must not throw
   on empty data (a heatmap `MIN(date)=NULL` once white-screened Stats). Test empty AND the empty->first-entry
   transition (a hooks-ordering bug crashed exactly there).
