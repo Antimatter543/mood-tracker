@@ -3,7 +3,7 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
-## [Unreleased]
+## [2.11.2] - 2026-09-06
 
 ### Fixed
 - **Changes to your activities show up everywhere straight away.** Creating an activity while
