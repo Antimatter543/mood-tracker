@@ -3,7 +3,7 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
-## [Unreleased]
+## [2.12.0] - 2026-09-11
 
 ### Added
 - **Health Connect is now available in the Google Play build.** Sleep, heart rate, heart rate
