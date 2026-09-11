@@ -76,22 +76,23 @@ staging NOTHING (a deterministic pause for policy gates — see below); (1) asse
 agree; (2) **cheap idempotent guard** — if the versionCode is already on the production track, log "already on
 track — nothing to do" and stop; (3) if CI hasn't built `SoulSync-<version>.aab` yet, log "AAB not built yet —
 will retry" and stop; (4) otherwise delegate to `publish-to-play.sh` (`SOURCE=run`).
-- **Play state (2026-09-04):** production = **v2.10.0 (vc 21000) PUBLISHED, completed @ 100%** — still
-  **built WITHOUT Health Connect permissions**. The `.play-hold` marker is
-  GONE; the HC policy gate moved into the BUILD: CI's AAB lane sets `EXPO_PUBLIC_HEALTH_CONNECT=0` (one env
-  knob — strips the 4 health perms from the manifest via `plugins/withHealthConnect.js` AND hides every HC
-  surface at runtime via `lib/healthConnectConfig.ts`; two loud CI assertions guard both directions).
+- **Play state:** production = **v2.10.0 (vc 21000) PUBLISHED, completed @ 100%** (2026-09-04). The
+  `.play-hold` marker is GONE; the HC policy gate lives in the BUILD, as the one env knob
+  `EXPO_PUBLIC_HEALTH_CONNECT` (drives `plugins/withHealthConnect.js` for the manifest AND
+  `lib/healthConnectConfig.ts` for the runtime, so the two layers agree by construction).
+  **Health Connect SHIPS ON PLAY from the next release (2026-09-11):** Google's "Health Apps"
+  declaration is ACTIONED (App content > Actioned, last edited 2026-07-18, 4 perms; Policy status
+  "No issues found"), so the Play AAB lane now builds with the knob at `'1'` and Play gets HC exactly
+  like the GitHub APK. **`'0'` is now the EMERGENCY ROLLBACK value** (both envs in
+  `.github/workflows/release-apk.yml`, kept in lockstep) — every CI gate in that lane DERIVES from the
+  knob, so a rollback flips the assertions instead of reddening the lane.
   **METRO-CACHE TRAP (broke v2.11.2 on Play, fixed 2026-09-11):** `EXPO_PUBLIC_*` values are NOT in Metro's
   transform cache key and the cache root (`os.tmpdir()/metro-cache`) outlives `prebuild --clean`, so the AAB
-  pass reused the APK's HC-ENABLED bundle. CI wipes `${TMPDIR:-/tmp}/metro-cache` between the two gradle
-  bundle steps and asserts the ARTIFACT (greps each extracted bundle for `HEALTH_CONNECT_BUILD_VARIANT`'s
-  marker both ways) — **never verify a build knob by the env or a log line**. Detail: `frontend/tasks/lessons.md`
-  2026-09-11; shape pinned by `frontend/__tests__/playVariantBundleGuard.test.ts`. The
-  GitHub APK keeps HC fully enabled. **When Google's "Health Apps" declaration approves** (filed 2026-07-18;
-  4 perms; justification in `ops/routes/soulsync/research/health-connect-integration-plan.md`), flip the CI
-  env to `'1'`/remove it (one line in `.github/workflows/release-apk.yml`, marked TEMPORARY-2026-07-17) and
-  cut a release — Play then gets HC too. The **internal track** holds a `2.5.0 (vc 20500) draft` with the HC
-  perms, uploaded only to surface the declaration form in the Console.
+  pass reused the APK's bundle. CI wipes `${TMPDIR:-/tmp}/metro-cache` between the two gradle bundle steps
+  and asserts the ARTIFACT (greps each extracted bundle for `HEALTH_CONNECT_BUILD_VARIANT`'s marker) —
+  **never verify a build knob by the env or a log line**. Detail: `frontend/tasks/lessons.md` 2026-09-11;
+  shape pinned by `frontend/__tests__/playVariantBundleGuard.test.ts`. The **internal track** holds a
+  `2.5.0 (vc 20500) draft` with the HC perms, uploaded only to surface the declaration form in the Console.
   **The cron now publishes LIVE:** its crontab line carries `PLAY_STATUS=completed PLAY_ROLLOUT=1.0`
   (flipped 2026-07-18) — so `scripts/release.sh patch|minor|major` is the ONLY human step: tag → CI builds →
   within 30 min the cron pushes it straight to Play production (Nudge-parity). Script defaults stay `draft`

@@ -30,13 +30,18 @@ import type { HealthConnectStatus } from './healthConnect';
  * for the prebuild AND the gradle bundle step (metro bundles the JS during
  * gradle — the env must be present there too, or the runtime flag bakes in wrong).
  *
- * WHY THE KNOB EXISTS (temporary, 2026-07-17): shipping Health Connect reads on
- * Google Play requires Google's app-level "Health Apps" declaration APPROVED
- * first (undeclared `android.permission.health.*` risks store removal; approval
- * takes ~2-3 weeks). That declaration is unfiled, so the Play AAB is built with
- * this knob OFF — Play users get everything ELSE now, with a manifest carrying
- * ZERO health permissions. Once the declaration is approved, flip the CI env
- * line to '1' (or drop it) and Play gets HC too, no code change.
+ * WHY THE KNOB EXISTS, and where it stands (2026-09-11): shipping Health Connect
+ * reads on Google Play requires Google's app-level "Health Apps" declaration to be
+ * actioned first (undeclared `android.permission.health.*` risks store removal), so
+ * from 2026-07-17 the Play AAB was built with this knob OFF and Play users got
+ * everything ELSE, with a manifest carrying ZERO health permissions. That
+ * declaration is now ACTIONED ("No issues found"), the CI Play lane builds with the
+ * knob at '1', and Play ships Health Connect exactly like the GitHub APK.
+ *
+ * The knob STAYS as the EMERGENCY ROLLBACK: set it back to '0' in both CI env
+ * blocks and the feature disappears from the Play build again, manifest and JS
+ * together, with no code change. CI's gates all derive from it, so a rollback flips
+ * them rather than breaking the lane.
  */
 export const HEALTH_CONNECT_ENABLED =
   process.env.EXPO_PUBLIC_HEALTH_CONNECT !== '0';

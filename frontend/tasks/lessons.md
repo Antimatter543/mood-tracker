@@ -52,6 +52,12 @@ HC-ENABLED bundle; the same pass after `rm -rf "$TMPDIR/metro-cache"` produced t
   AAB carries the marker for the knob it was built with (so flipping the knob to `'1'` after the
   Health Apps declaration is approved flips the assertion instead of breaking the lane), and the
   two bundles differ.
+- **Same day, opposite direction:** Google's Health Apps declaration turned out to be ACTIONED, so
+  the Play lane was flipped to `EXPO_PUBLIC_HEALTH_CONNECT='1'` in the same PR and Play now ships
+  Health Connect. With both lanes on the same knob the marker assertions agree by construction and
+  the md5 comparison is skipped, i.e. this guard is deliberately QUIET right now. It regains its
+  teeth the moment anyone takes the `'0'` rollback, which is exactly when nobody will be watching,
+  which is why the cache wipe and the gates stay in the lane instead of being deleted as satisfied.
 - `__tests__/playVariantBundleGuard.test.ts` pins the CI shape: the wipe exists, wipes the real
   cache root, and sits BETWEEN the two gradle bundle steps; both assertions grep the exact
   literals the module emits; the AAB expectation derives from the bundle step's own knob value.

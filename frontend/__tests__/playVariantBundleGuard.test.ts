@@ -1,7 +1,13 @@
 /**
  * __tests__/playVariantBundleGuard.test.ts
  *
- * Guards the CI shape that keeps the Google Play "no Health Connect" AAB honest.
+ * Guards the CI shape that keeps the Google Play AAB honest about Health Connect.
+ *
+ * The knob is '1' today (the Health Apps declaration was actioned, so Play ships HC
+ * like the GitHub APK), and '0' is the documented rollback. So nothing here asserts a
+ * VALUE: the properties are that every Play-lane gate DERIVES from one knob, that all
+ * four Play steps read the same one, and that the cache wipe still stands between the
+ * two bundle passes for the day someone takes the rollback.
  *
  * WHY THIS EXISTS (2026-09-11): v2.11.2 shipped to Play with an HC-free MANIFEST and
  * an HC-ENABLED JS BUNDLE. `EXPO_PUBLIC_*` values are inlined by babel at transform
@@ -97,6 +103,22 @@ const aabAssert = find(
   (s) => s.body.includes('base/assets/index.android.bundle'),
   'AAB bundle assertion'
 );
+const playPrebuild = find(
+  // Match the RUN line, not a comment that merely mentions the command (the cache
+  // wipe step explains itself by naming `expo prebuild --clean`).
+  (s) => s.body.includes('run: npx expo prebuild') && s.body.includes('--clean'),
+  'Play variant prebuild'
+);
+const manifestAssert = find(
+  (s) =>
+    s.body.includes('AndroidManifest.xml') &&
+    s.body.includes('ViewPermissionUsageActivity'),
+  'Play manifest assertion'
+);
+
+/** The knob a step declares in its own `env:` block, or undefined. */
+const knobOf = (s: Step): string | undefined =>
+  /EXPO_PUBLIC_HEALTH_CONNECT: '([^']*)'/.exec(s.body)?.[1];
 
 describe('release-apk.yml still has every step this guard reasons about', () => {
   it.each([
@@ -161,20 +183,24 @@ describe('release-apk.yml asserts the ARTIFACT, in both directions', () => {
     }
   });
 
-  it('asserts the two bundles differ, using the APK bundle md5 captured upstream', () => {
+  it('compares the two bundles by md5, but ONLY when the lanes were built differently', () => {
+    // With both lanes on the same knob the bundles are supposed to agree, so an
+    // unconditional "they must differ" would fail on the normal build. The converse
+    // ("they must be identical") is not asserted either: two same-env passes still
+    // differ in md5, so it would be a flaky gate. The marker greps are the real gate.
     expect(apkAssert.body).toMatch(/id: apkbundle/);
     expect(apkAssert.body).toContain('md5=$MD5" >> "$GITHUB_OUTPUT"');
     expect(aabAssert.body).toContain('steps.apkbundle.outputs.md5');
-    expect(aabAssert.body).toContain('"$MD5" = "$APK_BUNDLE_MD5"');
+    expect(aabAssert.body).toMatch(
+      /if \[ "\$EXPECT_NAME" = "excluded" \] && \[ "\$MD5" = "\$APK_BUNDLE_MD5" \]/
+    );
   });
 
   it('derives the AAB expectation from the SAME knob value the bundle step used', () => {
-    // So that flipping the knob to '1' once the Health Apps declaration is approved
-    // flips the assertion with it, instead of turning the release lane red.
-    const knob = (s: Step): string | undefined =>
-      /EXPO_PUBLIC_HEALTH_CONNECT: '([^']*)'/.exec(s.body)?.[1];
-    expect(knob(aabBuild)).toBeDefined();
-    expect(knob(aabAssert)).toBe(knob(aabBuild));
+    // So that taking the '0' rollback flips the assertion with it, instead of
+    // turning the release lane red.
+    expect(knobOf(aabBuild)).toBeDefined();
+    expect(knobOf(aabAssert)).toBe(knobOf(aabBuild));
     expect(aabAssert.body).toMatch(/EXPO_PUBLIC_HEALTH_CONNECT:-/);
   });
 
@@ -194,6 +220,57 @@ describe('release-apk.yml asserts the ARTIFACT, in both directions', () => {
       expect(step.body).not.toMatch(/^ {8}if:/m);
     }
     expect(workflow).toContain('workflow_dispatch');
+  });
+});
+
+describe('the Play variant gates all DERIVE from one knob', () => {
+  it('the manifest assertion exists and branches on the knob, not on a hardcoded expectation', () => {
+    // Before 2026-09-11 this step asserted ZERO health permissions unconditionally.
+    // With the Health Apps declaration actioned the Play build SHIPS Health Connect,
+    // so a hardcoded expectation would now have to be rewritten (and re-reviewed)
+    // every time the knob moves. It branches instead.
+    expect(manifestAssert.line).not.toBe(MISSING);
+    expect(manifestAssert.body).toMatch(/EXPO_PUBLIC_HEALTH_CONNECT:-.*\}" \] ?= "0"|= "0" \]/);
+    expect(manifestAssert.body).toContain('::error::Play AAB manifest STILL declares');
+    expect(manifestAssert.body).toContain('::error::Play AAB manifest is MISSING');
+  });
+
+  it('the enabled branch requires all 4 health permissions AND the usage alias', () => {
+    // The alias is the Android 14+ route from the system "permission usage" screen
+    // back into MainActivity. The plugin adds it together with the permissions, so
+    // its absence means the plugin did not run, even if a permission grep passed.
+    for (const perm of [
+      'READ_SLEEP',
+      'READ_HEART_RATE',
+      'READ_HEART_RATE_VARIABILITY',
+      'READ_RESTING_HEART_RATE',
+    ]) {
+      expect(manifestAssert.body).toContain(perm);
+    }
+    // Assert the alias is GATED, not merely mentioned: counting it into $ALIAS and
+    // then never testing $ALIAS is exactly the shape that passes a naive grep test
+    // while letting a delegate-less manifest ship.
+    expect(manifestAssert.body).toContain('ViewPermissionUsageActivity');
+    expect(manifestAssert.body).toContain('"$ALIAS" -lt 1'); // enabled: must exist
+    expect(manifestAssert.body).toContain('"$ALIAS" -ne 0'); // rollback: must not
+    expect(manifestAssert.body).toContain('"$COUNT" -ne 4'); // enabled: exactly 4
+    expect(manifestAssert.body).toContain('"$COUNT" -ne 0'); // rollback: none
+  });
+
+  it('every Play-variant step reads the SAME knob value', () => {
+    // The manifest comes from the prebuild and the JS from gradle's metro run. Those
+    // two disagreeing IS the v2.11.2 crash, so lockstep is the property, not the
+    // particular value: this passes at '1' today and at '0' after a rollback.
+    const knobs = [playPrebuild, manifestAssert, aabBuild, aabAssert].map(knobOf);
+    expect(knobs[0]).toBeDefined();
+    expect(new Set(knobs).size).toBe(1);
+  });
+
+  it('the GitHub APK lane never sets the knob (it is the always-enabled reference)', () => {
+    // The APK assertion hardcodes "enabled"; that is only sound while the APK lane
+    // inherits the default. A stray knob here would make that assertion a lie.
+    expect(knobOf(apkBuild)).toBeUndefined();
+    expect(knobOf(apkAssert)).toBeUndefined();
   });
 });
 

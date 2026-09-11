@@ -17,23 +17,26 @@
 // Every mutation THIS plugin makes is idempotent (guarded), so re-running
 // prebuild never duplicates one of our entries. Modeled on ./withReleaseAbis.js.
 //
-// BUILD KNOB — EXPO_PUBLIC_HEALTH_CONNECT (TEMPORARY, 2026-07-17): when this env
+// BUILD KNOB — EXPO_PUBLIC_HEALTH_CONNECT (added 2026-07-17 as a temporary Play
+// gate; since 2026-09-11 it is the EMERGENCY ROLLBACK, see below): when this env
 // var is '0' at prebuild time, this plugin applies NOTHING — no health
 // <uses-permission>, no ViewPermissionUsageActivity <activity-alias>, no
 // MainActivity delegate edit — so the generated manifest carries ZERO
 // `android.permission.health.*`. That is the Play "no-HC" AAB variant, needed
-// only until Google's "Health Apps" declaration is approved (undeclared health
-// permissions risk Play removal). See lib/healthConnectConfig.ts for the WHY and
-// the matching runtime flag (the SAME env var drives both, so manifest ⇆ JS
-// agree). REVERT once approved: build the AAB with EXPO_PUBLIC_HEALTH_CONNECT=1
-// (or drop the env) and this plugin declares HC exactly as the APK does.
+// needed while Google's "Health Apps" declaration was not yet actioned (undeclared
+// health permissions risk Play removal). See lib/healthConnectConfig.ts for the WHY
+// and the matching runtime flag (the SAME env var drives both, so manifest ⇆ JS
+// agree). THE REVERT WAS EXECUTED 2026-09-11: the declaration is actioned and CI's
+// Play lane builds with EXPO_PUBLIC_HEALTH_CONNECT=1, so this plugin declares HC on
+// Play exactly as it does for the APK. '0' remains the one-knob rollback.
 //   NOTE — harmless residue when disabled: the library's own bundled
 //   app.plugin.js (listed BEFORE us in app.json) still adds a rationale
 //   intent-filter to MainActivity. That is an <intent-filter> (action
 //   `androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE`), NOT a permission — it
 //   contains no `android.permission.health.*`, so it does not trip Play's
-//   health-permission detection. Verified against the generated manifest (the CI
-//   Play-variant build asserts `grep -c android.permission.health == 0`).
+//   health-permission detection. Verified against the generated manifest (in
+//   rollback mode CI asserts `grep -c android.permission.health == 0`, and that
+//   assertion passed with the rationale filter present).
 //
 // KNOWN upstream quirk (not ours): the library's bundled app.plugin.js pushes
 // the rationale intent-filter with NO guard, so re-running `expo prebuild` over
@@ -205,8 +208,8 @@ const withHealthConnect = (config) => {
       'withHealthConnect',
       'Health Connect EXCLUDED from this build (EXPO_PUBLIC_HEALTH_CONNECT=0): ' +
         'no health uses-permissions, no ViewPermissionUsageActivity activity-alias, ' +
-        'no MainActivity permission delegate. This is the Google Play no-HC variant, ' +
-        'temporary until the "Health Apps" declaration is approved.'
+        'no MainActivity permission delegate. This is the no-HC rollback variant ' +
+        '(EXPO_PUBLIC_HEALTH_CONNECT=0); the normal Play build ships Health Connect.'
     );
     return config;
   }

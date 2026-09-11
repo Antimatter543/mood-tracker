@@ -75,6 +75,7 @@ const REAL_FAILURE_SIGNATURES = [
   '::error::Default manifest is MISSING',
   '::error::Expected exactly 4 android.permission.health',
   '::error::Play AAB manifest STILL declares',
+  '::error::Play AAB manifest is MISSING',
   // Our own artifact-level JS-bundle guards (the 2026-09-11 Metro-cache leak:
   // manifest correct, bundle wrong). A marker mismatch is a shipped-wrong-variant
   // break, never a flake.
