@@ -80,6 +80,54 @@ describe('HEALTH_CONNECT_ENABLED (EXPO_PUBLIC_HEALTH_CONNECT build knob)', () =>
       expect(loadEnabled()).toBe(true);
     }
   });
+
+  /**
+   * HEALTH_CONNECT_BUILD_VARIANT — the artifact-visible witness for this knob.
+   *
+   * v2.11.2's Play AAB shipped an HC-free manifest with an HC-ENABLED JS bundle:
+   * `EXPO_PUBLIC_*` values are inlined at babel TRANSFORM time but are NOT part of
+   * Metro's transform cache key, so the Play bundle pass reused the APK pass's
+   * cached transform. Nothing in CI could see it, because the env was correct the
+   * whole time — only the bundle lied. This marker is what CI now greps out of the
+   * extracted bundle, so these tests pin BOTH literals (verbatim, not re-derived
+   * from the module) and the fact that the marker can never disagree with the flag.
+   */
+  const loadVariant = (): string => {
+    jest.resetModules();
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- fresh module load per env value
+    return require('../lib/healthConnectConfig').HEALTH_CONNECT_BUILD_VARIANT;
+  };
+
+  it("'0' marks the bundle as the EXCLUDED variant", () => {
+    process.env.EXPO_PUBLIC_HEALTH_CONNECT = '0';
+    // Verbatim: CI greps this exact string out of the shipped Hermes bundle, so a
+    // rename has to fail here (and in playVariantBundleGuard.test.ts) loudly.
+    expect(loadVariant()).toBe('soulsync-hc-variant:excluded');
+  });
+
+  it('unset marks the bundle as the ENABLED variant (normal GitHub build)', () => {
+    delete process.env.EXPO_PUBLIC_HEALTH_CONNECT;
+    expect(loadVariant()).toBe('soulsync-hc-variant:enabled');
+  });
+
+  it('the marker can NEVER disagree with HEALTH_CONNECT_ENABLED (any knob value)', () => {
+    // Class-level: both derive from the same expression in the same module, so they
+    // share one Metro cache entry. That is what makes the marker a faithful proxy
+    // for the flag actually baked into the bundle, rather than a second opinion.
+    for (const v of ['0', '1', 'true', 'enabled', '', undefined]) {
+      if (v === undefined) delete process.env.EXPO_PUBLIC_HEALTH_CONNECT;
+      else process.env.EXPO_PUBLIC_HEALTH_CONNECT = v;
+      jest.resetModules();
+      /* eslint-disable @typescript-eslint/no-require-imports -- one fresh load per knob value */
+      const mod = require('../lib/healthConnectConfig');
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      expect(mod.HEALTH_CONNECT_BUILD_VARIANT).toBe(
+        mod.HEALTH_CONNECT_ENABLED
+          ? 'soulsync-hc-variant:enabled'
+          : 'soulsync-hc-variant:excluded'
+      );
+    }
+  });
 });
 
 describe('resolveHealthConnectPhase (SDK status → card phase)', () => {

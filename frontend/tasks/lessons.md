@@ -1,5 +1,71 @@
 # SoulSync — Project Lessons
 
+## 2026-09-11: Two bundles in one CI job, one Metro cache — the Play build shipped the APK's JS
+
+**The bug users saw**: Google Play users were kicked out of the app the moment they tapped
+Connect on the Health Connect card. That card is not supposed to EXIST in the Play build: the
+`EXPO_PUBLIC_HEALTH_CONNECT=0` knob is meant to strip the four `android.permission.health.*`
+permissions from the manifest (via `plugins/withHealthConnect.js`) AND hide every Health Connect
+surface at runtime (via `HEALTH_CONNECT_ENABLED` in `lib/healthConnectConfig.ts`).
+
+**Mechanism**: the manifest half worked; the JS half did not. `EXPO_PUBLIC_*` values are inlined
+by babel at TRANSFORM time (`babel-preset-expo`'s `inline-env-vars` replaces
+`process.env.EXPO_PUBLIC_*` with a literal in production), but **the env VALUES are not part of
+Metro's transform cache key** — `@expo/metro-config`'s `metro-transform-worker.getCacheKey` and
+`babel-transformer.getCacheKey` hash the transformer files and config only. The Metro FileStore
+cache root is `path.join(os.tmpdir(), 'metro-cache')`, which `expo prebuild --clean` does NOT
+touch (it only deletes `android/`) and which persists across both gradle runs of ONE CI job. The
+release lane builds the GitHub APK first (knob unset, HC enabled) and then the Play AAB (knob
+`'0'`), so the second pass got cache HITS for every unchanged file, `lib/healthConnectConfig.ts`
+included, and reused the first pass's inlined `HEALTH_CONNECT_ENABLED === true`. The result in
+v2.11.2: `base/assets/index.android.bundle` inside the AAB was **byte-identical** (md5
+`2c8ed11f2e0f18f62e08d2264e42eeec`) to `assets/index.android.bundle` inside the APK. The card
+rendered, `requestPermission()` ran in a MainActivity where the config plugin had never
+registered `HealthConnectPermissionDelegate`, and the native module threw in a release build.
+
+**Reproduced locally before fixing anything** (Metro only, no native build): two
+`npx expo export:embed --platform android --dev false --bytecode` passes against the same
+`TMPDIR`. Pass 2 with `EXPO_PUBLIC_HEALTH_CONNECT=0` and no cache wipe still produced the
+HC-ENABLED bundle; the same pass after `rm -rf "$TMPDIR/metro-cache"` produced the excluded one.
+
+**Rules**:
+- **Two bundles in one job with different `EXPO_PUBLIC_*` values need a cache wipe between
+  them.** `rm -rf "${TMPDIR:-/tmp}/metro-cache"` before the second bundle step. `--clean` on
+  prebuild is not enough, and neither is `node_modules/.cache`.
+- **Assert the ARTIFACT, never the env.** Every existing signal was green: the env was set on
+  both steps, the log said so, the manifest assertions passed. The env was right the whole time;
+  only the bundle lied. A build-time knob is unverified until something greps the built file.
+- **An md5 difference between the two bundles is a weak signal, not the gate.** In the local
+  reproduction the two bundles differed in md5 while the HC flag had still leaked. The marker
+  grep is what actually decides; the md5 check only catches the crudest case.
+
+**Rung**: CI + test-grade, both directions.
+- `lib/healthConnectConfig.ts` exports `HEALTH_CONNECT_BUILD_VARIANT`, derived from the SAME env
+  expression as the flag, so the minifier folds it to exactly ONE of
+  `soulsync-hc-variant:enabled` / `soulsync-hc-variant:excluded` in the Hermes string table. It
+  is the `testID` of the Settings About block — live, always-rendered code, so it cannot be
+  dead-code-eliminated (the Health Connect card itself would be the wrong host: it returns
+  `null` in precisely the build being inspected), and an installed build can be identified from
+  its view hierarchy.
+- `.github/workflows/release-apk.yml` extracts the JS bundle from both artifacts and asserts,
+  with `::error::` + `exit 1`: the APK carries the enabled marker and not the excluded one, the
+  AAB carries the marker for the knob it was built with (so flipping the knob to `'1'` after the
+  Health Apps declaration is approved flips the assertion instead of breaking the lane), and the
+  two bundles differ.
+- **Same day, opposite direction:** Google's Health Apps declaration turned out to be ACTIONED, so
+  the Play lane was flipped to `EXPO_PUBLIC_HEALTH_CONNECT='1'` in the same PR and Play now ships
+  Health Connect. With both lanes on the same knob the marker assertions agree by construction and
+  the md5 comparison is skipped, i.e. this guard is deliberately QUIET right now. It regains its
+  teeth the moment anyone takes the `'0'` rollback, which is exactly when nobody will be watching,
+  which is why the cache wipe and the gates stay in the lane instead of being deleted as satisfied.
+- `__tests__/playVariantBundleGuard.test.ts` pins the CI shape: the wipe exists, wipes the real
+  cache root, and sits BETWEEN the two gradle bundle steps; both assertions grep the exact
+  literals the module emits; the AAB expectation derives from the bundle step's own knob value.
+  `__tests__/healthConnectConfig.test.ts` pins the marker to the knob in both states and asserts
+  it can never disagree with `HEALTH_CONNECT_ENABLED`. `__tests__/ciFailureClassifier.test.ts`
+  now also asserts the reverse direction: every `::error::` the workflow emits is on the
+  auto-retry deny-list, so a new guard can never be laundered into a flake.
+
 ## 2026-09-05: The stale-screen bug was never one bug, and reviewing call sites had not caught the other two
 
 **Mistake**: "Home shows stale data after Submit" was root-caused and fixed on 2026-07-13 by

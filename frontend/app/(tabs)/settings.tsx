@@ -23,6 +23,7 @@ import { runMigrations } from "@/databases/migrations";
 import { DataManagementSection } from "@/components/DataManagementSection";
 import { HealthConnectSection } from "@/components/HealthConnectSection";
 import { versionLine, copyrightLine } from "@/lib/versionInfo";
+import { HEALTH_CONNECT_BUILD_VARIANT } from "@/lib/healthConnectConfig";
 
 // Support Section
 const SupportSection = () => {
@@ -198,7 +199,13 @@ function Setting() {
             <SupportSection />
             {__DEV__ && <DangerZoneSection db={db} refetchEntries={refetchEntries} />}
 
-            <View style={styles.versionInfo}>
+            {/* testID carries the Health Connect build-variant marker (see
+                lib/healthConnectConfig.ts): invisible to users, but it pins one of the
+                two marker literals into the shipped Hermes string table from live,
+                always-rendered code, which is what CI greps to prove the Play AAB
+                bundle was really built with the knob OFF. Do NOT replace it with a
+                static id. */}
+            <View style={styles.versionInfo} testID={HEALTH_CONNECT_BUILD_VARIANT}>
                 <Text style={styles.versionText}>{versionLine(Constants.expoConfig?.version)}</Text>
                 <Text style={styles.versionText}>{copyrightLine(new Date().getFullYear())}</Text>
                 <Text style={styles.versionText}> Have feedback? Email us at hello@raeduslabs.com! </Text>

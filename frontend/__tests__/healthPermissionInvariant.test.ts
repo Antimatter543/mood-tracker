@@ -167,8 +167,10 @@ describe('Health Connect build knob — manifest ⇆ runtime parity in both mode
     const out = withHealthConnect(config);
 
     // No manifest mod, no MainActivity mod — config returned untouched, plus an
-    // info line explaining the exclusion. This is what makes the generated
-    // manifest carry ZERO android.permission.health.* (CI asserts grep -c == 0).
+    // info line explaining the exclusion. This is what makes the generated manifest
+    // carry ZERO android.permission.health.* in the '0' ROLLBACK build (CI's Play
+    // manifest assertion branches on the same knob and demands zero there; at '1',
+    // today's default, it demands all 4 permissions plus the usage alias).
     expect(cp.withAndroidManifest).not.toHaveBeenCalled();
     expect(cp.withMainActivity).not.toHaveBeenCalled();
     expect(cp.WarningAggregator.addWarningAndroid).toHaveBeenCalledTimes(1);

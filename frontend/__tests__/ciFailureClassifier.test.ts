@@ -150,6 +150,31 @@ describe('CLASS INVARIANT: every guarded release-apk.yml error is on the deny-li
       expect(verdict.transient).toBe(false);
     }
   });
+
+  // The REVERSE direction, added 2026-09-11 with the JS-bundle variant guards: the
+  // assertions above only prove that deny-listed guards still exist. A NEW `::error::`
+  // guard that nobody deny-lists is the dangerous case — it is unrecognised, and while
+  // "unrecognised" currently means "not transient" (fail safe), that safety is a
+  // property of the classifier's default, not of the guard. Pinning every guard
+  // explicitly means a future allow-list entry can never start laundering one.
+  const workflowGuardMessages: string[] = Array.from(
+    releaseWorkflow.matchAll(/::error::[^"]+/g),
+    (m) => m[0]
+  );
+
+  it('finds the workflow guards (a regex that matches nothing would vacuously pass)', () => {
+    expect(workflowGuardMessages.length).toBeGreaterThanOrEqual(6);
+  });
+
+  it.each(workflowGuardMessages)(
+    'every ::error:: emitted by release-apk.yml is deny-listed: %s',
+    (message: string) => {
+      expect(
+        REAL_FAILURE_SIGNATURES.some((sig: string) => message.startsWith(sig))
+      ).toBe(true);
+      expect(classifyCiFailure(`log\n${message}\n`).transient).toBe(false);
+    }
+  );
 });
 
 describe('CLASS INVARIANT: the auto-retry workflow cannot loop or mask breaks', () => {

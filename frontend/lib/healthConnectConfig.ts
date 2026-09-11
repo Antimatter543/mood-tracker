@@ -30,16 +30,53 @@ import type { HealthConnectStatus } from './healthConnect';
  * for the prebuild AND the gradle bundle step (metro bundles the JS during
  * gradle — the env must be present there too, or the runtime flag bakes in wrong).
  *
- * WHY THE KNOB EXISTS (temporary, 2026-07-17): shipping Health Connect reads on
- * Google Play requires Google's app-level "Health Apps" declaration APPROVED
- * first (undeclared `android.permission.health.*` risks store removal; approval
- * takes ~2-3 weeks). That declaration is unfiled, so the Play AAB is built with
- * this knob OFF — Play users get everything ELSE now, with a manifest carrying
- * ZERO health permissions. Once the declaration is approved, flip the CI env
- * line to '1' (or drop it) and Play gets HC too, no code change.
+ * WHY THE KNOB EXISTS, and where it stands (2026-09-11): shipping Health Connect
+ * reads on Google Play requires Google's app-level "Health Apps" declaration to be
+ * actioned first (undeclared `android.permission.health.*` risks store removal), so
+ * from 2026-07-17 the Play AAB was built with this knob OFF and Play users got
+ * everything ELSE, with a manifest carrying ZERO health permissions. That
+ * declaration is now ACTIONED ("No issues found"), the CI Play lane builds with the
+ * knob at '1', and Play ships Health Connect exactly like the GitHub APK.
+ *
+ * The knob STAYS as the EMERGENCY ROLLBACK: set it back to '0' in both CI env
+ * blocks and the feature disappears from the Play build again, manifest and JS
+ * together, with no code change. CI's gates all derive from it, so a rollback flips
+ * them rather than breaking the lane.
  */
 export const HEALTH_CONNECT_ENABLED =
   process.env.EXPO_PUBLIC_HEALTH_CONNECT !== '0';
+
+/**
+ * BUILD-VARIANT MARKER — the only way to tell, FROM THE ARTIFACT, which side of
+ * the {@link HEALTH_CONNECT_ENABLED} knob a shipped JS bundle was compiled with.
+ *
+ * Derived from the SAME `process.env.EXPO_PUBLIC_HEALTH_CONNECT` expression, so it
+ * cannot disagree with the flag: babel inlines the env value at transform time and
+ * the minifier folds the ternary, leaving EXACTLY ONE of the two literals in the
+ * bundle's Hermes string table. CI greps the extracted bundle for it in both
+ * directions (`strings <bundle> | grep soulsync-hc-variant:…`).
+ *
+ * WHY IT EXISTS (2026-09-11): env values are NOT part of Metro's transform cache
+ * key (`@expo/metro-config` hashes transformer files + config only), and the cache
+ * root lives at `os.tmpdir()/metro-cache`, which survives `expo prebuild --clean`
+ * (that only deletes `android/`). One CI job builds the GitHub APK (knob unset → HC
+ * enabled) and then the Play AAB (knob '0' → HC excluded); the second pass got
+ * cache HITS and REUSED the first pass's inlined `HEALTH_CONNECT_ENABLED === true`.
+ * v2.11.2 shipped to Play with an HC-free manifest but an HC-ENABLED bundle: the
+ * Settings card rendered, `requestPermission()` ran in a MainActivity where the
+ * config plugin had never registered `HealthConnectPermissionDelegate`, and the app
+ * crashed the moment a Play user tapped "Connect". The two bundles were
+ * byte-identical and nothing in CI could see it. The fix is a Metro cache wipe
+ * between the two bundle steps; THIS marker is what proves the wipe worked, because
+ * asserting on the env (or on a log line echoing it) would have passed the whole time.
+ *
+ * Also surfaced on-device: it is the `testID` of the Settings About block, so a
+ * view-hierarchy dump of an installed build names the variant it was built as.
+ */
+export const HEALTH_CONNECT_BUILD_VARIANT =
+  process.env.EXPO_PUBLIC_HEALTH_CONNECT === '0'
+    ? 'soulsync-hc-variant:excluded'
+    : 'soulsync-hc-variant:enabled';
 
 /**
  * Hard cap on how far back a historical backfill reads (≈1 year). A user with

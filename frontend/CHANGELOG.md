@@ -3,6 +3,14 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [Unreleased]
+
+### Added
+- **Health Connect is now available in the Google Play build.** Sleep, heart rate, heart rate
+  variability and resting heart rate can sit alongside your mood in Insights. It is opt-in from
+  Settings, reads only what you allow, and everything stays on your device. This also fixes the
+  crash when tapping Connect in the previous Play build.
+
 ## [2.11.2] - 2026-09-06
 
 ### Fixed
