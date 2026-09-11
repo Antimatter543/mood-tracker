@@ -3,6 +3,15 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [Unreleased]
+
+### Fixed
+- **The app no longer closes when you tap Connect on the Health Connect card in the Google Play
+  build.** That build doesn't include Health Connect yet, but the card was still being shown, and
+  tapping Connect closed the app. The card is now correctly hidden there, so the Play build shows
+  only the features it actually has. (The GitHub APK is unaffected: it has always included Health
+  Connect, and still does.)
+
 ## [2.11.2] - 2026-09-06
 
 ### Fixed

@@ -80,7 +80,13 @@ will retry" and stop; (4) otherwise delegate to `publish-to-play.sh` (`SOURCE=ru
   **built WITHOUT Health Connect permissions**. The `.play-hold` marker is
   GONE; the HC policy gate moved into the BUILD: CI's AAB lane sets `EXPO_PUBLIC_HEALTH_CONNECT=0` (one env
   knob — strips the 4 health perms from the manifest via `plugins/withHealthConnect.js` AND hides every HC
-  surface at runtime via `lib/healthConnectConfig.ts`; two loud CI assertions guard both directions). The
+  surface at runtime via `lib/healthConnectConfig.ts`; two loud CI assertions guard both directions).
+  **METRO-CACHE TRAP (broke v2.11.2 on Play, fixed 2026-09-11):** `EXPO_PUBLIC_*` values are NOT in Metro's
+  transform cache key and the cache root (`os.tmpdir()/metro-cache`) outlives `prebuild --clean`, so the AAB
+  pass reused the APK's HC-ENABLED bundle. CI wipes `${TMPDIR:-/tmp}/metro-cache` between the two gradle
+  bundle steps and asserts the ARTIFACT (greps each extracted bundle for `HEALTH_CONNECT_BUILD_VARIANT`'s
+  marker both ways) — **never verify a build knob by the env or a log line**. Detail: `frontend/tasks/lessons.md`
+  2026-09-11; shape pinned by `frontend/__tests__/playVariantBundleGuard.test.ts`. The
   GitHub APK keeps HC fully enabled. **When Google's "Health Apps" declaration approves** (filed 2026-07-18;
   4 perms; justification in `ops/routes/soulsync/research/health-connect-integration-plan.md`), flip the CI
   env to `'1'`/remove it (one line in `.github/workflows/release-apk.yml`, marked TEMPORARY-2026-07-17) and

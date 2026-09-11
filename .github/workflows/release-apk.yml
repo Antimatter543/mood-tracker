@@ -144,6 +144,32 @@ jobs:
           echo "name=SoulSync-${{ steps.ver.outputs.version }}.apk" >> "$GITHUB_OUTPUT"
           ls -la "$DEST"
 
+      - name: Assert APK JS bundle is the Health-Connect-ENABLED variant
+        id: apkbundle
+        # ARTIFACT-level proof, not env-level. The manifest guards above only see
+        # permissions; this sees the JS. lib/healthConnectConfig.ts exports
+        # HEALTH_CONNECT_BUILD_VARIANT off the SAME EXPO_PUBLIC_HEALTH_CONNECT
+        # expression as HEALTH_CONNECT_ENABLED: babel inlines the knob at transform
+        # time and the minifier folds the ternary, so EXACTLY ONE of the two marker
+        # literals survives into the bundle's Hermes string table. The GitHub APK
+        # lane never sets the knob, so "enabled" is the invariant here.
+        env:
+          APK_PATH: ${{ steps.apk.outputs.path }}
+        run: |
+          set -euo pipefail
+          BUNDLE="$RUNNER_TEMP/apk-index.android.bundle"
+          unzip -p "$APK_PATH" assets/index.android.bundle > "$BUNDLE"
+          MD5=$(md5sum "$BUNDLE" | cut -d' ' -f1)
+          EN=$(strings "$BUNDLE" | grep -F -c 'soulsync-hc-variant:enabled' || true)
+          EX=$(strings "$BUNDLE" | grep -F -c 'soulsync-hc-variant:excluded' || true)
+          echo "APK bundle: $(stat -c%s "$BUNDLE") bytes  md5=$MD5  enabled-marker=$EN  excluded-marker=$EX"
+          echo "md5=$MD5" >> "$GITHUB_OUTPUT"
+          if [ "$EN" -lt 1 ] || [ "$EX" -ne 0 ]; then
+            echo "::error::APK JS bundle is NOT the HC-enabled variant (enabled marker x$EN, excluded marker x$EX); the GitHub APK lost Health Connect in its JS bundle" >&2
+            exit 1
+          fi
+          echo "OK: APK JS bundle carries the Health-Connect-ENABLED marker only."
+
       # ═══════════════════════════════════════════════════════════════════════
       # AAB (Android App Bundle) = the Google Play "no Health Connect" VARIANT.
       #
@@ -191,6 +217,27 @@ jobs:
           fi
           echo "OK: Play AAB manifest carries ZERO android.permission.health permissions."
 
+      - name: Wipe Metro transform cache (Play variant must re-transform under the new env)
+        # THE 2026-09-11 BUG, and why this step is load-bearing: EXPO_PUBLIC_* values
+        # are inlined by babel at TRANSFORM time (babel-preset-expo's inline-env-vars
+        # replaces process.env.EXPO_PUBLIC_* with a literal), but the env VALUES are
+        # NOT part of Metro's transform cache key, @expo/metro-config's
+        # metro-transform-worker.getCacheKey / babel-transformer.getCacheKey hash the
+        # transformer files + config only. The cache root is os.tmpdir()/metro-cache,
+        # which `expo prebuild --clean` does NOT touch (it only deletes android/), and
+        # both gradle runs live in ONE job. So the APK pass above (knob unset → HC
+        # ENABLED) warmed the cache and this AAB pass got cache HITS, reusing the
+        # HC-ENABLED inlined flag: v2.11.2's Play AAB shipped a JS bundle BYTE-IDENTICAL
+        # to the APK's. Manifest HC-free, JS HC-on → the Settings card rendered, and
+        # requestPermission() ran in a MainActivity where the config plugin had never
+        # registered HealthConnectPermissionDelegate, so Play users crashed on "Connect".
+        # Wiping forces a genuine re-transform. First path is the real one; the others
+        # are belt-and-braces (all -f, so absence is fine).
+        run: |
+          set -eu
+          rm -rf "${TMPDIR:-/tmp}/metro-cache" "$RUNNER_TEMP/metro-cache" node_modules/.cache
+          echo "Metro transform caches wiped; the Play-variant bundle will be re-transformed under EXPO_PUBLIC_HEALTH_CONNECT=0."
+
       - name: Build signed release AAB (Play no-HC variant)
         working-directory: frontend/android
         env:
@@ -219,6 +266,45 @@ jobs:
           echo "path=$DEST" >> "$GITHUB_OUTPUT"
           echo "name=SoulSync-${{ steps.ver.outputs.version }}.aab" >> "$GITHUB_OUTPUT"
           ls -la "$DEST"
+
+      - name: Assert Play AAB JS bundle matches the Health Connect knob
+        # The other half of the artifact-level gate: the AAB's JS bundle must carry the
+        # marker for the variant this lane was BUILT as, and must not be a copy of the
+        # APK's bundle. Asserting the artifact (not the env, and not a log line echoing
+        # the env) is the whole point: the env was correct all through the v2.11.2
+        # leak; only the bundle told the truth.
+        env:
+          # Must stay in lockstep with the bundleRelease step's knob above. The
+          # expectation DERIVES from this value, so flipping the knob to '1' (or
+          # dropping it) once the Health Apps declaration is approved flips this
+          # assertion with it instead of breaking the lane.
+          EXPO_PUBLIC_HEALTH_CONNECT: '0'
+          AAB_PATH: ${{ steps.aab.outputs.path }}
+          APK_BUNDLE_MD5: ${{ steps.apkbundle.outputs.md5 }}
+        run: |
+          set -euo pipefail
+          BUNDLE="$RUNNER_TEMP/aab-index.android.bundle"
+          unzip -p "$AAB_PATH" base/assets/index.android.bundle > "$BUNDLE"
+          MD5=$(md5sum "$BUNDLE" | cut -d' ' -f1)
+          EN=$(strings "$BUNDLE" | grep -F -c 'soulsync-hc-variant:enabled' || true)
+          EX=$(strings "$BUNDLE" | grep -F -c 'soulsync-hc-variant:excluded' || true)
+          if [ "${EXPO_PUBLIC_HEALTH_CONNECT:-}" = "0" ]; then
+            EXPECT_NAME=excluded; EXPECT_COUNT="$EX"; FORBID_NAME=enabled; FORBID_COUNT="$EN"
+          else
+            EXPECT_NAME=enabled;  EXPECT_COUNT="$EN"; FORBID_NAME=excluded; FORBID_COUNT="$EX"
+          fi
+          echo "AAB bundle: $(stat -c%s "$BUNDLE") bytes  md5=$MD5  enabled-marker=$EN  excluded-marker=$EX"
+          echo "APK bundle md5=$APK_BUNDLE_MD5"
+          echo "knob EXPO_PUBLIC_HEALTH_CONNECT='${EXPO_PUBLIC_HEALTH_CONNECT:-<unset>}' -> expecting the '$EXPECT_NAME' marker"
+          if [ "$EXPECT_COUNT" -lt 1 ] || [ "$FORBID_COUNT" -ne 0 ]; then
+            echo "::error::Play AAB JS bundle is NOT the '$EXPECT_NAME' Health Connect variant ($EXPECT_NAME marker x$EXPECT_COUNT, $FORBID_NAME marker x$FORBID_COUNT); the inlined runtime flag disagrees with EXPO_PUBLIC_HEALTH_CONNECT; do NOT ship this AAB to Play" >&2
+            exit 1
+          fi
+          if [ "$EXPECT_NAME" = "excluded" ] && [ "$MD5" = "$APK_BUNDLE_MD5" ]; then
+            echo "::error::Play AAB JS bundle is IDENTICAL to the GitHub APK bundle (md5 $MD5); the two lanes must differ when Health Connect is excluded; the Metro transform cache leaked the APK pass's inlined env" >&2
+            exit 1
+          fi
+          echo "OK: Play AAB JS bundle is the '$EXPECT_NAME' variant and distinct from the APK bundle."
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4

@@ -75,6 +75,12 @@ const REAL_FAILURE_SIGNATURES = [
   '::error::Default manifest is MISSING',
   '::error::Expected exactly 4 android.permission.health',
   '::error::Play AAB manifest STILL declares',
+  // Our own artifact-level JS-bundle guards (the 2026-09-11 Metro-cache leak:
+  // manifest correct, bundle wrong). A marker mismatch is a shipped-wrong-variant
+  // break, never a flake.
+  '::error::APK JS bundle is NOT',
+  '::error::Play AAB JS bundle is NOT',
+  '::error::Play AAB JS bundle is IDENTICAL',
   // Artifact-location guards.
   'No release APK found',
   'No release AAB found',
