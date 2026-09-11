@@ -17,6 +17,9 @@ Rate your mood on a 0–10 scale (decimals welcome — a 7.5 kind of day is real
 🔍 DEEP-DIVE ANY ACTIVITY
 Tap any activity for its own analytics: its mood distribution, whether it's a "hit or miss" activity, how days with it compare to your usual — and what it tends to pair with.
 
+❤️ SLEEP & HEART RATE, NEXT TO YOUR MOOD (optional)
+Connect Health Connect and SoulSync lines up your sleep, heart rate, heart-rate variability and resting heart rate against how you actually felt, with real correlation numbers, not vibes. Opt-in from Settings, read-only, and like everything else it stays on your phone.
+
 💡 INSIGHTS IN PLAIN ENGLISH
 "Days with Exercise average +2.0 mood." "When you're in a rough patch, Social is what's usually followed by a lift." SoulSync reads your data back to you: what lifts you, and what drags you down.
 
