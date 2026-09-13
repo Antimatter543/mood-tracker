@@ -43,6 +43,13 @@ not a Timeline quirk.
    Related: read a context value through a ref before putting it in a card callback's dep list —
    whether a provider memoizes its value must not decide the list's render cost.
 
+**One deliberate behaviour change falls out of (1), and it is the right one.** Leaving the Timeline and
+coming back now KEEPS the user's place. It used to land them at the top — but only as a side effect of
+the truncation: the navigator keeps the screen mounted, so the native scroll offset always survived a
+tab switch, and it was the data collapsing underneath it that threw the user upward. Device-confirmed
+2026-09-13. If anyone ever wants "return to top on focus" as a real feature, it has to be an explicit
+`scrollToLocation`, never a short read.
+
 **Separately, the Timeline's SectionList had no bottom content inset.** `Layout`'s ScrollView branch
 pads `100 + insetBottom` so the last item clears the floating FAB; a screen that opts OUT of that
 ScrollView and brings its own list gets none of it, and Timeline never added it, so the last card sat

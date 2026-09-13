@@ -476,6 +476,16 @@ export function DatabaseViewer() {
     // the scroll position, and makes the refresh idempotent — which is what the
     // useDataRefresh contract already promised (hooks/useDataRefresh.ts) and this
     // loader was quietly violating.
+    //
+    // ONE DELIBERATE BEHAVIOUR CHANGE falls out of that, device-confirmed
+    // 2026-09-13: leaving the Timeline and coming back now KEEPS the user where
+    // they were. It used to land them at the top, but only as a side effect of the
+    // truncation — the navigator keeps this screen mounted, so the native scroll
+    // offset always survived a tab switch; it was the data collapsing underneath it
+    // that threw the user to the top. Losing your place in a long history because
+    // you glanced at another tab is not a feature. If a future change ever wants
+    // "return to top on focus", that has to be an explicit scrollToLocation, not a
+    // truncated read.
     const loadEntries = useCallback(async () => {
         // Claim this run BEFORE the first await so any later invocation (focus /
         // data-version bump / a loadMore) supersedes it; a stale run that resolves
