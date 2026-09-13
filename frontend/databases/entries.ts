@@ -21,7 +21,7 @@ import { buildEntryFilter, EntryFilters } from '@/components/timeline/entryFilte
  * Transaction contract: every multi-statement WRITE goes through
  * `withWriteTransaction` (databases/writeTransaction.ts) — a real transaction on
  * the singleton write connection, statements on the `txn` argument only. READS
- * (`getMoodEntries`, `getEntriesPage`) take no transaction and run on the caller-
+ * (`getMoodEntries`, `getEntriesWindow`) take no transaction and run on the caller-
  * supplied connection (the SQLiteProvider's read connection).
  *
  * Soft-delete contract (migration 12): `entries.deleted_at` is NULL for a LIVE
@@ -242,26 +242,14 @@ export async function getEarliestEntryInstant(
 }
 
 /**
- * Read ONE page of entries for the Timeline, applying the search / mood filter
- * in SQL (the list is server-paginated, so a client-side filter would only see
- * the ~pageSize rows currently loaded — see components/timeline/entryFilter.ts).
+ * Read ONE page of entries for the Timeline. Thin wrapper over
+ * {@link getEntriesWindow} for the fixed-page-size case (`page * pageSize`).
  *
- * A READ: no transaction, runs on the caller's connection (the SQLiteProvider's
- * read connection). Unlike the old inline `DBViewer.fetchEntriesPage`, this
- * DELIBERATELY does NOT catch-and-return-[] on error: a transient read failure
- * that returns [] blanks the Timeline into the "add your first entry" empty
- * state over a full DB. Errors PROPAGATE so the component can show a real
- * "couldn't load" state with a retry (see DBViewer.loadInitialData).
- *
- * Recycle-bin entries are ALWAYS excluded: `e.deleted_at IS NULL` is baked into
- * the query itself rather than into `buildEntryFilter`, so it is structurally
- * impossible for a UI filter state to surface a binned entry. The user filter (if
- * any) is ANDed on in its own parenthesised group.
- *
- * INVARIANT: the CTE here is mirrored by __tests__/entryFilter.integration.test.ts
- * (same FROM/JOINs, the base `WHERE e.deleted_at IS NULL` + ` AND (${where})`
- * splice BEFORE GROUP BY, and the `[...params, LIMIT, OFFSET]` bind order). If
- * this query changes, update it.
+ * Has no production caller — `getEntriesWindow` is the one the app uses, because a
+ * caller that refreshes an already-paginated list has to re-read the rows it is
+ * CURRENTLY showing, which is `(0, loadedCount)` and not any page index (see the
+ * depth-preserving refresh in components/DBViewer.tsx). This wrapper stays for
+ * callers that genuinely think in pages, which today means the DB-layer tests.
  */
 export async function getEntriesPage(
   db: SQLiteDatabase,
@@ -269,7 +257,51 @@ export async function getEntriesPage(
   page: number,
   pageSize: number
 ): Promise<MoodEntry[]> {
-  const offset = page * pageSize;
+  return getEntriesWindow(db, filters, page * pageSize, pageSize);
+}
+
+/**
+ * Read an arbitrary OFFSET/LIMIT window of entries for the Timeline, applying
+ * the search / mood filter in SQL (the list is server-paginated, so a
+ * client-side filter would only see the rows currently loaded — see
+ * components/timeline/entryFilter.ts).
+ *
+ * A READ: no transaction, runs on the caller's connection (the SQLiteProvider's
+ * read connection). Unlike the old inline `DBViewer.fetchEntriesPage`, this
+ * DELIBERATELY does NOT catch-and-return-[] on error: a transient read failure
+ * that returns [] blanks the Timeline into the "add your first entry" empty
+ * state over a full DB. Errors PROPAGATE so the component can show a real
+ * "couldn't load" state with a retry (see DBViewer.loadEntries).
+ *
+ * Recycle-bin entries are ALWAYS excluded: `e.deleted_at IS NULL` is baked into
+ * the query itself rather than into `buildEntryFilter`, so it is structurally
+ * impossible for a UI filter state to surface a binned entry. The user filter (if
+ * any) is ANDed on in its own parenthesised group.
+ *
+ * ORDERING IS A TOTAL ORDER (`e.date DESC, e.id DESC`), and that is load-bearing,
+ * not cosmetic. `date` is not unique — two entries logged in the same instant, or
+ * any rows imported from a backup that only carried day precision, collide — and
+ * OFFSET pagination over a merely PARTIAL order is free to return the same row on
+ * two pages and never return another, because nothing obliges SQLite to break ties
+ * the same way for `LIMIT 20 OFFSET 20` as it did for `LIMIT 20 OFFSET 0`. A
+ * duplicated row means duplicate React keys in the SectionList; a skipped row just
+ * silently vanishes from the user's history. `e.id DESC` is the tiebreaker because
+ * ids are monotonic, so it also reads as "newest first" within one timestamp. The
+ * outer SELECT re-states the ORDER BY: a bare `SELECT * FROM cte` is not
+ * guaranteed to preserve the CTE's row order.
+ *
+ * INVARIANT: the CTE here is mirrored by __tests__/entryFilter.integration.test.ts
+ * (same FROM/JOINs, the base `WHERE e.deleted_at IS NULL` + ` AND (${where})`
+ * splice BEFORE GROUP BY, and the `[...params, LIMIT, OFFSET]` bind order). If
+ * this query changes, update it. Pagination consistency itself is locked by
+ * __tests__/entriesPagination.integration.test.ts.
+ */
+export async function getEntriesWindow(
+  db: SQLiteDatabase,
+  filters: EntryFilters,
+  offset: number,
+  limit: number
+): Promise<MoodEntry[]> {
   // The WHERE is spliced BEFORE `GROUP BY e.id` so it filters raw rows; its
   // EXISTS subquery uses `ea2`/`a2` aliases distinct from the outer `ea`/`a`.
   // It is ANDed onto the always-on bin exclusion, parenthesised so an OR inside
@@ -290,12 +322,12 @@ export async function getEntriesPage(
           LEFT JOIN activities a ON ea.activity_id = a.id
           WHERE e.deleted_at IS NULL${where ? ' AND (' + where + ')' : ''}
           GROUP BY e.id
-          ORDER BY e.date DESC
+          ORDER BY e.date DESC, e.id DESC
           LIMIT ? OFFSET ?
       )
-      SELECT * FROM EntryData
+      SELECT * FROM EntryData ORDER BY date DESC, id DESC
     `,
-    [...params, pageSize, offset]
+    [...params, limit, offset]
   );
 
   const baseEntries: MoodEntry[] = rows.map((row) => {

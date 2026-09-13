@@ -9,8 +9,9 @@ import {
     Alert,
 } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '@/styles/global';
-import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
+import { LAYOUT_CONTENT_PADDING, LAYOUT_FAB_CLEARANCE } from '@/styles/layout';
 import { useDataContext } from '@/context/DataContext';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useLatestRun } from '@/hooks/useLatestRun';
@@ -26,10 +27,13 @@ import {
     MoodPresetKey,
 } from './timeline/entryFilter';
 import { sectionKeyForDate, formatSectionTitle } from './timeline/dateHeader';
-// The DB layer owns ALL SQL now: this component reads pages via getEntriesPage
-// and mutates via updateMoodEntry / deleteMoodEntry (databases/entries.ts). The
-// component is hooks + rendering only — zero SQL, zero transactions.
-import { getEntriesPage, updateMoodEntry, deleteMoodEntry, setEntryStarred } from '@/databases/entries';
+// The DB layer owns ALL SQL now: this component reads OFFSET/LIMIT windows via
+// getEntriesWindow and mutates via updateMoodEntry / deleteMoodEntry
+// (databases/entries.ts). The component is hooks + rendering only — zero SQL,
+// zero transactions. It asks for a WINDOW rather than a page number because the
+// window it needs is "the rows I am currently showing", which a page index
+// cannot express (see the loader below).
+import { getEntriesWindow, updateMoodEntry, deleteMoodEntry, setEntryStarred } from '@/databases/entries';
 // Recycle bin (migration 12): `deleteMoodEntry` is now a SOFT delete, so the
 // destructive-looking tap is fully reversible, from the snackbar right after it,
 // or from the "Recently deleted" panel for the next 30 days.
@@ -49,7 +53,7 @@ type Section = {
     data: MoodEntry[];
 };
 
-const useThemedStyles = (colors: any) => {
+const useThemedStyles = (colors: any, insetBottom: number) => {
     return useMemo(() => StyleSheet.create({
         // Root fills the tab body so the search bar pins at the top and the list
         // (or the loading / empty branch below it) takes the remaining space.
@@ -60,6 +64,13 @@ const useThemedStyles = (colors: any) => {
             // The entry list's gutter — same as the search bar pinned above it
             // and the Timeline page title above that (styles/layout.ts).
             paddingHorizontal: LAYOUT_CONTENT_PADDING,
+            // Timeline renders inside `<Layout useScrollView={false}>`, so it gets
+            // NONE of Layout's ScrollView padding and owes itself the FAB clearance
+            // (styles/layout.ts). Without it the last entry card — and the
+            // load-more spinner under it — sit permanently beneath the floating
+            // "add entry" button with no scroll range left to lift them clear,
+            // which reads exactly like "I can't scroll past a certain point".
+            paddingBottom: LAYOUT_FAB_CLEARANCE + insetBottom,
         },
         loadingContainer: {
             flex: 1,
@@ -138,7 +149,7 @@ const useThemedStyles = (colors: any) => {
             letterSpacing: 0.3,
             textTransform: 'uppercase',
         },
-    }), [colors]);
+    }), [colors, insetBottom]);
 }
 
 // Helper Functions
@@ -179,15 +190,54 @@ const groupEntriesByDate = (entries: MoodEntry[], now: Date = new Date()): Secti
  * top. Pagination doesn't need it either: `loadMoreData` APPENDS, which never
  * moves anything above it. Locked by the "Timeline list scroll anchoring" tests
  * in __tests__/timelineUndoDelete.test.tsx.
+ *
+ * ── SCROLL DEPTH IS STATE THE USER OWNS (2026-09-13) ────────────────────────────
+ * Reported as "scrolling the timeline glitches me all the way up, and I'm not sure
+ * I can even scroll down past a certain point", reproduced on device at depth and
+ * INDEPENDENT of fling speed. Three separate defects stacked into it, all fixed
+ * here and each commented at its own site:
+ *
+ *   1. Every refresh re-read exactly ONE page and reset the page counter, so any
+ *      refresh while the user was deep truncated the loaded rows back to 20. The
+ *      content collapsed under the scroll offset and Android clamped the offset
+ *      into the much shorter content. `loadEntries` now re-reads the WHOLE loaded
+ *      window; only a filter change resets the depth.
+ *   2. Pagination's SQL offset came from a page counter that the local list
+ *      splices (delete, unstar-under-the-starred-filter) silently desynced, so the
+ *      next page SKIPPED as many entries as the list had lost. The offset is now
+ *      derived from what is actually on screen.
+ *   3. The list was not virtualized in practice (RN's default 21-viewport window
+ *      exceeded the whole content) and no cell was memoized, so every parent state
+ *      change re-rendered every mounted card — three times per page append. RN's
+ *      own "large list that is slow to update" notice fired on device. Cards are
+ *      `React.memo`, their callbacks are stable and entry-agnostic, and the window
+ *      is bounded.
+ *
+ * The through-line: a list that owns a scroll position must never silently render
+ * FEWER rows than it did a moment ago, and must never rebuild the whole native
+ * view tree while the user is dragging it.
  */
 export function DatabaseViewer() {
     const colors = useThemeColors();
-    const styles = useThemedStyles(colors);
+    const insets = useSafeAreaInsets();
+    const styles = useThemedStyles(colors, insets.bottom);
     const db = useSQLiteContext();
     // refetchEntries bumps the global data version after writes here; the
     // focus-aware useDataRefresh below consumes that bump (no direct refreshCount
     // read needed — the hook reads it internally).
     const { refetchEntries } = useDataContext();
+    // `broadcastWrite` is THE way this component announces a write — every write
+    // path below calls it, none calls `refetchEntries` directly. It is a stable
+    // wrapper over a ref so the memoized card handlers don't have to carry
+    // `refetchEntries` in a dependency list: whether a context value keeps its
+    // identity is the PROVIDER's business, and the list's render cost must not
+    // silently depend on it. An un-memoized `refetchEntries` would otherwise change
+    // every callback identity on every render, defeat React.memo on 100+ cards and
+    // bring the scroll glitch back. Locked by __tests__/timelineListPerf.test.tsx,
+    // whose context mock deliberately returns a fresh function each render.
+    const refetchEntriesRef = useRef(refetchEntries);
+    refetchEntriesRef.current = refetchEntries;
+    const broadcastWrite = useCallback(() => refetchEntriesRef.current(), []);
 
     // State
     const [sections, setSections] = useState<Section[]>([]);
@@ -198,8 +248,16 @@ export function DatabaseViewer() {
     // loader and must not trigger a re-render when it flips.
     const hasLoadedOnce = useRef(false);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
+    // Mirrors `isLoadingMore` for the GUARD in loadMoreData. The state drives the
+    // footer spinner; the ref is what stops a second page from being requested,
+    // because a `useState` flag is only visible to the NEXT render and
+    // `onEndReached` can fire again before that render commits (VirtualizedList
+    // re-checks the edge on every content-size change, and appending the footer
+    // spinner is itself a content-size change). Two overlapping runs at the same
+    // offset would append the same rows twice — duplicate ids, duplicate
+    // SectionList keys, corrupted cell measurement.
+    const isLoadingMoreRef = useRef(false);
     const [hasMore, setHasMore] = useState(true);
-    const [page, setPage] = useState(0);
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [currentEntry, setCurrentEntry] = useState<MoodEntry | null>(null);
     // True when the last initial load FAILED. Drives the inline "couldn't load"
@@ -244,6 +302,20 @@ export function DatabaseViewer() {
     const filtersRef = useRef(filters);
     filtersRef.current = filters;
 
+    // HOW DEEP the list currently is, derived from `sections` rather than kept as
+    // its own `page` counter. It is both the SQL OFFSET for the next page and the
+    // window size a refresh must re-read, and the two MUST agree — a separate
+    // counter drifts the moment the list changes by any path that isn't a page
+    // load (a delete splices a row out; unstarring under the starred filter drops
+    // one), and a drifted offset makes the next page SKIP exactly as many entries
+    // as the list lost. Deriving it makes that class of desync unrepresentable.
+    const loadedCount = useMemo(
+        () => sections.reduce((total, section) => total + section.data.length, 0),
+        [sections]
+    );
+    const loadedCountRef = useRef(loadedCount);
+    loadedCountRef.current = loadedCount;
+
     // Any active filter switches the empty branch from "add your first entry" to
     // the filter-specific "nothing matched" message (with a reset).
     const isFiltering = debouncedQuery.trim() !== '' || moodPresetKey !== 'all' || starredOnly;
@@ -265,7 +337,21 @@ export function DatabaseViewer() {
     const { begin: beginRun, isLatest: isLatestRun } = useLatestRun();
 
     // Event Handlers
-    const handleDelete = async (entryId: number) => {
+    //
+    // The three handlers the entry cards receive (`handleEdit`, `handleDelete`,
+    // `handleToggleStar`) are MEMOIZED and take the entry as an argument instead
+    // of being bound to it per row. That is what makes `React.memo(EntryCard)`
+    // effective — see the note on EntryCard. Anything that would put changing
+    // state in their closures (the revert snapshot below) reads a ref instead.
+    const sectionsRef = useRef(sections);
+    sectionsRef.current = sections;
+
+    const handleEdit = useCallback((entry: MoodEntry) => {
+        setCurrentEntry(entry);
+        setEditModalVisible(true);
+    }, []);
+
+    const handleDelete = useCallback(async (entryId: number) => {
         // deleteMoodEntry is a SOFT delete since migration 12: it only stamps
         // `deleted_at`, so the entry's activities, media rows and photo FILES all
         // survive and the undo below is lossless. It returns a DatabaseResult
@@ -284,8 +370,8 @@ export function DatabaseViewer() {
                 .filter(section => section.data.length > 0)
         );
         setPendingUndo({ id: entryId, nonce: ++undoNonce.current });
-        refetchEntries();
-    };
+        broadcastWrite();
+    }, [db, broadcastWrite]);
 
     // Undo: put the entry straight back. A full reload (not a local splice) is
     // what restores it to its correct DATE position in the sections, the entry
@@ -296,8 +382,8 @@ export function DatabaseViewer() {
             Alert.alert("Couldn't restore entry", result.message);
             return;
         }
-        await loadInitialDataRef.current();
-        refetchEntries();
+        await loadEntriesRef.current();
+        broadcastWrite();
     };
 
     const handleUpdate = async (formData: EntryFormData) => {
@@ -319,15 +405,16 @@ export function DatabaseViewer() {
             return;
         }
         setEditModalVisible(false);
-        refetchEntries();
+        broadcastWrite();
     };
 
-    const handleToggleStar = async (entry: MoodEntry) => {
+    const handleToggleStar = useCallback(async (entry: MoodEntry) => {
         const nextStarred = entry.starred_at == null;
         const nextStarredAt = nextStarred ? new Date().toISOString() : null;
 
-        // Snapshot for revert-on-failure.
-        const prevSections = sections;
+        // Snapshot for revert-on-failure — read from the ref so this handler's
+        // identity doesn't change with every list update (see the note above).
+        const prevSections = sectionsRef.current;
 
         // Optimistic update: reflect the new star state immediately. If the
         // starred filter is active AND we just UNstarred, the entry no longer
@@ -354,44 +441,88 @@ export function DatabaseViewer() {
             Alert.alert("Couldn't update star", result.message);
             return;
         }
-        refetchEntries();
-    };
+        broadcastWrite();
+    }, [db, broadcastWrite, starredOnly]);
+
+    // A refresh has to know whether the filter CHANGED, because that is the only
+    // thing that legitimately throws away the user's scroll depth. The signature
+    // is captured in the loader's closure (it is rebuilt on every filter change);
+    // the ref holds what the PREVIOUS run saw. Differ => the filter just changed
+    // => collapse back to one page. Equal => this is a focus gain or a data-version
+    // bump => keep the depth. See the loader below.
+    const filterSignature = `${debouncedQuery} ${moodPresetKey} ${starredOnly}`;
+    const lastLoadedFilterRef = useRef(filterSignature);
 
     // Focus-aware reload (replaces useEffect([db, refreshCount])). Runs whenever
     // the Timeline tab regains focus — so an entry added on another tab shows
-    // immediately, no app reopen — and re-runs while focused when refreshCount
-    // bumps (a write here). The full-screen spinner shows ONLY on the very first
-    // load; a refetch over an already-populated list keeps the stale list
-    // visible (no spinner flash) and swaps it for fresh data when the query
-    // resolves. `hasLoadedOnce` is a ref so toggling it never itself re-renders.
-    const loadInitialData = useCallback(async () => {
+    // immediately, no app reopen — and re-runs while focused when the data version
+    // bumps (any write, here or on another screen). The full-screen spinner shows
+    // ONLY on the very first load; a refetch over an already-populated list keeps
+    // the stale list visible (no spinner flash) and swaps it for fresh data when
+    // the query resolves. `hasLoadedOnce` is a ref so toggling it never itself
+    // re-renders.
+    //
+    // IT RE-READS THE WHOLE LOADED WINDOW, NOT PAGE 0. This is the fix for the
+    // reported "scrolling the Timeline glitches me back to the top and then I
+    // can't get past a certain point". Every refresh used to read exactly
+    // ITEMS_PER_PAGE rows and reset the page counter, so ANY refresh while the
+    // user was paginated deep — deleting an entry, starring one, editing one,
+    // restoring from the bin, or just leaving the tab and coming back — silently
+    // truncated 100+ rendered rows down to 20. The content height collapsed under
+    // the scroll offset, the native ScrollView clamped the offset into the much
+    // shorter content (the "glitch to the top"), and the rows the user had already
+    // paged in were gone until `onEndReached` fetched them all over again (the
+    // "wall"). Refreshing IN PLACE at the current depth keeps both the data and
+    // the scroll position, and makes the refresh idempotent — which is what the
+    // useDataRefresh contract already promised (hooks/useDataRefresh.ts) and this
+    // loader was quietly violating.
+    const loadEntries = useCallback(async () => {
         // Claim this run BEFORE the first await so any later invocation (focus /
-        // refreshCount bump / a loadMore) supersedes it; a stale run that resolves
+        // data-version bump / a loadMore) supersedes it; a stale run that resolves
         // after a newer one is then dropped instead of clobbering fresher state.
         const runId = beginRun();
+        const filterChanged = lastLoadedFilterRef.current !== filterSignature;
+        lastLoadedFilterRef.current = filterSignature;
+        // A filter change is the ONE reset: the rows on screen no longer match, so
+        // starting over at one page is correct (and the user is at the top anyway,
+        // having just tapped a chip or typed). Otherwise re-read exactly as many
+        // rows as are on screen — never fewer, or the list shrinks under the user.
+        if (filterChanged) {
+            // Void the bookkeeping too, not just this run's window. A filter change
+            // fires BOTH useDataRefresh vectors in the same commit (the focus
+            // effect's callback identity changed AND its dep list changed), so a
+            // second run follows this one with no render in between — and it would
+            // read the OLD depth off the ref and quietly restore it, defeating the
+            // reset. The ref is re-derived from `sections` on the next render.
+            loadedCountRef.current = 0;
+        }
+        const windowSize = Math.max(ITEMS_PER_PAGE, loadedCountRef.current);
         if (!hasLoadedOnce.current) setIsLoading(true);
         try {
-            const initialEntries = await getEntriesPage(
+            const entries = await getEntriesWindow(
                 db,
                 filtersRef.current,
                 0,
-                ITEMS_PER_PAGE
+                windowSize
             );
             // A newer run started while these reads were in flight — drop this
             // (now stale) result so it can't overwrite the newer one or blank the
             // list out of order.
             if (!isLatestRun(runId)) return;
-            setSections(groupEntriesByDate(initialEntries));
-            setPage(0);
-            setHasMore(initialEntries.length === ITEMS_PER_PAGE);
+            setSections(groupEntriesByDate(entries));
+            // A SHORT window is proof there is nothing past it: the query starts at
+            // offset 0, so fewer rows than asked for means the whole filtered set
+            // fits in what we just read. (A full window says nothing either way, so
+            // assume there is more and let the next onEndReached settle it.)
+            setHasMore(entries.length === windowSize);
             setLoadError(false);
         } catch (error) {
-            // getEntriesPage now THROWS on a read failure (it used to swallow the
+            // getEntriesWindow THROWS on a read failure (it used to swallow the
             // error and return [], which blanked the list into EmptyState over a
             // full DB). KEEP whatever sections are already on screen and flag the
             // error so the render can show a retry when there's nothing to show —
             // NEVER fall through to EmptyState on an error.
-            console.error('Error loading initial data:', error);
+            console.error('Error loading timeline entries:', error);
             if (isLatestRun(runId)) setLoadError(true);
         } finally {
             // Only the latest run owns the loading flag / hasLoadedOnce — a stale
@@ -401,19 +532,19 @@ export function DatabaseViewer() {
                 setIsLoading(false);
             }
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- getEntriesPage reads db + filtersRef.current (not closed deps); the filter deps below make this loader re-run (resetting to page 0) on a filter change via useDataRefresh; setState + latch (beginRun/isLatestRun) identities are stable
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- getEntriesWindow reads db + filtersRef.current/loadedCountRef.current (not closed deps); the filter deps below make this loader re-run (collapsing to one page) on a filter change via useDataRefresh; setState + latch (beginRun/isLatestRun) identities are stable
     }, [db, debouncedQuery, moodPresetKey, starredOnly]);
-    // A filter change flips these extraDeps -> useDataRefresh re-runs loadInitialData
-    // through the SAME run-sequence latch, which resets pagination to page 0 and
-    // supersedes any in-flight loadMore (shared beginRun) so it can't append stale
-    // pages onto the freshly-filtered list.
-    useDataRefresh(loadInitialData, [db, debouncedQuery, moodPresetKey, starredOnly]);
-    // Undo (declared ABOVE loadInitialData) needs to re-run the loader; a ref
+    // A filter change flips these extraDeps -> useDataRefresh re-runs loadEntries
+    // through the SAME run-sequence latch, which collapses the window back to one
+    // page and supersedes any in-flight loadMore (shared beginRun) so it can't
+    // append stale pages onto the freshly-filtered list.
+    useDataRefresh(loadEntries, [db, debouncedQuery, moodPresetKey, starredOnly]);
+    // Undo (declared ABOVE loadEntries) needs to re-run the loader; a ref
     // updated every render lets it call the CURRENT one without hoisting the
     // whole loader above the handlers or touching the useLatestRun wiring —
     // the same trick `filtersRef` uses.
-    const loadInitialDataRef = useRef(loadInitialData);
-    loadInitialDataRef.current = loadInitialData;
+    const loadEntriesRef = useRef(loadEntries);
+    loadEntriesRef.current = loadEntries;
 
     // Bin badge count. Rides the SAME focus/data-version signal as the list, so
     // it re-counts after any delete, undo, restore or purge without its own
@@ -424,30 +555,49 @@ export function DatabaseViewer() {
     useDataRefresh(loadBinCount, [db]);
 
     const loadMoreData = async () => {
-        if (isLoadingMore || !hasMore) return;
+        // Guard on the REF, not the state (see isLoadingMoreRef): a fast fling can
+        // re-enter this before React has committed `setIsLoadingMore(true)`, and two
+        // runs reading the same offset would append the same rows twice.
+        if (isLoadingMoreRef.current || !hasMore) return;
 
-        // Pagination joins the same run sequence: if a fresh initial load (focus /
-        // refreshCount bump) begins while this page is loading, this run is no
+        // Pagination joins the same run sequence: if a fresh load (focus /
+        // data-version bump) begins while this page is loading, this run is no
         // longer latest and must not append onto — or mis-set hasMore for — the
-        // list the newer load just reset.
+        // list the newer load just refreshed.
         const runId = beginRun();
+        isLoadingMoreRef.current = true;
         setIsLoadingMore(true);
         try {
-            const nextPage = page + 1;
-            const newEntries = await getEntriesPage(
+            // OFFSET = how many rows are on screen right now, not a page counter.
+            // The query excludes anything the list dropped locally (a soft-deleted
+            // entry, an entry unstarred under the starred filter), so "rows loaded"
+            // and "rows to skip" are the same number BY CONSTRUCTION — a separate
+            // page counter drifts past those splices and silently skips entries.
+            const offset = loadedCountRef.current;
+            const newEntries = await getEntriesWindow(
                 db,
                 filtersRef.current,
-                nextPage,
+                offset,
                 ITEMS_PER_PAGE
             );
             if (!isLatestRun(runId)) return;
 
             if (newEntries.length > 0) {
                 setSections(prevSections => {
-                    const allEntries = [...prevSections.flatMap(s => s.data), ...newEntries];
-                    return groupEntriesByDate(allEntries);
+                    const loaded = prevSections.flatMap(s => s.data);
+                    // De-dupe by id. An entry added between the last read and this
+                    // one shifts the whole window down by a row, so this offset can
+                    // hand back a row already on screen; a duplicate id becomes a
+                    // duplicate SectionList key, which corrupts cell measurement
+                    // (and makes React drop a row). Cheap, and it makes the append
+                    // safe against ANY concurrent insert rather than just the ones
+                    // we thought of.
+                    const seen = new Set(loaded.map(e => e.id));
+                    const fresh = newEntries.filter(e => !seen.has(e.id));
+                    return fresh.length > 0
+                        ? groupEntriesByDate([...loaded, ...fresh])
+                        : prevSections;
                 });
-                setPage(nextPage);
                 setHasMore(newEntries.length === ITEMS_PER_PAGE);
             } else {
                 setHasMore(false);
@@ -457,32 +607,40 @@ export function DatabaseViewer() {
         } finally {
             // Always clear the loading flag, even when superseded: it's local
             // pagination/guard UI state (NOT list data), so a stale run resetting
-            // it can't clobber fresher data — and leaving it stuck `true` would
-            // permanently block the `isLoadingMore` guard above. Only the data
-            // writes (setSections/setPage/setHasMore) are latch-gated.
+            // it can't clobber fresher data — and leaving it stuck would
+            // permanently block the guard above. Only the data writes
+            // (setSections/setHasMore) are latch-gated.
+            isLoadingMoreRef.current = false;
             setIsLoadingMore(false);
         }
     };
 
-    // Render Methods
-    const renderItem = ({ item: entry }: { item: MoodEntry }) => (
-        <EntryCard
-            entry={entry}
-            onEdit={() => {
-                setCurrentEntry(entry);
-                setEditModalVisible(true);
-            }}
-            onDelete={handleDelete}
-            onToggleStar={() => handleToggleStar(entry)}
-            colors={colors}
-        />
+    // Render Methods — memoized along with the handlers they pass down, so a
+    // parent state change (a spinner toggling, a page appending) re-renders the
+    // NEW cells only instead of every mounted card. See EntryCard's memo note.
+    const renderItem = useCallback(
+        ({ item: entry }: { item: MoodEntry }) => (
+            <EntryCard
+                entry={entry}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onToggleStar={handleToggleStar}
+                colors={colors}
+            />
+        ),
+        [handleEdit, handleDelete, handleToggleStar, colors]
     );
 
-    const renderSectionHeader = ({ section: { title } }: { section: Section }) => (
-        <View style={styles.sectionHeader}>
-            <Text style={styles.sectionHeaderText}>{title}</Text>
-        </View>
+    const renderSectionHeader = useCallback(
+        ({ section: { title } }: { section: Section }) => (
+            <View style={styles.sectionHeader}>
+                <Text style={styles.sectionHeaderText}>{title}</Text>
+            </View>
+        ),
+        [styles]
     );
+
+    const keyExtractor = useCallback((item: MoodEntry) => item.id.toString(), []);
 
     // EntryFormModal is rendered UNCONDITIONALLY below — never behind an early
     // return. A focus refetch can flip `isLoading`, and if the edit form lived
@@ -519,7 +677,7 @@ export function DatabaseViewer() {
                     </Text>
                     <Pressable
                         testID="timeline-retry"
-                        onPress={() => loadInitialData()}
+                        onPress={() => loadEntries()}
                         accessibilityRole="button"
                         accessibilityLabel="Try again"
                         style={styles.retryButton}
@@ -560,10 +718,24 @@ export function DatabaseViewer() {
                     sections={sections}
                     renderItem={renderItem}
                     renderSectionHeader={renderSectionHeader}
-                    keyExtractor={item => item.id.toString()}
+                    keyExtractor={keyExtractor}
                     onEndReached={loadMoreData}
                     onEndReachedThreshold={0.5}
                     stickySectionHeadersEnabled={true}
+                    // ACTUALLY VIRTUALIZE. RN's default `windowSize` is 21
+                    // VIEWPORTS, which for a list of a few hundred entry cards is
+                    // taller than the whole list — so nothing was ever unmounted
+                    // and every mounted card took part in every render pass. 5
+                    // viewports keeps two screens of cards live above and below the
+                    // visible one (plenty for a fling to land on rendered content)
+                    // while capping how much native view tree a single update has
+                    // to touch. Keep it well above 2: these cells have no
+                    // `getItemLayout` (heights vary with notes and photos), so the
+                    // tail spacer is clamped to the highest MEASURED cell and too
+                    // small a window makes the list grow in visible stutters.
+                    windowSize={5}
+                    initialNumToRender={ITEMS_PER_PAGE / 2}
+                    maxToRenderPerBatch={ITEMS_PER_PAGE / 2}
                     keyboardDismissMode="on-drag"
                     keyboardShouldPersistTaps="handled"
                     ListFooterComponent={isLoadingMore ? (
@@ -594,8 +766,8 @@ export function DatabaseViewer() {
                 visible={binVisible}
                 onClose={() => setBinVisible(false)}
                 onChanged={() => {
-                    loadInitialDataRef.current();
-                    refetchEntries();
+                    loadEntriesRef.current();
+                    broadcastWrite();
                 }}
             />
             <EntryFormModal

@@ -1,5 +1,69 @@
 # SoulSync — Project Lessons
 
+## 2026-09-13: A paginated list must never render FEWER rows than it did a moment ago
+
+"When in timeline if i scroll too fast or too far down it like glitches me all the way up and tbh im
+not sure i can even scroll down past a certain point." Reproduced on device on 2.11.1 and, crucially,
+**depth-dependent rather than fling-dependent** — the slow-scroll pass jumped to the top too, on swipe
+~25. That one observation kills the tempting "it is a fling-velocity race" reading and points at the
+amount of loaded content instead. Three defects were stacked in `DBViewer`; each is a general trap,
+not a Timeline quirk.
+
+1. **A refresh that reads ONE page over a list that has loaded five is a silent truncation.**
+   `loadInitialData` always read `ITEMS_PER_PAGE` rows and reset `page` to 0, and `useDataRefresh`
+   fires the loader on every focus gain AND every `bumpDataVersion()` — so any write anywhere in the
+   app (a star tap, a delete, an edit, a restore, or just leaving the tab and coming back) replaced
+   100+ rendered rows with 20. RN's JS layer never repositions the scroll itself (verified in
+   `VirtualizedList` source: its only self-initiated scroll is the one-shot `initialScrollIndex`), so
+   what the user sees is **Android clamping the offset into content that just got shorter** — the
+   "glitch to the top" — and then having to re-earn every page through `onEndReached`, which is the
+   "can't get past a certain point". **The refresh contract for any paginated list: re-read the WHOLE
+   loaded window (`offset 0, limit = rows on screen`), and reset the depth ONLY on an explicit user
+   action that invalidates the rows (here: a filter change).** Scroll depth is state the user owns.
+   Corollary trap: a filter change fires BOTH `useDataRefresh` vectors in the same commit with no
+   render between them, so the "collapse the depth" branch must void the depth BOOKKEEPING too, or the
+   second run reads the old depth off the ref and quietly restores it.
+2. **Never keep a page counter next to a list the UI also splices.** Deleting an entry removed a row
+   from `sections` but left `page` alone, so the next page's `OFFSET = page * 20` started one row too
+   far in and an entry was skipped permanently. The fix is not "remember to decrement" — it is to
+   **derive the offset from the rows actually loaded** (`sections.reduce(...)`), which makes the desync
+   unrepresentable. Same shape as the general "two sources for one number" class.
+3. **A list with no `getItemLayout` and no memoized cell is not virtualized.** RN's default
+   `windowSize` is **21 viewports** — for a few hundred entry cards that exceeds the whole content, so
+   nothing is ever unmounted and every mounted card takes part in every render pass. Each page append
+   fires THREE parent renders (spinner on, sections in, spinner off), so one `onEndReached` rebuilt the
+   native view tree for every loaded card while the user's finger was still on it. RN told us so on
+   device — `VirtualizedList: You have a large list that is slow to update ... make sure your
+   renderItem function renders components that follow React performance best practices` — and the
+   blank-list-with-live-accessibility-tree frame the device pass caught is what that looks like.
+   Fix: `React.memo` on the cell, **callbacks that take the item as an ARGUMENT instead of being bound
+   per row** (an inline `onEdit={() => onEdit(entry)}` makes memo a permanent no-op while looking
+   right), and a bounded `windowSize`. Keep it well above 2: without `getItemLayout` the tail spacer is
+   clamped to the highest MEASURED cell, so too small a window makes the list grow in visible stutters.
+   Related: read a context value through a ref before putting it in a card callback's dep list —
+   whether a provider memoizes its value must not decide the list's render cost.
+
+**Separately, the Timeline's SectionList had no bottom content inset.** `Layout`'s ScrollView branch
+pads `100 + insetBottom` so the last item clears the floating FAB; a screen that opts OUT of that
+ScrollView and brings its own list gets none of it, and Timeline never added it, so the last card sat
+permanently under the FAB. The clearance is now `LAYOUT_FAB_CLEARANCE` in `styles/layout.ts`, shared by
+both, because the duplicated literal is what let them drift. Any new full-height scroller owes it.
+
+**Also found while reading the query.** `ORDER BY e.date DESC` alone is a PARTIAL order (`date` is not
+unique — same-instant entries, or a backup import carrying only day precision), and OFFSET pagination
+over a partial order may hand back a row on two pages and never hand back another. SQLite happened to
+be consistent when probed, so this was latent rather than live — but duplicate ids mean duplicate
+SectionList keys and a skipped row is silent data loss, so the order is now total: `date DESC, id DESC`,
+restated on the outer SELECT because `SELECT * FROM cte` does not promise the CTE's row order.
+
+**How to test any of this.** Under jest a `VirtualizedList` never receives layout events, so it mounts
+`initialNumToRender` cells no matter how many rows the data holds — counting rendered cards proves
+nothing. Assert on **the `(limit, offset)` the component asks SQL for** (mock `getAllAsync` to serve a
+synthetic table out of the real bind positions) and on **the prop identities the list hands its cells**.
+`__tests__/timelineScrollDepth.test.tsx`, `timelineListPerf.test.tsx`, `entryCardMemo.test.tsx`,
+`entriesPagination.integration.test.ts`. 18 of those 24 assertions fail on the pre-fix tree — verify
+that, a regression test that also passes before the fix is measuring the wrong thing.
+
 ## 2026-09-13: The Stats window can be ANY length now — three things you may no longer infer from `timeframe`
 
 The Statistics screen gained a custom date range (tap the period label → calendar → two days).

@@ -88,7 +88,16 @@ const writeFunctions = (): string[] => {
     return [...names];
 };
 
-const BROADCAST = /refetchEntries|bumpDataVersion/;
+/**
+ * What counts as broadcasting. `bumpDataVersion` is the store primitive and
+ * `refetchEntries` the context handle; `broadcastWrite` is DBViewer's stable
+ * wrapper over the latter (it exists so the Timeline's memoized entry-card
+ * callbacks don't carry a context value in their dependency lists — see the note
+ * in DBViewer). A wrapper is only trustworthy if it is still wired to the real
+ * signal, so the exemption test below asserts that chain rather than taking the
+ * name on faith.
+ */
+const BROADCAST = /refetchEntries|bumpDataVersion|broadcastWrite/;
 
 describe('every UI write path broadcasts the data-refresh signal', () => {
     const writes = writeFunctions();
@@ -136,6 +145,15 @@ describe('every UI write path broadcasts the data-refresh signal', () => {
         expect(viewer).toMatch(/<RecentlyDeletedPanel/);
         const onChangedProp = viewer.slice(viewer.indexOf('<RecentlyDeletedPanel'));
         expect(onChangedProp.slice(0, 600)).toMatch(BROADCAST);
+
+        // DBViewer broadcasts through its own `broadcastWrite` wrapper, so prove the
+        // wrapper is still CONNECTED to the real signal. Without this the regex
+        // above would accept a `broadcastWrite` that had been quietly turned into a
+        // no-op, and every Timeline write would stop reaching the other screens with
+        // the whole sweep still green.
+        const stripped = stripComments(viewer);
+        expect(stripped).toMatch(/const\s+broadcastWrite\s*=[\s\S]{0,120}?refetchEntries/);
+        expect(stripped).toMatch(/const\s*\{\s*refetchEntries\s*\}\s*=\s*useDataContext\(\)/);
 
         // Every exempt path must still exist, so a rename cannot silently
         // retire an exemption and take its write out of the sweep with it.

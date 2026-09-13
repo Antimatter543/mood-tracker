@@ -2,7 +2,7 @@ import { ThemeColors, useThemeColors } from '@/styles/global';
 import { ViewProps, View, StatusBar, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AddEntryButton } from './AddEntryButton';
-import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
+import { LAYOUT_CONTENT_PADDING, LAYOUT_FAB_CLEARANCE } from '@/styles/layout';
 import { useMemo } from 'react';
 
 type LayoutProps = {
@@ -36,13 +36,13 @@ const useThemedStyles = (colors: ThemeColors, insetTop: number, insetBottom: num
                     padding: LAYOUT_CONTENT_PADDING,
                     flexGrow: 1,
                     // Pad the bottom past the FAB so the last item scrolls fully
-                    // into view above the floating button. The FAB floats at
-                    // (FAB_BOTTOM_GAP + insetBottom) and is ~56px tall, so this
-                    // 100 + insetBottom clearance tracks the FAB as it rises with
-                    // the bottom safe-area inset. (The tab-bar height itself is
-                    // already excluded from the scene by react-navigation, so we
-                    // only clear the FAB here.)
-                    paddingBottom: 100 + insetBottom,
+                    // into view above the floating button; the clearance tracks the
+                    // FAB as it rises with the bottom safe-area inset. (The tab-bar
+                    // height itself is already excluded from the scene by
+                    // react-navigation, so we only clear the FAB here.) Screens that
+                    // opt OUT of this ScrollView owe themselves the same padding —
+                    // hence the shared constant, see styles/layout.ts.
+                    paddingBottom: LAYOUT_FAB_CLEARANCE + insetBottom,
                 },
                 fullHeightContent: {
                     flex: 1,
