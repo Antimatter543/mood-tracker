@@ -2,23 +2,18 @@
 //
 // Timeframe helpers for the Statistics screen.
 //
-// The window math itself now lives in ./periodWindow.ts, which added a signed
-// period `offset` so the Stats header can page backwards through history. This
-// file keeps the two things that aren't offset-dependent: the period-length
-// lookup used by the consistency KPI, and a plain offset-0 `computeWindow` for
-// callers outside the navigable Stats screen.
+// The window math itself lives in ./periodWindow.ts — a signed period `offset`
+// so the Stats header can page backwards, plus arbitrary custom ranges. All this
+// file still holds is a plain offset-0 `computeWindow` for callers OUTSIDE the
+// navigable Stats screen, and the `Timeframe` re-export a lot of charts import
+// from here for historical reasons.
 //
 // IF YOU ARE A CHART ON THE STATS SCREEN, DO NOT CALL `computeWindow`. Read
 // `window` off `useTimeframe()` instead — it already reflects whichever period
 // the user has paged to, and one shared object means the header and the charts
 // can never describe different ranges.
 
-import {
-    computePeriodWindow,
-    todayLocalDay,
-    PERIOD_LENGTH_DAYS,
-    type Timeframe,
-} from './periodWindow';
+import { computePeriodWindow, todayLocalDay, type Timeframe } from './periodWindow';
 
 export type { Timeframe };
 
@@ -32,11 +27,11 @@ export type Window = { start: string; end: string };
 export const computeWindow = (timeframe: Timeframe): Window =>
     computePeriodWindow(timeframe, 0, todayLocalDay());
 
-/**
- * Calendar days covered by one period of `timeframe`. Used by the KPI
- * consistency math (entries / daysInWindow) — and it is EXACT, not approximate:
- * `periodDayRange` builds windows of precisely this many days. For 'alltime' the
- * caller should override with the real span; this returns a workable default.
- */
-export const daysInTimeframe = (timeframe: Timeframe): number =>
-    timeframe === 'alltime' ? 365 : PERIOD_LENGTH_DAYS[timeframe];
+// REMOVED: `daysInTimeframe(timeframe)`.
+//
+// It answered "how many days is a period of this LENGTH", which stopped being the
+// same question as "how many days is the window on screen" the moment a custom
+// range could be any length at all — and it was already fudging 'alltime' as a
+// flat 365. The consistency KPI's denominator now comes from `windowDayCount` on
+// TimeframeContext, which measures the ACTUAL window (and 'alltime' from the
+// user's first entry). Deriving a day count from a timeframe NAME is the bug.

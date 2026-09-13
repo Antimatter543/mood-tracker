@@ -19,7 +19,12 @@ export type SegmentedOption<T extends string> = {
 
 export type SegmentedControlProps<T extends string> = {
     options: readonly SegmentedOption<T>[];
-    value: T;
+    /**
+     * The selected option, or `null` for NONE selected — a real state, not a
+     * missing value: the Stats row goes fully unselected while a custom date
+     * range is driving the screen, because none of these pills is what's shown.
+     */
+    value: T | null;
     onChange: (value: T) => void;
     /** `'md'` is the full-width screen row; `'sm'` fits inside a card. */
     size?: 'md' | 'sm';

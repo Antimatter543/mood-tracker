@@ -185,28 +185,32 @@ export const canStepBack = (
 export const canStepForward = (timeframe: Timeframe, offset: number): boolean =>
     timeframe !== 'alltime' && normaliseOffset(offset) < 0;
 
-/**
- * Human label for the period — always a concrete range, never "This week".
- *
- * Granularity follows the period length: week/month read as days ("Aug 23 – 29",
- * "Jul 31 – Aug 29"), 3 months/year read as months ("Jun – Aug 2026",
- * "Sep 2025 – Aug 2026"). The year is appended only when it isn't the current
- * one, so the common case stays short enough for the sticky header.
- */
-export const formatPeriodLabel = (
-    timeframe: Timeframe,
-    offset: number,
-    today: string,
-): string => {
-    if (timeframe === 'alltime') return 'All time';
+/** How precisely a range's label spells out its ends. */
+export type LabelGranularity = 'day' | 'month';
 
-    const { startDay, endDay } = periodDayRange(timeframe, offset, today);
+/**
+ * Human label for an inclusive day range — always concrete, never "This week".
+ *
+ * 'day' granularity reads as days ("Aug 23 – 29", "Jul 31 – Aug 29"); 'month'
+ * collapses to months ("Jun – Aug 2026"), which is what the 3-month and year
+ * periods want since naming their exact end days adds noise, not information.
+ * The year is appended only when it isn't the current one, so the common case
+ * stays short enough for the sticky header.
+ *
+ * Shared by the preset periods and the custom range, so one screen can never
+ * render two different date-formatting conventions.
+ */
+export const formatDayRangeLabel = (
+    { startDay, endDay }: DayRange,
+    today: string,
+    granularity: LabelGranularity = 'day',
+): string => {
     const [startYear, startMonth, startDate] = startDay.split('-').map(Number);
     const [endYear, endMonth, endDate] = endDay.split('-').map(Number);
     const startMon = MONTH_NAMES[startMonth - 1];
     const endMon = MONTH_NAMES[endMonth - 1];
 
-    if (timeframe === '3months' || timeframe === 'year') {
+    if (granularity === 'month') {
         if (startYear !== endYear) return `${startMon} ${startYear} – ${endMon} ${endYear}`;
         if (startMonth === endMonth) return `${startMon} ${endYear}`;
         return `${startMon} – ${endMon} ${endYear}`;
@@ -217,7 +221,120 @@ export const formatPeriodLabel = (
         return `${startMon} ${startDate}, ${startYear} – ${endMon} ${endDate}, ${endYear}`;
     }
     const yearSuffix = endYear !== Number(today.slice(0, 4)) ? `, ${endYear}` : '';
+    // A one-day range is a DATE, not a range: "Aug 15", never "Aug 15 – 15".
+    // Unreachable for the presets (all >= 7 days); reachable for a custom range.
+    if (startDay === endDay) return `${startMon} ${startDate}${yearSuffix}`;
     return startMonth === endMonth
         ? `${startMon} ${startDate} – ${endDate}${yearSuffix}`
         : `${startMon} ${startDate} – ${endMon} ${endDate}${yearSuffix}`;
+};
+
+/**
+ * Human label for the period `offset` steps back from now. Granularity follows
+ * the period length: week/month read as days, 3 months/year as months.
+ */
+export const formatPeriodLabel = (
+    timeframe: Timeframe,
+    offset: number,
+    today: string,
+): string => {
+    if (timeframe === 'alltime') return 'All time';
+    return formatDayRangeLabel(
+        periodDayRange(timeframe, offset, today),
+        today,
+        timeframe === '3months' || timeframe === 'year' ? 'month' : 'day',
+    );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CUSTOM RANGES
+//
+// The presets answer "the last N days"; a custom range answers "these two dates
+// I picked on a calendar". It joins the model at exactly one point — it produces
+// a `PeriodWindow` like any preset — so every chart keeps reading ONE window and
+// none of them needs to know a custom range exists.
+//
+// What a custom range deliberately does NOT get: period paging. "The period
+// before Aug 15 – Sep 13" has no single obvious reading (is the step 30 days, or
+// a calendar month?), and inventing one would put a wrong label over real data.
+// Paging is disabled in custom mode; the presets remain the way to walk history.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** True for a well-formed `YYYY-MM-DD` that names a real calendar day. */
+export const isValidDay = (day: unknown): day is string => {
+    if (typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+    const [y, m, d] = day.split('-').map(Number);
+    const parsed = new Date(y, m - 1, d);
+    // Round-trips only if the day really exists (rejects 2026-02-30, month 13…).
+    return (
+        parsed.getFullYear() === y &&
+        parsed.getMonth() === m - 1 &&
+        parsed.getDate() === d
+    );
+};
+
+/** Inclusive day count of a range — the real denominator for a custom window. */
+export const dayCountInclusive = ({ startDay, endDay }: DayRange): number =>
+    daysBetweenDays(startDay, endDay) + 1;
+
+/**
+ * Coerce two picked days into a usable inclusive range, or `null` if they can't
+ * be one. Order-insensitive (tapping the later day first is a normal way to use
+ * a calendar) and never allows the future, which would show an empty tail under
+ * a confident label.
+ *
+ * A start BEFORE the user's first entry is deliberately allowed: "everything up
+ * to March" is a legitimate question, and padding it with empty leading days is
+ * the honest answer rather than silently moving the bound the user chose.
+ */
+export const normaliseCustomRange = (
+    a: string,
+    b: string,
+    today: string,
+): DayRange | null => {
+    if (!isValidDay(a) || !isValidDay(b) || !isValidDay(today)) return null;
+    const [startDay, endDay] = daysBetweenDays(a, b) < 0 ? [b, a] : [a, b];
+    // Clamp the END to today rather than rejecting: a future end can only come
+    // from a stale "today" (a session left open across local midnight), and
+    // clamping keeps the user's start instead of discarding their selection.
+    const clampedEnd = daysBetweenDays(endDay, today) < 0 ? today : endDay;
+    // A start past the clamped end (both in the future) has nothing left to show.
+    if (daysBetweenDays(startDay, clampedEnd) < 0) return null;
+    return { startDay, endDay: clampedEnd };
+};
+
+/**
+ * The `PeriodWindow` for an inclusive custom day range. Same shape and the same
+ * whole-boundary-day UTC instants as a preset window, so it drops straight into
+ * every `WHERE date BETWEEN ?start AND ?end` on the screen.
+ */
+export const computeCustomWindow = ({ startDay, endDay }: DayRange): PeriodWindow => ({
+    startDay,
+    endDay,
+    start: startOfLocalDay(parseDay(startDay)),
+    end: endOfLocalDay(parseDay(endDay)),
+});
+
+/**
+ * The preset whose LENGTH a window of `days` days most resembles.
+ *
+ * This is how a custom range reaches the charts' length-sensitive policies —
+ * x-axis label density (weeklyMood.formatLabel), moving-average width
+ * (moodSeries.maWindowFor), the trend card's title — without every one of them
+ * growing a 'custom' branch. A 3-day range is answered like a week (weekday
+ * labels, no moving average); a 400-day range like a year (sparse "Mon 'YY"
+ * labels, a 14-day average). 'alltime' is never returned: it is a *policy*
+ * ("ignore the offset, start at the epoch"), not a length, and returning it
+ * would make a bounded range claim to be unbounded.
+ *
+ * Invariant (pinned by test): every preset's own length maps back to itself.
+ */
+export const granularityForDays = (days: number): BoundedTimeframe => {
+    if (!Number.isFinite(days) || days <= PERIOD_LENGTH_DAYS.week) return 'week';
+    // Boundaries sit well clear of each preset's own length so the round-trip
+    // invariant holds, and lean toward the SHORTER preset — a 6-week range reads
+    // better at month resolution than sparsened like a quarter.
+    if (days <= 45) return 'month';
+    if (days <= 150) return '3months';
+    return 'year';
 };

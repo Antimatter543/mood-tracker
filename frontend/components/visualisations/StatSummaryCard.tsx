@@ -8,7 +8,7 @@ import { Card } from '@/components/Card';
 import { StatTile } from '@/components/StatTile';
 import { useTimeframe } from '@/context/TimeframeContext';
 import { WINDOW_SUMMARY, RECENT_ENTRY_DATES } from './queries';
-import { daysInTimeframe, type Timeframe } from './transforms/windowHelpers';
+import { type Timeframe } from './transforms/windowHelpers';
 import { startOfLocalDay, addDays, localDateString } from './transforms/dateHelpers';
 import { currentStreak, longestStreak } from './transforms/streak';
 import { computeMovingAverage } from './transforms/movingAverage';
@@ -31,7 +31,7 @@ const FALLING_COLOR = '#e57373';
 const StatSummaryCard: React.FC = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
-    const { timeframe, periodWindow, offset } = useTimeframe();
+    const { timeframe, periodWindow, windowDayCount, isCurrentPeriod } = useTimeframe();
     const [summary, setSummary] = useState<StatSummaryData | null>(null);
     const [moodState, setMoodState] = useState<MoodState | null>(null);
     // Which streak the card is currently reporting. Set in the SAME commit as
@@ -74,10 +74,14 @@ const StatSummaryCard: React.FC = () => {
                     const tf = timeframe as Timeframe;
                     const { start, end } = periodWindow;
                     // "Current streak" is a claim about TODAY, so it only means
-                    // anything while the user is on the present period. Paged
-                    // back, we report the longest run INSIDE that window instead
-                    // (below) and skip this 60-day lookback entirely.
-                    const isCurrentPeriod = offset === 0;
+                    // anything while the window actually ENDS today. Otherwise we
+                    // report the longest run INSIDE that window instead (below)
+                    // and skip this 60-day lookback entirely.
+                    //
+                    // Read off the context rather than re-derived from `offset`:
+                    // a custom range can sit entirely in the past at offset 0, so
+                    // `offset === 0` would have shown a live streak next to
+                    // last March's data. `isCurrentPeriod` asks the real question.
                     // Streak lookback: 60 days of distinct local entry dates.
                     const streakStart = startOfLocalDay(
                         addDays(localDateString(new Date()), -60)
@@ -145,7 +149,10 @@ const StatSummaryCard: React.FC = () => {
                                 : bestStreakInPeriod,
                             avgMoodInWindow: windowRow?.avg_mood ?? 0,
                             totalEntries: windowRow?.entry_count ?? 0,
-                            daysInWindow: daysInTimeframe(tf),
+                            // The REAL inclusive length of the window on screen —
+                            // never derived from the timeframe name, which knows
+                            // nothing about a hand-picked range.
+                            daysInWindow: windowDayCount,
                             movingAverageSlope: slope,
                         })
                     );
@@ -166,10 +173,10 @@ const StatSummaryCard: React.FC = () => {
             return () => {
                 active = false;
             };
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + periodWindow + offset; timeframe only sets the consistency denominator; setState identities are stable
-        }, [db, periodWindow, offset, timeframe]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + periodWindow; the rest only shape the derived stats; setState identities are stable
+        }, [db, periodWindow, windowDayCount, isCurrentPeriod, timeframe]);
     // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe])).
-    useDataRefresh(fetchSummary, [db, periodWindow, offset, timeframe]);
+    useDataRefresh(fetchSummary, [db, periodWindow, windowDayCount, isCurrentPeriod, timeframe]);
 
     // The trend chip now carries the richer 2-axis mood-state when classified,
     // falling back to the single trendArrow while still 'building'. The icon
