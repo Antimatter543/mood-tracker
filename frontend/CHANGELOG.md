@@ -3,6 +3,25 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.13.0] - 2026-09-13
+
+### Added
+- **Pick your own date range on Statistics.** Tap the dates under the Week / Month / 3 Months
+  pills to open a calendar, choose any start and end day (a few days, a specific week, several
+  months), and every chart on the page shows just the entries between them. Tap the small ✕ next
+  to the dates to come back to the present, or pick any pill to leave the custom range.
+
+### Fixed
+- **Timeline no longer jumps back to the top when you scroll deep.** Scrolling a long way down
+  the Timeline (slowly or with fast flicks) could throw you back to the top, blank the list for a
+  moment, or stop you reaching your oldest entries. The list now keeps its place through
+  refreshes, loads older pages without skipping an entry, and stays smooth when many entries are
+  loaded. The last entry also clears the floating + button instead of sitting underneath it.
+- **The "current streak" tile only shows when you are looking at the present.** A range that ends
+  in the past shows the best streak in that period instead.
+- **"All time" consistency is measured from your first entry**, not a fixed 365 days, so a newer
+  user sees an honest percentage.
+
 ## [2.12.0] - 2026-09-11
 
 ### Added
