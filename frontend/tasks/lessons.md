@@ -1,5 +1,42 @@
 # SoulSync — Project Lessons
 
+## 2026-09-13: The Stats window can be ANY length now — three things you may no longer infer from `timeframe`
+
+The Statistics screen gained a custom date range (tap the period label → calendar → two days).
+`periodWindow` is therefore no longer one of five fixed lengths ending today: it can be 1 day or
+2,000, and it can end six months ago. Three habits that were harmless while the length came from a
+five-member enum are now outright bugs, so if you are writing a chart on this screen:
+
+1. **The consistency-style denominator is `windowDayCount` off `useTimeframe()`** — never a length
+   looked up from the timeframe name. The old `daysInTimeframe()` helper is DELETED for exactly this
+   reason (it also fudged `alltime` as a flat 365; `windowDayCount` measures from the user's first
+   entry instead). Deriving a day count from a timeframe NAME is the bug.
+2. **"Is this the present?" is `isCurrentPeriod`, never `offset === 0`.** A custom range sits at
+   offset 0 while ending in the past, so the old test would have shown a LIVE logging streak next to
+   last March's data (this was a real bug in StatSummaryCard, fixed here). `isCurrentPeriod` is
+   `periodWindow.endDay === today` — gate every "claim about today" statistic on it.
+3. **Never put a preset NAME in copy.** `timeframe` deliberately reports the *length-equivalent*
+   preset while a custom range is active (`granularityForDays`) — that is what lets the nine
+   timeframe-scoped charts keep their bucketing, axis-label density and moving-average width correct
+   on an arbitrary range with no `'custom'` branch anywhere. It is a GRANULARITY descriptor, not a
+   claim about which pill is lit, so calling a user-picked 30 days "Monthly Mood Trend" is the card
+   asserting something the user never chose. Read `isCustom` and fall back to a neutral string.
+
+Pinned by `__tests__/customRangeWindow.test.ts` (window math, label, and the round-trip invariant
+that each preset's own length maps back to itself — the thing that stops the mapping drifting away
+from the presets it must agree with), `__tests__/dateRangeSelection.test.ts` (the two-tap protocol)
+and `__tests__/customRangeNavigation.test.tsx` (label-tap → pick → Apply, end to end).
+
+**Test-harness notes for this screen.** A suite that renders `PeriodNavigator` now renders
+`DateRangePicker` → `OverlayModal`, so it needs the same three scoped shims `overlayPopover.test.tsx`
+uses (`react-native-reanimated` — worklets initialise at import time; `react-native-safe-area-context`
+— `useSafeAreaInsets` throws with no provider; `@/hooks/useKeyboardHeight`) plus a `Calendar` stub,
+since `react-native-calendars` sits outside `transformIgnorePatterns`. And **never assert
+`toHaveTextContent` on a control that also holds an `@expo/vector-icons` glyph** — icons render as
+Text nodes, so the button's text content is `"<glyph>Aug 23 – 29"` and the failure prints two
+visually IDENTICAL strings. The period label's text has its own `period-nav-label-text` testID for
+this reason; the outer `period-nav-label` stays the press target.
+
 ## 2026-09-11: Two bundles in one CI job, one Metro cache — the Play build shipped the APK's JS
 
 **The bug users saw**: Google Play users were kicked out of the app the moment they tapped
