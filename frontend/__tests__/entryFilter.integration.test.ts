@@ -13,10 +13,13 @@
  * new dependency. If the runtime lacks it, the suite skips cleanly rather than
  * failing CI.
  *
- * INVARIANT: the `pageQuery` below MUST mirror `getEntriesPage`'s CTE (same
+ * INVARIANT: the `pageQuery` below MUST mirror `getEntriesWindow`'s CTE (same
  * FROM/JOINs, the base `WHERE e.deleted_at IS NULL` + ` AND (${where})` splice
- * BEFORE GROUP BY, and `[...params, LIMIT, OFFSET]` bind order). If that query
- * changes, update this mirror.
+ * BEFORE GROUP BY, the `ORDER BY e.date DESC, e.id DESC` total order, and the
+ * `[...params, LIMIT, OFFSET]` bind order). If that query changes, update this
+ * mirror. (Pagination CONSISTENCY is tested against the real, unmirrored function
+ * in entriesPagination.integration.test.ts — this suite is about the filter
+ * splice, so the trimmed mirror is deliberate.)
  */
 import { buildEntryFilter, moodPresetToRange, EntryFilters, MoodRange } from '@/components/timeline/entryFilter';
 
@@ -32,8 +35,8 @@ const describeIfSqlite = DatabaseSync ? describe : describe.skip;
 
 const ITEMS_PER_PAGE = 20;
 
-// Mirror of DBViewer.fetchEntriesPage's CTE (activity columns trimmed to the
-// `name` GROUP_CONCAT needed to assert identity; the filterable shape is exact).
+// Mirror of getEntriesWindow's CTE (activity columns trimmed to the `name`
+// GROUP_CONCAT needed to assert identity; the filterable shape is exact).
 const pageQuery = (where: string) => `
     WITH EntryData AS (
         SELECT e.id, e.mood, e.notes, e.date, e.starred_at,
@@ -43,10 +46,10 @@ const pageQuery = (where: string) => `
         LEFT JOIN activities a ON ea.activity_id = a.id
         WHERE e.deleted_at IS NULL${where ? ' AND (' + where + ')' : ''}
         GROUP BY e.id
-        ORDER BY e.date DESC
+        ORDER BY e.date DESC, e.id DESC
         LIMIT ? OFFSET ?
     )
-    SELECT * FROM EntryData`;
+    SELECT * FROM EntryData ORDER BY date DESC, id DESC`;
 
 const F = (query = '', moodRange: MoodRange | null = null, starredOnly = false): EntryFilters => ({
     query,
