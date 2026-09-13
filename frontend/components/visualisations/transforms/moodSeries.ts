@@ -21,6 +21,14 @@
 import { addDays, daysBetween } from '@/databases/dateHelpers';
 import type { DayAvgRow } from './dailyAverages';
 import type { Timeframe } from './windowHelpers';
+// One `isValidDay` for the whole app. This module had a private, looser copy
+// (parseability only) under the same NAME, two sibling transforms disagreeing
+// about what a valid day is, which is how the next person picks the wrong one.
+// The shared version additionally requires the exact `YYYY-MM-DD` shape and a
+// day that really exists, and `dailyAverageRows` only ever emits
+// `localDateString` output, so real data is unaffected and corrupt data is
+// caught strictly more often.
+import { isValidDay } from './periodWindow';
 
 /** Maximum rendered points; beyond this we down-sample to keep the line legible. */
 export const MAX_POINTS = 90;
@@ -63,10 +71,6 @@ export type MoodSeriesPoint = {
  * compressed axis is a far better failure than a frozen screen.
  */
 const MAX_FILLED_DAYS = 4000;
-
-/** True when a "YYYY-MM-DD" day parses. Parsed as LOCAL midnight, never bare. */
-const isValidDay = (day: string): boolean =>
-    typeof day === 'string' && !Number.isNaN(new Date(`${day}T00:00:00`).getTime());
 
 /**
  * Expand logged-day rows onto the calendar between the FIRST and LAST logged

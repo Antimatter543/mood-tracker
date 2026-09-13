@@ -38,7 +38,10 @@ jest.mock('@/components/visualisations/transforms/periodWindow', () => ({
 jest.mock('react-native-calendars', () => {
     const ReactActual = require('react') as typeof React;
     const RN = require('react-native') as typeof import('react-native');
-    /** Days the stub offers as tappable cells — enough to span two months. */
+    // Days the stub offers as tappable cells — enough to span several months.
+    // `2026-09-13` is deliberately AFTER the pinned today: the real calendar makes
+    // it untappable via `maxDate`, and the stub ignoring that is what lets one test
+    // below prove the context re-clamps instead of trusting the picker.
     const DAYS = [
         '2026-03-05',
         '2026-07-20',
@@ -104,6 +107,32 @@ jest.mock('expo-router', () => {
 });
 
 jest.mock('@/context/dataRefreshStore', () => ({ useDataVersion: () => 0 }));
+
+// jest-expo does not auto-mock safe-area-context, and OverlayModal reads
+// useSafeAreaInsets (it consumes the IME/nav-bar inset in JS under edge-to-edge).
+jest.mock('react-native-safe-area-context', () => ({
+    useSafeAreaInsets: () => ({ top: 24, bottom: 48, left: 0, right: 0 }),
+}));
+jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
+
+
+// OverlayModal (which DateRangePicker renders through) imports reanimated, and
+// both the real module and reanimated's own mock.js initialise the native
+// worklets runtime at import time - unavailable under jest. Shim exactly the
+// surface OverlayModal uses. Same scoped shim as overlayPopover.test.tsx.
+jest.mock('react-native-reanimated', () => {
+    const ReactLocal = require('react');
+    const { View } = require('react-native');
+    const entering = { duration: () => entering };
+    return {
+        __esModule: true,
+        default: {
+            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
+        },
+        FadeIn: entering,
+    };
+});
+
 
 jest.mock('@/styles/global', () => ({
     useThemeColors: () => ({
@@ -251,24 +280,38 @@ describe('opening the picker', () => {
 describe('applying a custom range', () => {
     it('hands the charts the exact inclusive window, as whole local days', async () => {
         const view = await renderStats();
-        await pickRange(view, '2026-08-15', '2026-09-13');
+        await pickRange(view, '2026-07-20', '2026-08-15');
 
         expect(view.getByTestId('probe-custom')).toHaveTextContent('true');
-        expect(view.getByTestId('probe-window')).toHaveTextContent('2026-08-15..2026-09-13');
-        // Brisbane (UTC+10): whole local Aug 15 .. whole local Sep 13.
+        expect(view.getByTestId('probe-window')).toHaveTextContent('2026-07-20..2026-08-15');
+        // Brisbane (UTC+10): the WHOLE of local Jul 20 .. the WHOLE of local Aug 15.
+        // A half-open boundary here would silently drop the first or last day's
+        // entries from every chart on the screen.
         expect(view.getByTestId('probe-sql')).toHaveTextContent(
-            '2026-08-14T14:00:00.000Z|2026-09-13T13:59:59.999Z',
+            '2026-07-19T14:00:00.000Z|2026-08-15T13:59:59.999Z',
         );
-        expect(view.getByTestId('probe-label')).toHaveTextContent('Aug 15 – Sep 13');
-        expect(view.getByTestId('probe-days')).toHaveTextContent('30');
+        expect(view.getByTestId('probe-label')).toHaveTextContent('Jul 20 – Aug 15');
+        expect(view.getByTestId('probe-days')).toHaveTextContent('27');
         expect(view.queryByTestId('date-range-picker')).toBeNull();
     });
 
     it('accepts the two days in either order', async () => {
         const view = await renderStats();
-        await pickRange(view, '2026-09-13', '2026-08-15');
-        expect(view.getByTestId('probe-window')).toHaveTextContent('2026-08-15..2026-09-13');
-        expect(view.getByTestId('probe-label')).toHaveTextContent('Aug 15 – Sep 13');
+        await pickRange(view, '2026-08-15', '2026-07-20');
+        expect(view.getByTestId('probe-window')).toHaveTextContent('2026-07-20..2026-08-15');
+        expect(view.getByTestId('probe-label')).toHaveTextContent('Jul 20 – Aug 15');
+    });
+
+    it('re-clamps a future end to today instead of trusting the picker', async () => {
+        // The real calendar bounds this at `maxDate`, but the context must not
+        // DEPEND on that: it routes every pair through `normaliseCustomRange`, so
+        // a stale "today" (a session left open across local midnight) can never
+        // produce a window with an empty future tail under a confident label.
+        const view = await renderStats();
+        await pickRange(view, '2026-08-15', '2026-09-13');
+        expect(view.getByTestId('probe-window')).toHaveTextContent(`2026-08-15..${TODAY}`);
+        expect(view.getByTestId('probe-label')).toHaveTextContent('Aug 15 – 29');
+        expect(view.getByTestId('probe-current')).toHaveTextContent('true');
     });
 
     it('handles a 3-day range: real day count, week-level granularity', async () => {
@@ -318,7 +361,7 @@ describe('paging is disabled on a custom range', () => {
         const view = await renderStats();
         expect(view.getByTestId('period-nav-back')).toBeTruthy();
 
-        await pickRange(view, '2026-08-15', '2026-09-13');
+        await pickRange(view, '2026-07-20', '2026-08-15');
         expect(view.queryByTestId('period-nav-back')).toBeNull();
         expect(view.queryByTestId('period-nav-forward')).toBeNull();
         // Also the signal PeriodSwipe reads — no swipe can smuggle the user back
@@ -332,9 +375,9 @@ describe('paging is disabled on a custom range', () => {
         for (let i = 0; i < 3; i++) await press(view, 'period-nav-back');
         expect(view.getByTestId('probe-offset')).toHaveTextContent('-3');
 
-        await pickRange(view, '2026-08-15', '2026-09-13');
+        await pickRange(view, '2026-07-20', '2026-08-15');
         expect(view.getByTestId('probe-offset')).toHaveTextContent('0');
-        expect(view.getByTestId('probe-window')).toHaveTextContent('2026-08-15..2026-09-13');
+        expect(view.getByTestId('probe-window')).toHaveTextContent('2026-07-20..2026-08-15');
     });
 });
 

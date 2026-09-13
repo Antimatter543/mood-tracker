@@ -9,6 +9,10 @@
  *   - the back-bound still applies once the earliest-entry query resolves, which
  *     happens AFTER first paint (so "unknown" briefly means "unbounded").
  *
+ * SCOPE: PRESET paging only. The custom-date-range wiring (the picker the header
+ * label now opens) has its own suite in customRangeNavigation.test.tsx, and the
+ * picker is stubbed out below so a change to it can never redden this file.
+ *
  * A probe component renders the context values as text, so the assertions are on
  * the exact `periodWindow` the six timeframe-scoped charts receive, not on a
  * re-derivation of it.
@@ -49,6 +53,14 @@ jest.mock('expo-router', () => {
 });
 
 jest.mock('@/context/dataRefreshStore', () => ({ useDataVersion: () => 0 }));
+
+// The header label opens the custom-range picker, which renders a real month grid
+// through the overlay host. Neither is under test here (see SCOPE above), and
+// stubbing it keeps this suite free of an OverlayProvider + calendar mock.
+jest.mock('@/components/DateRangePicker', () => ({
+    __esModule: true,
+    default: () => null,
+}));
 
 jest.mock('@/styles/global', () => ({
     useThemeColors: () => ({
@@ -120,7 +132,7 @@ describe('PeriodNavigator — initial state', () => {
         const view = await renderNav();
 
         // Default timeframe is 'month' (30 days ending today).
-        expect(view.getByTestId('period-nav-label')).toHaveTextContent('Jul 31 – Aug 29');
+        expect(view.getByTestId('period-nav-label-text')).toHaveTextContent('Jul 31 – Aug 29');
         expect(view.getByTestId('probe-offset')).toHaveTextContent('0');
         expect(isDisabled(view.getByTestId('period-nav-forward'))).toBe(true);
         expect(isDisabled(view.getByTestId('period-nav-back'))).toBe(false);
@@ -151,12 +163,12 @@ describe('PeriodNavigator — stepping', () => {
         expect(view.getByTestId('probe-window')).toHaveTextContent(
             '2026-08-16..2026-08-22',
         );
-        expect(view.getByTestId('period-nav-label')).toHaveTextContent('Aug 16 – 22');
+        expect(view.getByTestId('period-nav-label-text')).toHaveTextContent('Aug 16 – 22');
         // Having left the present, forward opens up.
         expect(isDisabled(view.getByTestId('period-nav-forward'))).toBe(false);
 
         await press(view, 'period-nav-back');
-        expect(view.getByTestId('period-nav-label')).toHaveTextContent('Aug 9 – 15');
+        expect(view.getByTestId('period-nav-label-text')).toHaveTextContent('Aug 9 – 15');
     });
 
     it('walks back toward the present and stops there', async () => {
@@ -178,7 +190,10 @@ describe('PeriodNavigator — stepping', () => {
         expect(view.getByTestId('probe-offset')).toHaveTextContent('0');
     });
 
-    it('returns to the present when the label is tapped', async () => {
+    // The label itself now opens the date-range picker, so the "back to now"
+    // escape hatch is its own ✕ control — which is also why it appears for a
+    // custom range, where there is no offset to reset.
+    it('returns to the present when the reset control is tapped', async () => {
         earliestEntryIso = '2024-01-01T00:00:00.000Z';
         const view = await renderNav();
         await press(view, 'set-week');
@@ -186,9 +201,11 @@ describe('PeriodNavigator — stepping', () => {
         for (let i = 0; i < 4; i++) await press(view, 'period-nav-back');
         expect(view.getByTestId('probe-offset')).toHaveTextContent('-4');
 
-        await press(view, 'period-nav-label');
+        await press(view, 'period-nav-reset');
         expect(view.getByTestId('probe-offset')).toHaveTextContent('0');
-        expect(view.getByTestId('period-nav-label')).toHaveTextContent('Aug 23 – 29');
+        expect(view.getByTestId('period-nav-label-text')).toHaveTextContent('Aug 23 – 29');
+        // Nothing to return from any more, so the control goes away.
+        expect(view.queryByTestId('period-nav-reset')).toBeNull();
     });
 });
 
@@ -272,7 +289,7 @@ describe('PeriodNavigator — changing the timeframe', () => {
 
         await press(view, 'set-year');
         expect(view.getByTestId('probe-offset')).toHaveTextContent('0');
-        expect(view.getByTestId('period-nav-label')).toHaveTextContent('Aug 2025 – Aug 2026');
+        expect(view.getByTestId('period-nav-label-text')).toHaveTextContent('Aug 2025 – Aug 2026');
     });
 
     it('drops the chevrons entirely on All Time', async () => {
@@ -280,7 +297,7 @@ describe('PeriodNavigator — changing the timeframe', () => {
         const view = await renderNav();
 
         await press(view, 'set-alltime');
-        expect(view.getByTestId('period-nav-label')).toHaveTextContent('All time');
+        expect(view.getByTestId('period-nav-label-text')).toHaveTextContent('All time');
         expect(view.queryByTestId('period-nav-back')).toBeNull();
         expect(view.queryByTestId('period-nav-forward')).toBeNull();
     });

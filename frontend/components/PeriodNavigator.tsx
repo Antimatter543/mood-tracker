@@ -143,7 +143,12 @@ const PeriodNavigator: React.FC = () => {
                     size={13}
                     color={!isCurrentPeriod || isCustom ? colors.accent : colors.textSecondary}
                 />
+                {/* Its own testID: the button wrapping it also contains the
+                    calendar glyph, and Feather renders that glyph as a Text node
+                    — so a text assertion on the BUTTON would silently include an
+                    invisible icon codepoint. */}
                 <Text
+                    testID="period-nav-label-text"
                     style={[
                         styles.labelText,
                         (!isCurrentPeriod || isCustom) && styles.labelTextPast,
