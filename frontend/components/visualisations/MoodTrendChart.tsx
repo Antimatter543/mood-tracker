@@ -56,7 +56,7 @@ const titleFor = (tf: Timeframe): string => {
 
 const MoodTrendChart = () => {
   const colors = useThemeColors();
-  const { timeframe, periodLabel } = useTimeframe();
+  const { timeframe, periodLabel, isCustom } = useTimeframe();
   const tf = timeframe as Timeframe;
   const data = useMoodTrendData();
   const [expanded, setExpanded] = useState(false);
@@ -123,7 +123,11 @@ const MoodTrendChart = () => {
     [data.series, data.latestEntries],
   );
 
-  const title = titleFor(tf);
+  // A custom range has no period NAME — calling a user-picked Aug 15 – Sep 13
+  // "Monthly Mood Trend" because it happens to be ~30 days long would be the
+  // card asserting something the user never chose. The header's date label
+  // directly above already says which days these are.
+  const title = isCustom ? 'Mood Trend' : titleFor(tf);
 
   const header = (
     <View style={styles.titleRow}>

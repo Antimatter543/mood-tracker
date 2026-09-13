@@ -6,7 +6,8 @@ import SegmentedControl, { type SegmentedOption } from '@/components/SegmentedCo
 export type Timeframe = 'week' | 'month' | '3months' | 'year' | 'alltime';
 
 interface TimeframeSelectorProps {
-  selectedTimeframe: Timeframe;
+  /** `null` = no pill lit, because a custom date range is driving the screen. */
+  selectedTimeframe: Timeframe | null;
   onTimeframeChange: (timeframe: Timeframe) => void;
 }
 

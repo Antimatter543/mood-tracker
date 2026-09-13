@@ -28,7 +28,7 @@ import { useThemeColors } from '@/styles/global';
 const DEFAULT_HEADER_HEIGHT = 96;
 
 const StatisticsContent = () => {
-  const { timeframe, setTimeframe } = useTimeframe();
+  const { timeframe, setTimeframe, isCustom } = useTimeframe();
   const colors = useThemeColors();
   const db = useSQLiteContext();
   // Whole-DB empty check. `null` = still loading (render nothing to avoid a
@@ -130,8 +130,12 @@ const StatisticsContent = () => {
     <View style={styles.container}>
       {/* Sticky header positioned above the ScrollView */}
       <View style={styles.stickyHeader} onLayout={onHeaderLayout}>
+        {/* No pill is lit under a custom range: `timeframe` still reports a
+            LENGTH-equivalent preset for the charts' bucketing (see
+            TimeframeContext), and lighting that pill would claim the user picked
+            it. Tapping any pill clears the range. */}
         <TimeframeSelector
-          selectedTimeframe={timeframe}
+          selectedTimeframe={isCustom ? null : timeframe}
           onTimeframeChange={setTimeframe}
         />
         {/* Steps through periods of the selected length. Replaces the old
