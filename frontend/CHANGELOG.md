@@ -3,6 +3,12 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.13.1] - 2026-09-13
+
+### Fixed
+- **The streak tile no longer cuts off its label** when a custom date range is active ("Best streak in
+  peri…" is now "Best streak"; the dates above the charts already say which period).
+
 ## [2.13.0] - 2026-09-13
 
 ### Added

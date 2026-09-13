@@ -230,7 +230,7 @@ const StatSummaryCard: React.FC = () => {
             label:
                 streakScope === 'current'
                     ? `Streak · best ${summary?.longestStreak ?? 0}`
-                    : 'Best streak in period',
+                    : 'Best streak',
         },
         {
             id: 'avg',
