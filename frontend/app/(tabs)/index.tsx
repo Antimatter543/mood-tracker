@@ -15,6 +15,7 @@ import { StatTile } from '@/components/StatTile';
 import { ActivityIcon } from '@/components/activityIcon';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useLatestRun } from '@/hooks/useLatestRun';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { startOfLocalDay, endOfLocalDay, localDateString } from '@/databases/dateHelpers';
 import { dailyAverageMap } from '@/components/visualisations/transforms/dailyAverages';
 import { todaysMoodValue, monthlyOverview, formatAverageDisplay } from '@/components/visualisations/transforms/homeSummary';
@@ -43,23 +44,11 @@ type RecentActivity = {
 };
 
 
-// Simple date formatting helper
-// Update formatDate to handle invalid dates
-const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return { full: '--', short: '--' };
-
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return { full: '--', short: '--' };
-
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const shortMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const longMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-
-    return {
-        full: `${days[date.getDay()]}, ${longMonths[date.getMonth()]} ${date.getDate()}`,
-        short: `${shortMonths[date.getMonth()]} ${date.getDate()}`
-    };
-};
+// Dates on this screen go through lib/dateFormat.ts (read via useDateFormat) so
+// they follow the user's `date_format` setting. This file used to carry its own
+// weekday/month-name arrays, hardcoding US "September 18" order for every user.
+// `formatDate` returns '' for a missing/unparseable date, hence the `|| '--'`
+// fallbacks below, which is what the old local helper returned.
 
 // Time-of-day greeting + its glyph live in lib/greeting.ts (pure, unit-tested
 // over all 24 hours — see __tests__/homeGreeting.test.ts).
@@ -103,11 +92,12 @@ const TodaysMoodCard = memo(function TodaysMoodCard({
 }) {
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
+    const { format: formatDate } = useDateFormat();
 
     return (
         <Card accentTop style={styles.heroCard}>
             <Text style={styles.heroDate}>
-                {formatDate(new Date().toISOString()).full}
+                {formatDate(new Date(), 'longNoYear') || '--'}
             </Text>
             <View style={styles.moodRow}>
                 {mood !== null ? (
@@ -192,11 +182,12 @@ const MonthlyOverviewCard = memo(function MonthlyOverviewCard({ stats }: {
     }
 }) {
     const styles = useThemedStyles(useThemeColors());
+    const { format: formatDate } = useDateFormat();
 
     // `average` is null (not 0) when there's no data, so a real 0.0 average still
     // shows "0.0 / 10" — see transforms/homeSummary.ts.
     const displayAverage = formatAverageDisplay(stats.average);
-    const bestDay = stats.bestDay ? formatDate(stats.bestDay).short : '--';
+    const bestDay = (stats.bestDay && formatDate(stats.bestDay, 'mediumNoYear')) || '--';
 
     const tiles: {
         icon: React.ComponentProps<typeof Feather>['name'];

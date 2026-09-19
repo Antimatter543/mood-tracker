@@ -11,6 +11,8 @@ import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import { Activity } from '@/components/types';
 import { getActivities } from '@/databases/activities';
+import { useDateFormat } from '@/hooks/useDateFormat';
+import { formatDate, type DateFormatPref } from '@/lib/dateFormat';
 
 import {
   WEEKLY_MOOD_AVERAGES,
@@ -72,6 +74,7 @@ const ON_ACCENT = '#FFFFFF';
 const MoodCalendar = () => {
   const db = useSQLiteContext();
   const colors = useThemeColors();
+  const { pref: dateFormatPref } = useDateFormat();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -304,6 +307,7 @@ const MoodCalendar = () => {
             onClose={() => setDaySummary(null)}
             styles={styles}
             colors={colors}
+            dateFormatPref={dateFormatPref}
           />
         )}
       </OverlayModal>
@@ -347,16 +351,13 @@ const FilterChip = ({
   </Pressable>
 );
 
-const formatDayHeading = (dayKey: string): string => {
-  // Local-parse so the weekday/date is the user's, not UTC's.
-  const d = new Date(`${dayKey}T00:00:00`);
-  return d.toLocaleDateString(undefined, {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
-};
+/**
+ * "Thursday, 18 September 2026" in the user's chosen order. `formatDate` local-
+ * parses a bare `YYYY-MM-DD` day key (appends `T00:00:00`), so the weekday is
+ * the user's, not UTC's.
+ */
+const formatDayHeading = (dayKey: string, pref: DateFormatPref): string =>
+  formatDate(dayKey, pref, 'long');
 
 const formatTime = (instant: string): string =>
   new Date(instant).toLocaleTimeString(undefined, {
@@ -369,16 +370,20 @@ const DaySummaryCard = ({
   onClose,
   styles,
   colors,
+  dateFormatPref,
 }: {
   summary: DaySummary;
   onClose: () => void;
   styles: Styles;
   colors: ThemeColors;
+  dateFormatPref: DateFormatPref;
 }) => (
   <View style={styles.summaryCard}>
     <View style={styles.summaryHeader}>
       <View style={styles.summaryHeaderText}>
-        <Text style={styles.summaryDate}>{formatDayHeading(summary.day)}</Text>
+        <Text style={styles.summaryDate}>
+          {formatDayHeading(summary.day, dateFormatPref)}
+        </Text>
         <Text style={styles.summaryMeta}>
           {summary.count === 0
             ? 'No entries this day'

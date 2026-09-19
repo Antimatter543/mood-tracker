@@ -115,6 +115,7 @@ const baseSettings: Settings = {
     mood_precision: 'low',
     show_mood_benchmarks: true,
     activity_carryover: false,
+    date_format: 'system',
     reminders: '[]',
 };
 

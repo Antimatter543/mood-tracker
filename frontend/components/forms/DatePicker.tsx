@@ -5,6 +5,7 @@ import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/dat
 import { useThemeColors } from '@/styles/global';
 import Feather from '@expo/vector-icons/Feather';
 import { isSameLocalDay } from './dateHelpersStub';
+import { useDateFormat } from '@/hooks/useDateFormat';
 
 type DatePickerProps = {
     date: Date;
@@ -60,6 +61,7 @@ export function normalizePickedTime(picked: Date, current: Date): Date {
 
 export const DatePicker: React.FC<DatePickerProps> = ({ date, onDateChange }) => {
     const colors = useThemeColors();
+    const { format: formatDate } = useDateFormat();
     const [mode, setMode] = useState<PickerMode>('none');
 
     const styles = useMemo(
@@ -97,12 +99,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({ date, onDateChange }) =>
         [colors]
     );
 
-    const longDate = date.toLocaleDateString(undefined, {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-    });
+    const longDate = formatDate(date, 'long');
     const shortTime = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     // A single onChange for both pickers. On Android the picker is a dialog whose

@@ -4,6 +4,7 @@ import Feather from '@expo/vector-icons/Feather';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { Card } from '@/components/Card';
 import { StatTile } from '@/components/StatTile';
 import { useTimeframe } from '@/context/TimeframeContext';
@@ -32,6 +33,7 @@ const StatSummaryCard: React.FC = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
     const { timeframe, periodWindow, windowDayCount, isCurrentPeriod } = useTimeframe();
+    const { pref: dateFormatPref } = useDateFormat();
     const [summary, setSummary] = useState<StatSummaryData | null>(null);
     const [moodState, setMoodState] = useState<MoodState | null>(null);
     // Which streak the card is currently reporting. Set in the SAME commit as
@@ -124,7 +126,11 @@ const StatSummaryCard: React.FC = () => {
                     const bestStreakInPeriod = longestStreak(daysLoggedInPeriod);
 
                     // Moving-average slope over the window's gap-filled daily avgs.
-                    const built = buildWeeklyMoodChartData(dailyRows, tf);
+                    // Only `.data` is consumed here (the axis labels this also
+                    // builds belong to the chart), but the real date-format
+                    // preference is passed rather than a default so no call site
+                    // in the app quietly formats dates its own way.
+                    const built = buildWeeklyMoodChartData(dailyRows, tf, dateFormatPref);
                     const dense = built.isEmpty
                         ? []
                         : built.data.map((value, i) => ({
@@ -176,7 +182,7 @@ const StatSummaryCard: React.FC = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + periodWindow; the rest only shape the derived stats; setState identities are stable
         }, [db, periodWindow, windowDayCount, isCurrentPeriod, timeframe]);
     // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe])).
-    useDataRefresh(fetchSummary, [db, periodWindow, windowDayCount, isCurrentPeriod, timeframe]);
+    useDataRefresh(fetchSummary, [db, periodWindow, windowDayCount, isCurrentPeriod, timeframe, dateFormatPref]);
 
     // The trend chip now carries the richer 2-axis mood-state when classified,
     // falling back to the single trendArrow while still 'building'. The icon

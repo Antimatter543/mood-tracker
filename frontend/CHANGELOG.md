@@ -3,6 +3,22 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [Unreleased]
+
+### Added
+- **Date format setting** (System / MM/DD/YYYY / DD/MM/YYYY / YYYY-MM-DD) under Settings >
+  Appearance & Behavior, requested by a Play reviewer ("is there a way I can change the MM/DD
+  format to DD/MM? I'm from a different country"). Each choice shows today's date as a live
+  example. "System default" follows your device's locale, which is what the app did before, so
+  nothing changes unless you pick a format. It applies everywhere a date is written: the Home
+  header, Timeline day headings and bin, chart x-axis labels, the calendar day summary, activity
+  insights, recovery episodes, the entry date picker and the Health Connect sync line.
+
+### Fixed
+- **Chart x-axis dates are no longer always US order.** The Month and 3 Months axis labels were
+  hardcoded to MM/DD for every user; they now follow the setting above (and, by default, the
+  device locale).
+
 ## [2.13.1] - 2026-09-13
 
 ### Fixed

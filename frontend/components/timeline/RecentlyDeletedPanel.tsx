@@ -23,6 +23,8 @@ import {
 } from '@/databases/entry-bin';
 import { moodColor } from './moodColor';
 import { describeBinRow } from './binCopy';
+import { formatDate, type DateFormatPref } from '@/lib/dateFormat';
+import { useDateFormat } from '@/hooks/useDateFormat';
 
 /**
  * "Recently deleted" — the recycle-bin view, reached from the bin button in the
@@ -212,15 +214,18 @@ const useStyles = (colors: ThemeColors, insetTop: number, insetBottom: number) =
     );
 
 /** "13 Jul 2026, 9:05 AM" — the entry's own timestamp, not the deletion's. */
-const formatLoggedAt = (iso: string): string => {
+const formatLoggedAt = (iso: string, pref: DateFormatPref): string => {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleString(undefined, {
-        day: 'numeric',
-        month: 'short',
+    // The DATE half follows the user's `date_format` setting; the TIME half stays
+    // on the device locale (12h vs 24h is a separate, device-level choice we
+    // don't ask about). Pure + module level, so the preference is an argument.
+    const day = formatDate(d, pref, 'mediumNoYear');
+    const time = d.toLocaleTimeString(undefined, {
         hour: 'numeric',
         minute: '2-digit',
     });
+    return `${day}, ${time}`;
 };
 
 export function RecentlyDeletedPanel({
@@ -251,6 +256,7 @@ function RecentlyDeletedContent({
     const insets = useSafeAreaInsets();
     const styles = useStyles(colors, insets.top, insets.bottom);
     const db = useSQLiteContext();
+    const { pref: dateFormatPref } = useDateFormat();
 
     const [entries, setEntries] = useState<BinnedEntry[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -324,7 +330,7 @@ function RecentlyDeletedContent({
     const renderItem = useCallback(
         ({ item }: { item: BinnedEntry }) => {
             const accent = moodColor(item.mood, colors.accent, colors.overlays.tag);
-            const loggedAt = formatLoggedAt(item.date);
+            const loggedAt = formatLoggedAt(item.date, dateFormatPref);
             return (
                 <View style={styles.row} testID={`bin-entry-${item.id}`}>
                     <View style={[styles.accentBar, { backgroundColor: accent }]} />
