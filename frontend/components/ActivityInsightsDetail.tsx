@@ -15,6 +15,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { Card } from '@/components/Card';
 import { ActivityIcon } from '@/components/activityIcon';
 import { Activity } from '@/components/types';
@@ -61,12 +62,9 @@ const VARIABILITY_ICON: Record<VariabilityKind, FeatherName> = {
     polarizing: 'shuffle',
 };
 
-const fmtDate = (iso: string): string =>
-    new Date(iso).toLocaleDateString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-    });
+// The date shape is the user's choice (`date_format`), so this is no longer a
+// module-level helper: the component binds it from useDateFormat and passes it
+// down. See lib/dateFormat.ts.
 
 /**
  * Full-screen detail for ONE activity: its mood distribution, variability
@@ -79,6 +77,9 @@ export const ActivityInsightsDetail: React.FC<{
     onClose: () => void;
 }> = ({ activity, onClose }) => {
     const colors = useThemeColors();
+    const { format } = useDateFormat();
+    /** "18 Sep 2026" in the user's chosen order (setting `date_format`). */
+    const fmtDate = (iso: string): string => format(iso, 'medium');
     const insets = useSafeAreaInsets();
     const db = useSQLiteContext();
     const styles = useMemo(() => makeStyles(colors), [colors]);

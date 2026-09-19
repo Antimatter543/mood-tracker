@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { moodColor } from '@/components/timeline/moodColor';
 import { useThemeColors } from '@/styles/global';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { formatReadoutDay, type LatestEntry } from './transforms/latestEntry';
 
 /**
@@ -34,6 +35,7 @@ export const MoodTrendReadout: React.FC<MoodTrendReadoutProps> = ({
     variant = 'bubble',
 }) => {
     const colors = useThemeColors();
+    const { pref: dateFormatPref } = useDateFormat();
     const panel = variant === 'panel';
 
     const styles = useMemo(
@@ -80,7 +82,7 @@ export const MoodTrendReadout: React.FC<MoodTrendReadoutProps> = ({
 
     return (
         <View style={styles.wrap} testID="mood-trend-readout">
-            <Text style={styles.day}>{formatReadoutDay(day)}</Text>
+            <Text style={styles.day}>{formatReadoutDay(day, dateFormatPref)}</Text>
 
             {average === null ? (
                 // A day with no entry. The line still crosses it (dashed), so say

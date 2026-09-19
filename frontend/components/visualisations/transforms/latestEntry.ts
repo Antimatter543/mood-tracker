@@ -13,6 +13,7 @@
 // belongs to that local day here and everywhere else.
 
 import { localDateString } from '@/databases/dateHelpers';
+import { formatDate, type DateFormatPref } from '@/lib/dateFormat';
 
 /** A row of `ENTRY_DETAILS_IN_RANGE` — a raw stored instant plus its content. */
 export type EntryDetailRow = {
@@ -70,14 +71,10 @@ export const firstNoteLine = (notes: string | null | undefined): string | null =
  * avoid (see transforms/dailyAverages.ts DOCTRINE). Returns the raw input for
  * an unparseable day rather than throwing.
  */
-export const formatReadoutDay = (day: string): string => {
+export const formatReadoutDay = (day: string, pref: DateFormatPref): string => {
     const d = new Date(`${day}T00:00:00`);
     if (Number.isNaN(d.getTime())) return day;
-    return d.toLocaleDateString(undefined, {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short',
-    });
+    return formatDate(d, pref, 'mediumWeekday');
 };
 
 /**

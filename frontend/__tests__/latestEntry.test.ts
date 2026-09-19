@@ -117,13 +117,19 @@ describe('formatReadoutDay', () => {
     it('names the day the user means, not the UTC one', () => {
         // Parsed at LOCAL midnight; a bare `new Date('2026-09-02')` would be UTC
         // midnight and name the 1st for anyone west of UTC.
-        const label = formatReadoutDay('2026-09-02');
+        const label = formatReadoutDay('2026-09-02', 'system');
         expect(label).toContain('2');
         expect(label).toContain('Sep');
         expect(label).toContain('Wed');
     });
 
     it('passes an unparseable day straight through instead of throwing', () => {
-        expect(formatReadoutDay('garbage')).toBe('garbage');
+        expect(formatReadoutDay('garbage', 'system')).toBe('garbage');
+    });
+
+    it('orders the day and month per the date-format preference', () => {
+        expect(formatReadoutDay('2026-09-02', 'dmy')).toBe('Wed, 2 Sep');
+        expect(formatReadoutDay('2026-09-02', 'mdy')).toBe('Wed, Sep 2');
+        expect(formatReadoutDay('2026-09-02', 'ymd')).toBe('Wed, 09-02');
     });
 });

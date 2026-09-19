@@ -340,6 +340,23 @@ export const migrations: Migration[] = [
                 [serializeReminders(list)]
             );
         }
+    },
+    {
+        // Date-format preference (default 'system' = follow the device locale,
+        // i.e. exactly what the app did before this setting existed, so an
+        // existing user sees no change on upgrade). user_settings is a key-value
+        // table, so this is a row insert, not a schema change. getSetting already
+        // falls back to the SETTINGS_REGISTRY default, so this row is belt and
+        // braces, seeded for explicitness like migrations 4, 7 and 10. The
+        // matching SETTINGS_REGISTRY entry lives in databases/settings.ts and the
+        // formatting policy in lib/dateFormat.ts.
+        version: 15,
+        up: async (db: SQLiteDatabase) => {
+            await db.execAsync(`
+                INSERT OR IGNORE INTO user_settings (key, value)
+                VALUES ('date_format', 'system');
+            `);
+        }
     }
 
     // To add a new migration: create a new entry with the next version number.

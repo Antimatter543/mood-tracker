@@ -4,6 +4,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { Card } from '@/components/Card';
 import { useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import InfoBubble from '../InfoBubble';
 import {
   analyseRecoveryPatterns,
@@ -18,6 +19,7 @@ import {
 
 const RecoveryAnalysis = () => {
     const colors = useThemeColors();
+    const { format: formatDate } = useDateFormat();
     const db = useSQLiteContext();
     const [currentEpisode, setCurrentEpisode] = useState<RecoveryEpisode | null>(null);
     const [historicalEpisodes, setHistoricalEpisodes] = useState<RecoveryEpisode[]>([]);
@@ -131,7 +133,7 @@ const RecoveryAnalysis = () => {
         <View style={styles.currentEpisode}>
           <Text style={styles.subtitle}>Current Recovery Episode</Text>
           <Text style={styles.text}>
-            Started: {new Date(currentEpisode.startDate).toLocaleDateString()}
+            Started: {formatDate(currentEpisode.startDate, 'numeric')}
           </Text>
           <Text style={styles.text}>
             Duration: {currentEpisode.durationDays} days
@@ -162,8 +164,8 @@ const RecoveryAnalysis = () => {
           {historicalEpisodes.slice(0, 3).map((episode, index) => (
             <View key={index} style={styles.episodeItem}>
               <Text style={styles.text}>
-                {new Date(episode.startDate).toLocaleDateString()} - 
-                {episode.endDate ? new Date(episode.endDate).toLocaleDateString() : 'Ongoing'}
+                {formatDate(episode.startDate, 'numeric')} - 
+                {episode.endDate ? formatDate(episode.endDate, 'numeric') : 'Ongoing'}
               </Text>
               <Text style={styles.text}>
                 Duration: {episode.durationDays} days

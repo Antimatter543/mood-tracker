@@ -1,4 +1,5 @@
 import { SETTINGS_REGISTRY } from '@/databases/settings';
+import { DATE_FORMAT_PREFS, DEFAULT_DATE_FORMAT } from '@/lib/dateFormat';
 import { getSetting } from '@/databases/database';
 import { createMockDatabase } from 'expo-sqlite';
 
@@ -22,6 +23,23 @@ jest.mock('@/databases/migrations', () => ({
 
 describe('SETTINGS_REGISTRY', () => {
   const registryEntries = Object.entries(SETTINGS_REGISTRY);
+
+  // The date-format row is generated from lib/dateFormat.ts. If the registry and
+  // the helper ever drift, Settings would offer a value `formatDate` can't
+  // render, so pin the link rather than the literal list twice.
+  it('offers exactly the date formats lib/dateFormat.ts implements', () => {
+    expect(SETTINGS_REGISTRY.date_format.options.map(o => o.value)).toEqual([
+      ...DATE_FORMAT_PREFS,
+    ]);
+  });
+
+  it("defaults date_format to the no-change-for-existing-users value", () => {
+    // 'system' follows the device locale, which is what the app did before the
+    // setting existed. Changing this default silently re-formats every date for
+    // every upgrading user.
+    expect(SETTINGS_REGISTRY.date_format.default).toBe(DEFAULT_DATE_FORMAT);
+    expect(DEFAULT_DATE_FORMAT).toBe('system');
+  });
 
   it('every key in registry has a key field matching its object key', () => {
     for (const [objKey, config] of registryEntries) {

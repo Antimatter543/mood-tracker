@@ -27,6 +27,7 @@ import {
     MoodPresetKey,
 } from './timeline/entryFilter';
 import { sectionKeyForDate, formatSectionTitle } from './timeline/dateHeader';
+import { useDateFormat } from '@/hooks/useDateFormat';
 // The DB layer owns ALL SQL now: this component reads OFFSET/LIMIT windows via
 // getEntriesWindow and mutates via updateMoodEntry / deleteMoodEntry
 // (databases/entries.ts). The component is hooks + rendering only — zero SQL,
@@ -49,7 +50,6 @@ const SEARCH_DEBOUNCE_MS = 250;
 // Types — `key` is the stable local-day bucket; `title` is its humanized label.
 type Section = {
     key: string;
-    title: string;
     data: MoodEntry[];
 };
 
@@ -153,7 +153,7 @@ const useThemedStyles = (colors: any, insetBottom: number) => {
 }
 
 // Helper Functions
-const groupEntriesByDate = (entries: MoodEntry[], now: Date = new Date()): Section[] => {
+const groupEntriesByDate = (entries: MoodEntry[]): Section[] => {
     const grouped = entries.reduce((acc: { [key: string]: MoodEntry[] }, entry) => {
         const key = sectionKeyForDate(entry.date);
         if (!acc[key]) acc[key] = [];
@@ -161,11 +161,7 @@ const groupEntriesByDate = (entries: MoodEntry[], now: Date = new Date()): Secti
         return acc;
     }, {});
 
-    return Object.entries(grouped).map(([key, data]) => ({
-        key,
-        title: formatSectionTitle(key, now),
-        data,
-    }));
+    return Object.entries(grouped).map(([key, data]) => ({ key, data }));
 };
 
 /**
@@ -238,6 +234,9 @@ export function DatabaseViewer() {
     const refetchEntriesRef = useRef(refetchEntries);
     refetchEntriesRef.current = refetchEntries;
     const broadcastWrite = useCallback(() => refetchEntriesRef.current(), []);
+
+    // The user's date-format preference, used to render the section headers.
+    const { pref: dateFormatPref } = useDateFormat();
 
     // State
     const [sections, setSections] = useState<Section[]>([]);
@@ -642,12 +641,14 @@ export function DatabaseViewer() {
     );
 
     const renderSectionHeader = useCallback(
-        ({ section: { title } }: { section: Section }) => (
+        ({ section: { key } }: { section: Section }) => (
             <View style={styles.sectionHeader}>
-                <Text style={styles.sectionHeaderText}>{title}</Text>
+                <Text style={styles.sectionHeaderText}>
+                    {formatSectionTitle(key, dateFormatPref)}
+                </Text>
             </View>
         ),
-        [styles]
+        [styles, dateFormatPref]
     );
 
     const keyExtractor = useCallback((item: MoodEntry) => item.id.toString(), []);

@@ -10,6 +10,12 @@ import {
     sectionKeyForDate,
     formatSectionTitle,
 } from '@/components/timeline/dateHeader';
+import { type DateFormatPref } from '@/lib/dateFormat';
+
+// The relative labels and the bucketing are preference-independent, so the
+// existing cases run under 'system' (the default). The preference's effect on the
+// long-form title has its own describe block below.
+const SYSTEM: DateFormatPref = 'system';
 
 describe('localDayKey', () => {
     it('formats a date as local YYYY-MM-DD with zero-padding', () => {
@@ -43,15 +49,15 @@ describe('formatSectionTitle', () => {
     const now = new Date(2025, 5, 10, 15, 0, 0);
 
     it('labels the same local day as "Today"', () => {
-        expect(formatSectionTitle('2025-06-10', now)).toBe('Today');
+        expect(formatSectionTitle('2025-06-10', SYSTEM, now)).toBe('Today');
     });
 
     it('labels the previous local day as "Yesterday"', () => {
-        expect(formatSectionTitle('2025-06-09', now)).toBe('Yesterday');
+        expect(formatSectionTitle('2025-06-09', SYSTEM, now)).toBe('Yesterday');
     });
 
     it('labels an older day with the long-form date', () => {
-        const title = formatSectionTitle('2025-06-08', now);
+        const title = formatSectionTitle('2025-06-08', SYSTEM, now);
         // toLocaleDateString output varies by environment locale, but it must NOT
         // be the relative labels and must include the year + a weekday word.
         expect(title).not.toBe('Today');
@@ -61,14 +67,14 @@ describe('formatSectionTitle', () => {
 
     it('crosses a month boundary correctly (1st -> "Today", last of prev -> "Yesterday")', () => {
         const julyFirst = new Date(2025, 6, 1, 9, 0, 0); // Jul 1, 2025 local
-        expect(formatSectionTitle('2025-07-01', julyFirst)).toBe('Today');
-        expect(formatSectionTitle('2025-06-30', julyFirst)).toBe('Yesterday');
+        expect(formatSectionTitle('2025-07-01', SYSTEM, julyFirst)).toBe('Today');
+        expect(formatSectionTitle('2025-06-30', SYSTEM, julyFirst)).toBe('Yesterday');
     });
 
     it('crosses a year boundary correctly', () => {
         const newYears = new Date(2026, 0, 1, 0, 30, 0); // Jan 1, 2026, 00:30 local
-        expect(formatSectionTitle('2026-01-01', newYears)).toBe('Today');
-        expect(formatSectionTitle('2025-12-31', newYears)).toBe('Yesterday');
+        expect(formatSectionTitle('2026-01-01', SYSTEM, newYears)).toBe('Today');
+        expect(formatSectionTitle('2025-12-31', SYSTEM, newYears)).toBe('Yesterday');
     });
 
     it('handles the local-midnight edge without UTC drift', () => {
@@ -78,10 +84,29 @@ describe('formatSectionTitle', () => {
         const justAfterMidnight = new Date(2025, 5, 10, 0, 5, 0);
         const key = sectionKeyForDate(justAfterMidnight.toISOString());
         expect(key).toBe('2025-06-10');
-        expect(formatSectionTitle(key, justAfterMidnight)).toBe('Today');
+        expect(formatSectionTitle(key, SYSTEM, justAfterMidnight)).toBe('Today');
     });
 
     it('returns a non-date key verbatim (degenerate fallback)', () => {
-        expect(formatSectionTitle('garbage', now)).toBe('garbage');
+        expect(formatSectionTitle('garbage', SYSTEM, now)).toBe('garbage');
+    });
+});
+
+describe('formatSectionTitle honours the date-format preference', () => {
+    const now = new Date(2025, 5, 10, 15, 0, 0); // Tue, Jun 10, 2025 local
+
+    it('writes the long-form title in the chosen order', () => {
+        expect(formatSectionTitle('2025-06-08', 'mdy', now)).toBe('Sunday, June 8, 2025');
+        expect(formatSectionTitle('2025-06-08', 'dmy', now)).toBe('Sunday, 8 June 2025');
+        // YYYY-MM-DD has no month-name ordering of its own, so it stays numeric.
+        expect(formatSectionTitle('2025-06-08', 'ymd', now)).toBe('Sunday, 2025-06-08');
+    });
+
+    it('keeps Today / Yesterday relative under every preference', () => {
+        for (const pref of ['system', 'mdy', 'dmy', 'ymd'] as DateFormatPref[]) {
+            expect(formatSectionTitle('2025-06-10', pref, now)).toBe('Today');
+            expect(formatSectionTitle('2025-06-09', pref, now)).toBe('Yesterday');
+            expect(formatSectionTitle('garbage', pref, now)).toBe('garbage');
+        }
     });
 });

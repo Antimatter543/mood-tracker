@@ -1,4 +1,10 @@
 /// ALL SETTINGS HERE SO JUST ADD/CHANGE HERE...
+import {
+    DATE_FORMAT_OPTION_LABELS,
+    DATE_FORMAT_PREFS,
+    type DateFormatPref,
+} from '@/lib/dateFormat';
+
 export const SETTINGS_REGISTRY = {
     fab_position: {
         key: 'fab_position',
@@ -54,6 +60,26 @@ export const SETTINGS_REGISTRY = {
         description:
             'Count activities toward your mood for the next ~36 hours, with fading weight — not just the day you log them',
     },
+    date_format: {
+        key: 'date_format',
+        // The user's numeric-date ordering. Raised by a Play reviewer ("is there
+        // a way I can change the MM/DD format to DD/MM? I'm from a different
+        // country"). 'system' = follow the device locale, i.e. the behaviour the
+        // app had before the setting existed, so it is the default and existing
+        // users see no change. Values + the formatting policy: lib/dateFormat.ts.
+        //
+        // `options` here are the plain labels; the Settings card swaps in
+        // `dateFormatOptions(new Date())` so each row shows today's date as a
+        // live example. Seeded by migration 15.
+        default: 'system' as DateFormatPref,
+        type: 'select',
+        label: 'Date format',
+        description: 'How dates are written across the app',
+        options: DATE_FORMAT_PREFS.map(value => ({
+            label: DATE_FORMAT_OPTION_LABELS[value],
+            value,
+        })),
+    },
     reminders: {
         key: 'reminders',
         // A JSON-encoded Reminder[] (see lib/reminders.ts) — the user's list of
@@ -80,6 +106,7 @@ export type SettingValues = {
     mood_precision: 'high' | 'low';
     show_mood_benchmarks: boolean;
     activity_carryover: boolean;
+    date_format: DateFormatPref;  // 'system' | 'mdy' | 'dmy' | 'ymd', see lib/dateFormat.ts
     reminders: string;  // JSON-encoded Reminder[] — parse with lib/reminders.parseReminders
 };
 

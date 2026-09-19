@@ -8,6 +8,7 @@
 // go through it, so the axes cannot drift apart.
 
 import { interpolateData } from '../chartUtils';
+import { formatDate, type DateFormatPref } from '@/lib/dateFormat';
 
 export type MoodAvgRow = {
     date: string;          // "YYYY-MM-DD"
@@ -61,15 +62,28 @@ const monthYearLabel = (date: Date): string => {
     return `${month} '${yy}`;
 };
 
-/** Short enough for month/quarter axes on narrow phones. */
-const numericMonthDayLabel = (date: Date): string =>
-    `${date.getMonth() + 1}/${date.getDate()}`;
+/**
+ * Short enough for month/quarter axes on narrow phones, and in the user's chosen
+ * day/month ORDER.
+ *
+ * This label is the exact thing a 5-star Play reviewer wrote in about: it used to
+ * be hardcoded `M/D` (US order) for every user on earth. It now follows the
+ * `date_format` setting, whose default ('system') follows the device locale.
+ */
+const numericMonthDayLabel = (date: Date, pref: DateFormatPref): string =>
+    formatDate(date, pref, 'numericShort');
 
 export const formatLabel = (
     dateStr: string,
     index: number,
     totalPoints: number,
-    timeframe: Timeframe
+    timeframe: Timeframe,
+    /**
+     * REQUIRED (no default on purpose): a defaulted preference would let a new
+     * call site silently fall back to US ordering, which is the bug this
+     * parameter exists to fix.
+     */
+    pref: DateFormatPref
 ): string => {
     // Use Date constructor on YYYY-MM-DD strings — parses as UTC. For label
     // formatting we want the local-calendar view of that date. Append a time
@@ -82,12 +96,12 @@ export const formatLabel = (
 
         case 'month':
             return isSparseLabelIndex(index, totalPoints)
-                ? numericMonthDayLabel(date)
+                ? numericMonthDayLabel(date, pref)
                 : '';
 
         case '3months':
             return isSparseLabelIndex(index, totalPoints)
-                ? numericMonthDayLabel(date)
+                ? numericMonthDayLabel(date, pref)
                 : '';
 
         case 'year':
@@ -112,14 +126,15 @@ export const formatLabel = (
  */
 export const buildWeeklyMoodChartData = (
     rows: MoodAvgRow[],
-    timeframe: Timeframe
+    timeframe: Timeframe,
+    pref: DateFormatPref
 ): WeeklyMoodChartData => {
     if (rows.length === 0) {
         return { labels: [], data: [], nullIndices: [], isEmpty: true };
     }
 
     const moodValues = rows.map((r) => r.avgMood);
-    const labels = rows.map((r, i) => formatLabel(r.date, i, rows.length, timeframe));
+    const labels = rows.map((r, i) => formatLabel(r.date, i, rows.length, timeframe, pref));
     const { data, nullIndices } = interpolateData(moodValues);
 
     return { labels, data, nullIndices, isEmpty: false };

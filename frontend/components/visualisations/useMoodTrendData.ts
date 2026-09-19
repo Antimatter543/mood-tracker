@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { useDataRefresh } from '@/hooks/useDataRefresh';
@@ -16,6 +16,7 @@ import {
 } from './transforms/moodSeries';
 import { latestEntryPerDay, type EntryDetailRow, type LatestEntry } from './transforms/latestEntry';
 import { formatLabel } from './transforms/weeklyMood';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { type Timeframe } from './transforms/windowHelpers';
 
 /**
@@ -29,7 +30,11 @@ export type MoodTrendData = {
     series: MoodSeriesPoint[];
     /** Moving average aligned 1:1 with `series`, or null when the window is 0. */
     overlay: number[] | null;
-    /** Sparse x-axis labels aligned 1:1 with `series`. */
+    /**
+     * Sparse x-axis labels aligned 1:1 with `series`. DERIVED at render (not
+     * stored with the fetched data) so changing the date-format setting
+     * re-labels the axis immediately instead of waiting for the next read.
+     */
     labels: string[];
     /** Local day -> that day's most recent entry, for the scrub readout. */
     latestEntries: Map<string, LatestEntry>;
@@ -47,7 +52,12 @@ export const useMoodTrendData = (): MoodTrendData => {
     const { timeframe, periodWindow } = useTimeframe();
     const tf = timeframe as Timeframe;
 
-    const [loaded, setLoaded] = useState<Omit<MoodTrendData, 'loading' | 'isEmpty'> | null>(null);
+    const { pref: dateFormatPref } = useDateFormat();
+
+    const [loaded, setLoaded] = useState<Omit<
+        MoodTrendData,
+        'loading' | 'isEmpty' | 'labels'
+    > | null>(null);
     const [loading, setLoading] = useState(true);
 
     const fetchData = useCallback(async () => {
@@ -100,7 +110,6 @@ export const useMoodTrendData = (): MoodTrendData => {
             setLoaded({
                 series,
                 overlay: maFull ? keep.map((i) => maFull[i].value) : null,
-                labels: series.map((p, i) => formatLabel(p.date, i, series.length, tf)),
                 latestEntries: latestEntryPerDay(detailRows),
                 maWindow: window,
             });
@@ -114,6 +123,15 @@ export const useMoodTrendData = (): MoodTrendData => {
 
     useDataRefresh(fetchData, [db, periodWindow, tf]);
 
+    const series = loaded?.series;
+    const labels = useMemo(
+        () =>
+            series
+                ? series.map((p, i) => formatLabel(p.date, i, series.length, tf, dateFormatPref))
+                : [],
+        [series, tf, dateFormatPref]
+    );
+
     if (!loaded) {
         return {
             series: [],
@@ -126,5 +144,5 @@ export const useMoodTrendData = (): MoodTrendData => {
         };
     }
 
-    return { ...loaded, loading, isEmpty: false };
+    return { ...loaded, labels, loading, isEmpty: false };
 };

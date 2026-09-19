@@ -5,6 +5,7 @@ import { useThemeColors } from '@/styles/global';
 import { SettingConfig, SETTINGS_REGISTRY } from '@/databases/settings';
 import { useSettings } from '@/context/SettingsContext';
 import { useOverlay } from '@/context/OverlayHost';
+import { dateFormatOptions } from '@/lib/dateFormat';
 import { Ionicons } from '@expo/vector-icons';
 
 type SettingRowProps = {
@@ -340,6 +341,15 @@ function ThemeColorPreview({ themeName }: { themeName: string }) {
 export function SettingsSection() {
     const colors = useThemeColors();
     const { settings, updateSetting } = useSettings();
+
+    // The Date format picker shows today's date rendered each way ("DD/MM/YYYY
+    // (18/09/2026)"), which the static registry can't express. Memoized on mount:
+    // a fresh options array every render would re-run SettingRow's mount effect
+    // and thrash the open overlay.
+    const dateFormatConfig = useMemo<SettingConfig>(() => ({
+      ...(SETTINGS_REGISTRY.date_format as SettingConfig),
+      options: dateFormatOptions(new Date()),
+    }), []);
     
     const styles = useMemo(() => StyleSheet.create({
       section: {
@@ -395,7 +405,8 @@ export function SettingsSection() {
 
           // Type assertion to fix TypeScript errors
           const typedKey = key as keyof typeof SETTINGS_REGISTRY;
-          const typedConfig = config as SettingConfig;
+          const typedConfig =
+            key === 'date_format' ? dateFormatConfig : (config as SettingConfig);
           
           return (
             <SettingRow

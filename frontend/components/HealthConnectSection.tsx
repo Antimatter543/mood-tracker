@@ -31,6 +31,8 @@ import {
   type HealthConnectStatus,
 } from '@/lib/healthConnect';
 import { syncHealthMetrics } from '@/lib/healthSync';
+import { formatDate, type DateFormatPref } from '@/lib/dateFormat';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useDataContext } from '@/context/DataContext';
 import { clearAllHealthMetrics } from '@/databases/health-metrics';
 import { getSetting, updateSetting } from '@/databases/user-settings';
@@ -53,8 +55,12 @@ import {
  */
 type Phase = 'loading' | HealthConnectCardPhase;
 
-/** Friendly "Last synced …" line from an ISO timestamp. */
-function formatLastSynced(iso: string | null): string {
+/**
+ * Friendly "Last synced …" line from an ISO timestamp. Anything older than a day
+ * falls back to a calendar date, which follows the user's `date_format` setting,
+ * so the preference comes in as an argument (this helper is module-level + pure).
+ */
+function formatLastSynced(iso: string | null, pref: DateFormatPref): string {
   if (!iso) return 'Not synced yet';
   const then = new Date(iso);
   if (Number.isNaN(then.getTime())) return 'Not synced yet';
@@ -64,11 +70,12 @@ function formatLastSynced(iso: string | null): string {
   if (mins < 60) return `Synced ${mins} min ago`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `Synced ${hours}h ago`;
-  return `Last synced ${then.toLocaleDateString()}`;
+  return `Last synced ${formatDate(then, pref, 'numeric')}`;
 }
 
 export const HealthConnectSection = () => {
   const colors = useThemeColors();
+  const { pref: dateFormatPref } = useDateFormat();
   const db = useSQLiteContext();
   // Syncing writes health rows and turning the feature off deletes them; both
   // change what the Statistics and Insights health charts render. Without this
@@ -306,7 +313,7 @@ export const HealthConnectSection = () => {
           Sleep and heart rate are syncing to this device only. Pull the latest
           any time.
         </Text>
-        <Text style={styles.subtle}>{formatLastSynced(lastSynced)}</Text>
+        <Text style={styles.subtle}>{formatLastSynced(lastSynced, dateFormatPref)}</Text>
 
         <PrimaryButton
           styles={styles}

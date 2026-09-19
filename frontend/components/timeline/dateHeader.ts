@@ -9,6 +9,13 @@
 // same local day must land in the same group even across a UTC midnight, and
 // "Today"/"Yesterday" are relative to the viewer's local now. We therefore key
 // on a local `YYYY-MM-DD` derived from the Date's local getFullYear/Month/Date.
+//
+// The group KEY is data and never changes shape. Only the humanized TITLE follows
+// the user's `date_format` setting (lib/dateFormat.ts), which is why
+// `formatSectionTitle` takes the preference as a required argument: this module is
+// pure, so the caller (components/DBViewer.tsx) reads the setting and passes it in.
+
+import { formatDate, type DateFormatPref } from '@/lib/dateFormat';
 
 /** Local-calendar `YYYY-MM-DD` for a Date (NOT UTC). */
 export const localDayKey = (d: Date): string => {
@@ -33,7 +40,9 @@ export const sectionKeyForDate = (isoDate: string): string => {
  * Humanized section title for a `YYYY-MM-DD` local day key, relative to `now`:
  *   - same local day as `now`        -> "Today"
  *   - the local day before `now`     -> "Yesterday"
- *   - otherwise                      -> long-form date ("Monday, June 9, 2025")
+ *   - otherwise                      -> long-form date in the user's chosen
+ *                                       format ("Monday, June 9, 2025" for
+ *                                       mdy/system, "Monday, 9 June 2025" for dmy)
  *
  * `dateKey` is parsed as a LOCAL midnight (we append no `Z`), so the comparison
  * stays on the local calendar. A non-`YYYY-MM-DD` key (the degenerate fallback
@@ -41,7 +50,11 @@ export const sectionKeyForDate = (isoDate: string): string => {
  */
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
-export const formatSectionTitle = (dateKey: string, now: Date = new Date()): string => {
+export const formatSectionTitle = (
+    dateKey: string,
+    pref: DateFormatPref,
+    now: Date = new Date()
+): string => {
     if (!YMD.test(dateKey)) return dateKey;
 
     // Parse the key as local midnight (split avoids `new Date('YYYY-MM-DD')`,
@@ -56,10 +69,5 @@ export const formatSectionTitle = (dateKey: string, now: Date = new Date()): str
     const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
     if (localDayKey(yesterday) === dateKey) return 'Yesterday';
 
-    return dayDate.toLocaleDateString(undefined, {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-    });
+    return formatDate(dayDate, pref, 'long');
 };
