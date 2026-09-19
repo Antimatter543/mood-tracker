@@ -17,20 +17,19 @@
 #   (rotatable via Play App Signing). The gplay admin service-account key lives on the
 #   laptop only — so the Play push runs here, on a local cron, not in the cloud.
 #
-# WHY IT DEFAULTS TO DRAFT (and how to flip to live):
-#   SoulSync is a brand-new Play app. Its first version (2.3.4) is still IN_REVIEW at
-#   Google, and the one-time IARC content-rating questionnaire (a Console-only step,
-#   Anti's) is not yet done. Until BOTH clear, Play ONLY accepts DRAFT uploads —
-#   a --status completed/inProgress release is rejected. So the safe, correct default
-#   today is PLAY_STATUS=draft (staged, zero users affected). Once the app is approved
-#   AND the IARC questionnaire is complete, flip to a live staged rollout by exporting:
-#       PLAY_STATUS=inProgress PLAY_ROLLOUT=0.2   (20% staged, halt-able)
-#   then later PLAY_STATUS=completed PLAY_ROLLOUT=1.0 for full rollout. That flip is a
-#   FUTURE action — do not attempt a live publish while the app is pre-approval.
+# STATUS DEFAULTS TO completed @ 100% (Anti policy, 2026-07-30: ship at 100%, stage only on
+#   purpose). History: this defaulted to `draft` while the app was pre-approval (Play only
+#   accepts drafts then). The app has been live since 2026-07-04, and on 2026-09-19 a
+#   hand-run of this script (without the cron's PLAY_STATUS env) pushed v2.14.0 as a DRAFT,
+#   after which the idempotent guard below said "already on track" forever -- the exact
+#   forgotten-draft trap the policy exists to prevent. To stage deliberately, export
+#   PLAY_STATUS=inProgress PLAY_ROLLOUT=0.2 and file a dated promote task in the route
+#   tasks.md. To take an existing draft live: edits/tracks cycle in
+#   ops/references/play-console-cli.md (re-running this script will NOT do it).
 #
 # ENV KNOBS (all optional):
-#   PLAY_STATUS    draft|inProgress|halted|completed   (default: draft)
-#   PLAY_ROLLOUT   0.0–1.0                              (default: 0.2)
+#   PLAY_STATUS    draft|inProgress|halted|completed   (default: completed)
+#   PLAY_ROLLOUT   0.0-1.0                              (default: 1.0)
 #   PLAY_TRACK     production|beta|alpha|internal       (default: production)
 #   SOULSYNC_PLAY_LOG   log file path                   (default: ~/ops/runtime/soulsync-play.log)
 #   (the heavy lifting — AAB download, preflight, gplay release — is delegated to
@@ -68,8 +67,8 @@ export GPLAY_SERVICE_ACCOUNT_JSON
 REPO="Antimatter543/mood-tracker"
 PKG="com.raeduslabs.soulsyncapp"
 TRACK="${PLAY_TRACK:-production}"
-STATUS="${PLAY_STATUS:-draft}"
-ROLLOUT="${PLAY_ROLLOUT:-0.2}"
+STATUS="${PLAY_STATUS:-completed}"
+ROLLOUT="${PLAY_ROLLOUT:-1.0}"
 
 # Resolve repo layout from this script's own location (robust to cron's cwd).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
