@@ -3,7 +3,7 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
-## [Unreleased]
+## [2.14.0] - 2026-09-19
 
 ### Added
 - **Date format setting** (System / MM/DD/YYYY / DD/MM/YYYY / YYYY-MM-DD) under Settings >
