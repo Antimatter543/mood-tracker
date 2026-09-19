@@ -95,8 +95,8 @@ will retry" and stop; (4) otherwise delegate to `publish-to-play.sh` (`SOURCE=ru
   `2.5.0 (vc 20500) draft` with the HC perms, uploaded only to surface the declaration form in the Console.
   **The cron now publishes LIVE:** its crontab line carries `PLAY_STATUS=completed PLAY_ROLLOUT=1.0`
   (flipped 2026-07-18) — so `scripts/release.sh patch|minor|major` is the ONLY human step: tag → CI builds →
-  within 30 min the cron pushes it straight to Play production (Nudge-parity). Script defaults stay `draft`
-  (safe for ad-hoc manual runs). Env knobs: `PLAY_STATUS` / `PLAY_ROLLOUT` / `PLAY_TRACK` / `SOULSYNC_PLAY_LOG`
+  within 30 min the cron pushes it straight to Play production (Nudge-parity). Script defaults are `completed`/`1.0` too (flipped 2026-09-19 after a hand-run pushed a forgotten draft)
+  Env knobs: `PLAY_STATUS` / `PLAY_ROLLOUT` / `PLAY_TRACK` / `SOULSYNC_PLAY_LOG`
   / `SOULSYNC_PLAY_HOLD_FILE` (hold marker still honored if ever re-created).
   **Store listing (2026-07-18 refresh):** canonical text = `fastlane/metadata/android/en-US/` (emoji-led copy,
   no HC mentions until it ships on Play); framed 8-slide screenshot set + feature graphic =
