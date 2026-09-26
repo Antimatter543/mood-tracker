@@ -22,12 +22,15 @@
 //      main screen for a feature that is meant to ADD reach, not remove it.
 // The label is always the CONCRETE range ("Aug 23 – 29"), never a vague
 // "This week", so the trailing-window semantics are visible rather than implied.
+// Its day/month ORDERING follows the user's `date_format` setting through
+// lib/dateFormat.ts's policy — see formatDayRangeLabel below.
 //
 // TIMEZONE: every boundary is computed on local `YYYY-MM-DD` day strings and
 // only converted to UTC ISO at the edge (startOfLocalDay / endOfLocalDay) for
 // SQLite's `BETWEEN ? AND ?`. NEVER use SQLite's `date('now')` — it is UTC and
 // mis-buckets entries for users east/west of UTC. See databases/dateHelpers.ts.
 
+import { type DateFormatPref } from '@/lib/dateFormat';
 import { startOfLocalDay, endOfLocalDay, localDateString, addDays } from './dateHelpers';
 
 export type Timeframe = 'week' | 'month' | '3months' | 'year' | 'alltime';
@@ -51,12 +54,22 @@ export const PERIOD_LENGTH_DAYS: Record<BoundedTimeframe, number> = {
 export const ALLTIME_START = '1970-01-01T00:00:00.000Z';
 const ALLTIME_START_DAY = '1970-01-01';
 
+/**
+ * The same 3-letter English months as `MONTHS_SHORT` in lib/dateFormat.ts,
+ * duplicated rather than imported because that array isn't exported and this
+ * module has no business widening that one's API. The duplication is PINNED:
+ * the one-day-range invariant in customRangeWindow.test.ts asserts, for all 12
+ * months, that a single-day label equals `formatDate(day, pref, 'medium…')`, so
+ * the two arrays cannot silently drift apart.
+ */
 const MONTH_NAMES = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
 const MS_PER_DAY = 86_400_000;
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
 
 /** Local `YYYY-MM-DD` for "today". Extracted so callers/tests can pin it. */
 export const todayLocalDay = (now: Date = new Date()): string => localDateString(now);
@@ -189,59 +202,158 @@ export const canStepForward = (timeframe: Timeframe, offset: number): boolean =>
 export type LabelGranularity = 'day' | 'month';
 
 /**
+ * The ORDERING FAMILY a range is written in, derived from `date_format`.
+ *
+ * Deliberately not one branch per pref: 'system' and 'mdy' produce
+ * byte-identical month-first labels, so they share a branch and cannot drift
+ * apart. Grouping by shape is what keeps three branches maintainable instead
+ * of four that mostly repeat each other.
+ *
+ * WHY 'system' IS MONTH-FIRST: for THIS function the pre-setting behaviour was
+ * a hardcoded English month-first string — it never went through
+ * `toLocaleDateString`, unlike the call sites lib/dateFormat.ts replaced. So
+ * "reproduce the old bytes exactly" (the default-user-sees-no-change rule)
+ * means month-first here. A non-US user who wants day-first picks 'dmy', which
+ * is precisely why the setting exists.
+ */
+type RangeOrder = 'monthFirst' | 'dayFirst' | 'iso';
+
+const rangeOrderFor = (pref: DateFormatPref): RangeOrder =>
+    pref === 'dmy' ? 'dayFirst' : pref === 'ymd' ? 'iso' : 'monthFirst';
+
+/** `2026-08-15` / `08-15` — mirrors `numericDate` in lib/dateFormat.ts. */
+const isoDay = (year: number, month: number, date: number, withYear: boolean): string =>
+    withYear ? `${year}-${pad2(month)}-${pad2(date)}` : `${pad2(month)}-${pad2(date)}`;
+
+/**
  * Human label for an inclusive day range — always concrete, never "This week".
  *
  * 'day' granularity reads as days ("Aug 23 – 29", "Jul 31 – Aug 29"); 'month'
  * collapses to months ("Jun – Aug 2026"), which is what the 3-month and year
  * periods want since naming their exact end days adds noise, not information.
- * The year is appended only when it isn't the current one, so the common case
+ * The year is shown only when it isn't the current one, so the common case
  * stays short enough for the sticky header.
  *
  * Shared by the preset periods and the custom range, so one screen can never
  * render two different date-formatting conventions.
+ *
+ * `pref` is the user's `date_format` setting and is REQUIRED — this is a pure
+ * transform, so it never reads the hook (see the CONTRACT in lib/dateFormat.ts)
+ * and a new call site must not be able to silently forget the preference. What
+ * each pref produces (with "today" in 2026):
+ *
+ *   day granularity        system / mdy            dmy                 ymd
+ *   same month, this yr    Aug 23 – 29             23 – 29 Aug         08-23 – 08-29
+ *   two months, this yr    Aug 15 – Sep 13         15 Aug – 13 Sep     08-15 – 09-13
+ *   one day, this yr       Aug 15                  15 Aug              08-15
+ *   same month, past yr    Mar 1 – 10, 2025        1 – 10 Mar 2025     2025-03-01 – 2025-03-10
+ *   one day, past yr       Mar 1, 2025             1 Mar 2025          2025-03-01
+ *   across new year        Dec 20, 2025 –          20 Dec 2025 –       2025-12-20 – 2026-01-05
+ *                            Jan 5, 2026             5 Jan 2026
+ *
+ *   month granularity      system / mdy / dmy                          ymd
+ *   two months, one yr     Jun – Aug 2026                              2026-06 – 2026-08
+ *   one month              Aug 2026                                    2026-08
+ *   across new year        Aug 2025 – Aug 2026                         2025-08 – 2026-08
+ *
+ * Three rules generate that table:
+ *   1. The shared month is printed ONCE, on the side the ordering puts it —
+ *      leading for month-first, trailing for day-first.
+ *   2. A shared year trails the WHOLE label and only when it isn't the current
+ *      one. `mdy` writes ", 2025" and `dmy` " 2025", which is exactly how
+ *      `formatDate(end, pref, 'medium')` spells that same end date. (Pinned:
+ *      a one-day range equals `formatDate` of that day, for all three explicit
+ *      prefs and all twelve months.)
+ *   3. `ymd` never abbreviates one end against the other. A truncated ISO date
+ *      stops being sortable and unambiguous, which is the only reason to pick
+ *      ISO; so the current-year rule becomes "carry the year or don't", never
+ *      "append it". Month granularity is `YYYY-MM` for the same reason a `ymd`
+ *      user sees no month NAME anywhere else in the app — both `longDate` and
+ *      `mediumDate` in lib/dateFormat.ts fall back to the numeric form for it.
  */
 export const formatDayRangeLabel = (
     { startDay, endDay }: DayRange,
     today: string,
+    pref: DateFormatPref,
     granularity: LabelGranularity = 'day',
 ): string => {
     const [startYear, startMonth, startDate] = startDay.split('-').map(Number);
     const [endYear, endMonth, endDate] = endDay.split('-').map(Number);
-    const startMon = MONTH_NAMES[startMonth - 1];
-    const endMon = MONTH_NAMES[endMonth - 1];
+    const crossesYear = startYear !== endYear;
+    const order = rangeOrderFor(pref);
 
     if (granularity === 'month') {
-        if (startYear !== endYear) return `${startMon} ${startYear} – ${endMon} ${endYear}`;
+        if (order === 'iso') {
+            const startIso = `${startYear}-${pad2(startMonth)}`;
+            const endIso = `${endYear}-${pad2(endMonth)}`;
+            return startIso === endIso ? startIso : `${startIso} – ${endIso}`;
+        }
+        // A month name carries no day, so day-first and month-first agree here.
+        const startMon = MONTH_NAMES[startMonth - 1];
+        const endMon = MONTH_NAMES[endMonth - 1];
+        if (crossesYear) return `${startMon} ${startYear} – ${endMon} ${endYear}`;
         if (startMonth === endMonth) return `${startMon} ${endYear}`;
         return `${startMon} – ${endMon} ${endYear}`;
     }
 
-    // Day granularity. Spanning two years always needs both years spelled out.
-    if (startYear !== endYear) {
-        return `${startMon} ${startDate}, ${startYear} – ${endMon} ${endDate}, ${endYear}`;
+    // Day granularity.
+    if (order === 'iso') {
+        // Both ends stay whole (rule 3): the year is either on both or neither,
+        // and crossing a new year always forces it on.
+        const withYear = crossesYear || endYear !== Number(today.slice(0, 4));
+        const start = isoDay(startYear, startMonth, startDate, withYear);
+        if (startDay === endDay) return start;
+        return `${start} – ${isoDay(endYear, endMonth, endDate, withYear)}`;
     }
-    const yearSuffix = endYear !== Number(today.slice(0, 4)) ? `, ${endYear}` : '';
+
+    const dayFirst = order === 'dayFirst';
+    const startMon = MONTH_NAMES[startMonth - 1];
+    const endMon = MONTH_NAMES[endMonth - 1];
+
+    // Spanning two years always needs both years spelled out.
+    if (crossesYear) {
+        return dayFirst
+            ? `${startDate} ${startMon} ${startYear} – ${endDate} ${endMon} ${endYear}`
+            : `${startMon} ${startDate}, ${startYear} – ${endMon} ${endDate}, ${endYear}`;
+    }
+
+    const inCurrentYear = endYear === Number(today.slice(0, 4));
+    const yearSuffix = inCurrentYear ? '' : dayFirst ? ` ${endYear}` : `, ${endYear}`;
+
     // A one-day range is a DATE, not a range: "Aug 15", never "Aug 15 – 15".
     // Unreachable for the presets (all >= 7 days); reachable for a custom range.
-    if (startDay === endDay) return `${startMon} ${startDate}${yearSuffix}`;
-    return startMonth === endMonth
-        ? `${startMon} ${startDate} – ${endDate}${yearSuffix}`
+    if (startDay === endDay) {
+        return dayFirst
+            ? `${startDate} ${startMon}${yearSuffix}`
+            : `${startMon} ${startDate}${yearSuffix}`;
+    }
+    if (startMonth === endMonth) {
+        return dayFirst
+            ? `${startDate} – ${endDate} ${endMon}${yearSuffix}`
+            : `${startMon} ${startDate} – ${endDate}${yearSuffix}`;
+    }
+    return dayFirst
+        ? `${startDate} ${startMon} – ${endDate} ${endMon}${yearSuffix}`
         : `${startMon} ${startDate} – ${endMon} ${endDate}${yearSuffix}`;
 };
 
 /**
  * Human label for the period `offset` steps back from now. Granularity follows
  * the period length: week/month read as days, 3 months/year as months.
+ *
+ * `pref` is required for the same reason it is on `formatDayRangeLabel`.
  */
 export const formatPeriodLabel = (
     timeframe: Timeframe,
     offset: number,
     today: string,
+    pref: DateFormatPref,
 ): string => {
     if (timeframe === 'alltime') return 'All time';
     return formatDayRangeLabel(
         periodDayRange(timeframe, offset, today),
         today,
+        pref,
         timeframe === '3months' || timeframe === 'year' ? 'month' : 'day',
     );
 };

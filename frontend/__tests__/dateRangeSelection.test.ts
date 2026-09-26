@@ -22,6 +22,7 @@ import {
     type RangeSelection,
 } from '@/components/visualisations/transforms/dateRangeSelection';
 import { formatDayRangeLabel } from '@/components/visualisations/transforms/periodWindow';
+import { DATE_FORMAT_PREFS } from '@/lib/dateFormat';
 
 const TODAY = '2026-08-29';
 
@@ -204,28 +205,60 @@ describe('buildRangeMarking', () => {
 
 describe('selectionSummary', () => {
     it('prompts for each tap in turn', () => {
-        expect(selectionSummary(null, TODAY)).toBe('Tap a start date');
-        expect(selectionSummary({ startDay: '2026-08-15', endDay: null }, TODAY)).toBe(
-            'Now tap an end date',
-        );
+        expect(selectionSummary(null, TODAY, 'system')).toBe('Tap a start date');
+        expect(
+            selectionSummary({ startDay: '2026-08-15', endDay: null }, TODAY, 'system'),
+        ).toBe('Now tap an end date');
     });
 
     it('reports the range and its inclusive day count', () => {
         expect(
-            selectionSummary({ startDay: '2026-08-15', endDay: '2026-09-13' }, TODAY),
+            selectionSummary(
+                { startDay: '2026-08-15', endDay: '2026-09-13' },
+                TODAY,
+                'system',
+            ),
         ).toBe('Aug 15 – Sep 13 · 30 days');
     });
 
     it('says "1 day" for a single day, not "1 days"', () => {
         expect(
-            selectionSummary({ startDay: '2026-08-15', endDay: '2026-08-15' }, TODAY),
+            selectionSummary(
+                { startDay: '2026-08-15', endDay: '2026-08-15' },
+                TODAY,
+                'system',
+            ),
         ).toBe('Aug 15 · 1 day');
     });
 
-    it('spells the range exactly as the Stats header will', () => {
-        // The user must see the label they are about to get, not a variant.
-        const range = { startDay: '2026-08-15', endDay: '2026-09-13' };
-        const headerLabel = formatDayRangeLabel(range, TODAY, 'day');
-        expect(selectionSummary({ ...range }, TODAY)).toContain(headerLabel);
+    // The promise this function makes is "the label you see here is the label
+    // you are about to get". That only holds if BOTH sides honour the user's
+    // date_format, so the check runs under every pref rather than the default
+    // alone — a summary that silently kept month-first while the header went
+    // day-first would pass a single-pref version of this test.
+    it.each(DATE_FORMAT_PREFS)(
+        'spells the range exactly as the Stats header will (%s)',
+        (pref) => {
+            const range = { startDay: '2026-08-15', endDay: '2026-09-13' };
+            const headerLabel = formatDayRangeLabel(range, TODAY, pref, 'day');
+            expect(selectionSummary({ ...range }, TODAY, pref)).toContain(headerLabel);
+        },
+    );
+
+    it('carries the day count through every pref', () => {
+        expect(
+            selectionSummary(
+                { startDay: '2026-08-15', endDay: '2026-09-13' },
+                TODAY,
+                'dmy',
+            ),
+        ).toBe('15 Aug – 13 Sep · 30 days');
+        expect(
+            selectionSummary(
+                { startDay: '2026-08-15', endDay: '2026-08-15' },
+                TODAY,
+                'ymd',
+            ),
+        ).toBe('08-15 · 1 day');
     });
 });

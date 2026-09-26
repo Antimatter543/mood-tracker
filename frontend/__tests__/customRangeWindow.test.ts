@@ -28,7 +28,13 @@ import {
     isValidDay,
     normaliseCustomRange,
     type BoundedTimeframe,
+    type DayRange,
 } from '@/components/visualisations/transforms/periodWindow';
+import {
+    DATE_FORMAT_PREFS,
+    formatDate,
+    type DateFormatPref,
+} from '@/lib/dateFormat';
 
 /** Same pinned "today" as periodWindow.test.ts, so the two suites read together. */
 const TODAY = '2026-08-29';
@@ -168,37 +174,74 @@ describe('computeCustomWindow — SQL bounds', () => {
     });
 });
 
-describe('formatDayRangeLabel', () => {
+// ─────────────────────────────────────────────────────────────────────────────
+// THE LABEL.
+//
+// Every assertion in this first describe passes pref 'system', which makes it
+// the BYTE-IDENTITY PIN for the default: the strings below are exactly what the
+// Stats header rendered before `date_format` existed, so an existing user who
+// never opens Settings sees no change. (For THIS function the pre-setting
+// behaviour was hardcoded English month-first — it never went through
+// toLocaleDateString — so reproducing the old bytes means month-first, which is
+// why 'system' and 'mdy' agree here and only here.)
+//
+// The other three prefs get their own describe below.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('formatDayRangeLabel — system (the pre-setting bytes)', () => {
     it('collapses a same-month day range', () => {
         expect(
-            formatDayRangeLabel({ startDay: '2026-08-23', endDay: '2026-08-29' }, TODAY),
+            formatDayRangeLabel(
+                { startDay: '2026-08-23', endDay: '2026-08-29' },
+                TODAY,
+                'system',
+            ),
         ).toBe('Aug 23 – 29');
     });
 
     it('spells both months when the range crosses one (Anti\'s example)', () => {
         expect(
-            formatDayRangeLabel({ startDay: '2026-08-15', endDay: '2026-09-13' }, TODAY),
+            formatDayRangeLabel(
+                { startDay: '2026-08-15', endDay: '2026-09-13' },
+                TODAY,
+                'system',
+            ),
         ).toBe('Aug 15 – Sep 13');
     });
 
     it('renders a one-day range as a DATE, not a range', () => {
         expect(
-            formatDayRangeLabel({ startDay: '2026-08-15', endDay: '2026-08-15' }, TODAY),
+            formatDayRangeLabel(
+                { startDay: '2026-08-15', endDay: '2026-08-15' },
+                TODAY,
+                'system',
+            ),
         ).toBe('Aug 15');
     });
 
     it('adds the year only once the range leaves the current one', () => {
         expect(
-            formatDayRangeLabel({ startDay: '2025-03-01', endDay: '2025-03-10' }, TODAY),
+            formatDayRangeLabel(
+                { startDay: '2025-03-01', endDay: '2025-03-10' },
+                TODAY,
+                'system',
+            ),
         ).toBe('Mar 1 – 10, 2025');
         expect(
-            formatDayRangeLabel({ startDay: '2025-03-01', endDay: '2025-03-01' }, TODAY),
+            formatDayRangeLabel(
+                { startDay: '2025-03-01', endDay: '2025-03-01' },
+                TODAY,
+                'system',
+            ),
         ).toBe('Mar 1, 2025');
     });
 
     it('spells out both years across a new-year boundary', () => {
         expect(
-            formatDayRangeLabel({ startDay: '2025-12-20', endDay: '2026-01-05' }, TODAY),
+            formatDayRangeLabel(
+                { startDay: '2025-12-20', endDay: '2026-01-05' },
+                TODAY,
+                'system',
+            ),
         ).toBe('Dec 20, 2025 – Jan 5, 2026');
     });
 
@@ -207,6 +250,7 @@ describe('formatDayRangeLabel', () => {
             formatDayRangeLabel(
                 { startDay: '2026-06-01', endDay: '2026-08-29' },
                 TODAY,
+                'system',
                 'month',
             ),
         ).toBe('Jun – Aug 2026');
@@ -214,6 +258,7 @@ describe('formatDayRangeLabel', () => {
             formatDayRangeLabel(
                 { startDay: '2026-08-01', endDay: '2026-08-29' },
                 TODAY,
+                'system',
                 'month',
             ),
         ).toBe('Aug 2026');
@@ -221,11 +266,202 @@ describe('formatDayRangeLabel', () => {
 
     it('still produces every preset label (formatPeriodLabel delegates here)', () => {
         // Guards the extraction: the presets must keep their exact wording.
-        expect(formatPeriodLabel('week', 0, TODAY)).toBe('Aug 23 – 29');
-        expect(formatPeriodLabel('month', 0, TODAY)).toBe('Jul 31 – Aug 29');
-        expect(formatPeriodLabel('3months', 0, TODAY)).toBe('Jun – Aug 2026');
-        expect(formatPeriodLabel('year', 0, TODAY)).toBe('Aug 2025 – Aug 2026');
-        expect(formatPeriodLabel('alltime', 0, TODAY)).toBe('All time');
+        expect(formatPeriodLabel('week', 0, TODAY, 'system')).toBe('Aug 23 – 29');
+        expect(formatPeriodLabel('month', 0, TODAY, 'system')).toBe('Jul 31 – Aug 29');
+        expect(formatPeriodLabel('3months', 0, TODAY, 'system')).toBe('Jun – Aug 2026');
+        expect(formatPeriodLabel('year', 0, TODAY, 'system')).toBe('Aug 2025 – Aug 2026');
+        expect(formatPeriodLabel('alltime', 0, TODAY, 'system')).toBe('All time');
+    });
+});
+
+/**
+ * Every case in the shape table on formatDayRangeLabel, one row per case, all
+ * four prefs side by side. Laid out as a table rather than four describes so a
+ * reviewer can see the whole contract at a glance and a drifting branch is one
+ * mismatched column, not a test buried three screens away.
+ *
+ * TODAY is 2026-08-29, so 2026 is "the current year" for the year-suffix rule.
+ */
+const LABEL_TABLE: ReadonlyArray<{
+    name: string;
+    range: DayRange;
+    granularity?: 'day' | 'month';
+    system: string;
+    mdy: string;
+    dmy: string;
+    ymd: string;
+}> = [
+    {
+        name: 'same month, current year',
+        range: { startDay: '2026-08-23', endDay: '2026-08-29' },
+        system: 'Aug 23 – 29',
+        mdy: 'Aug 23 – 29',
+        dmy: '23 – 29 Aug',
+        ymd: '08-23 – 08-29',
+    },
+    {
+        name: 'two months, current year',
+        range: { startDay: '2026-08-15', endDay: '2026-09-13' },
+        system: 'Aug 15 – Sep 13',
+        mdy: 'Aug 15 – Sep 13',
+        dmy: '15 Aug – 13 Sep',
+        ymd: '08-15 – 09-13',
+    },
+    {
+        name: 'one day, current year',
+        range: { startDay: '2026-08-15', endDay: '2026-08-15' },
+        system: 'Aug 15',
+        mdy: 'Aug 15',
+        dmy: '15 Aug',
+        ymd: '08-15',
+    },
+    {
+        name: 'same month, past year',
+        range: { startDay: '2025-03-01', endDay: '2025-03-10' },
+        system: 'Mar 1 – 10, 2025',
+        mdy: 'Mar 1 – 10, 2025',
+        dmy: '1 – 10 Mar 2025',
+        ymd: '2025-03-01 – 2025-03-10',
+    },
+    {
+        name: 'two months, past year',
+        range: { startDay: '2025-01-05', endDay: '2025-02-03' },
+        system: 'Jan 5 – Feb 3, 2025',
+        mdy: 'Jan 5 – Feb 3, 2025',
+        dmy: '5 Jan – 3 Feb 2025',
+        ymd: '2025-01-05 – 2025-02-03',
+    },
+    {
+        name: 'one day, past year',
+        range: { startDay: '2025-03-01', endDay: '2025-03-01' },
+        system: 'Mar 1, 2025',
+        mdy: 'Mar 1, 2025',
+        dmy: '1 Mar 2025',
+        ymd: '2025-03-01',
+    },
+    {
+        name: 'across a new year',
+        range: { startDay: '2025-12-20', endDay: '2026-01-05' },
+        system: 'Dec 20, 2025 – Jan 5, 2026',
+        mdy: 'Dec 20, 2025 – Jan 5, 2026',
+        dmy: '20 Dec 2025 – 5 Jan 2026',
+        ymd: '2025-12-20 – 2026-01-05',
+    },
+    {
+        name: 'month granularity, two months in one year',
+        range: { startDay: '2026-06-01', endDay: '2026-08-29' },
+        granularity: 'month',
+        system: 'Jun – Aug 2026',
+        mdy: 'Jun – Aug 2026',
+        // A month name carries no day, so day-first has nothing to reorder.
+        dmy: 'Jun – Aug 2026',
+        ymd: '2026-06 – 2026-08',
+    },
+    {
+        name: 'month granularity, one month',
+        range: { startDay: '2026-08-01', endDay: '2026-08-29' },
+        granularity: 'month',
+        system: 'Aug 2026',
+        mdy: 'Aug 2026',
+        dmy: 'Aug 2026',
+        ymd: '2026-08',
+    },
+    {
+        name: 'month granularity, across a new year',
+        range: { startDay: '2025-08-30', endDay: '2026-08-29' },
+        granularity: 'month',
+        system: 'Aug 2025 – Aug 2026',
+        mdy: 'Aug 2025 – Aug 2026',
+        dmy: 'Aug 2025 – Aug 2026',
+        ymd: '2025-08 – 2026-08',
+    },
+];
+
+describe('formatDayRangeLabel — every date_format pref', () => {
+    it.each(LABEL_TABLE)('$name', ({ range, granularity, ...expected }) => {
+        for (const pref of DATE_FORMAT_PREFS) {
+            expect(formatDayRangeLabel(range, TODAY, pref, granularity)).toBe(
+                expected[pref],
+            );
+        }
+    });
+
+    // THE invariant that ties this module to lib/dateFormat.ts. A one-day range
+    // is a single DATE, so it must be spelled exactly the way every other date
+    // in the app is spelled — otherwise a `dmy` user gets day-first everywhere
+    // except the one header this bug was filed about.
+    //
+    // Run over all twelve months it also pins the local MONTH_NAMES array in
+    // periodWindow.ts against dateFormat.ts's MONTHS_SHORT, without either
+    // module importing the other's array. ('system' is excluded on purpose:
+    // formatDate's 'system' follows the DEVICE locale and this label never did,
+    // so it is pinned to the legacy bytes above instead.)
+    const EXPLICIT: Array<Exclude<DateFormatPref, 'system'>> = ['mdy', 'dmy', 'ymd'];
+    it.each(EXPLICIT)(
+        'a one-day range is spelled exactly like formatDate (%s, all 12 months)',
+        (pref) => {
+            for (let month = 1; month <= 12; month++) {
+                const mm = String(month).padStart(2, '0');
+
+                const thisYear = `2026-${mm}-18`;
+                expect(
+                    formatDayRangeLabel(
+                        { startDay: thisYear, endDay: thisYear },
+                        TODAY,
+                        pref,
+                    ),
+                ).toBe(formatDate(thisYear, pref, 'mediumNoYear'));
+
+                const pastYear = `2025-${mm}-18`;
+                expect(
+                    formatDayRangeLabel(
+                        { startDay: pastYear, endDay: pastYear },
+                        TODAY,
+                        pref,
+                    ),
+                ).toBe(formatDate(pastYear, pref, 'medium'));
+            }
+        },
+    );
+
+    // A label is the Stats header's entire caption: an empty or placeholder-ish
+    // one is a blank header, and it must be impossible under EVERY setting.
+    it.each(DATE_FORMAT_PREFS)('%s never produces an empty label', (pref) => {
+        for (const { range, granularity } of LABEL_TABLE) {
+            expect(
+                formatDayRangeLabel(range, TODAY, pref, granularity).length,
+            ).toBeGreaterThan(0);
+        }
+    });
+
+    // The presets delegate to the same function, so the pref has to reach them
+    // too — this is the actual reported bug (the header ignored the setting).
+    it('threads the pref through formatPeriodLabel to the presets', () => {
+        expect(formatPeriodLabel('week', 0, TODAY, 'dmy')).toBe('23 – 29 Aug');
+        expect(formatPeriodLabel('month', 0, TODAY, 'dmy')).toBe('31 Jul – 29 Aug');
+        expect(formatPeriodLabel('3months', 0, TODAY, 'dmy')).toBe('Jun – Aug 2026');
+        expect(formatPeriodLabel('year', 0, TODAY, 'dmy')).toBe('Aug 2025 – Aug 2026');
+
+        expect(formatPeriodLabel('week', 0, TODAY, 'ymd')).toBe('08-23 – 08-29');
+        expect(formatPeriodLabel('month', 0, TODAY, 'ymd')).toBe('07-31 – 08-29');
+        expect(formatPeriodLabel('3months', 0, TODAY, 'ymd')).toBe('2026-06 – 2026-08');
+        expect(formatPeriodLabel('year', 0, TODAY, 'ymd')).toBe('2025-08 – 2026-08');
+
+        // 'All time' has no dates in it, so it is the same under every pref.
+        for (const pref of DATE_FORMAT_PREFS) {
+            expect(formatPeriodLabel('alltime', 0, TODAY, pref)).toBe('All time');
+        }
+    });
+
+    // Paging back out of the current year has to keep working per-pref: the
+    // year is APPENDED for the name-based orders and CARRIED (year-first) for
+    // ISO, which is the one rule that isn't shared between the branches.
+    it('applies each order\'s own year rule when paging out of this year', () => {
+        expect(formatPeriodLabel('week', -40, TODAY, 'mdy')).toBe('Nov 16 – 22, 2025');
+        expect(formatPeriodLabel('week', -40, TODAY, 'dmy')).toBe('16 – 22 Nov 2025');
+        expect(formatPeriodLabel('week', -40, TODAY, 'ymd')).toBe(
+            '2025-11-16 – 2025-11-22',
+        );
     });
 });
 
