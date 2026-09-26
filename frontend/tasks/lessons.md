@@ -1,5 +1,59 @@
 # SoulSync — Project Lessons
 
+## 2026-09-26: A retrofitted display policy's `system` must reproduce THAT site's old bytes
+
+v2.14.0 added the `date_format` setting (`lib/dateFormat.ts`) and routed "every" date display
+through it. One was missed for two releases: the Statistics period header
+(`transforms/periodWindow.ts#formatDayRangeLabel`), so a user who set DD/MM/YYYY got day-first
+everywhere in the app and month-first on the caption over the whole Stats screen. Three general
+traps, in the order they bite.
+
+1. **The sweep for an app-wide display policy must find sites by what they PRODUCE, not by what
+   they call.** The v2.14.0 migration converted the `toLocaleDateString` call sites and the one
+   hardcoded `M/D` axis — which is exactly the grep you reach for. `formatDayRangeLabel` matched
+   neither: it had its own private `MONTH_NAMES` array and built the string by hand, so it was
+   invisible to the search that defined the work. When you introduce a policy, enumerate the
+   SURFACES that show the thing (here: every screen that renders a date or a range) and check each
+   one off, because the sites that already rolled their own are precisely the ones the obvious grep
+   cannot see.
+2. **`system` means "the bytes THIS call site used to emit", which is not the same thing at every
+   call site.** Everywhere else, pre-setting behaviour was `toLocaleDateString`, so `system` =
+   device locale. This function's pre-setting behaviour was hardcoded English month-first and never
+   touched `Intl` — so byte-identity here means month-first, and `system` and `mdy` produce
+   identical output in this one function. That asymmetry looks like an inconsistency and it is
+   load-bearing: "fixing" it by routing `system` through `toLocaleDateString` would silently change
+   the header for every existing user, which is the exact regression the default exists to prevent.
+   The whole legacy assertion set in `periodWindow.test.ts` / `customRangeWindow.test.ts` now runs
+   under `pref: 'system'` and IS that pin — don't relax it.
+3. **A pure-transform test cannot tell a threaded parameter from a defaulted one.** Giving the
+   transform a `pref` parameter and unit-testing all four prefs proves nothing about whether the
+   user's actual setting reaches it — a provider that passed `DEFAULT_DATE_FORMAT` would be green on
+   every one of them and change nothing on screen. `__tests__/periodHeaderDateFormat.test.tsx`
+   renders the real `TimeframeProvider` over a mocked `SettingsContext` and asserts the header text
+   per pref (plus that it RE-RENDERS when the setting changes, i.e. the pref is in the memo deps).
+   Counterfactual, run before trusting it: hardcoding the pref back in the provider reddens 8 of
+   those 13 and zero of the three pure suites.
+
+Shape chosen, for anyone touching the label again: the shared month is printed once on the side the
+ordering puts it (`Aug 23 – 29` vs `23 – 29 Aug`); a shared year trails the whole label and only
+when it isn't the current one, spelled the way `formatDate(end, pref, 'medium')` spells that end
+date; and `ymd` never abbreviates one end against the other, because a truncated ISO date stops
+being sortable, which is the only reason to pick ISO. Full table in the function's doc comment.
+
+**Running guardrail 1 properly found FOUR more, still OPEN** (the period header was only the one that
+got reported). Each shows a hardcoded English month under every pref, so a `ymd` user — who sees no
+month name from `formatDate` at any style — gets one anyway:
+`MonthOverMonthCard.tsx:19` (Stats, "January (this month)"), `transforms/heatmap.ts:141` (Stats,
+`toLocaleDateString('en-US')` column labels), `transforms/weeklyMood.ts:59` `monthYearLabel` (Stats
+year/alltime x-axis — note the REST of that same file already takes `pref`, so it is a half-migrated
+file, the easiest kind to miss), and `MoodMetricOverlayCard.tsx:60` (Insights, a private `MONTHS`
+array that hardcodes day-FIRST "1 Jul", so it is the `mdy` user who sees the wrong order there).
+Weekday-only labels (`weeklyMood.ts:95,116`, `chartUtils.ts:46`) are a lesser variant: they follow
+the device locale even under an explicit pref, contra `dateFormat.ts`'s "explicit prefs are
+locale-independent" contract. The fix for each is the same four lines — `useDateFormat()` in the
+component, `formatDate(day, pref, …)` in place of the private array — and none is forced by `tsc`,
+which is exactly why they survived two releases.
+
 ## 2026-09-13: A paginated list must never render FEWER rows than it did a moment ago
 
 "When in timeline if i scroll too fast or too far down it like glitches me all the way up and tbh im

@@ -10,6 +10,8 @@ import React, {
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { useDataRefresh } from '@/hooks/useDataRefresh';
+import { useDateFormat } from '@/hooks/useDateFormat';
+import { DEFAULT_DATE_FORMAT } from '@/lib/dateFormat';
 import { EARLIEST_ENTRY_DATE } from '@/components/visualisations/queries';
 import { localDateString } from '@/components/visualisations/transforms/dateHelpers';
 import {
@@ -151,7 +153,10 @@ const TimeframeContext = createContext<TimeframeContextType>({
   canGoBack: false,
   canGoForward: false,
   periodWindow: computePeriodWindow(DEFAULT_TIMEFRAME, 0, todayLocalDay()),
-  periodLabel: formatPeriodLabel(DEFAULT_TIMEFRAME, 0, todayLocalDay()),
+  // Provider-less fallback, so it gets the setting's own default rather than a
+  // guess — a consumer rendered outside TimeframeProvider is a bug, not a user
+  // whose date preference we should be inventing.
+  periodLabel: formatPeriodLabel(DEFAULT_TIMEFRAME, 0, todayLocalDay(), DEFAULT_DATE_FORMAT),
   earliestEntryDay: null,
   customRange: null,
   isCustom: false,
@@ -164,6 +169,11 @@ const TimeframeContext = createContext<TimeframeContextType>({
 
 export const TimeframeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const db = useSQLiteContext();
+  // The header label's day/month ordering. Read here, at the one place that
+  // BUILDS the label, so PeriodNavigator and MoodTrendExpanded (which only
+  // render the finished string) can never disagree about the format — and
+  // handed down as a parameter, never a hook, once it reaches the transform.
+  const { pref: dateFormatPref } = useDateFormat();
   // The PILL the user picked. Stays put while a custom range is active so
   // clearing the range returns them to the preset they were on, and so the
   // paging bounds below never have to reason about a custom window.
@@ -266,9 +276,9 @@ export const TimeframeProvider: React.FC<{ children: ReactNode }> = ({ children 
       customRange
         ? // Always DAY granularity: the user named two exact dates, so collapsing
           // them to months would stop describing what they actually picked.
-          formatDayRangeLabel(customRange, today, 'day')
-        : formatPeriodLabel(presetTimeframe, offset, today),
-    [customRange, presetTimeframe, offset, today],
+          formatDayRangeLabel(customRange, today, dateFormatPref, 'day')
+        : formatPeriodLabel(presetTimeframe, offset, today, dateFormatPref),
+    [customRange, presetTimeframe, offset, today, dateFormatPref],
   );
 
   // The real inclusive length of whatever window is active. For a bounded preset

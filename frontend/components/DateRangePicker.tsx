@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Calendar, type DateData } from 'react-native-calendars';
 
 import { OverlayModal } from '@/components/OverlayModal';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import { calendarThemeKey } from '@/components/visualisations/transforms/calendarMarkers';
 import {
@@ -67,6 +68,10 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({
 }) => {
     const colors = useThemeColors();
     const styles = useMemo(() => makeStyles(colors), [colors]);
+    // Both date strings below are built by PURE transforms, so the preference is
+    // read once here and passed down — the summary line has to be spelled the
+    // same way the Stats header will spell it after Apply.
+    const { pref: dateFormatPref } = useDateFormat();
 
     const [pending, setPending] = useState<RangeSelection | null>(null);
 
@@ -145,7 +150,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({
             <View style={styles.card} testID="date-range-picker">
                 <Text style={styles.title}>Custom range</Text>
                 <Text style={styles.summary} testID="date-range-summary">
-                    {selectionSummary(pending, maxDay)}
+                    {selectionSummary(pending, maxDay, dateFormatPref)}
                 </Text>
 
                 <Calendar
@@ -168,6 +173,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({
                         {`First entry: ${formatDayRangeLabel(
                             { startDay: earliestEntryDay, endDay: earliestEntryDay },
                             maxDay,
+                            dateFormatPref,
                             'day',
                         )}. Earlier dates just show empty days.`}
                     </Text>

@@ -16,6 +16,7 @@
 // periodWindow.ts is the authority that re-checks the pair before it can ever
 // reach a chart. This module only shapes what the user is pointing at.
 
+import { type DateFormatPref } from '@/lib/dateFormat';
 import { addDays } from './dateHelpers';
 import {
     dayCountInclusive,
@@ -145,16 +146,22 @@ export const buildRangeMarking = (
  * The picker's one-line status. Reuses `formatDayRangeLabel` so the pending
  * selection is spelled exactly the way the Stats header will spell it once
  * applied — the user sees the label they are about to get, not a variant of it.
+ *
+ * `pref` is the user's `date_format` setting, passed in rather than read from a
+ * hook (this module is pure) and REQUIRED for the same reason it is on
+ * `formatDayRangeLabel`: the promise above only holds if the caller hands this
+ * the SAME preference the header is rendered with.
  */
 export const selectionSummary = (
     selection: RangeSelection | null,
     today: string,
+    pref: DateFormatPref,
 ): string => {
     if (!selection) return 'Tap a start date';
     if (!isComplete(selection)) return 'Now tap an end date';
     const range = { startDay: selection.startDay, endDay: selection.endDay };
     const days = dayCountInclusive(range);
-    return `${formatDayRangeLabel(range, today, 'day')} · ${days} ${
+    return `${formatDayRangeLabel(range, today, pref, 'day')} · ${days} ${
         days === 1 ? 'day' : 'days'
     }`;
 };

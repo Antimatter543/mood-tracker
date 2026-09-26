@@ -29,6 +29,7 @@ import {
     todayLocalDay,
     type Timeframe,
 } from '@/components/visualisations/transforms/periodWindow';
+import { DATE_FORMAT_PREFS } from '@/lib/dateFormat';
 
 /** A Saturday, mid-year, mid-month — no boundary coincidences to hide bugs. */
 const TODAY = '2026-08-29';
@@ -223,46 +224,58 @@ describe('computePeriodWindow — SQL bounds', () => {
     });
 });
 
+// Every assertion in here passes pref 'system' — which makes this whole
+// describe the BYTE-IDENTITY PIN for the default: 'system' must reproduce the
+// exact strings this screen shipped before `date_format` existed, so an existing
+// user who never opens Settings sees no change. The other three prefs have their
+// own describe in customRangeWindow.test.ts (next to the shape table they test).
 describe('formatPeriodLabel', () => {
     it('reads week/month periods as concrete days', () => {
-        expect(formatPeriodLabel('week', 0, TODAY)).toBe('Aug 23 – 29');
-        expect(formatPeriodLabel('week', -1, TODAY)).toBe('Aug 16 – 22');
-        expect(formatPeriodLabel('month', 0, TODAY)).toBe('Jul 31 – Aug 29');
-        expect(formatPeriodLabel('month', -1, TODAY)).toBe('Jul 1 – 30');
+        expect(formatPeriodLabel('week', 0, TODAY, 'system')).toBe('Aug 23 – 29');
+        expect(formatPeriodLabel('week', -1, TODAY, 'system')).toBe('Aug 16 – 22');
+        expect(formatPeriodLabel('month', 0, TODAY, 'system')).toBe('Jul 31 – Aug 29');
+        expect(formatPeriodLabel('month', -1, TODAY, 'system')).toBe('Jul 1 – 30');
     });
 
     it('reads 3-month/year periods as months', () => {
-        expect(formatPeriodLabel('3months', 0, TODAY)).toBe('Jun – Aug 2026');
-        expect(formatPeriodLabel('3months', -1, TODAY)).toBe('Mar – May 2026');
-        expect(formatPeriodLabel('year', 0, TODAY)).toBe('Aug 2025 – Aug 2026');
-        expect(formatPeriodLabel('year', -1, TODAY)).toBe('Aug 2024 – Aug 2025');
+        expect(formatPeriodLabel('3months', 0, TODAY, 'system')).toBe('Jun – Aug 2026');
+        expect(formatPeriodLabel('3months', -1, TODAY, 'system')).toBe('Mar – May 2026');
+        expect(formatPeriodLabel('year', 0, TODAY, 'system')).toBe('Aug 2025 – Aug 2026');
+        expect(formatPeriodLabel('year', -1, TODAY, 'system')).toBe('Aug 2024 – Aug 2025');
     });
 
     // The year is noise while you're in the current one and essential once
     // you've paged out of it.
     it('omits the year inside the current year and adds it once you leave', () => {
-        expect(formatPeriodLabel('week', 0, TODAY)).not.toMatch(/2026/);
-        expect(formatPeriodLabel('week', -40, TODAY)).toBe('Nov 16 – 22, 2025');
+        expect(formatPeriodLabel('week', 0, TODAY, 'system')).not.toMatch(/2026/);
+        expect(formatPeriodLabel('week', -40, TODAY, 'system')).toBe('Nov 16 – 22, 2025');
     });
 
     it('spells out both years when a period straddles new year', () => {
-        expect(formatPeriodLabel('week', 0, '2026-01-05')).toBe(
+        expect(formatPeriodLabel('week', 0, '2026-01-05', 'system')).toBe(
             'Dec 30, 2025 – Jan 5, 2026',
         );
-        expect(formatPeriodLabel('month', -1, '2026-01-31')).toBe(
+        expect(formatPeriodLabel('month', -1, '2026-01-31', 'system')).toBe(
             'Dec 3, 2025 – Jan 1, 2026',
         );
-        expect(formatPeriodLabel('year', 0, '2026-01-05')).toBe('Jan 2025 – Jan 2026');
+        expect(formatPeriodLabel('year', 0, '2026-01-05', 'system')).toBe(
+            'Jan 2025 – Jan 2026',
+        );
     });
 
     it('labels alltime plainly and ignores the offset', () => {
-        expect(formatPeriodLabel('alltime', 0, TODAY)).toBe('All time');
-        expect(formatPeriodLabel('alltime', -4, TODAY)).toBe('All time');
+        expect(formatPeriodLabel('alltime', 0, TODAY, 'system')).toBe('All time');
+        expect(formatPeriodLabel('alltime', -4, TODAY, 'system')).toBe('All time');
     });
 
-    it.each(ALL)('%s always produces a non-empty label', (tf) => {
-        for (const offset of [0, -1, -12, -100]) {
-            expect(formatPeriodLabel(tf, offset, TODAY).length).toBeGreaterThan(0);
+    // Widened to every pref: a label is the Stats header's whole caption, so an
+    // empty one is a blank header — and it must be impossible under ANY setting,
+    // not just the default.
+    it.each(ALL)('%s always produces a non-empty label under every pref', (tf) => {
+        for (const pref of DATE_FORMAT_PREFS) {
+            for (const offset of [0, -1, -12, -100]) {
+                expect(formatPeriodLabel(tf, offset, TODAY, pref).length).toBeGreaterThan(0);
+            }
         }
     });
 });
