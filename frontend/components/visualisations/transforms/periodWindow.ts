@@ -267,9 +267,14 @@ const isoDay = (year: number, month: number, date: number, withYear: boolean): s
  *   3. `ymd` never abbreviates one end against the other. A truncated ISO date
  *      stops being sortable and unambiguous, which is the only reason to pick
  *      ISO; so the current-year rule becomes "carry the year or don't", never
- *      "append it". Month granularity is `YYYY-MM` for the same reason a `ymd`
- *      user sees no month NAME anywhere else in the app — both `longDate` and
- *      `mediumDate` in lib/dateFormat.ts fall back to the numeric form for it.
+ *      "append it". Month granularity is `YYYY-MM` because lib/dateFormat.ts
+ *      emits NO month name under `ymd` at ANY style — both `longDate` and
+ *      `mediumDate` fall back to the numeric form — so spelling one here would
+ *      be the policy contradicting itself. (Four surfaces DO still show a
+ *      hardcoded English month under every pref: MonthOverMonthCard,
+ *      transforms/heatmap.ts, weeklyMood.ts's `monthYearLabel`, and
+ *      MoodMetricOverlayCard. They predate the setting exactly as this file
+ *      did — the same unfinished migration, not a precedent to copy.)
  */
 export const formatDayRangeLabel = (
     { startDay, endDay }: DayRange,

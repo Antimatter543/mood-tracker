@@ -40,6 +40,20 @@ when it isn't the current one, spelled the way `formatDate(end, pref, 'medium')`
 date; and `ymd` never abbreviates one end against the other, because a truncated ISO date stops
 being sortable, which is the only reason to pick ISO. Full table in the function's doc comment.
 
+**Running guardrail 1 properly found FOUR more, still OPEN** (the period header was only the one that
+got reported). Each shows a hardcoded English month under every pref, so a `ymd` user — who sees no
+month name from `formatDate` at any style — gets one anyway:
+`MonthOverMonthCard.tsx:19` (Stats, "January (this month)"), `transforms/heatmap.ts:141` (Stats,
+`toLocaleDateString('en-US')` column labels), `transforms/weeklyMood.ts:59` `monthYearLabel` (Stats
+year/alltime x-axis — note the REST of that same file already takes `pref`, so it is a half-migrated
+file, the easiest kind to miss), and `MoodMetricOverlayCard.tsx:60` (Insights, a private `MONTHS`
+array that hardcodes day-FIRST "1 Jul", so it is the `mdy` user who sees the wrong order there).
+Weekday-only labels (`weeklyMood.ts:95,116`, `chartUtils.ts:46`) are a lesser variant: they follow
+the device locale even under an explicit pref, contra `dateFormat.ts`'s "explicit prefs are
+locale-independent" contract. The fix for each is the same four lines — `useDateFormat()` in the
+component, `formatDate(day, pref, …)` in place of the private array — and none is forced by `tsc`,
+which is exactly why they survived two releases.
+
 ## 2026-09-13: A paginated list must never render FEWER rows than it did a moment ago
 
 "When in timeline if i scroll too fast or too far down it like glitches me all the way up and tbh im
