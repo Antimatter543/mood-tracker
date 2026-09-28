@@ -95,6 +95,23 @@ const DevDatabaseSection = ({
             >
                 <Text style={styles.buttonText}>Generate 50 Sample Entries</Text>
             </Pressable>
+
+            {/* Bigger, realistic seed for Timeline scroll/QA: day-clustered
+                multi-entry groups, mixed note lengths, photos, stars — see
+                components/generateData.ts (planSeedEntries). */}
+            <Pressable
+                style={({ pressed }) => [
+                    styles.button,
+                    styles.buttonPrimary,
+                    pressed && styles.buttonPressed
+                ]}
+                onPress={async () => {
+                    await seedMoodEntries(db, 300);
+                    refetchEntries();
+                }}
+            >
+                <Text style={styles.buttonText}>Generate 300 Timeline QA Entries</Text>
+            </Pressable>
         </View>
     );
 };
