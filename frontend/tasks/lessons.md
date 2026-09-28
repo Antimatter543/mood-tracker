@@ -1,5 +1,78 @@
 # SoulSync — Project Lessons
 
+## 2026-09-28: A fling that outruns rendering leaves cells unmeasured, and VirtualizedList places them at `average × index`
+
+"When I scroll down hard/fast enough it's still glitchy, and if I do it fast enough it'll teleport
+me back up to the most recent date or a more recent date." The 2026-09-13 fix removed the
+DEPTH-dependent half of this report (a refresh that truncated the list). This is the other half, and
+it is FLING-dependent: slow scrolling never shows it.
+
+**Root cause, read out of RN 0.85's own source, not guessed.** A hard fling moves VirtualizedList's
+render window past cells that never mount, so they are never measured. For an unmeasured cell at an
+index BELOW the highest measured one, `ListMetricsAggregator.getCellMetricsApprox` returns
+`offset = averageCellLength * index` — a flat estimate that ignores every real measured offset before
+it. Spacers and window-boundary cells are then placed from those estimates, so whenever the window
+later moves across the unmeasured stretch, the content above the viewport changes height by the
+accumulated error, and everything under the user's finger shifts. Two things made it worse here:
+(1) sticky section headers — VirtualizedList renders the active section's header at its own index on
+every window update, so a boundary lands in the unmeasured region constantly; (2) the error is a
+fraction of the offset, so it GROWS WITH DEPTH — deep in the list it is thousands of px, i.e. "a
+more recent date". Nothing compensated, because `maintainVisibleContentPosition` had been removed on
+2026-09-03 (it hid new entries at the top). The tail spacer is also clamped to the highest MEASURED
+cell without `getItemLayout` (source comment: "to prevent the user for hyperscrolling into un-measured
+area because otherwise content will likely jump around"), which is the stutter half of "glitchy".
+
+**Fix: remove the mechanism, don't tune it.** The Timeline is now `@shopify/flash-list` v2:
+- its layout table is CONTIGUOUS (each row's y = previous y + height, estimated or measured — never
+  `average × index`), rendered cells are measured synchronously before paint on the new architecture,
+  and `maintainVisibleContentPosition` (on by default in v2) corrects for any size change above the
+  first visible row, anchored to that row's KEY;
+- photo boxes are FIXED size (expo-image + `recyclingKey`), so an image load never changes a row;
+- the footer is a constant 64px (a spinner that mounts/unmounts changed content height twice per page,
+  and content that shrinks at the end makes Android clamp the offset);
+- pages are 50 rows (was 20) and the prefetch starts 2 screens from the end (was 0.5), so a fling is
+  still over loaded rows when the next page lands.
+
+**The trap that nearly shipped with it: content-position maintenance HIDES insertions at the top.**
+It is the 2026-09-03 bug in a new list — the anchor holds still, so a new entry lands above the
+viewport. FlashList v2 offers `autoscrollToTopThreshold`, and it is the wrong tool: Android's
+`MaintainVisibleScrollPositionHelper` scrolls to the top on EVERY anchor correction while the offset is
+under the threshold, including a plain re-measure of a row above the viewport — a new "teleport to the
+top" for anyone near it. Instead the refresh path decides with the pure `shouldRevealInsertion` (an
+entry that is NEW and sits above an already-loaded one — an insertion, not an append — landed above
+the first visible row, and the user is within one viewport of the top) and scrolls to 0 once the rows
+have committed. A deep user keeps their place; the new back-to-top pill is one tap away.
+
+**Traps found while doing it, each general:**
+1. **A decision taken by a run that can be superseded must live in a ref the COMMITTING run consumes.**
+   A filter change fires both `useDataRefresh` vectors in one commit; the first run saw
+   `filterChanged === true` and was dropped by the latch, the second saw `false`, and the "start the
+   new list at the top" decision vanished. Same shape as the 2026-09-13 `loadedCountRef` note.
+2. **Recycled cells leak local state.** FlashList re-renders the SAME component instance with another
+   entry's props, so `useState` in a cell (the photo viewer's open flag, a thumbnail's `failed`, the
+   card's delete strip) carries over to whatever entry recycles into it. Use `useRecyclingState(init,
+   [id])`. Test it by `rerender`ing the same element with a different entry — that IS recycling.
+3. **A refresh that re-reads SQL hands back new objects for every row**, which defeats `React.memo` on
+   every mounted card after every write anywhere in the app. `reuseUnchanged` carries unchanged
+   entries over by reference.
+4. **`jest.requireMock('pkg')` returns a SEPARATE instance of a root-`__mocks__` module.** Scripting its
+   `jest.fn`s silently never reaches the copy the component imported. Use a plain `require('pkg')`.
+5. **Nested buttons inside a `Pressable` are invisible to TalkBack** (a Pressable is an accessibility
+   container). The card body is the edit button; star / more actions / photos are SIBLINGS of it.
+6. **The contrast invariant over every theme found a pre-existing app-wide failure**: forest's
+   `textSecondary` was 3.98:1 on its page (AA is 4.5). Measure all five themes from the real tokens
+   (`timelineContrast.test.ts`), never one by eye.
+
+**Testing it.** A virtualized list gets no layout under jest, so `__mocks__/@shopify/flash-list.tsx` is
+a PROBE: every prop lands on the `timeline-list` host, every row renders unvirtualized, and its ref
+exposes `jest.fn`s (`getFirstVisibleIndex`, `scrollToOffset`) so a test scripts the viewport and
+asserts the scroll. The row model is pure and unit-tested (`timelineRows.test.ts`). Counterfactuals run
+before trusting the suite — each of these mutations reddens at least one test: recycling state back to
+`useState` (card, photos), no `reuseUnchanged`, no insertion reveal, reveal ignoring depth, the
+toggling footer, 20-row pages, no append dedupe, one-page refresh (the 2026-09-13 bug), the lost
+filter reset. The fling itself is device-only: seed with Settings → "Generate 300 Timeline QA Entries"
+(`__DEV__`) and fling hard, repeatedly, at depth.
+
 ## 2026-09-26: A retrofitted display policy's `system` must reproduce THAT site's old bytes
 
 v2.14.0 added the `date_format` setting (`lib/dateFormat.ts`) and routed "every" date display
