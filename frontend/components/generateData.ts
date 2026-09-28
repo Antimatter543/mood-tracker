@@ -247,20 +247,10 @@ async function ensureSamplePhotoFiles(): Promise<string[]> {
   return cachedSamplePhotoPaths;
 }
 
-// Helper to get random activities for an entry
+// Random activities for an entry: the shared `shuffled` helper, then a prefix.
 function getRandomActivities(activities: Activity[], count: number) {
-    // Create array of indices and shuffle those instead of the activities
-    const indices = Array.from(activities.keys());
-    for (let i = indices.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [indices[i], indices[j]] = [indices[j], indices[i]];
-    }
-
-    // Use shuffled indices to get random activities
-    return indices
-      .slice(0, Math.min(count, activities.length))
-      .map(i => activities[i]);
-  }
+  return shuffled(activities, Math.random).slice(0, Math.min(count, activities.length));
+}
 
 // Main seeding function. Used both by the Settings "Generate 50 Sample
 // Entries" button and the "Generate 300 Timeline QA Entries" button — the

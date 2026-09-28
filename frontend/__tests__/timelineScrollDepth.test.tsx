@@ -142,6 +142,8 @@ jest.mock('@/databases/mediaHelpers', () => ({
     deleteMediaFile: jest.fn(),
 }));
 
+let mockSetEntryStarred = jest.fn().mockResolvedValue({ success: true, message: 'ok' });
+
 // The soft delete: succeeds, and removes the row from the fake table so the next
 // window read reflects the DB the way a real soft delete would.
 const mockDeleteMoodEntry = jest.fn(async (_db: unknown, id: number) => {
@@ -152,7 +154,7 @@ jest.mock('@/databases/entries', () => ({
     ...jest.requireActual('@/databases/entries'),
     deleteMoodEntry: (...args: any[]) => (mockDeleteMoodEntry as any)(...args),
     updateMoodEntry: jest.fn().mockResolvedValue({ success: true, message: 'ok' }),
-    setEntryStarred: jest.fn().mockResolvedValue({ success: true, message: 'ok' }),
+    setEntryStarred: (...args: any[]) => (mockSetEntryStarred as any)(...args),
 }));
 // Keep the bin badge off `getAllAsync` so `windows` only ever records entry reads.
 jest.mock('@/databases/entry-bin', () => ({
@@ -164,16 +166,29 @@ jest.mock('@/databases/entry-bin', () => ({
 }));
 jest.mock('@/components/forms/EntryForm', () => ({ EntryFormModal: () => null }));
 jest.mock('@/components/EmptyState', () => ({ EmptyState: () => null }));
-// A card thin enough to drive from a test: its notes as text, plus a delete
-// button that exercises the real `onDelete(id)` contract.
+// A card thin enough to drive from a test: its notes as text, plus delete and
+// star buttons that exercise the real `onDelete(id)` / `onToggleStar(entry)`
+// contracts.
 jest.mock('@/components/timeline/EntryCard', () => ({
-    EntryCard: ({ entry, onDelete }: any) => {
+    EntryCard: ({ entry, onDelete, onToggleStar }: any) => {
         const ReactActual = require('react') as typeof React;
-        const { Text: RNText, Pressable } = require('react-native');
+        const { Text: RNText, Pressable, View: RNView } = require('react-native');
         return ReactActual.createElement(
-            Pressable,
-            { testID: `delete-${entry.id}`, onPress: () => onDelete(entry.id) },
-            ReactActual.createElement(RNText, null, entry.notes)
+            RNView,
+            null,
+            ReactActual.createElement(
+                Pressable,
+                { testID: `delete-${entry.id}`, onPress: () => onDelete(entry.id) },
+                ReactActual.createElement(RNText, null, entry.notes)
+            ),
+            ReactActual.createElement(Pressable, {
+                testID: `star-${entry.id}`,
+                // Not returned: RNTL 14 awaits a handler's promise, and the test
+                // holds the star write open on purpose.
+                onPress: () => {
+                    void onToggleStar(entry);
+                },
+            })
         );
     },
 }));
@@ -347,5 +362,36 @@ describe("Timeline — the next page's offset follows the rows on screen", () =>
         // lands at the bottom.
         await reachEnd(view);
         expect(windows).toHaveLength(0);
+    });
+});
+
+describe('Timeline, a failed star toggle', () => {
+    it('reverts only that entry and keeps a page appended while the write was in flight', async () => {
+        const { Alert } = require('react-native');
+        jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+        const view = await mountAtDepth(2);
+        let failWrite: (r: unknown) => void = () => {};
+        mockSetEntryStarred = jest.fn(
+            () => new Promise((resolve) => { failWrite = resolve; })
+        );
+
+        await fireEvent.press(view.getByTestId('star-1'));
+        await waitFor(() =>
+            expect(loadedEntries(view).find((e: any) => e.id === 1).starred_at).not.toBeNull()
+        );
+        // A page lands while the star write is still pending.
+        await reachEnd(view);
+        await waitFor(() => expect(loadedEntries(view)).toHaveLength(3 * P));
+
+        await act(async () => {
+            failWrite({ success: false, message: 'disk full' });
+        });
+
+        // Before this fix the handler restored a snapshot taken BEFORE the await:
+        // the appended page vanished (3P -> 2P rows) under the user.
+        expect(loadedEntries(view)).toHaveLength(3 * P);
+        expect(loadedEntries(view).find((e: any) => e.id === 1).starred_at).toBeNull();
+        expect(Alert.alert).toHaveBeenCalledWith("Couldn't update star", 'disk full');
+        mockSetEntryStarred = jest.fn().mockResolvedValue({ success: true, message: 'ok' });
     });
 });

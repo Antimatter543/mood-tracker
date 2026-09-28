@@ -373,22 +373,25 @@ export function DatabaseViewer() {
     const handleToggleStar = useCallback(async (entry: MoodEntry) => {
         const nextStarred = entry.starred_at == null;
         const nextStarredAt = nextStarred ? new Date().toISOString() : null;
-        // Snapshot for revert-on-failure — read from the ref so this handler's
-        // identity doesn't change with every list update.
-        const prevEntries = entriesRef.current;
+        const leavesList = starredOnlyRef.current && !nextStarred;
 
         // Optimistic update. Under the starred filter an UNstar means the entry
         // no longer matches, so it leaves the list; otherwise it's updated in
         // place (a NEW object, so its memoized card re-renders).
         setEntries(current =>
-            starredOnlyRef.current && !nextStarred
+            leavesList
                 ? current.filter(e => e.id !== entry.id)
                 : current.map(e => (e.id === entry.id ? { ...e, starred_at: nextStarredAt } : e))
         );
 
         const result = await setEntryStarred(db, entry.id, nextStarred);
         if (!result.success) {
-            setEntries(prevEntries);
+            // Revert ONLY this entry. Restoring a whole snapshot taken before the
+            // await would also throw away a page that was appended meanwhile —
+            // shrinking the window under the user. An entry that left the list
+            // comes back through a window refresh, which re-reads at full depth.
+            if (leavesList) void loadEntriesRef.current();
+            else setEntries(current => current.map(e => (e.id === entry.id ? entry : e)));
             Alert.alert("Couldn't update star", result.message);
             return;
         }
@@ -480,7 +483,8 @@ export function DatabaseViewer() {
         // eslint-disable-next-line react-hooks/exhaustive-deps -- getEntriesWindow reads db + refs (not closed deps); the filter deps make this loader re-run (collapsing to one page) on a filter change via useDataRefresh; setState + latch identities are stable
     }, [db, debouncedQuery, moodPresetKey, starredOnly]);
     useDataRefresh(loadEntries, [db, debouncedQuery, moodPresetKey, starredOnly]);
-    // Undo + the bin panel need to re-run the CURRENT loader.
+    // The memoized star handler (declared above the loader) re-runs the CURRENT
+    // loader through this ref; plain per-render closures call `loadEntries`.
     const loadEntriesRef = useRef(loadEntries);
     loadEntriesRef.current = loadEntries;
 
@@ -506,7 +510,7 @@ export function DatabaseViewer() {
             Alert.alert("Couldn't restore entry", result.message);
             return;
         }
-        await loadEntriesRef.current();
+        await loadEntries();
         broadcastWrite();
     };
 
@@ -732,7 +736,7 @@ export function DatabaseViewer() {
                 visible={binVisible}
                 onClose={() => setBinVisible(false)}
                 onChanged={() => {
-                    loadEntriesRef.current();
+                    loadEntries();
                     broadcastWrite();
                 }}
             />
