@@ -3,6 +3,15 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.15.0] - 2026-09-28
+
+### Changed
+- **A redesigned Timeline.** Each day shows its entry count and average mood, and a mood line runs down the page with each entry's score. Tap an entry to edit it; delete is under the "..." button and can still be undone. A "Back to top" button appears when you scroll deep.
+
+### Fixed
+- **Fast scrolling no longer jumps you back to a more recent date.**
+- **Statistics dates follow your date format setting.**
+
 ## [2.14.0] - 2026-09-19
 
 ### Added
