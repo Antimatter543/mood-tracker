@@ -36,6 +36,7 @@
  */
 import React from 'react';
 import { render, act, waitFor, fireEvent } from '@testing-library/react-native';
+import { TIMELINE_PAGE_SIZE } from '@/components/timeline/timelineRows';
 
 // ── expo-router: `useFocusEffect` models a focus gain that re-runs when the
 //    callback identity changes (production behaviour — react-navigation re-runs
@@ -52,7 +53,7 @@ jest.mock('expo-router', () => {
     };
 });
 
-// ── The DB: a synthetic 100-entry table served through the REAL
+// ── The DB: a synthetic 5-page table served through the REAL
 //    limit/offset bind positions, so the test exercises the window the component
 //    actually asks for instead of a hand-fed page. `getEntriesWindow` binds
 //    `[...filterParams, limit, offset]`, so the window is always the last two. ──
@@ -74,7 +75,7 @@ const entryRow = (id: number) => ({
     activity_icon_names: null,
     activity_icon_families: null,
 });
-const TOTAL_ENTRIES = 100;
+const TOTAL_ENTRIES = 5 * TIMELINE_PAGE_SIZE;
 /** Rows still live in the fake DB, newest first. Deletes remove from here too. */
 let table = Array.from({ length: TOTAL_ENTRIES }, (_, i) => entryRow(i + 1));
 
@@ -180,7 +181,8 @@ jest.mock('@/components/timeline/EntryCard', () => ({
 import { OverlayProvider } from '@/context/OverlayHost';
 import { DatabaseViewer } from '@/components/DBViewer';
 
-const ITEMS_PER_PAGE = 20;
+const ITEMS_PER_PAGE = TIMELINE_PAGE_SIZE;
+const P = TIMELINE_PAGE_SIZE;
 
 const renderTimeline = () =>
     render(
@@ -190,19 +192,22 @@ const renderTimeline = () =>
     );
 
 /**
- * The loaded rows, read off the list itself. `VirtualizedSectionList` hands its
- * `sections` array down as VirtualizedList's `data`, and that is the prop that
- * reaches the host element the testID lands on — so `props.data` IS the sections.
+ * The loaded entries, read off the list itself: the FlashList probe
+ * (__mocks__/@shopify/flash-list.tsx) puts every prop on the testID'd host, so
+ * `props.data` IS the flat row array (day headers + entries).
  */
 const loadedEntries = (view: any): any[] =>
-    view.getByTestId('timeline-list').props.data.flatMap((s: any) => s.data);
+    view
+        .getByTestId('timeline-list')
+        .props.data.filter((row: any) => row.type === 'entry')
+        .map((row: any) => row.entry);
 const loadedIds = (view: any): number[] => loadedEntries(view).map((e: any) => e.id);
 
 /** Fire the list's own `onEndReached` — the real pagination entry point. */
 const reachEnd = async (view: ReturnType<typeof render> extends Promise<infer T> ? T : any) => {
     const list = view.getByTestId('timeline-list');
     await act(async () => {
-        list.props.onEndReached({ distanceFromEnd: 0 });
+        list.props.onEndReached();
     });
 };
 
@@ -236,11 +241,11 @@ describe('Timeline — a refresh must preserve the loaded scroll depth', () => {
         const view = await mountAtDepth(3);
         expect(windows).toEqual([
             { limit: ITEMS_PER_PAGE, offset: 0 },
-            { limit: ITEMS_PER_PAGE, offset: 20 },
-            { limit: ITEMS_PER_PAGE, offset: 40 },
+            { limit: ITEMS_PER_PAGE, offset: P },
+            { limit: ITEMS_PER_PAGE, offset: 2 * P },
         ]);
         // Sanity: the deepest page's rows really did reach the component's data.
-        expect(loadedEntries(view)).toHaveLength(60);
+        expect(loadedEntries(view)).toHaveLength(3 * P);
     });
 
     it('re-reads the WHOLE loaded window on a data-version bump (the truncation bug)', async () => {
@@ -259,11 +264,11 @@ describe('Timeline — a refresh must preserve the loaded scroll depth', () => {
         });
         await waitFor(() => expect(windows.length).toBeGreaterThan(0));
 
-        // Pre-fix this was `{ limit: 20, offset: 0 }` — 60 loaded rows replaced by
-        // 20, the scroll offset clamped into the shorter content.
-        expect(windows).toContainEqual({ limit: 60, offset: 0 });
-        expect(windows.every((w) => w.offset === 0 && w.limit === 60)).toBe(true);
-        expect(loadedEntries(view)).toHaveLength(60);
+        // Before 2026-09-13 this was `{ limit: P, offset: 0 }`: 3P loaded rows
+        // replaced by P, the scroll offset clamped into the shorter content.
+        expect(windows).toContainEqual({ limit: 3 * P, offset: 0 });
+        expect(windows.every((w) => w.offset === 0 && w.limit === 3 * P)).toBe(true);
+        expect(loadedEntries(view)).toHaveLength(3 * P);
     });
 
     it('keeps paginating from the refreshed depth, not from page 1', async () => {
@@ -276,14 +281,14 @@ describe('Timeline — a refresh must preserve the loaded scroll depth', () => {
                 </OverlayProvider>
             );
         });
-        await waitFor(() => expect(windows).toContainEqual({ limit: 60, offset: 0 }));
+        await waitFor(() => expect(windows).toContainEqual({ limit: 3 * P, offset: 0 }));
         windows.length = 0;
 
         await reachEnd(view);
         await waitFor(() => expect(windows.length).toBe(1));
         // The next page continues past the refreshed window instead of re-fetching
-        // rows 20-39 all over again.
-        expect(windows[0]).toEqual({ limit: ITEMS_PER_PAGE, offset: 60 });
+        // the second page all over again.
+        expect(windows[0]).toEqual({ limit: ITEMS_PER_PAGE, offset: 3 * P });
     });
 
     it('collapses back to one page when the FILTER changes (the one legitimate reset)', async () => {
@@ -304,37 +309,39 @@ describe('Timeline — a refresh must preserve the loaded scroll depth', () => {
 describe("Timeline — the next page's offset follows the rows on screen", () => {
     it('does not skip an entry after a local delete shortens the list', async () => {
         const view = await mountAtDepth(3);
-        // Deleting an entry splices it out of the rendered list, leaving 59 rows.
+        // Deleting an entry splices it out of the rendered list, leaving 3P-1 rows.
         await act(async () => {
             await fireEvent.press(view.getByTestId('delete-1'));
         });
         await waitFor(() => expect(mockDeleteMoodEntry).toHaveBeenCalledWith(mockDb, 1));
-        await waitFor(() => expect(loadedEntries(view)).toHaveLength(59));
+        await waitFor(() => expect(loadedEntries(view)).toHaveLength(3 * P - 1));
         windows.length = 0;
 
         await reachEnd(view);
         await waitFor(() => expect(windows.length).toBe(1));
-        // Pre-fix: offset 60 (page 3 × 20) over a 59-row window — entry 61 was
-        // never fetched by any page and vanished from the user's history.
-        expect(windows[0]).toEqual({ limit: ITEMS_PER_PAGE, offset: 59 });
-        await waitFor(() => expect(loadedIds(view)).toContain(61));
+        // Before 2026-09-13: offset 3P (page 3 x P) over a 3P-1 row window, so
+        // entry 3P+1 was never fetched by any page and vanished from the history.
+        expect(windows[0]).toEqual({ limit: ITEMS_PER_PAGE, offset: 3 * P - 1 });
+        await waitFor(() => expect(loadedIds(view)).toContain(3 * P + 1));
     });
 
     it('never loads the same entry twice, at any depth', async () => {
         const view = await mountAtDepth(5);
         const ids = loadedIds(view);
         expect(ids).toHaveLength(new Set(ids).size);
-        // Duplicate ids would be duplicate SectionList keys — the thing that
-        // corrupts VirtualizedList cell measurement on Android.
-        expect(ids).toEqual(Array.from({ length: 100 }, (_, i) => i + 1));
+        // Duplicate ids would be duplicate list keys, which breaks FlashList's
+        // key-anchored content-position maintenance and its cell recycling.
+        expect(ids).toEqual(Array.from({ length: TOTAL_ENTRIES }, (_, i) => i + 1));
+        const keys = view.getByTestId('timeline-list').props.data.map((row: any) => row.key);
+        expect(new Set(keys).size).toBe(keys.length);
     });
 
     it('stops asking for more once a window comes back short', async () => {
-        const view = await mountAtDepth(5); // all 100 rows loaded
+        const view = await mountAtDepth(5); // all 5P rows loaded
         windows.length = 0;
         await reachEnd(view);
         await waitFor(() => expect(windows.length).toBe(1));
-        expect(windows[0]).toEqual({ limit: ITEMS_PER_PAGE, offset: 100 });
+        expect(windows[0]).toEqual({ limit: ITEMS_PER_PAGE, offset: TOTAL_ENTRIES });
         windows.length = 0;
         // hasMore is now false, so the list stops hitting SQL on every fling that
         // lands at the bottom.

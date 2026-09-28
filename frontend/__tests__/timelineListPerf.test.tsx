@@ -13,6 +13,9 @@
  */
 import React from 'react';
 import { render, act, waitFor } from '@testing-library/react-native';
+import { TIMELINE_PAGE_SIZE } from '@/components/timeline/timelineRows';
+import { TIMELINE_FOOTER_HEIGHT } from '@/components/timeline/TimelineFooter';
+import { StyleSheet } from 'react-native';
 
 let mockDataVersion = 0;
 jest.mock('expo-router', () => {
@@ -25,7 +28,9 @@ jest.mock('expo-router', () => {
     };
 });
 
-const ROWS = Array.from({ length: 40 }, (_, i) => ({
+// Two full pages, so the first read is a FULL window (hasMore) and an append
+// really happens.
+const ROWS = Array.from({ length: 2 * TIMELINE_PAGE_SIZE }, (_, i) => ({
     id: i + 1,
     mood: 6,
     notes: `entry-${i + 1}`,
@@ -161,7 +166,7 @@ describe('Timeline — the props it hands each card are stable', () => {
         // The event that used to re-render every mounted card.
         const list = view.getByTestId('timeline-list');
         await act(async () => {
-            list.props.onEndReached({ distanceFromEnd: 0 });
+            list.props.onEndReached();
         });
         await waitFor(() => expect(mockDb.getAllAsync).toHaveBeenCalledTimes(2));
 
@@ -192,16 +197,84 @@ describe('Timeline — the props it hands each card are stable', () => {
         expect(after.onToggleStar).toBe(before.onToggleStar);
     });
 
-    it('bounds the render window so the whole loaded list is not permanently mounted', async () => {
-        // RN's default `windowSize` is 21 VIEWPORTS — for a few hundred entry cards
-        // that exceeds the entire content, so nothing was ever unmounted and every
-        // mounted card took part in every render pass. The exact number is a
-        // judgement call; that it is BOUNDED, and well clear of the 2-viewport floor
-        // that would make a fling land on unrendered space, is the contract.
+    it('a refresh carries UNCHANGED entries over by reference, so their cards bail out', async () => {
+        // A refresh re-reads the whole window from SQL, which builds a NEW object
+        // for every row. Handing those to memoized cards would re-render every
+        // mounted card after every write anywhere in the app (reuseUnchanged).
+        const view = await render(<Timeline />);
+        await waitFor(() => expect(mockHanded.length).toBeGreaterThan(0));
+        const before = latestFor(1)!;
+
+        await act(async () => {
+            mockDataVersion = 1;
+            view.rerender(<Timeline />);
+        });
+        await waitFor(() => expect(mockDb.getAllAsync.mock.calls.length).toBeGreaterThan(1));
+
+        expect(latestFor(1)!.entry).toBe(before.entry);
+    });
+
+    it('recycles by row kind: headers, text entries and photo entries use separate pools', async () => {
         const view = await render(<Timeline />);
         await waitFor(() => expect(mockHanded.length).toBeGreaterThan(0));
         const list = view.getByTestId('timeline-list');
-        expect(list.props.windowSize).toBeGreaterThanOrEqual(3);
-        expect(list.props.windowSize).toBeLessThanOrEqual(10);
+        const types = new Set(list.props.data.map((row: any) => list.props.getItemType(row)));
+        expect(types).toEqual(new Set(['header', 'entry']));
+        expect(
+            list.props.getItemType({
+                type: 'entry',
+                key: 'entry:99',
+                entry: { ...ROWS[0], activities: [], photos: [{ id: 1, entry_id: 99, file_path: 'x', media_type: 'image' }] },
+                isFirstOfDay: true,
+                isLastOfDay: true,
+            })
+        ).toBe('entry-photos');
+        // Sticky indices are exactly the header rows.
+        const headerIdx = list.props.data
+            .map((row: any, i: number) => (row.type === 'header' ? i : -1))
+            .filter((i: number) => i >= 0);
+        expect(list.props.stickyHeaderIndices).toEqual(headerIdx);
+        // Every row key is unique (key-anchored position maintenance + recycling).
+        const keys = list.props.data.map((row: any) => row.key);
+        expect(new Set(keys).size).toBe(keys.length);
+    });
+
+    it('prefetches well before the end, with pages big enough that a fling does not hit it', async () => {
+        const view = await render(<Timeline />);
+        await waitFor(() => expect(mockHanded.length).toBeGreaterThan(0));
+        const list = view.getByTestId('timeline-list');
+        // FlashList measures the threshold in viewport lengths: >= 1.5 screens of
+        // runway (it was 0.5 on the SectionList, with 20-row pages).
+        expect(list.props.onEndReachedThreshold).toBeGreaterThanOrEqual(1.5);
+        expect(TIMELINE_PAGE_SIZE).toBeGreaterThanOrEqual(40);
+        expect(mockDb.getAllAsync.mock.calls[0][1].slice(-2)).toEqual([TIMELINE_PAGE_SIZE, 0]);
+    });
+
+    it('the footer keeps ONE height whether loading, idle or at the end', async () => {
+        // A footer that mounts a spinner and unmounts it again changes the content
+        // height twice per page, and a content height that shrinks at the end of
+        // the list makes Android clamp the scroll offset.
+        let resolvePage: (rows: unknown[]) => void = () => {};
+        const view = await render(<Timeline />);
+        await waitFor(() => expect(mockHanded.length).toBeGreaterThan(0));
+        const heightNow = () => StyleSheet.flatten(view.getByTestId('timeline-footer').props.style).height;
+
+        const idle = heightNow();
+        mockDb.getAllAsync.mockImplementationOnce(
+            () => new Promise((resolve) => { resolvePage = resolve as (rows: unknown[]) => void; })
+        );
+        await act(async () => {
+            view.getByTestId('timeline-list').props.onEndReached();
+        });
+        const loading = heightNow();
+        await act(async () => {
+            resolvePage(ROWS.slice(TIMELINE_PAGE_SIZE, TIMELINE_PAGE_SIZE + 3)); // short page -> end
+        });
+        await waitFor(() => expect(view.queryByText('The start of your timeline')).not.toBeNull());
+        const end = heightNow();
+
+        expect(idle).toBe(TIMELINE_FOOTER_HEIGHT);
+        expect(loading).toBe(TIMELINE_FOOTER_HEIGHT);
+        expect(end).toBe(TIMELINE_FOOTER_HEIGHT);
     });
 });

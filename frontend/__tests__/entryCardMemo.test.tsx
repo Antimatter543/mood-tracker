@@ -15,24 +15,21 @@
  * components that follow React performance best practices".
  *
  * Render counts are observed behaviourally, by counting the renders of a leaf the
- * card always renders (`Card`) — not by asserting on `React.memo`'s internals.
+ * card always renders (`ActivityRow`) — not by asserting on `React.memo`'s
+ * internals.
  */
 import React from 'react';
 import { render, act } from '@testing-library/react-native';
 
 let mockCardBodyRenders = 0;
-jest.mock('@/components/Card', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    return {
-        Card: ({ children, ...rest }: any) => {
-            mockCardBodyRenders += 1;
-            return ReactLocal.createElement(View, rest, children);
-        },
-    };
-});
-// Leaves the card always renders; irrelevant to the render-count contract.
-jest.mock('@/components/timeline/ActivityRow', () => ({ ActivityRow: () => null }));
+// Count renders of a leaf the card ALWAYS renders (its activity row renders even
+// for an entry with no activities; it just returns null).
+jest.mock('@/components/timeline/ActivityRow', () => ({
+    ActivityRow: () => {
+        mockCardBodyRenders += 1;
+        return null;
+    },
+}));
 jest.mock('@/components/timeline/EntryPhotos', () => ({ EntryPhotos: () => null }));
 
 import { EntryCard } from '@/components/timeline/EntryCard';

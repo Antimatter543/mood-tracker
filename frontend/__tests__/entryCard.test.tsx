@@ -1,21 +1,20 @@
 /**
- * Render-structure tests for the Timeline EntryCard.
+ * Render-structure tests for the Timeline EntryCard (redesigned 2026-09-28 as a
+ * node on a per-day rail beside a calm card).
  *
- * These guard the redesign's STRUCTURE (the device-QA pass owns pixel fidelity):
- *   - the mood number + "/10" render (not "Mood:" label prose),
- *   - a left accent bar element is present and absolutely positioned with a
- *     mood-derived backgroundColor (the QA pass caught it rendering invisible
- *     when it was an in-flow child of Card's wrapper — this asserts the bar
- *     style is `position:'absolute'`, the shape of the fix),
- *   - edit/delete keep their exact accessibility labels,
- *   - one photo takes the stretched hero wrapper (the QA pass caught it
- *     shrink-wrapping to ~40% width — this asserts `alignSelf:'stretch'`).
- *
- * The real Card is used (the bug lived in how Card wraps children); heavy leaf
- * deps (OverlayModal / image picker) are mocked to keep the render cheap.
+ * These guard STRUCTURE and CONTRACTS (the device-QA pass owns pixel fidelity):
+ *   - the mood lives in the rail NODE (integer bare, fraction to one decimal),
+ *     and the node's ring is tinted with the app's one mood ramp (moodColor);
+ *   - the rail enters/leaves the node according to first/last-of-day;
+ *   - the whole card body is the edit button ("Edit entry"); delete sits one
+ *     step away behind "More actions" and keeps its exact "Delete entry" label;
+ *   - per-card UI state resets when FlashList RECYCLES the instance for another
+ *     entry (the same component, re-rendered with a different entry);
+ *   - one photo takes the stretched hero wrapper at a FIXED height (an image
+ *     load must never change a virtualized row's height).
  */
 import React from 'react';
-import { render, fireEvent } from '@testing-library/react-native';
+import { render, fireEvent, within } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
 // Minimal theme so useThemeColors works without SettingsProvider (Card reads it).
@@ -49,12 +48,12 @@ jest.mock('@/components/OverlayModal', () => ({
     },
 }));
 
-import { EntryCard } from '@/components/timeline/EntryCard';
+import { EntryCard, formatMood } from '@/components/timeline/EntryCard';
+import { PHOTO_HERO_HEIGHT } from '@/components/timeline/EntryPhotos';
 import { moodColor } from '@/components/timeline/moodColor';
 import type { MoodEntry } from '@/components/types';
 
 const THEME_ACCENT = '#4CAF50';
-const TAG = '#222';
 
 const baseEntry = (over: Partial<MoodEntry> = {}): MoodEntry => ({
     id: 1,
@@ -85,45 +84,100 @@ const collectByStyle = (
 };
 
 describe('EntryCard — structure', () => {
-    it('shows the mood number and "/10", not "Mood:" label prose', async () => {
-        const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
+    const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
+
+    it('puts the mood in the rail node (integers bare, fractions to one decimal), not "/10" prose', async () => {
         const view = await render(
             <EntryCard entry={baseEntry({ mood: 7 })} onEdit={noop} onDelete={noop} onToggleStar={noop} colors={colors} />
         );
-        expect(view.getByText('7')).toBeTruthy();
-        expect(view.getByText('/10')).toBeTruthy();
+        expect(within(view.getByTestId('entry-mood-node')).getByText('7')).toBeTruthy();
+        expect(view.queryByText('/10')).toBeNull();
         expect(view.queryByText(/Mood:/)).toBeNull();
+
+        await view.rerender(
+            <EntryCard entry={baseEntry({ mood: 6.5 })} onEdit={noop} onDelete={noop} onToggleStar={noop} colors={colors} />
+        );
+        expect(within(view.getByTestId('entry-mood-node')).getByText('6.5')).toBeTruthy();
+        expect(formatMood(8)).toBe('8');
+        expect(formatMood(7.25)).toBe('7.3');
     });
 
-    it('renders an absolutely-positioned accent bar tinted by the mood', async () => {
-        const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
-        const expected = moodColor(7, THEME_ACCENT, TAG); // rgba(76,175,80, 0.76)
+    it("tints the node's ring with the canonical mood ramp", async () => {
+        const expected = moodColor(7, THEME_ACCENT, '#333'); // rgba(76,175,80, 0.76)
         const view = await render(
             <EntryCard entry={baseEntry({ mood: 7 })} onEdit={noop} onDelete={noop} onToggleStar={noop} colors={colors} />
         );
-        // The bar is the View whose backgroundColor is the mood color AND is
-        // absolutely positioned (the shape of the fix).
-        const bars = collectByStyle(
-            view.toJSON(),
-            (s) => s.backgroundColor === expected && s.position === 'absolute'
+        expect(styleOf(view.getByTestId('entry-mood-node')).borderColor).toBe(expected);
+        // A different mood is a different ring (the ramp is actually applied).
+        await view.rerender(
+            <EntryCard entry={baseEntry({ mood: 2 })} onEdit={noop} onDelete={noop} onToggleStar={noop} colors={colors} />
         );
-        expect(bars.length).toBeGreaterThan(0);
-        const barStyle = styleOf(bars[0]);
-        expect(barStyle.left).toBe(0);
-        expect(barStyle.width).toBe(4);
+        expect(styleOf(view.getByTestId('entry-mood-node')).borderColor).toBe(moodColor(2, THEME_ACCENT, '#333'));
     });
 
-    it('preserves the exact edit/delete accessibility labels', async () => {
-        const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
+    it('draws the rail into the node unless first of the day, and out of it unless last', async () => {
+        const rail = (json: any) =>
+            collectByStyle(json, (s) => s.position === 'absolute' && s.width === 2);
+        const card = (first: boolean, last: boolean) => (
+            <EntryCard
+                entry={baseEntry()}
+                isFirstOfDay={first}
+                isLastOfDay={last}
+                onEdit={noop}
+                onDelete={noop}
+                onToggleStar={noop}
+                colors={colors}
+            />
+        );
+        const view = await render(card(true, true));
+        expect(rail(view.toJSON())).toHaveLength(0); // a lone entry: just the node
+        await view.rerender(card(false, false));
+        expect(rail(view.toJSON())).toHaveLength(2); // mid-day: in AND out
+        await view.rerender(card(true, false));
+        const [out] = rail(view.toJSON());
+        expect(styleOf(out).top).toBeGreaterThan(0); // starts at the node, runs down
+        expect(styleOf(out).bottom).toBe(0);
+    });
+
+    it('the card body is the edit button, and hands the entry to onEdit', async () => {
+        const onEdit = jest.fn();
+        const entry = baseEntry({ notes: 'tap me' });
+        const view = await render(
+            <EntryCard entry={entry} onEdit={onEdit} onDelete={noop} onToggleStar={noop} colors={colors} />
+        );
+        await fireEvent.press(view.getByLabelText('Edit entry'));
+        expect(onEdit).toHaveBeenCalledWith(entry);
+        // The notes are INSIDE the edit target (tapping the text edits).
+        expect(within(view.getByLabelText('Edit entry')).getByText('tap me')).toBeTruthy();
+    });
+
+    it('keeps delete one step away, behind "More actions", with its exact label', async () => {
+        const onDelete = jest.fn();
+        const view = await render(
+            <EntryCard entry={baseEntry({ id: 42 })} onEdit={noop} onDelete={onDelete} onToggleStar={noop} colors={colors} />
+        );
+        expect(view.queryByLabelText('Delete entry')).toBeNull();
+        await fireEvent.press(view.getByLabelText('More actions'));
+        await fireEvent.press(view.getByLabelText('Delete entry'));
+        expect(onDelete).toHaveBeenCalledTimes(1);
+        expect(onDelete).toHaveBeenCalledWith(42);
+        // Cancel closes the strip without deleting.
+        await fireEvent.press(view.getByLabelText('More actions'));
+        await fireEvent.press(view.getByLabelText('Cancel'));
+        expect(view.queryByLabelText('Delete entry')).toBeNull();
+        expect(onDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it('action buttons are NOT nested inside the edit button (TalkBack cannot reach nested buttons)', async () => {
         const view = await render(
             <EntryCard entry={baseEntry()} onEdit={noop} onDelete={noop} onToggleStar={noop} colors={colors} />
         );
-        expect(view.getByLabelText('Edit entry')).toBeTruthy();
-        expect(view.getByLabelText('Delete entry')).toBeTruthy();
+        const body = within(view.getByLabelText('Edit entry'));
+        expect(body.queryByLabelText('Star entry')).toBeNull();
+        expect(body.queryByLabelText('More actions')).toBeNull();
     });
 
-    it('stretches the single-photo hero wrapper to full width', async () => {
-        const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
+    it('stretches the single-photo hero wrapper to full width at a FIXED height', async () => {
         const view = await render(
             <EntryCard
                 entry={baseEntry({
@@ -141,6 +195,30 @@ describe('EntryCard — structure', () => {
         // label (the multi-photo strip would have no stretched wrapper).
         const heroBtn = view.getByLabelText('View photo 1');
         expect(styleOf(heroBtn).alignSelf).toBe('stretch');
+        const heights = collectByStyle(view.toJSON(), (s) => s.height === PHOTO_HERO_HEIGHT);
+        expect(heights.length).toBeGreaterThan(0);
+    });
+});
+
+describe('EntryCard — recycled into another entry (FlashList re-uses the instance)', () => {
+    const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
+
+    it("does not carry an open delete strip over to the next entry", async () => {
+        const card = (id: number) => (
+            <EntryCard entry={baseEntry({ id })} onEdit={noop} onDelete={noop} onToggleStar={noop} colors={colors} />
+        );
+        const view = await render(card(1));
+        await fireEvent.press(view.getByLabelText('More actions'));
+        expect(view.queryByLabelText('Delete entry')).not.toBeNull();
+
+        // Same instance, same entry: a parent re-render must NOT close it.
+        await view.rerender(card(1));
+        expect(view.queryByLabelText('Delete entry')).not.toBeNull();
+
+        // Recycled to entry 2: a stray tap must not delete an entry the user never
+        // opened.
+        await view.rerender(card(2));
+        expect(view.queryByLabelText('Delete entry')).toBeNull();
     });
 });
 

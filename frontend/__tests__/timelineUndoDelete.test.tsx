@@ -17,7 +17,7 @@
  * un-awaited `fireEvent.press` silently does nothing and reads as dead wiring.
  */
 import React from 'react';
-import { render, act, waitFor, fireEvent } from '@testing-library/react-native';
+import { render, act, waitFor, fireEvent, within } from '@testing-library/react-native';
 
 let mockRefreshCount = 0;
 jest.mock('expo-router', () => {
@@ -122,6 +122,19 @@ import { OverlayProvider } from '@/context/OverlayHost';
 import { UNDO_SNACKBAR_DURATION_MS } from '@/components/UndoSnackbar';
 import { DatabaseViewer } from '@/components/DBViewer';
 
+// The FlashList stand-in's imperative ref (see __mocks__/@shopify/flash-list.tsx).
+// A plain require, NOT jest.requireMock: requireMock hands back a SEPARATE
+// instance of a root-__mocks__ module, so scripting its jest.fns would never
+// reach the copy DBViewer imported.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { flashListProbe } = require('@shopify/flash-list') as {
+    flashListProbe: {
+        scrollToOffset: jest.Mock;
+        getFirstVisibleIndex: jest.Mock;
+        reset: () => void;
+    };
+};
+
 const entryRow = (id: number, notes: string) => ({
     id,
     mood: 7,
@@ -142,8 +155,21 @@ const renderTimeline = () =>
         </OverlayProvider>
     );
 
+/**
+ * Delete is one step behind "More actions" on the redesigned card (2026-09-28):
+ * the trash can no longer sits on every card. Open the strip, then delete.
+ * NOT wrapped in an outer `act`: RNTL 14's async fireEvent acts itself, and an
+ * outer act would batch the strip's open state until AFTER the second query.
+ */
+const pressDelete = async (view: any, id = 1) => {
+    const card = within(view.getByTestId(`entry-${id}`));
+    await fireEvent.press(card.getByLabelText('More actions'));
+    await fireEvent.press(card.getByLabelText('Delete entry'));
+};
+
 beforeEach(() => {
     jest.clearAllMocks();
+    flashListProbe.reset();
     mockRefreshCount = 0;
     mockDb.getFirstAsync.mockResolvedValue(null);
     mockGetBinCount.mockResolvedValue(0);
@@ -163,9 +189,7 @@ describe('Timeline delete → undo', () => {
         await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
         expect(view.queryByTestId('undo-snackbar')).toBeNull();
 
-        await act(async () => {
-            await fireEvent.press(view.getByLabelText('Delete entry'));
-        });
+        await pressDelete(view);
 
         // The soft delete, NOT purgeMoodEntry — a stray tap must never destroy
         // photos on disk.
@@ -183,9 +207,7 @@ describe('Timeline delete → undo', () => {
         await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
         const readsBeforeDelete = mockDb.getAllAsync.mock.calls.length;
 
-        await act(async () => {
-            await fireEvent.press(view.getByLabelText('Delete entry'));
-        });
+        await pressDelete(view);
         await waitFor(() => expect(view.queryByTestId('undo-snackbar')).not.toBeNull());
 
         await act(async () => {
@@ -208,9 +230,7 @@ describe('Timeline delete → undo', () => {
         const view = await renderTimeline();
         await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
 
-        await act(async () => {
-            await fireEvent.press(view.getByLabelText('Delete entry'));
-        });
+        await pressDelete(view);
 
         // Offering "Undo" for a delete that never happened would either restore
         // an entry the user still has or silently do nothing — both confusing.
@@ -224,9 +244,7 @@ describe('Timeline delete → undo', () => {
         const view = await renderTimeline();
         await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
 
-        await act(async () => {
-            await fireEvent.press(view.getByLabelText('Delete entry'));
-        });
+        await pressDelete(view);
         await waitFor(() => expect(view.queryByTestId('undo-snackbar')).not.toBeNull());
         await act(async () => {
             await fireEvent.press(view.getByTestId('undo-snackbar-action'));
@@ -242,9 +260,7 @@ describe('Timeline delete → undo', () => {
         await act(async () => {
             jest.advanceTimersByTime(500);
         });
-        await act(async () => {
-            await fireEvent.press(view.getByLabelText('Delete entry'));
-        });
+        await pressDelete(view);
         expect(view.queryByTestId('undo-snackbar')).not.toBeNull();
 
         // Drive the REAL window, never a copy of the number — re-hardcoding it
@@ -260,47 +276,30 @@ describe('Timeline delete → undo', () => {
 });
 
 describe('Timeline list scroll anchoring', () => {
-    // REGRESSION (device QA 2026-09-03). The SectionList carried
+    // HISTORY. The old SectionList carried
     // `maintainVisibleContentPosition={{ minIndexForVisible: 0 }}` from the
-    // initial release. It pins the scroll offset to the VIEW of the first
-    // visible row, so any layout pass that pushes that row down is compensated
-    // for by scrolling down the same amount. This list is date-DESC: every
-    // insert the user cares about (a new entry, an undone delete, a bin
-    // restore) lands at the TOP and pushes that row down — so the list silently
-    // scrolled the new row off the top of the viewport. It read as "restoring
-    // corrupts the entry" (only the trailing note line showed under the sticky
-    // date header — no mood, no time, no activity chips) and as "new entries
-    // don't appear until you pull to refresh".
+    // initial release and it hid every insertion at the top (device QA
+    // 2026-09-03: a restored entry read as "corrupted" because only its last
+    // note line peeked out under the sticky header; new entries "only appeared
+    // after a pull-to-refresh"). The prop was removed, which is what let the
+    // FLING bug of 2026-09-28 through: with nothing compensating, rows above the
+    // viewport that re-measured moved the user's content ("teleports me to a
+    // more recent date").
     //
-    // Layout is not simulated in jest, so the observable contract is the prop
-    // itself: this list must not anchor its scroll position. `loadMoreData`
-    // APPENDS, so pagination never needed it.
-    //
-    // SectionList forwards `maintainVisibleContentPosition` all the way down to
-    // its host RCTScrollView, so reading it off the `timeline-list` testID node
-    // is a REAL assertion: it reads back `{ minIndexForVisible: 0 }` when the
-    // prop is set and `undefined` when it isn't (verified against RNTL 14 before
-    // this was written — a vacuous "always undefined" assertion would be worse
-    // than no test).
-    it('does NOT anchor scroll position (a prepended entry must stay visible)', async () => {
-        const view = await renderTimeline();
-        await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
+    // THE CONTRACT NOW (FlashList v2): content-position maintenance stays ON
+    // (FlashList's default: we must not disable it, and must not set the native
+    // `autoscrollToTopThreshold`, which fires on ANY anchor correction), and the
+    // refresh path itself scrolls to the top when it inserted rows ABOVE the
+    // first visible row while the user was near the top. Layout is not
+    // simulated in jest, so the scripted inputs are the probe's
+    // `getFirstVisibleIndex()` and the list's own onScroll/onLayout; the
+    // observable output is the `scrollToOffset` call.
 
-        const list = view.getByTestId('timeline-list');
-        expect(list.props.maintainVisibleContentPosition).toBeUndefined();
-    });
-
-    it('an entry restored to the TOP of the list is rendered first', async () => {
-        // The undo reload returns the restored entry as the NEWEST row — the
-        // exact position the scroll anchor used to hide.
-        const view = await renderTimeline();
-        await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
-
-        await act(async () => {
-            await fireEvent.press(view.getByLabelText('Delete entry'));
-        });
+    const restoreAtTop = async (view: any) => {
+        await pressDelete(view);
         await waitFor(() => expect(view.queryByTestId('undo-snackbar')).not.toBeNull());
-
+        // The undo reload returns the restored entry as the NEWEST row, on a
+        // day of its own, above the day the user was looking at.
         mockDb.getAllAsync.mockResolvedValue([
             { ...entryRow(1, 'delete-me'), date: '2026-06-14T10:00:00.000Z' },
             entryRow(2, 'older sibling'),
@@ -308,15 +307,98 @@ describe('Timeline list scroll anchoring', () => {
         await act(async () => {
             await fireEvent.press(view.getByTestId('undo-snackbar-action'));
         });
-
         await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
-        // …and it is the FIRST row in document order, i.e. exactly the position
-        // the scroll anchor used to park above the viewport.
+    };
+
+    const scrollTo = async (view: any, y: number, viewport = 800) => {
+        const list = view.getByTestId('timeline-list');
+        await act(async () => {
+            list.props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 400, height: viewport } } });
+            list.props.onScroll({
+                nativeEvent: {
+                    contentOffset: { x: 0, y },
+                    layoutMeasurement: { width: 400, height: viewport },
+                    contentSize: { width: 400, height: 50_000 },
+                },
+            });
+        });
+    };
+
+    it('keeps FlashList content-position maintenance ON, with no native autoscroll threshold', async () => {
+        mockDb.getAllAsync.mockResolvedValue([entryRow(1, 'delete-me'), entryRow(2, 'older sibling')]);
+        const view = await renderTimeline();
+        await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
+
+        const mvcp = view.getByTestId('timeline-list').props.maintainVisibleContentPosition;
+        // Undefined = FlashList v2's default, which is ENABLED. Anything passed
+        // must neither disable it nor add the threshold that teleports users.
+        expect(mvcp?.disabled).not.toBe(true);
+        expect(mvcp?.autoscrollToTopThreshold).toBeUndefined();
+    });
+
+    it('an entry restored ABOVE the first visible row, near the top, is scrolled into view', async () => {
+        mockDb.getAllAsync.mockResolvedValue([entryRow(1, 'delete-me'), entryRow(2, 'older sibling')]);
+        const view = await renderTimeline();
+        await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
+        // The user is at the very top: the first visible row is the day header.
+        flashListProbe.getFirstVisibleIndex.mockReturnValue(0);
+        await scrollTo(view, 0);
+
+        await restoreAtTop(view);
+
+        await waitFor(() =>
+            expect(flashListProbe.scrollToOffset).toHaveBeenCalledWith({ offset: 0, animated: true })
+        );
+        // …and it is the FIRST row in document order.
         const rendered = view.container
             .queryAll((node) => node.type === 'Text')
             .map((node) => node.props.children);
         expect(rendered.indexOf('delete-me')).toBeGreaterThanOrEqual(0);
         expect(rendered.indexOf('delete-me')).toBeLessThan(rendered.indexOf('older sibling'));
+    });
+
+    it('a user deep in their history keeps their place (no reveal)', async () => {
+        mockDb.getAllAsync.mockResolvedValue([entryRow(1, 'delete-me'), entryRow(2, 'older sibling')]);
+        const view = await renderTimeline();
+        await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
+        flashListProbe.getFirstVisibleIndex.mockReturnValue(1);
+        await scrollTo(view, 5_000); // six viewports down
+
+        await restoreAtTop(view);
+
+        // Give a pending frame every chance to fire before asserting silence.
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+        expect(flashListProbe.scrollToOffset).not.toHaveBeenCalled();
+    });
+
+    it('an entry added to the day ALREADY at the top does not scroll (it is visible in place)', async () => {
+        mockDb.getAllAsync.mockResolvedValue([entryRow(2, 'older sibling')]);
+        const view = await renderTimeline();
+        await waitFor(() => expect(view.queryByText('older sibling')).not.toBeNull());
+        flashListProbe.getFirstVisibleIndex.mockReturnValue(0); // that day's header
+        await scrollTo(view, 0);
+
+        // A new entry lands on the SAME day, below its header: the header the
+        // user sees does not move, so there is nothing to reveal.
+        mockDb.getAllAsync.mockResolvedValue([
+            { ...entryRow(3, 'brand new'), date: '2026-06-12T11:00:00.000Z' },
+            entryRow(2, 'older sibling'),
+        ]);
+        await act(async () => {
+            mockRefreshCount += 1;
+            view.rerender(
+                <OverlayProvider>
+                    <DatabaseViewer />
+                </OverlayProvider>
+            );
+        });
+        await waitFor(() => expect(view.queryByText('brand new')).not.toBeNull());
+        await act(async () => {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        });
+        expect(flashListProbe.scrollToOffset).not.toHaveBeenCalled();
     });
 });
 
