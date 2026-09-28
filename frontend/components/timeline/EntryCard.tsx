@@ -2,28 +2,41 @@ import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { Card } from '../Card';
+import { useRecyclingState } from '@shopify/flash-list';
 import { MoodEntry } from '../types';
 import { ThemeColors } from '@/styles/global';
-import { moodColor } from './moodColor';
+import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
+import { moodAccentRgb, moodAlpha, moodColor } from './moodColor';
 import { ActivityRow } from './ActivityRow';
 import { EntryPhotos } from './EntryPhotos';
 
 /**
  * EVERY callback takes the entry (or its id) as an ARGUMENT rather than being
  * pre-bound to it by the parent. That is what lets the Timeline hand the same
- * function identity to all 100+ cards, which is what lets `React.memo` below
+ * function identity to every card, which is what lets `React.memo` below
  * actually bail out. With per-item `() => onEdit(entry)` closures the props
  * differed on every parent render and memo never hit once.
  */
 type EntryCardProps = {
     entry: MoodEntry;
+    /** First entry of its day: the rail starts at this node. */
+    isFirstOfDay?: boolean;
+    /** Last loaded entry of its day: the rail ends at this node. */
+    isLastOfDay?: boolean;
     onEdit: (entry: MoodEntry) => void;
     onDelete: (id: number) => void;
     /** Toggle this entry's starred state. */
     onToggleStar: (entry: MoodEntry) => void;
     colors: ThemeColors;
 };
+
+/** Rail geometry. The node's centre sits level with the card's first line. */
+export const RAIL_WIDTH = 44;
+export const NODE_SIZE = 34;
+const NODE_TOP = 10;
+const RAIL_LINE_WIDTH = 2;
+/** Vertical gap between two cards. Part of the CELL (see `cell`), not a margin. */
+const CARD_GAP = 12;
 
 /** "9:05 AM" style — strip seconds off the locale time. */
 const formatTime = (iso: string): string => {
@@ -32,175 +45,307 @@ const formatTime = (iso: string): string => {
     return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 };
 
+/** A mood as the node prints it: integers bare, fractions to one decimal. */
+export const formatMood = (mood: number): string =>
+    Number.isInteger(mood) ? String(mood) : mood.toFixed(1);
+
+/**
+ * The node's soft fill: the same accent + alpha ramp as `moodColor`, scaled down
+ * so the mood number printed on it keeps full text contrast in every theme
+ * (a solid accent disc under `colors.text` fails 4.5:1 on the light themes).
+ * The RING carries the full-strength ramp.
+ */
+const nodeFill = (mood: number, accent: string): string => {
+    const { r, g, b } = moodAccentRgb(accent);
+    const alpha = Number.isFinite(mood) ? Math.round(moodAlpha(mood) * 0.3 * 1000) / 1000 : 0;
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 const useStyles = (colors: ThemeColors) =>
     useMemo(
         () =>
             StyleSheet.create({
-                card: {
-                    padding: 0, // padding handled by `body`; the bar overlays the left edge
-                    marginBottom: 12,
+                // The cell owns its gap as PADDING, so the rail (absolutely
+                // positioned against the cell) runs unbroken from one entry's
+                // node to the next.
+                cell: {
+                    flexDirection: 'row',
+                    paddingLeft: LAYOUT_CONTENT_PADDING - 8,
+                    paddingRight: LAYOUT_CONTENT_PADDING,
+                    paddingBottom: CARD_GAP,
                 },
-                // Absolutely positioned at the card's left edge so it spans the
-                // FULL card height regardless of Card's internal child wrapper
-                // (Card wraps children in its own View, so a flexDirection:'row'
-                // on the card style never reaches these children — an in-flow bar
-                // collapsed to an invisible top sliver). Card has overflow:'hidden'
-                // + borderRadius:24, so the bar's corners are clipped to the card's
-                // rounded shape automatically.
-                accentBar: {
+                rail: {
+                    width: RAIL_WIDTH,
+                    alignItems: 'center',
+                },
+                railLine: {
                     position: 'absolute',
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: 4,
+                    width: RAIL_LINE_WIDTH,
+                    left: (RAIL_WIDTH - RAIL_LINE_WIDTH) / 2,
+                    backgroundColor: colors.overlays.tagBorder,
+                },
+                node: {
+                    marginTop: NODE_TOP,
+                    width: NODE_SIZE,
+                    height: NODE_SIZE,
+                    borderRadius: NODE_SIZE / 2,
+                    borderWidth: 2,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: colors.background,
+                },
+                nodeText: {
+                    color: colors.text,
+                    fontSize: 13,
+                    fontWeight: '700',
+                    letterSpacing: -0.3,
+                },
+                card: {
+                    flex: 1,
+                    marginLeft: 8,
+                    backgroundColor: colors.cardBackground,
+                    borderRadius: 16,
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: colors.border,
+                    overflow: 'hidden',
                 },
                 body: {
-                    padding: 16,
-                    paddingLeft: 20, // 16 + the 4px accent bar so text clears it
+                    paddingHorizontal: 16,
+                    paddingTop: 14,
+                    paddingBottom: 14,
                 },
-                headerRow: {
-                    flexDirection: 'row',
-                    alignItems: 'flex-start',
-                    justifyContent: 'space-between',
+                bodyPressed: {
+                    backgroundColor: colors.overlays.tag,
                 },
-                moodBlock: {
-                    flexDirection: 'row',
-                    alignItems: 'baseline',
-                },
-                moodNumber: {
-                    color: colors.text,
-                    fontSize: 28,
-                    fontWeight: '700',
-                    letterSpacing: -0.5,
-                },
-                moodOutOf: {
-                    color: colors.textSecondary,
-                    fontSize: 14,
-                    fontWeight: '500',
-                    marginLeft: 2,
-                },
-                headerRight: {
+                timeRow: {
                     flexDirection: 'row',
                     alignItems: 'center',
-                    gap: 4,
+                    // Room for the absolutely-positioned action cluster.
+                    paddingRight: 80,
+                    minHeight: 22,
                 },
                 time: {
                     color: colors.textSecondary,
                     fontSize: 13,
-                    marginRight: 6,
-                },
-                iconButton: {
-                    padding: 8,
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                    fontWeight: '600',
+                    letterSpacing: 0.2,
                 },
                 notes: {
                     color: colors.text,
                     fontSize: 15,
                     lineHeight: 22,
-                    marginTop: 12,
+                    marginTop: 10,
+                },
+                photos: {
+                    paddingHorizontal: 16,
+                    marginTop: -2,
+                    paddingBottom: 14,
+                },
+                actions: {
+                    position: 'absolute',
+                    top: 2,
+                    right: 2,
+                    flexDirection: 'row',
+                },
+                iconButton: {
+                    width: 40,
+                    height: 40,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                },
+                deleteStrip: {
+                    flexDirection: 'row',
+                    justifyContent: 'flex-end',
+                    alignItems: 'center',
+                    gap: 8,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                    borderTopColor: colors.border,
+                },
+                stripButton: {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    minHeight: 40,
+                    paddingHorizontal: 12,
+                    borderRadius: 10,
+                },
+                stripCancelText: {
+                    color: colors.textSecondary,
+                    fontSize: 14,
+                    fontWeight: '600',
+                },
+                stripDeleteText: {
+                    color: '#E5484D',
+                    fontSize: 14,
+                    fontWeight: '700',
                 },
             }),
         [colors]
     );
 
 /**
- * A single clean timeline entry. One card surface; the mood is conveyed by a
- * left accent bar (tinted via the canonical heatmap scale) plus a prominent
- * number, NOT label prose. Quiet ghost icon-buttons for edit/delete; a compact
- * wrapping activity row; plain notes; and photos that hero when there's one.
+ * One Timeline entry: a mood NODE on the day's rail, and a calm card beside it.
  *
- * MEMOIZED (see the wrapper at the bottom of this file), and that is a
- * correctness concern on the Timeline, not just a micro-optimisation. The
- * Timeline's SectionList keeps the whole loaded window mounted (RN's default
- * `windowSize` spans far more than the content is tall for lists this size), so
- * an unmemoized card meant every single mounted entry re-rendered on every
- * parent state change — and each page append fires three of those (the spinner
- * on, the new sections, the spinner off). Deep in the list that turned one
- * `onEndReached` into seconds of synchronous React work rebuilding a native view
- * tree the user was actively flinging, which RN itself flags on device
- * ("VirtualizedList: You have a large list that is slow to update - make sure
- * your renderItem function renders components that follow React performance best
- * practices"). Keep the props value-comparable.
+ * The rail makes a day's entries read as one connected run: the line enters a
+ * node from above unless the entry is the first of its day, and leaves below
+ * unless it is the last. The node carries the mood (number + a ring tinted with
+ * the app's one mood ramp, `moodColor`), so the card itself needs no accent bar
+ * and no "7/10" block and can spend its space on the time, activities, notes and
+ * photos.
+ *
+ * Interaction: the card body IS the edit button ("Edit entry"). Star stays one
+ * tap (it is state the user wants to see and flip). Delete is one step further
+ * away, behind "More actions" — it is recoverable from the undo snackbar and the
+ * bin, but a trash can on every card was the loudest thing on the screen and the
+ * easiest to hit by accident. Action buttons are SIBLINGS of the body pressable,
+ * never children: a Pressable is an accessibility container, and a button nested
+ * inside one is unreachable to TalkBack.
+ *
+ * RECYCLED: FlashList re-uses this component's instance for a different entry
+ * as the user scrolls, so the local "delete strip open" flag is
+ * `useRecyclingState` keyed on the entry id — a plain useState would open the
+ * strip on whatever entry recycled into a cell the user had opened.
+ *
+ * MEMOIZED (see the wrapper at the bottom): a parent re-render (a page append, a
+ * spinner, a refresh) must not re-render every mounted card while the user is
+ * flinging. Keep the props value-comparable.
  */
-const EntryCardImpl: React.FC<EntryCardProps> = ({ entry, onEdit, onDelete, onToggleStar, colors }) => {
+const EntryCardImpl: React.FC<EntryCardProps> = ({
+    entry,
+    isFirstOfDay = true,
+    isLastOfDay = true,
+    onEdit,
+    onDelete,
+    onToggleStar,
+    colors,
+}) => {
     const styles = useStyles(colors);
-    const accent = moodColor(entry.mood, colors.accent, colors.overlays.tag);
+    const [actionsOpen, setActionsOpen] = useRecyclingState(false, [entry.id]);
+    const ring = moodColor(entry.mood, colors.accent, colors.overlays.tagBorder);
     const time = formatTime(entry.date);
     // NULL/absent = not starred; any instant = starred. Filled star (accent)
     // vs outline (muted) — Feather has no filled star, so the star glyph comes
     // from MaterialCommunityIcons ('star' / 'star-outline').
     const starred = entry.starred_at != null;
+    const hasPhotos = !!entry.photos && entry.photos.length > 0;
+    const nodeCentre = NODE_TOP + NODE_SIZE / 2;
 
     return (
-        <Card style={styles.card} variant="flat">
-            <View style={[styles.accentBar, { backgroundColor: accent }]} />
-            <View style={styles.body}>
-                <View style={styles.headerRow}>
-                    <View style={styles.moodBlock}>
-                        <Text style={styles.moodNumber}>{entry.mood}</Text>
-                        <Text style={styles.moodOutOf}>/10</Text>
-                    </View>
-                    <View style={styles.headerRight}>
-                        {time ? <Text style={styles.time}>{time}</Text> : null}
-                        <Pressable
-                            testID="entry-star-toggle"
-                            style={styles.iconButton}
-                            onPress={() => onToggleStar(entry)}
-                            accessibilityRole="button"
-                            accessibilityLabel={starred ? 'Unstar entry' : 'Star entry'}
-                            accessibilityState={{ selected: starred }}
-                            hitSlop={10}
-                        >
-                            <MaterialCommunityIcons
-                                name={starred ? 'star' : 'star-outline'}
-                                color={starred ? colors.accent : colors.textSecondary}
-                                size={18}
-                            />
-                        </Pressable>
-                        <Pressable
-                            style={styles.iconButton}
-                            onPress={() => onEdit(entry)}
-                            accessibilityRole="button"
-                            accessibilityLabel="Edit entry"
-                            hitSlop={10}
-                        >
-                            <Feather name="edit-2" color={colors.textSecondary} size={18} />
-                        </Pressable>
-                        <Pressable
-                            style={styles.iconButton}
-                            onPress={() => onDelete(entry.id)}
-                            accessibilityRole="button"
-                            accessibilityLabel="Delete entry"
-                            hitSlop={10}
-                        >
-                            <Feather name="trash-2" color={colors.textSecondary} size={18} />
-                        </Pressable>
-                    </View>
+        <View style={styles.cell} testID={`entry-${entry.id}`}>
+            <View style={styles.rail}>
+                {!isFirstOfDay ? (
+                    <View style={[styles.railLine, { top: 0, height: nodeCentre }]} />
+                ) : null}
+                {!isLastOfDay ? (
+                    <View style={[styles.railLine, { top: nodeCentre, bottom: 0 }]} />
+                ) : null}
+                <View
+                    testID="entry-mood-node"
+                    style={[styles.node, { borderColor: ring }]}
+                    accessibilityLabel={`Mood ${formatMood(entry.mood)} out of 10`}
+                >
+                    <View
+                        style={[
+                            StyleSheet.absoluteFill,
+                            { borderRadius: NODE_SIZE / 2, backgroundColor: nodeFill(entry.mood, colors.accent) },
+                        ]}
+                    />
+                    <Text style={styles.nodeText}>{formatMood(entry.mood)}</Text>
                 </View>
+            </View>
 
-                <ActivityRow activities={entry.activities} colors={colors} />
+            <View style={styles.card}>
+                <Pressable
+                    style={({ pressed }) => [styles.body, pressed && styles.bodyPressed]}
+                    onPress={() => onEdit(entry)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit entry"
+                    accessibilityHint={`Mood ${formatMood(entry.mood)} of 10${time ? `, ${time}` : ''}`}
+                >
+                    <View style={styles.timeRow}>
+                        {time ? <Text style={styles.time}>{time}</Text> : null}
+                    </View>
+                    <ActivityRow activities={entry.activities} colors={colors} />
+                    {entry.notes ? (
+                        <Text style={styles.notes} numberOfLines={4}>
+                            {entry.notes}
+                        </Text>
+                    ) : null}
+                </Pressable>
 
-                {entry.notes ? (
-                    <Text style={styles.notes} numberOfLines={4}>
-                        {entry.notes}
-                    </Text>
+                {hasPhotos ? (
+                    <View style={styles.photos}>
+                        <EntryPhotos photos={entry.photos!} colors={colors} />
+                    </View>
                 ) : null}
 
-                {entry.photos && entry.photos.length > 0 && (
-                    <EntryPhotos photos={entry.photos} colors={colors} />
-                )}
+                {actionsOpen ? (
+                    <View style={styles.deleteStrip}>
+                        <Pressable
+                            style={styles.stripButton}
+                            onPress={() => setActionsOpen(false)}
+                            accessibilityRole="button"
+                            accessibilityLabel="Cancel"
+                        >
+                            <Text style={styles.stripCancelText}>Cancel</Text>
+                        </Pressable>
+                        <Pressable
+                            testID="entry-delete"
+                            style={styles.stripButton}
+                            onPress={() => {
+                                setActionsOpen(false);
+                                onDelete(entry.id);
+                            }}
+                            accessibilityRole="button"
+                            accessibilityLabel="Delete entry"
+                        >
+                            <Feather name="trash-2" color="#E5484D" size={16} />
+                            <Text style={styles.stripDeleteText}>Delete</Text>
+                        </Pressable>
+                    </View>
+                ) : null}
+
+                <View style={styles.actions}>
+                    <Pressable
+                        testID="entry-star-toggle"
+                        style={styles.iconButton}
+                        onPress={() => onToggleStar(entry)}
+                        accessibilityRole="button"
+                        accessibilityLabel={starred ? 'Unstar entry' : 'Star entry'}
+                        accessibilityState={{ selected: starred }}
+                    >
+                        <MaterialCommunityIcons
+                            name={starred ? 'star' : 'star-outline'}
+                            color={starred ? colors.accent : colors.textSecondary}
+                            size={19}
+                        />
+                    </Pressable>
+                    <Pressable
+                        testID="entry-more"
+                        style={styles.iconButton}
+                        onPress={() => setActionsOpen((open) => !open)}
+                        accessibilityRole="button"
+                        accessibilityLabel="More actions"
+                        accessibilityState={{ expanded: actionsOpen }}
+                    >
+                        <Feather name="more-horizontal" color={colors.textSecondary} size={19} />
+                    </Pressable>
+                </View>
             </View>
-        </Card>
+        </View>
     );
 };
 
 /**
  * Default shallow comparison is exactly right here: `entry` objects are replaced
  * wholesale when their row changes (the list never mutates one in place — an edit
- * or a star toggle maps to a NEW object), `colors` is a module-level constant per
- * theme, and the three callbacks are entry-agnostic so the Timeline can memoize
- * them once. Guarded by __tests__/timelineListPerf.test.tsx.
+ * or a star toggle maps to a NEW object, and a refresh re-uses the previous
+ * object for every entry whose content did not change), `colors` is a
+ * module-level constant per theme, the rail flags are booleans, and the three
+ * callbacks are entry-agnostic so the Timeline can memoize them once. Guarded by
+ * __tests__/timelineListPerf.test.tsx and entryCardMemo.test.tsx.
  */
 export const EntryCard = React.memo(EntryCardImpl);
 EntryCard.displayName = 'EntryCard';

@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
     View,
-    Image,
     Pressable,
     ScrollView,
     StyleSheet,
     Dimensions,
     FlatList,
 } from 'react-native';
+import { Image } from 'expo-image';
+import { useRecyclingState } from '@shopify/flash-list';
 import Feather from '@expo/vector-icons/Feather';
 import { EntryPhoto } from '../types';
 import { ThemeColors } from '@/styles/global';
@@ -15,6 +16,17 @@ import { OverlayModal } from '../OverlayModal';
 import { photoLayoutFor } from './photoLayout';
 
 const { width: VIEWER_WIDTH, height: VIEWER_HEIGHT } = Dimensions.get('window');
+
+/**
+ * Photo box sizes. FIXED, never derived from the image: the Timeline is a
+ * virtualized list that positions every cell from its measured height, so a
+ * photo that resized its cell when it finished decoding would move every row
+ * below it — the same class of layout shift the 2026-09-28 fling fix removed.
+ * The hero stretches to the card's width (that is known at layout time and
+ * never changes), but its HEIGHT is a constant.
+ */
+export const PHOTO_HERO_HEIGHT = 168;
+export const PHOTO_THUMB_SIZE = 84;
 
 const viewerStyles = StyleSheet.create({
     overlay: {
@@ -71,7 +83,7 @@ const PhotoViewer: React.FC<{
                     <Image
                         source={{ uri: item.file_path }}
                         style={{ width: VIEWER_WIDTH, height: VIEWER_HEIGHT * 0.85 }}
-                        resizeMode="contain"
+                        contentFit="contain"
                     />
                 )}
             />
@@ -83,15 +95,24 @@ const PhotoViewer: React.FC<{
  * A single thumbnail with a broken-image fallback. On load error (a missing
  * file on an old install, an orphaned path) we render a VISIBLE muted
  * placeholder with an icon — never an empty/invisible box — so the problem is
- * diagnosable instead of silently swallowed.
+ * diagnosable instead of silently swallowed. The placeholder takes the SAME box
+ * as the image, so a failure never changes the cell's height either.
+ *
+ * RECYCLING: this lives inside a FlashList cell, and FlashList re-uses a cell's
+ * component instance for a DIFFERENT entry as the user scrolls. A plain
+ * `useState(false)` would carry `failed = true` from one entry's missing file
+ * onto the next entry's perfectly good photo. `useRecyclingState` resets it
+ * whenever the uri changes. `recyclingKey` does the same for expo-image's own
+ * native view, so a recycled cell never flashes the previous entry's picture
+ * while the new one decodes.
  */
-const ThumbImage: React.FC<{
+export const ThumbImage: React.FC<{
     uri: string;
     style: any;
     colors: ThemeColors;
     iconSize?: number;
 }> = ({ uri, style, colors, iconSize = 28 }) => {
-    const [failed, setFailed] = useState(false);
+    const [failed, setFailed] = useRecyclingState(false, [uri]);
     if (failed) {
         return (
             <View
@@ -112,8 +133,10 @@ const ThumbImage: React.FC<{
     return (
         <Image
             source={{ uri }}
-            style={[style, { backgroundColor: colors.cardBackground }]}
-            resizeMode="cover"
+            recyclingKey={uri}
+            style={[style, { backgroundColor: colors.overlays.tag }]}
+            contentFit="cover"
+            transition={120}
             onError={() => setFailed(true)}
         />
     );
@@ -121,41 +144,51 @@ const ThumbImage: React.FC<{
 
 const styles = StyleSheet.create({
     strip: {
-        flexDirection: 'row',
         marginTop: 12,
     },
+    stripContent: {
+        gap: 8,
+    },
     thumb: {
-        width: 80,
-        height: 80,
+        width: PHOTO_THUMB_SIZE,
+        height: PHOTO_THUMB_SIZE,
         borderRadius: 10,
-        marginRight: 8,
     },
     // The Pressable wrapper must stretch to the card body width, otherwise it
     // shrink-wraps the image's intrinsic size and the hero `width:'100%'`
     // resolves against that collapsed box (a portrait photo renders ~40% wide).
     heroWrap: {
         alignSelf: 'stretch',
+        marginTop: 12,
     },
     hero: {
-        marginTop: 12,
         width: '100%',
-        height: 150,
+        height: PHOTO_HERO_HEIGHT,
         borderRadius: 12,
     },
 });
 
+/** Stable identity of a photo set, so recycled state resets per entry. */
+const photoSetKey = (photos: EntryPhoto[]): string =>
+    photos.map((p) => `${p.id}:${p.file_path}`).join('|');
+
 /**
  * Entry photos: ONE photo renders as a large full-width hero; MULTIPLE render
- * as a horizontal strip of 80px thumbnails. Tapping any photo opens the
- * full-screen PhotoViewer at that index. The single-vs-grid decision is the
- * pure `photoLayoutFor` helper.
+ * as a horizontal strip of thumbnails. Tapping any photo opens the full-screen
+ * PhotoViewer at that index. The single-vs-grid decision is the pure
+ * `photoLayoutFor` helper.
+ *
+ * The viewer's open/index state is recycling state for the same reason as
+ * ThumbImage's: a cell recycled to another entry must not arrive with the
+ * previous entry's viewer open (or opened at its index).
  */
 export const EntryPhotos: React.FC<{ photos: EntryPhoto[]; colors: ThemeColors }> = ({
     photos,
     colors,
 }) => {
-    const [viewerVisible, setViewerVisible] = useState(false);
-    const [activeIndex, setActiveIndex] = useState(0);
+    const setKey = photoSetKey(photos);
+    const [viewerVisible, setViewerVisible] = useRecyclingState(false, [setKey]);
+    const [activeIndex, setActiveIndex] = useRecyclingState(0, [setKey]);
 
     const layout = photoLayoutFor(photos.length);
     if (layout.kind === 'none') return null;
@@ -177,7 +210,12 @@ export const EntryPhotos: React.FC<{ photos: EntryPhoto[]; colors: ThemeColors }
                     <ThumbImage uri={photos[0].file_path} style={styles.hero} colors={colors} iconSize={36} />
                 </Pressable>
             ) : (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.strip}>
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.strip}
+                    contentContainerStyle={styles.stripContent}
+                >
                     {photos.map((photo, index) => (
                         <Pressable
                             key={photo.id}
