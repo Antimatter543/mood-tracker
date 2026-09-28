@@ -247,7 +247,7 @@ describe('Timeline — the props it hands each card are stable', () => {
         // runway (it was 0.5 on the SectionList, with 20-row pages).
         expect(list.props.onEndReachedThreshold).toBeGreaterThanOrEqual(1.5);
         expect(TIMELINE_PAGE_SIZE).toBeGreaterThanOrEqual(40);
-        expect(mockDb.getAllAsync.mock.calls[0][1].slice(-2)).toEqual([TIMELINE_PAGE_SIZE, 0]);
+        expect((mockDb.getAllAsync.mock.calls[0][1] as unknown[]).slice(-2)).toEqual([TIMELINE_PAGE_SIZE, 0]);
     });
 
     it('the footer keeps ONE height whether loading, idle or at the end', async () => {

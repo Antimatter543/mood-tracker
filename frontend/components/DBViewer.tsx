@@ -401,6 +401,7 @@ export function DatabaseViewer() {
     // ref holds what the PREVIOUS run saw.
     const filterSignature = `${debouncedQuery} ${moodPresetKey} ${starredOnly}`;
     const lastLoadedFilterRef = useRef(filterSignature);
+    const filterResetPendingRef = useRef(false);
 
     // Focus-aware reload. Runs whenever the Timeline tab regains focus and
     // re-runs while focused when the data version bumps (any write, here or on
@@ -424,6 +425,10 @@ export function DatabaseViewer() {
             // second run would otherwise read the OLD depth off the ref and
             // quietly restore it. The ref is re-derived on the next render.
             loadedCountRef.current = 0;
+            // Same reason: the "start the new list at the top" decision must
+            // survive this run being superseded by its twin, so it is a flag the
+            // COMMITTING run consumes rather than this run's local.
+            filterResetPendingRef.current = true;
         }
         const windowSize = Math.max(TIMELINE_PAGE_SIZE, loadedCountRef.current);
         if (!hasLoadedOnce.current) setIsLoading(true);
@@ -439,7 +444,8 @@ export function DatabaseViewer() {
             // at offset 0). A full window says nothing either way.
             const nextHasMore = fetched.length === windowSize;
 
-            if (filterChanged) {
+            if (filterResetPendingRef.current) {
+                filterResetPendingRef.current = false;
                 // The rows on screen were replaced wholesale — start at the top.
                 revealPendingRef.current = { animated: false };
             } else if (

@@ -402,6 +402,68 @@ describe('Timeline list scroll anchoring', () => {
     });
 });
 
+describe('Timeline back-to-top pill', () => {
+    const scrollTo = async (view: any, y: number, viewport = 800) => {
+        const list = view.getByTestId('timeline-list');
+        await act(async () => {
+            list.props.onLayout({ nativeEvent: { layout: { x: 0, y: 0, width: 400, height: viewport } } });
+            list.props.onScroll({
+                nativeEvent: {
+                    contentOffset: { x: 0, y },
+                    layoutMeasurement: { width: 400, height: viewport },
+                    contentSize: { width: 400, height: 50_000 },
+                },
+            });
+        });
+    };
+
+    it('appears once the user is several screens deep, and takes them to the top', async () => {
+        mockDb.getAllAsync.mockResolvedValue([entryRow(1, 'delete-me'), entryRow(2, 'older sibling')]);
+        const view = await renderTimeline();
+        await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
+        expect(view.queryByLabelText('Back to top')).toBeNull();
+
+        await scrollTo(view, 1_000);
+        expect(view.queryByLabelText('Back to top')).toBeNull();
+
+        await scrollTo(view, 4_000);
+        expect(view.queryByLabelText('Back to top')).not.toBeNull();
+
+        await fireEvent.press(view.getByLabelText('Back to top'));
+        expect(flashListProbe.scrollToOffset).toHaveBeenCalledWith({ offset: 0, animated: true });
+
+        // Scrolling back up hides it again.
+        await scrollTo(view, 100);
+        expect(view.queryByLabelText('Back to top')).toBeNull();
+    });
+
+    it('steps aside while the undo snackbar is up (they share the bottom edge)', async () => {
+        mockDb.getAllAsync.mockResolvedValue([entryRow(1, 'delete-me'), entryRow(2, 'older sibling')]);
+        const view = await renderTimeline();
+        await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
+        await scrollTo(view, 4_000);
+        expect(view.queryByLabelText('Back to top')).not.toBeNull();
+
+        await pressDelete(view);
+        await waitFor(() => expect(view.queryByTestId('undo-snackbar')).not.toBeNull());
+        expect(view.queryByLabelText('Back to top')).toBeNull();
+    });
+});
+
+describe('Timeline filter change', () => {
+    it('starts the freshly-filtered list at the top', async () => {
+        mockDb.getAllAsync.mockResolvedValue([entryRow(1, 'delete-me'), entryRow(2, 'older sibling')]);
+        const view = await renderTimeline();
+        await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
+        flashListProbe.scrollToOffset.mockClear();
+
+        await fireEvent.press(view.getByTestId('mood-filter-low'));
+        await waitFor(() =>
+            expect(flashListProbe.scrollToOffset).toHaveBeenCalledWith({ offset: 0, animated: false })
+        );
+    });
+});
+
 describe('Timeline bin button', () => {
     it('shows no badge when the bin is empty', async () => {
         const view = await renderTimeline();
