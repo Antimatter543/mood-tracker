@@ -1,0 +1,67 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Timeline fast-fling smoke (2026-09-28, FlashList timeline).
+#
+# PRECONDITION: a few hundred entries. On a dev build / Expo Go use Settings ->
+# "Generate 300 Timeline QA Entries" (__DEV__ only) first. For Expo Go, change
+# appId to host.exp.exponent and open the project URL before running.
+#
+# What a human (or device-tester) must WATCH, because Maestro cannot assert it:
+# after each burst of hard flings the list keeps moving DOWN in time, never
+# snapping back to "Today" or a more recent day, and no blank gaps linger.
+# The screenshots after each burst are the evidence: the date in the pinned
+# day header must be OLDER in each successive shot.
+#
+# Tab-bar labels aren't exposed to Maestro, so the Timeline tab is tapped by
+# point (5 tabs at x = 10/30/50/70/90%, y = 89%). Run from
+# ~/Pictures/screenshots so the PNGs land there.
+
+- launchApp
+- tapOn:
+    text: "Continue"
+    optional: true
+
+- tapOn:
+    point: 50%, 89%
+- assertVisible:
+    text: "Timeline"
+- takeScreenshot: timeline-fling-0-top
+
+# Burst 1: five hard flings (short duration = high velocity).
+- repeat:
+    times: 5
+    commands:
+      - swipe:
+          start: 50%, 80%
+          end: 50%, 20%
+          duration: 80
+- takeScreenshot: timeline-fling-1
+
+# Burst 2: deeper.
+- repeat:
+    times: 8
+    commands:
+      - swipe:
+          start: 50%, 80%
+          end: 50%, 20%
+          duration: 80
+- takeScreenshot: timeline-fling-2
+
+# Burst 3: deeper still (several pages in).
+- repeat:
+    times: 12
+    commands:
+      - swipe:
+          start: 50%, 80%
+          end: 50%, 20%
+          duration: 80
+- takeScreenshot: timeline-fling-3
+
+# Deep enough for the back-to-top pill; it returns to the newest entry.
+- assertVisible:
+    text: "Back to top"
+- tapOn:
+    text: "Back to top"
+- assertNotVisible:
+    text: "Back to top"
+- takeScreenshot: timeline-fling-4-back-at-top

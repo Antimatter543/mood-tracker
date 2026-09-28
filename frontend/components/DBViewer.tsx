@@ -4,14 +4,17 @@ import {
     Text,
     Pressable,
     StyleSheet,
-    SectionList,
     ActivityIndicator,
     Alert,
+    LayoutChangeEvent,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
 } from 'react-native';
+import { FlashList, type FlashListRef, type ListRenderItemInfo } from '@shopify/flash-list';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useThemeColors } from '@/styles/global';
-import { LAYOUT_CONTENT_PADDING, LAYOUT_FAB_CLEARANCE } from '@/styles/layout';
+import { ThemeColors, useThemeColors } from '@/styles/global';
+import { LAYOUT_FAB_CLEARANCE } from '@/styles/layout';
 import { useDataContext } from '@/context/DataContext';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useLatestRun } from '@/hooks/useLatestRun';
@@ -20,56 +23,77 @@ import { MoodEntry } from './types';
 import { EntryFormData, EntryFormModal } from './forms/EntryForm';
 import { EmptyState } from './EmptyState';
 import { EntryCard } from './timeline/EntryCard';
+import { DayHeader } from './timeline/DayHeader';
+import { TimelineFooter, footerStateFor } from './timeline/TimelineFooter';
+import { BackToTopPill, shouldShowBackToTop } from './timeline/BackToTopPill';
 import { TimelineSearchBar } from './timeline/TimelineSearchBar';
 import {
     moodPresetToRange,
     EntryFilters,
     MoodPresetKey,
 } from './timeline/entryFilter';
-import { sectionKeyForDate, formatSectionTitle } from './timeline/dateHeader';
+import {
+    TIMELINE_PAGE_SIZE,
+    TimelineRow,
+    appendUnique,
+    buildTimelineRows,
+    reuseUnchanged,
+    rowTypeOf,
+    shouldRevealInsertion,
+    stickyHeaderIndicesFor,
+} from './timeline/timelineRows';
 import { useDateFormat } from '@/hooks/useDateFormat';
-// The DB layer owns ALL SQL now: this component reads OFFSET/LIMIT windows via
+// The DB layer owns ALL SQL: this component reads OFFSET/LIMIT windows via
 // getEntriesWindow and mutates via updateMoodEntry / deleteMoodEntry
 // (databases/entries.ts). The component is hooks + rendering only — zero SQL,
 // zero transactions. It asks for a WINDOW rather than a page number because the
 // window it needs is "the rows I am currently showing", which a page index
 // cannot express (see the loader below).
 import { getEntriesWindow, updateMoodEntry, deleteMoodEntry, setEntryStarred } from '@/databases/entries';
-// Recycle bin (migration 12): `deleteMoodEntry` is now a SOFT delete, so the
-// destructive-looking tap is fully reversible, from the snackbar right after it,
-// or from the "Recently deleted" panel for the next 30 days.
+// Recycle bin (migration 12): `deleteMoodEntry` is a SOFT delete, so the delete
+// is fully reversible, from the snackbar right after it, or from the "Recently
+// deleted" panel for the next 30 days.
 import { getBinCount, restoreMoodEntry } from '@/databases/entry-bin';
 import { UndoSnackbar } from './UndoSnackbar';
 import { RecentlyDeletedPanel } from './timeline/RecentlyDeletedPanel';
 
-const ITEMS_PER_PAGE = 20;
 // Debounce the search text before it hits SQL so each keystroke doesn't fire a
 // paged query; the mood chips filter instantly (no debounce needed).
 const SEARCH_DEBOUNCE_MS = 250;
 
-// Types — `key` is the stable local-day bucket; `title` is its humanized label.
-type Section = {
-    key: string;
-    data: MoodEntry[];
-};
+/**
+ * Prefetch the next page while the user is still this many SCREENS from the end
+ * (FlashList measures `onEndReachedThreshold` in viewport lengths). Two screens
+ * of runway plus 50-row pages means a hard fling is still over loaded rows when
+ * the next page lands, instead of slamming into the end of the content and
+ * appending mid-gesture.
+ */
+const END_REACHED_SCREENS = 2;
 
-const useThemedStyles = (colors: any, insetBottom: number) => {
+/**
+ * How far past the viewport FlashList keeps cells drawn, in px. Above the 250px
+ * default so a fling lands on rendered cells more often; FlashList recycles
+ * cells, so the extra reach costs re-binds, not new mounts.
+ */
+const DRAW_DISTANCE = 600;
+
+const useThemedStyles = (colors: ThemeColors, insetBottom: number) => {
     return useMemo(() => StyleSheet.create({
         // Root fills the tab body so the search bar pins at the top and the list
         // (or the loading / empty branch below it) takes the remaining space.
         root: {
             flex: 1,
         },
-        container: {
-            // The entry list's gutter — same as the search bar pinned above it
-            // and the Timeline page title above that (styles/layout.ts).
-            paddingHorizontal: LAYOUT_CONTENT_PADDING,
+        listContent: {
+            paddingTop: 4,
             // Timeline renders inside `<Layout useScrollView={false}>`, so it gets
             // NONE of Layout's ScrollView padding and owes itself the FAB clearance
-            // (styles/layout.ts). Without it the last entry card — and the
-            // load-more spinner under it — sit permanently beneath the floating
-            // "add entry" button with no scroll range left to lift them clear,
-            // which reads exactly like "I can't scroll past a certain point".
+            // (styles/layout.ts). Without it the last entry sits permanently under
+            // the floating "add entry" button. Horizontal padding is owned by each
+            // ROW, not by the content container: FlashList draws the pinned sticky
+            // header outside the content container (left:0/right:0 of the list), so
+            // a container gutter would misalign the sticky copy from its in-list
+            // original.
             paddingBottom: LAYOUT_FAB_CLEARANCE + insetBottom,
         },
         loadingContainer: {
@@ -126,153 +150,132 @@ const useThemedStyles = (colors: any, insetBottom: number) => {
             fontSize: 15,
             fontWeight: '600',
         },
-        loadingFooter: {
-            paddingVertical: 20,
-            alignItems: 'center',
-        },
-        // Lightweight text section header — no card bubble. A subtle hairline
-        // rule + generous top margin separate date groups; the title is small,
-        // semibold and muted. A solid background so sticky headers don't show
-        // list rows bleeding through as they scroll under.
-        sectionHeader: {
-            backgroundColor: colors.background,
-            paddingTop: 24,
-            paddingBottom: 8,
-            borderBottomWidth: StyleSheet.hairlineWidth,
-            borderBottomColor: colors.border,
-            marginBottom: 8,
-        },
-        sectionHeaderText: {
-            color: colors.textSecondary,
-            fontSize: 13,
-            fontWeight: '600',
-            letterSpacing: 0.3,
-            textTransform: 'uppercase',
-        },
     }), [colors, insetBottom]);
-}
-
-// Helper Functions
-const groupEntriesByDate = (entries: MoodEntry[]): Section[] => {
-    const grouped = entries.reduce((acc: { [key: string]: MoodEntry[] }, entry) => {
-        const key = sectionKeyForDate(entry.date);
-        if (!acc[key]) acc[key] = [];
-        acc[key].push(entry);
-        return acc;
-    }, {});
-
-    return Object.entries(grouped).map(([key, data]) => ({ key, data }));
 };
 
 /**
  * Main Component — the Timeline list.
  *
- * NEVER put `maintainVisibleContentPosition` on this SectionList. (It WAS here,
- * since the initial release, and it is what made the whole "new entries don't
- * show up" class of bugs.) The prop anchors the scroll offset to the *view* of
- * the first visible row and, whenever a layout pass moves that row, scrolls by
- * the delta to hold it still. This list is ordered date-DESC, so EVERY insert
- * the user cares about — a just-added entry, an undone delete, an entry restored
- * from the bin — lands at the TOP and pushes that anchor row down. The list then
- * silently scrolled down by exactly the new row's height, parking the new row
- * off-screen above the viewport. Device-QA'd 2026-09-03: a restored entry read
- * as CORRUPTED (only its trailing note line peeked below the sticky date header,
- * no mood / time / activity chips) because its card was three-quarters scrolled
- * off the top, and freshly-added entries "only appeared after a pull-to-refresh"
- * (i.e. after a scroll put the top back in view).
+ * ── WHY A FLASHLIST (2026-09-28) ─────────────────────────────────────────────
+ * Reported as "when I scroll down hard/fast enough it's still glitchy, and if I
+ * do it fast enough it'll teleport me back up to the most recent date or a more
+ * recent date". This was the FLING-dependent half of the 2026-09-13 bug (that fix
+ * removed the depth-dependent half — see below). Root cause, read out of RN
+ * 0.85's VirtualizedList: a hard fling moves the render window past cells that
+ * never mount, so they are never measured; VirtualizedList then estimates EACH
+ * unmeasured cell's offset as `averageCellLength * index`
+ * (ListMetricsAggregator.getCellMetricsApprox), ignoring the real measured
+ * offsets of the cells before it. The leading spacer and every window-boundary
+ * cell are placed from those estimates, so whenever the window later shifts
+ * across the unmeasured stretch — and a sticky section header is rendered at its
+ * own index on every window update, so it shifts constantly — the content above
+ * the viewport jumps by the accumulated estimation error, which GROWS WITH
+ * DEPTH. With `maintainVisibleContentPosition` deliberately off (it hid new
+ * entries, see below) nothing compensated, so the rows under the user's finger
+ * were replaced by rows hundreds or thousands of px higher up: "a more recent
+ * date". Detail: tasks/lessons.md 2026-09-28.
  *
- * The prop exists for chat-style lists that prepend HISTORY while the user reads
- * something below; it is exactly wrong for a list whose newest content is at the
- * top. Pagination doesn't need it either: `loadMoreData` APPENDS, which never
- * moves anything above it. Locked by the "Timeline list scroll anchoring" tests
- * in __tests__/timelineUndoDelete.test.tsx.
+ * FlashList v2 removes the mechanism rather than tuning around it: its layout
+ * manager keeps a CONTIGUOUS layout table (every row's y is the previous row's
+ * y + height, estimated or measured, never `average * index`), it measures cells
+ * synchronously before paint on the new architecture, and it corrects the
+ * scroll offset for any size change above the first visible row
+ * (`maintainVisibleContentPosition`, on by default in v2, anchored to that row's
+ * KEY). Photo boxes are fixed-size so an image load never changes a row height,
+ * and the footer is a constant height so a page append never shrinks content.
  *
- * ── SCROLL DEPTH IS STATE THE USER OWNS (2026-09-13) ────────────────────────────
- * Reported as "scrolling the timeline glitches me all the way up, and I'm not sure
- * I can even scroll down past a certain point", reproduced on device at depth and
- * INDEPENDENT of fling speed. Three separate defects stacked into it, all fixed
- * here and each commented at its own site:
+ * ── NEW ENTRIES AT THE TOP MUST STAY VISIBLE ───────────────────────────────────
+ * The old SectionList once carried `maintainVisibleContentPosition` and it hid
+ * every prepend (a just-added entry, an undone delete, a bin restore) by
+ * scrolling the new row off the top (device-QA'd 2026-09-03). FlashList's version
+ * would do the same whenever the insertion lands ABOVE the first visible row. So
+ * the refresh path decides, with the pure `shouldRevealInsertion`, whether it
+ * inserted rows above the user while they were near the top, and if so scrolls
+ * to the top once the new rows are laid out. Locked by
+ * __tests__/timelineUndoDelete.test.tsx + timelineRows.test.ts.
  *
- *   1. Every refresh re-read exactly ONE page and reset the page counter, so any
- *      refresh while the user was deep truncated the loaded rows back to 20. The
- *      content collapsed under the scroll offset and Android clamped the offset
- *      into the much shorter content. `loadEntries` now re-reads the WHOLE loaded
- *      window; only a filter change resets the depth.
- *   2. Pagination's SQL offset came from a page counter that the local list
- *      splices (delete, unstar-under-the-starred-filter) silently desynced, so the
- *      next page SKIPPED as many entries as the list had lost. The offset is now
- *      derived from what is actually on screen.
- *   3. The list was not virtualized in practice (RN's default 21-viewport window
- *      exceeded the whole content) and no cell was memoized, so every parent state
- *      change re-rendered every mounted card — three times per page append. RN's
- *      own "large list that is slow to update" notice fired on device. Cards are
- *      `React.memo`, their callbacks are stable and entry-agnostic, and the window
- *      is bounded.
+ * We deliberately do NOT use v2's `autoscrollToTopThreshold`: Android's native
+ * helper (MaintainVisibleScrollPositionHelper) fires it on EVERY anchor
+ * correction while the offset is under the threshold — including a plain
+ * re-measure of a row above the viewport — which would be a new "teleport to
+ * the top" for any user near it. Deciding in JS, on an actual insertion, is the
+ * precise version.
  *
+ * ── SCROLL DEPTH IS STATE THE USER OWNS (2026-09-13) ──────────────────────────
+ * Still true, still enforced here:
+ *   1. A refresh re-reads the WHOLE loaded window (never one page), so any write
+ *      or focus gain while the user is deep keeps both the rows and the scroll
+ *      position. Only a filter change resets the depth.
+ *   2. The next page's SQL OFFSET is `entries.length` — derived from the rows on
+ *      screen, never a page counter the local splices (delete, unstar under the
+ *      starred filter) could desync.
+ *   3. Cards are `React.memo`, their callbacks are stable and entry-agnostic,
+ *      and a refresh carries unchanged entries over BY REFERENCE
+ *      (`reuseUnchanged`), so a parent render re-renders only changed rows.
  * The through-line: a list that owns a scroll position must never silently render
- * FEWER rows than it did a moment ago, and must never rebuild the whole native
- * view tree while the user is dragging it.
+ * FEWER rows than it did a moment ago, must never move content above the user
+ * without compensating, and must never rebuild its cells while the user drags it.
  */
 export function DatabaseViewer() {
     const colors = useThemeColors();
     const insets = useSafeAreaInsets();
     const styles = useThemedStyles(colors, insets.bottom);
     const db = useSQLiteContext();
-    // refetchEntries bumps the global data version after writes here; the
-    // focus-aware useDataRefresh below consumes that bump (no direct refreshCount
-    // read needed — the hook reads it internally).
-    const { refetchEntries } = useDataContext();
     // `broadcastWrite` is THE way this component announces a write — every write
     // path below calls it, none calls `refetchEntries` directly. It is a stable
     // wrapper over a ref so the memoized card handlers don't have to carry
     // `refetchEntries` in a dependency list: whether a context value keeps its
     // identity is the PROVIDER's business, and the list's render cost must not
-    // silently depend on it. An un-memoized `refetchEntries` would otherwise change
-    // every callback identity on every render, defeat React.memo on 100+ cards and
-    // bring the scroll glitch back. Locked by __tests__/timelineListPerf.test.tsx,
-    // whose context mock deliberately returns a fresh function each render.
+    // silently depend on it. Locked by __tests__/timelineListPerf.test.tsx, whose
+    // context mock deliberately returns a fresh function each render.
+    const { refetchEntries } = useDataContext();
     const refetchEntriesRef = useRef(refetchEntries);
     refetchEntriesRef.current = refetchEntries;
     const broadcastWrite = useCallback(() => refetchEntriesRef.current(), []);
 
-    // The user's date-format preference, used to render the section headers.
+    // The user's date-format preference, used to render the day headers.
     const { pref: dateFormatPref } = useDateFormat();
 
-    // State
-    const [sections, setSections] = useState<Section[]>([]);
+    // ── State ──────────────────────────────────────────────────────────────────
+    // `entries` is the ONE source of truth: the loaded window, newest first, in
+    // the query's total order. Header rows, day summaries, sticky indices and the
+    // next page's offset are all DERIVED from it.
+    const [entries, setEntries] = useState<readonly MoodEntry[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     // True once the first load has resolved. Gates the full-screen spinner to
     // the initial load only, so on-focus refetches don't flash a spinner over
-    // the already-rendered list. A ref (not state) — it's read inside the
-    // loader and must not trigger a re-render when it flips.
+    // the already-rendered list. A ref — it must not trigger a re-render.
     const hasLoadedOnce = useRef(false);
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     // Mirrors `isLoadingMore` for the GUARD in loadMoreData. The state drives the
     // footer spinner; the ref is what stops a second page from being requested,
     // because a `useState` flag is only visible to the NEXT render and
-    // `onEndReached` can fire again before that render commits (VirtualizedList
-    // re-checks the edge on every content-size change, and appending the footer
-    // spinner is itself a content-size change). Two overlapping runs at the same
-    // offset would append the same rows twice — duplicate ids, duplicate
-    // SectionList keys, corrupted cell measurement.
+    // `onEndReached` can fire again before that render commits. Two overlapping
+    // runs at the same offset would append the same rows twice.
     const isLoadingMoreRef = useRef(false);
     const [hasMore, setHasMore] = useState(true);
     const [editModalVisible, setEditModalVisible] = useState(false);
     const [currentEntry, setCurrentEntry] = useState<MoodEntry | null>(null);
     // True when the last initial load FAILED. Drives the inline "couldn't load"
-    // + retry UI (only when there are no sections to show) — so a transient read
-    // failure never blanks a full DB into the EmptyState. Cleared on any
-    // successful load.
+    // + retry UI (only when there is nothing to show) — so a transient read
+    // failure never blanks a full DB into the EmptyState.
     const [loadError, setLoadError] = useState(false);
     // Recycle bin. `binCount` drives the search bar's badge; `pendingUndo` holds
     // the entry id the snackbar can restore (null = no snackbar). `undoNonce`
-    // makes two consecutive deletes of the SAME entry-less message distinct, so
-    // the snackbar's auto-dismiss timer restarts rather than inheriting the
-    // first one's remaining time.
+    // restarts the snackbar's auto-dismiss on a second delete.
     const [binCount, setBinCount] = useState(0);
     const [binVisible, setBinVisible] = useState(false);
     const [pendingUndo, setPendingUndo] = useState<{ id: number; nonce: number } | null>(null);
     const undoNonce = useRef(0);
+
+    // ── Scroll bookkeeping (refs: read on demand, never re-render per frame) ──
+    const listRef = useRef<FlashListRef<TimelineRow>>(null);
+    const scrollOffsetRef = useRef(0);
+    const viewportHeightRef = useRef(0);
+    const [showBackToTop, setShowBackToTop] = useState(false);
+    // Set by the refresh path when it decided to reveal an insertion; consumed
+    // after the new rows commit (see the effect below the rows memo).
+    const revealPendingRef = useRef<null | { animated: boolean }>(null);
 
     // Search + mood filter. `searchQuery` is the RAW input (drives the field with
     // zero lag); `debouncedQuery` is what actually reaches SQL. `moodPresetKey`
@@ -280,7 +283,6 @@ export function DatabaseViewer() {
     const [searchQuery, setSearchQuery] = useState('');
     const [moodPresetKey, setMoodPresetKey] = useState<MoodPresetKey>('all');
     // Independent "starred only" toggle (composes with search + mood presets).
-    // Filters instantly (no debounce), like the mood chips.
     const [starredOnly, setStarredOnly] = useState(false);
     const [debouncedQuery, setDebouncedQuery] = useState('');
     useEffect(() => {
@@ -288,32 +290,45 @@ export function DatabaseViewer() {
         return () => clearTimeout(timer);
     }, [searchQuery]);
 
-    // The SQL-facing filter state. Recomputed only when the debounced query or
-    // the mood preset changes.
+    // The SQL-facing filter state.
     const filters = useMemo<EntryFilters>(
         () => ({ query: debouncedQuery, moodRange: moodPresetToRange(moodPresetKey), starredOnly }),
         [debouncedQuery, moodPresetKey, starredOnly]
     );
-    // The non-memoized loaders (loadMoreData, and fetchEntriesPage which they
-    // share) close over stale state; a ref updated every render lets them read
-    // the CURRENT filter without threading it through — and, crucially, without
-    // touching the useLatestRun / useDataRefresh latch wiring.
+    // The loaders read the CURRENT filter through a ref, without threading it
+    // through and without touching the useLatestRun / useDataRefresh wiring.
     const filtersRef = useRef(filters);
     filtersRef.current = filters;
 
-    // HOW DEEP the list currently is, derived from `sections` rather than kept as
-    // its own `page` counter. It is both the SQL OFFSET for the next page and the
-    // window size a refresh must re-read, and the two MUST agree — a separate
-    // counter drifts the moment the list changes by any path that isn't a page
-    // load (a delete splices a row out; unstarring under the starred filter drops
-    // one), and a drifted offset makes the next page SKIP exactly as many entries
-    // as the list lost. Deriving it makes that class of desync unrepresentable.
-    const loadedCount = useMemo(
-        () => sections.reduce((total, section) => total + section.data.length, 0),
-        [sections]
-    );
-    const loadedCountRef = useRef(loadedCount);
-    loadedCountRef.current = loadedCount;
+    // HOW DEEP the list is: both the SQL OFFSET for the next page and the window
+    // a refresh must re-read. Derived — see note 2 above the component.
+    const entriesRef = useRef(entries);
+    entriesRef.current = entries;
+    const loadedCountRef = useRef(entries.length);
+    loadedCountRef.current = entries.length;
+
+    // Rows for the list. `hasMore` feeds the summary of the LAST day, which may
+    // continue on the page that hasn't loaded yet.
+    const rows = useMemo(() => buildTimelineRows(entries, hasMore), [entries, hasMore]);
+    const rowsRef = useRef(rows);
+    rowsRef.current = rows;
+    const stickyHeaderIndices = useMemo(() => stickyHeaderIndicesFor(rows), [rows]);
+
+    // Reveal an insertion the refresh decided the user must see. Runs after the
+    // rows commit, i.e. after FlashList has laid them out and applied its own
+    // content-position correction; the next frame lets that correction land
+    // natively before we scroll.
+    useEffect(() => {
+        const pending = revealPendingRef.current;
+        if (!pending) return;
+        revealPendingRef.current = null;
+        const frame = requestAnimationFrame(() => {
+            // Offset and pill state follow from the scroll events this produces
+            // (handleScroll is their one writer).
+            listRef.current?.scrollToOffset({ offset: 0, animated: pending.animated });
+        });
+        return () => cancelAnimationFrame(frame);
+    }, [rows]);
 
     // Any active filter switches the empty branch from "add your first entry" to
     // the filter-specific "nothing matched" message (with a reset).
@@ -324,74 +339,185 @@ export function DatabaseViewer() {
 
     // Run-sequence latch — the SAME guard Home's fetchData uses (see
     // app/(tabs)/index.tsx + hooks/useLatestRun.ts). useDataRefresh ignores the
-    // loader's returned Promise (it can't cancel it), so overlapping invocations —
-    // a rapid focus change, or a refreshCount bump that re-runs loadInitialData
-    // while a previous run is still awaiting its DB reads — can resolve in EITHER
-    // order. Without the latch a slow STALE run's setSections/setPage/setHasMore
-    // would clobber a fresher run and, when the stale read came back short/empty,
-    // blank the Timeline list (sections.length === 0 -> EmptyState) until remount.
-    // One shared counter also makes a fresh initial load supersede any in-flight
-    // loadMore (and vice-versa) so pagination can't write a stale page either —
-    // only the most recently begun run is allowed to commit state.
+    // loader's returned Promise, so overlapping invocations can resolve in EITHER
+    // order; only the most recently begun run (refresh OR page) may commit state.
     const { begin: beginRun, isLatest: isLatestRun } = useLatestRun();
 
-    // Event Handlers
-    //
-    // The three handlers the entry cards receive (`handleEdit`, `handleDelete`,
-    // `handleToggleStar`) are MEMOIZED and take the entry as an argument instead
-    // of being bound to it per row. That is what makes `React.memo(EntryCard)`
-    // effective — see the note on EntryCard. Anything that would put changing
-    // state in their closures (the revert snapshot below) reads a ref instead.
-    const sectionsRef = useRef(sections);
-    sectionsRef.current = sections;
-
+    // ── Card handlers ─────────────────────────────────────────────────────────
+    // MEMOIZED and entry-agnostic (they take the entry as an argument), which is
+    // what makes `React.memo(EntryCard)` effective. Anything that would put
+    // changing state in their closures reads a ref instead.
     const handleEdit = useCallback((entry: MoodEntry) => {
         setCurrentEntry(entry);
         setEditModalVisible(true);
     }, []);
 
     const handleDelete = useCallback(async (entryId: number) => {
-        // deleteMoodEntry is a SOFT delete since migration 12: it only stamps
-        // `deleted_at`, so the entry's activities, media rows and photo FILES all
-        // survive and the undo below is lossless. It returns a DatabaseResult
-        // (never throws); on failure we keep the row on screen and tell the user.
+        // deleteMoodEntry is a SOFT delete: it only stamps `deleted_at`, so the
+        // entry's activities, media rows and photo FILES all survive and the undo
+        // below is lossless. It returns a DatabaseResult (never throws); on
+        // failure we keep the row on screen and tell the user.
         const result = await deleteMoodEntry(db, entryId);
         if (!result.success) {
             Alert.alert("Couldn't delete entry", result.message);
             return;
         }
-        setSections(currentSections =>
-            currentSections
-                .map(section => ({
-                    ...section,
-                    data: section.data.filter(entry => entry.id !== entryId),
-                }))
-                .filter(section => section.data.length > 0)
-        );
+        setEntries(current => current.filter(entry => entry.id !== entryId));
         setPendingUndo({ id: entryId, nonce: ++undoNonce.current });
         broadcastWrite();
     }, [db, broadcastWrite]);
 
+    const starredOnlyRef = useRef(starredOnly);
+    starredOnlyRef.current = starredOnly;
+
+    const handleToggleStar = useCallback(async (entry: MoodEntry) => {
+        const nextStarred = entry.starred_at == null;
+        const nextStarredAt = nextStarred ? new Date().toISOString() : null;
+        const leavesList = starredOnlyRef.current && !nextStarred;
+
+        // Optimistic update. Under the starred filter an UNstar means the entry
+        // no longer matches, so it leaves the list; otherwise it's updated in
+        // place (a NEW object, so its memoized card re-renders).
+        setEntries(current =>
+            leavesList
+                ? current.filter(e => e.id !== entry.id)
+                : current.map(e => (e.id === entry.id ? { ...e, starred_at: nextStarredAt } : e))
+        );
+
+        const result = await setEntryStarred(db, entry.id, nextStarred);
+        if (!result.success) {
+            // Revert ONLY this entry. Restoring a whole snapshot taken before the
+            // await would also throw away a page that was appended meanwhile —
+            // shrinking the window under the user. An entry that left the list
+            // comes back through a window refresh, which re-reads at full depth.
+            if (leavesList) void loadEntriesRef.current();
+            else setEntries(current => current.map(e => (e.id === entry.id ? entry : e)));
+            Alert.alert("Couldn't update star", result.message);
+            return;
+        }
+        broadcastWrite();
+    }, [db, broadcastWrite]);
+
+    // A refresh has to know whether the filter CHANGED, because that is the only
+    // thing that legitimately throws away the user's scroll depth. The signature
+    // is captured in the loader's closure (rebuilt on every filter change); the
+    // ref holds what the PREVIOUS run saw.
+    const filterSignature = `${debouncedQuery} ${moodPresetKey} ${starredOnly}`;
+    const lastLoadedFilterRef = useRef(filterSignature);
+    const filterResetPendingRef = useRef(false);
+
+    // Focus-aware reload. Runs whenever the Timeline tab regains focus and
+    // re-runs while focused when the data version bumps (any write, here or on
+    // another screen). The full-screen spinner shows ONLY on the very first load.
+    //
+    // IT RE-READS THE WHOLE LOADED WINDOW, NOT PAGE 0 (2026-09-13). A refresh
+    // that read one page over a list the user had paged five deep truncated the
+    // content under the scroll offset; Android clamped the offset into the
+    // shorter content ("glitches me to the top") and the rows had to be re-earned
+    // one onEndReached at a time ("can't get past a certain point"). Leaving the
+    // Timeline and coming back KEEPS the user's place as a result — deliberately.
+    const loadEntries = useCallback(async () => {
+        // Claim this run BEFORE the first await so any later invocation (focus /
+        // data-version bump / a loadMore) supersedes it.
+        const runId = beginRun();
+        const filterChanged = lastLoadedFilterRef.current !== filterSignature;
+        lastLoadedFilterRef.current = filterSignature;
+        if (filterChanged) {
+            // A filter change is the ONE reset. Void the bookkeeping too: a filter
+            // change fires BOTH useDataRefresh vectors in the same commit, and the
+            // second run would otherwise read the OLD depth off the ref and
+            // quietly restore it. The ref is re-derived on the next render.
+            loadedCountRef.current = 0;
+            // Same reason: the "start the new list at the top" decision must
+            // survive this run being superseded by its twin, so it is a flag the
+            // COMMITTING run consumes rather than this run's local.
+            filterResetPendingRef.current = true;
+        }
+        const windowSize = Math.max(TIMELINE_PAGE_SIZE, loadedCountRef.current);
+        if (!hasLoadedOnce.current) setIsLoading(true);
+        try {
+            const fetched = await getEntriesWindow(db, filtersRef.current, 0, windowSize);
+            // A newer run started while these reads were in flight — drop this
+            // (now stale) result so it can't overwrite the newer one.
+            if (!isLatestRun(runId)) return;
+
+            const prev = entriesRef.current;
+            const next = reuseUnchanged(prev, fetched);
+            // A SHORT window is proof there is nothing past it (the query starts
+            // at offset 0). A full window says nothing either way.
+            const nextHasMore = fetched.length === windowSize;
+
+            if (filterResetPendingRef.current) {
+                filterResetPendingRef.current = false;
+                // The rows on screen were replaced wholesale — start at the top.
+                revealPendingRef.current = { animated: false };
+            } else if (
+                shouldRevealInsertion({
+                    prevIds: new Set(prev.map(e => e.id)),
+                    next,
+                    nextRows: buildTimelineRows(next, nextHasMore),
+                    firstVisibleKey: firstVisibleRowKey(),
+                    scrollOffset: scrollOffsetRef.current,
+                    nearTop: viewportHeightRef.current,
+                })
+            ) {
+                revealPendingRef.current = { animated: true };
+            }
+
+            setEntries(next);
+            setHasMore(nextHasMore);
+            setLoadError(false);
+        } catch (error) {
+            // getEntriesWindow THROWS on a read failure. KEEP whatever is already
+            // on screen and flag the error so the render can offer a retry when
+            // there's nothing to show — NEVER fall through to EmptyState.
+            console.error('Error loading timeline entries:', error);
+            if (isLatestRun(runId)) setLoadError(true);
+        } finally {
+            // Only the latest run owns the loading flag / hasLoadedOnce.
+            if (isLatestRun(runId)) {
+                hasLoadedOnce.current = true;
+                setIsLoading(false);
+            }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- getEntriesWindow reads db + refs (not closed deps); the filter deps make this loader re-run (collapsing to one page) on a filter change via useDataRefresh; setState + latch identities are stable
+    }, [db, debouncedQuery, moodPresetKey, starredOnly]);
+    useDataRefresh(loadEntries, [db, debouncedQuery, moodPresetKey, starredOnly]);
+    // The memoized star handler (declared above the loader) re-runs the CURRENT
+    // loader through this ref; plain per-render closures call `loadEntries`.
+    const loadEntriesRef = useRef(loadEntries);
+    loadEntriesRef.current = loadEntries;
+
+    /** Key of the first row on screen right now, or null before first layout. */
+    function firstVisibleRowKey(): string | null {
+        const index = listRef.current?.getFirstVisibleIndex?.() ?? -1;
+        return index >= 0 ? rowsRef.current[index]?.key ?? null : null;
+    }
+
+    // Bin badge count. Rides the SAME focus/data-version signal as the list.
+    // `getBinCount` never throws (a badge must not break the Timeline).
+    const loadBinCount = useCallback(async () => {
+        setBinCount(await getBinCount(db));
+    }, [db]);
+    useDataRefresh(loadBinCount, [db]);
+
     // Undo: put the entry straight back. A full reload (not a local splice) is
-    // what restores it to its correct DATE position in the sections, the entry
-    // may well not belong at the end of the list it was removed from.
+    // what restores it to its correct DATE position; the reload's reveal logic
+    // brings it into view if it landed above the user near the top.
     const handleUndoDelete = async (entryId: number) => {
         const result = await restoreMoodEntry(db, entryId);
         if (!result.success) {
             Alert.alert("Couldn't restore entry", result.message);
             return;
         }
-        await loadEntriesRef.current();
+        await loadEntries();
         broadcastWrite();
     };
 
     const handleUpdate = async (formData: EntryFormData) => {
         if (!currentEntry) return;
-
-        // updateMoodEntry owns the SQL + photo-diff/file-copy logic (see
-        // databases/entries.ts). On failure we KEEP the edit modal open with the
-        // draft intact and surface the error — the old path silently swallowed
-        // it, leaving the user staring at an unchanged entry with no feedback.
+        // updateMoodEntry owns the SQL + photo-diff/file-copy logic. On failure we
+        // KEEP the edit modal open with the draft intact and surface the error.
         const result = await updateMoodEntry(db, currentEntry.id, {
             mood: formData.mood,
             activities: formData.activities,
@@ -407,259 +533,105 @@ export function DatabaseViewer() {
         broadcastWrite();
     };
 
-    const handleToggleStar = useCallback(async (entry: MoodEntry) => {
-        const nextStarred = entry.starred_at == null;
-        const nextStarredAt = nextStarred ? new Date().toISOString() : null;
+    const hasMoreRef = useRef(hasMore);
+    hasMoreRef.current = hasMore;
+    const loadMoreData = useCallback(async () => {
+        // Guard on the REF, not the state (see isLoadingMoreRef).
+        if (isLoadingMoreRef.current || !hasMoreRef.current) return;
 
-        // Snapshot for revert-on-failure — read from the ref so this handler's
-        // identity doesn't change with every list update (see the note above).
-        const prevSections = sectionsRef.current;
-
-        // Optimistic update: reflect the new star state immediately. If the
-        // starred filter is active AND we just UNstarred, the entry no longer
-        // matches, so drop it from the visible list; otherwise update it in
-        // place. Then prune any section left empty.
-        setSections(currentSections =>
-            currentSections
-                .map(section => ({
-                    ...section,
-                    data:
-                        starredOnly && !nextStarred
-                            ? section.data.filter(e => e.id !== entry.id)
-                            : section.data.map(e =>
-                                  e.id === entry.id ? { ...e, starred_at: nextStarredAt } : e
-                              ),
-                }))
-                .filter(section => section.data.length > 0)
-        );
-
-        const result = await setEntryStarred(db, entry.id, nextStarred);
-        if (!result.success) {
-            // Roll the optimistic change back and tell the user.
-            setSections(prevSections);
-            Alert.alert("Couldn't update star", result.message);
-            return;
-        }
-        broadcastWrite();
-    }, [db, broadcastWrite, starredOnly]);
-
-    // A refresh has to know whether the filter CHANGED, because that is the only
-    // thing that legitimately throws away the user's scroll depth. The signature
-    // is captured in the loader's closure (it is rebuilt on every filter change);
-    // the ref holds what the PREVIOUS run saw. Differ => the filter just changed
-    // => collapse back to one page. Equal => this is a focus gain or a data-version
-    // bump => keep the depth. See the loader below.
-    const filterSignature = `${debouncedQuery} ${moodPresetKey} ${starredOnly}`;
-    const lastLoadedFilterRef = useRef(filterSignature);
-
-    // Focus-aware reload (replaces useEffect([db, refreshCount])). Runs whenever
-    // the Timeline tab regains focus — so an entry added on another tab shows
-    // immediately, no app reopen — and re-runs while focused when the data version
-    // bumps (any write, here or on another screen). The full-screen spinner shows
-    // ONLY on the very first load; a refetch over an already-populated list keeps
-    // the stale list visible (no spinner flash) and swaps it for fresh data when
-    // the query resolves. `hasLoadedOnce` is a ref so toggling it never itself
-    // re-renders.
-    //
-    // IT RE-READS THE WHOLE LOADED WINDOW, NOT PAGE 0. This is the fix for the
-    // reported "scrolling the Timeline glitches me back to the top and then I
-    // can't get past a certain point". Every refresh used to read exactly
-    // ITEMS_PER_PAGE rows and reset the page counter, so ANY refresh while the
-    // user was paginated deep — deleting an entry, starring one, editing one,
-    // restoring from the bin, or just leaving the tab and coming back — silently
-    // truncated 100+ rendered rows down to 20. The content height collapsed under
-    // the scroll offset, the native ScrollView clamped the offset into the much
-    // shorter content (the "glitch to the top"), and the rows the user had already
-    // paged in were gone until `onEndReached` fetched them all over again (the
-    // "wall"). Refreshing IN PLACE at the current depth keeps both the data and
-    // the scroll position, and makes the refresh idempotent — which is what the
-    // useDataRefresh contract already promised (hooks/useDataRefresh.ts) and this
-    // loader was quietly violating.
-    //
-    // ONE DELIBERATE BEHAVIOUR CHANGE falls out of that, device-confirmed
-    // 2026-09-13: leaving the Timeline and coming back now KEEPS the user where
-    // they were. It used to land them at the top, but only as a side effect of the
-    // truncation — the navigator keeps this screen mounted, so the native scroll
-    // offset always survived a tab switch; it was the data collapsing underneath it
-    // that threw the user to the top. Losing your place in a long history because
-    // you glanced at another tab is not a feature. If a future change ever wants
-    // "return to top on focus", that has to be an explicit scrollToLocation, not a
-    // truncated read.
-    const loadEntries = useCallback(async () => {
-        // Claim this run BEFORE the first await so any later invocation (focus /
-        // data-version bump / a loadMore) supersedes it; a stale run that resolves
-        // after a newer one is then dropped instead of clobbering fresher state.
-        const runId = beginRun();
-        const filterChanged = lastLoadedFilterRef.current !== filterSignature;
-        lastLoadedFilterRef.current = filterSignature;
-        // A filter change is the ONE reset: the rows on screen no longer match, so
-        // starting over at one page is correct (and the user is at the top anyway,
-        // having just tapped a chip or typed). Otherwise re-read exactly as many
-        // rows as are on screen — never fewer, or the list shrinks under the user.
-        if (filterChanged) {
-            // Void the bookkeeping too, not just this run's window. A filter change
-            // fires BOTH useDataRefresh vectors in the same commit (the focus
-            // effect's callback identity changed AND its dep list changed), so a
-            // second run follows this one with no render in between — and it would
-            // read the OLD depth off the ref and quietly restore it, defeating the
-            // reset. The ref is re-derived from `sections` on the next render.
-            loadedCountRef.current = 0;
-        }
-        const windowSize = Math.max(ITEMS_PER_PAGE, loadedCountRef.current);
-        if (!hasLoadedOnce.current) setIsLoading(true);
-        try {
-            const entries = await getEntriesWindow(
-                db,
-                filtersRef.current,
-                0,
-                windowSize
-            );
-            // A newer run started while these reads were in flight — drop this
-            // (now stale) result so it can't overwrite the newer one or blank the
-            // list out of order.
-            if (!isLatestRun(runId)) return;
-            setSections(groupEntriesByDate(entries));
-            // A SHORT window is proof there is nothing past it: the query starts at
-            // offset 0, so fewer rows than asked for means the whole filtered set
-            // fits in what we just read. (A full window says nothing either way, so
-            // assume there is more and let the next onEndReached settle it.)
-            setHasMore(entries.length === windowSize);
-            setLoadError(false);
-        } catch (error) {
-            // getEntriesWindow THROWS on a read failure (it used to swallow the
-            // error and return [], which blanked the list into EmptyState over a
-            // full DB). KEEP whatever sections are already on screen and flag the
-            // error so the render can show a retry when there's nothing to show —
-            // NEVER fall through to EmptyState on an error.
-            console.error('Error loading timeline entries:', error);
-            if (isLatestRun(runId)) setLoadError(true);
-        } finally {
-            // Only the latest run owns the loading flag / hasLoadedOnce — a stale
-            // run must not flip isLoading off under a newer in-flight load.
-            if (isLatestRun(runId)) {
-                hasLoadedOnce.current = true;
-                setIsLoading(false);
-            }
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- getEntriesWindow reads db + filtersRef.current/loadedCountRef.current (not closed deps); the filter deps below make this loader re-run (collapsing to one page) on a filter change via useDataRefresh; setState + latch (beginRun/isLatestRun) identities are stable
-    }, [db, debouncedQuery, moodPresetKey, starredOnly]);
-    // A filter change flips these extraDeps -> useDataRefresh re-runs loadEntries
-    // through the SAME run-sequence latch, which collapses the window back to one
-    // page and supersedes any in-flight loadMore (shared beginRun) so it can't
-    // append stale pages onto the freshly-filtered list.
-    useDataRefresh(loadEntries, [db, debouncedQuery, moodPresetKey, starredOnly]);
-    // Undo (declared ABOVE loadEntries) needs to re-run the loader; a ref
-    // updated every render lets it call the CURRENT one without hoisting the
-    // whole loader above the handlers or touching the useLatestRun wiring —
-    // the same trick `filtersRef` uses.
-    const loadEntriesRef = useRef(loadEntries);
-    loadEntriesRef.current = loadEntries;
-
-    // Bin badge count. Rides the SAME focus/data-version signal as the list, so
-    // it re-counts after any delete, undo, restore or purge without its own
-    // plumbing. `getBinCount` never throws (a badge must not break the Timeline).
-    const loadBinCount = useCallback(async () => {
-        setBinCount(await getBinCount(db));
-    }, [db]);
-    useDataRefresh(loadBinCount, [db]);
-
-    const loadMoreData = async () => {
-        // Guard on the REF, not the state (see isLoadingMoreRef): a fast fling can
-        // re-enter this before React has committed `setIsLoadingMore(true)`, and two
-        // runs reading the same offset would append the same rows twice.
-        if (isLoadingMoreRef.current || !hasMore) return;
-
-        // Pagination joins the same run sequence: if a fresh load (focus /
-        // data-version bump) begins while this page is loading, this run is no
-        // longer latest and must not append onto — or mis-set hasMore for — the
-        // list the newer load just refreshed.
+        // Pagination joins the same run sequence: if a fresh load begins while
+        // this page is loading, this run must not append onto the list the newer
+        // load just refreshed.
         const runId = beginRun();
         isLoadingMoreRef.current = true;
         setIsLoadingMore(true);
         try {
-            // OFFSET = how many rows are on screen right now, not a page counter.
-            // The query excludes anything the list dropped locally (a soft-deleted
-            // entry, an entry unstarred under the starred filter), so "rows loaded"
-            // and "rows to skip" are the same number BY CONSTRUCTION — a separate
-            // page counter drifts past those splices and silently skips entries.
+            // OFFSET = rows on screen, not a page counter (note 2 above).
             const offset = loadedCountRef.current;
-            const newEntries = await getEntriesWindow(
-                db,
-                filtersRef.current,
-                offset,
-                ITEMS_PER_PAGE
-            );
+            const page = await getEntriesWindow(db, filtersRef.current, offset, TIMELINE_PAGE_SIZE);
             if (!isLatestRun(runId)) return;
-
-            if (newEntries.length > 0) {
-                setSections(prevSections => {
-                    const loaded = prevSections.flatMap(s => s.data);
-                    // De-dupe by id. An entry added between the last read and this
-                    // one shifts the whole window down by a row, so this offset can
-                    // hand back a row already on screen; a duplicate id becomes a
-                    // duplicate SectionList key, which corrupts cell measurement
-                    // (and makes React drop a row). Cheap, and it makes the append
-                    // safe against ANY concurrent insert rather than just the ones
-                    // we thought of.
-                    const seen = new Set(loaded.map(e => e.id));
-                    const fresh = newEntries.filter(e => !seen.has(e.id));
-                    return fresh.length > 0
-                        ? groupEntriesByDate([...loaded, ...fresh])
-                        : prevSections;
-                });
-                setHasMore(newEntries.length === ITEMS_PER_PAGE);
-            } else {
-                setHasMore(false);
+            if (page.length > 0) {
+                // De-dupe by id: an entry added between two reads shifts the
+                // window, so this offset can hand back a row already on screen.
+                setEntries(prev => appendUnique(prev, page));
             }
+            setHasMore(page.length === TIMELINE_PAGE_SIZE);
         } catch (error) {
             console.error('Error loading more data:', error);
         } finally {
-            // Always clear the loading flag, even when superseded: it's local
-            // pagination/guard UI state (NOT list data), so a stale run resetting
-            // it can't clobber fresher data — and leaving it stuck would
-            // permanently block the guard above. Only the data writes
-            // (setSections/setHasMore) are latch-gated.
+            // Always clear the loading flag, even when superseded: it's guard UI
+            // state, not list data, and leaving it stuck would block the guard.
             isLoadingMoreRef.current = false;
             setIsLoadingMore(false);
         }
-    };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- reads db + refs; latch identities are stable
+    }, [db]);
 
-    // Render Methods — memoized along with the handlers they pass down, so a
-    // parent state change (a spinner toggling, a page appending) re-renders the
-    // NEW cells only instead of every mounted card. See EntryCard's memo note.
+    // ── Scroll tracking ──────────────────────────────────────────────────────
+    // Offset and viewport height go into refs (read by the reveal decision);
+    // the only STATE is the back-to-top pill's visibility, set only when it
+    // actually flips, so scrolling never re-renders the screen per frame.
+    const showBackToTopRef = useRef(false);
+    const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+        const { contentOffset, layoutMeasurement } = event.nativeEvent;
+        scrollOffsetRef.current = contentOffset.y;
+        if (layoutMeasurement?.height) viewportHeightRef.current = layoutMeasurement.height;
+        const show = shouldShowBackToTop(contentOffset.y, viewportHeightRef.current);
+        if (show !== showBackToTopRef.current) {
+            showBackToTopRef.current = show;
+            setShowBackToTop(show);
+        }
+    }, []);
+
+    const handleLayout = useCallback((event: LayoutChangeEvent) => {
+        viewportHeightRef.current = event.nativeEvent.layout.height;
+    }, []);
+
+    const scrollToTop = useCallback(() => {
+        listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    }, []);
+
+    // ── Rendering ────────────────────────────────────────────────────────────
+    // Memoized along with the handlers it passes down, so a parent state change
+    // (a spinner toggling, a page appending) re-binds only rows whose props
+    // changed instead of every mounted card.
     const renderItem = useCallback(
-        ({ item: entry }: { item: MoodEntry }) => (
-            <EntryCard
-                entry={entry}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                onToggleStar={handleToggleStar}
-                colors={colors}
-            />
-        ),
-        [handleEdit, handleDelete, handleToggleStar, colors]
+        ({ item, target }: ListRenderItemInfo<TimelineRow>) =>
+            item.type === 'header' ? (
+                <DayHeader
+                    dayKey={item.dayKey}
+                    count={item.count}
+                    averageMood={item.averageMood}
+                    complete={item.complete}
+                    dateFormatPref={dateFormatPref}
+                    colors={colors}
+                    sticky={target === 'StickyHeader'}
+                />
+            ) : (
+                <EntryCard
+                    entry={item.entry}
+                    isFirstOfDay={item.isFirstOfDay}
+                    isLastOfDay={item.isLastOfDay}
+                    onEdit={handleEdit}
+                    onDelete={handleDelete}
+                    onToggleStar={handleToggleStar}
+                    colors={colors}
+                />
+            ),
+        [handleEdit, handleDelete, handleToggleStar, colors, dateFormatPref]
     );
 
-    const renderSectionHeader = useCallback(
-        ({ section: { key } }: { section: Section }) => (
-            <View style={styles.sectionHeader}>
-                <Text style={styles.sectionHeaderText}>
-                    {formatSectionTitle(key, dateFormatPref)}
-                </Text>
-            </View>
-        ),
-        [styles, dateFormatPref]
-    );
+    const keyExtractor = useCallback((row: TimelineRow) => row.key, []);
 
-    const keyExtractor = useCallback((item: MoodEntry) => item.id.toString(), []);
+    const footer = (
+        <TimelineFooter state={footerStateFor(isLoadingMore, hasMore, entries.length)} colors={colors} />
+    );
 
     // EntryFormModal is rendered UNCONDITIONALLY below — never behind an early
     // return. A focus refetch can flip `isLoading`, and if the edit form lived
     // past an early return it would unmount mid-edit and destroy the user's
     // draft. So the loading/empty/list states are chosen inline while the form
-    // stays mounted across all of them. The full-screen spinner shows only on
-    // the INITIAL load (isLoading && no sections yet) — a refetch over an
-    // existing list keeps the stale list visible until fresh data arrives.
+    // stays mounted across all of them.
     return (
         <View style={styles.root}>
             {/* Pinned above the list — always rendered (even while loading/empty)
@@ -675,11 +647,11 @@ export function DatabaseViewer() {
                 onOpenBin={() => setBinVisible(true)}
                 colors={colors}
             />
-            {isLoading && sections.length === 0 ? (
+            {isLoading && entries.length === 0 ? (
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={colors.accent} />
                 </View>
-            ) : loadError && sections.length === 0 ? (
+            ) : loadError && entries.length === 0 ? (
                 // A read failed and there's nothing on screen — show a recoverable
                 // error, NOT the EmptyState. Retry re-runs the loader.
                 <View style={styles.errorContainer}>
@@ -696,7 +668,7 @@ export function DatabaseViewer() {
                         <Text style={styles.retryText}>Try again</Text>
                     </Pressable>
                 </View>
-            ) : sections.length === 0 ? (
+            ) : entries.length === 0 ? (
                 isFiltering ? (
                     <View style={styles.emptyFilterContainer}>
                         <Text style={styles.emptyFilterText}>
@@ -722,45 +694,32 @@ export function DatabaseViewer() {
                     <EmptyState />
                 )
             ) : (
-                // NO `maintainVisibleContentPosition` on this list — see the note
-                // above the component for why adding it back hides every prepend.
-                <SectionList
+                <FlashList
+                    ref={listRef}
                     testID="timeline-list"
-                    sections={sections}
+                    data={rows}
                     renderItem={renderItem}
-                    renderSectionHeader={renderSectionHeader}
                     keyExtractor={keyExtractor}
+                    getItemType={rowTypeOf}
+                    stickyHeaderIndices={stickyHeaderIndices}
                     onEndReached={loadMoreData}
-                    onEndReachedThreshold={0.5}
-                    stickySectionHeadersEnabled={true}
-                    // ACTUALLY VIRTUALIZE. RN's default `windowSize` is 21
-                    // VIEWPORTS, which for a list of a few hundred entry cards is
-                    // taller than the whole list — so nothing was ever unmounted
-                    // and every mounted card took part in every render pass. 5
-                    // viewports keeps two screens of cards live above and below the
-                    // visible one (plenty for a fling to land on rendered content)
-                    // while capping how much native view tree a single update has
-                    // to touch. Keep it well above 2: these cells have no
-                    // `getItemLayout` (heights vary with notes and photos), so the
-                    // tail spacer is clamped to the highest MEASURED cell and too
-                    // small a window makes the list grow in visible stutters.
-                    windowSize={5}
-                    initialNumToRender={ITEMS_PER_PAGE / 2}
-                    maxToRenderPerBatch={ITEMS_PER_PAGE / 2}
+                    onEndReachedThreshold={END_REACHED_SCREENS}
+                    drawDistance={DRAW_DISTANCE}
+                    onScroll={handleScroll}
+                    onLayout={handleLayout}
+                    scrollEventThrottle={16}
                     keyboardDismissMode="on-drag"
                     keyboardShouldPersistTaps="handled"
-                    ListFooterComponent={isLoadingMore ? (
-                        <View style={styles.loadingFooter}>
-                            <ActivityIndicator size="small" color={colors.accent} />
-                        </View>
-                    ) : null}
-                    contentContainerStyle={styles.container}
+                    ListFooterComponent={footer}
+                    contentContainerStyle={styles.listContent}
                 />
             )}
+            {showBackToTop && pendingUndo === null && entries.length > 0 ? (
+                <BackToTopPill colors={colors} onPress={scrollToTop} />
+            ) : null}
             {/* Undo affordance for the soft delete. In-tree (mounted through the
                 OverlayHost), never a react-native <Modal>. Keyed by the undo nonce
-                so a second delete restarts the countdown instead of inheriting
-                the first snackbar's remaining time. */}
+                so a second delete restarts the countdown. */}
             <UndoSnackbar
                 key={pendingUndo?.nonce ?? 'idle'}
                 visible={pendingUndo !== null}
@@ -777,7 +736,7 @@ export function DatabaseViewer() {
                 visible={binVisible}
                 onClose={() => setBinVisible(false)}
                 onChanged={() => {
-                    loadEntriesRef.current();
+                    loadEntries();
                     broadcastWrite();
                 }}
             />

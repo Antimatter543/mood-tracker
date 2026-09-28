@@ -197,7 +197,9 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   - Screen-content Text (headers, buttons like "Continue") IS matchable; tab labels are NOT.
 - Sideload installs may hit Play Protect: `adb shell settings put global verifier_verify_adb_installs 0`,
   then `adb install -r -g <apk>`. EAS-signed release vs debug-signed dev build differ → uninstall before swapping.
-- Seed test data: Settings has a `__DEV__`-only "Generate 50 Sample Entries" button (dev build only).
+- Seed test data: Settings has `__DEV__`-only "Generate 50 Sample Entries" and "Generate 300 Timeline QA
+  Entries" buttons (dev build / Expo Go only). The 300 seed clusters entries by day with mixed note lengths,
+  photos and stars: use it for any Timeline scroll/fling QA (`.maestro/timeline-fling.yaml`).
 
 ## Hard-won gotchas (see frontend/tasks/lessons.md for detail)
 - **NEVER use `react-native` `<Modal>` here (removed v1.2.3).** It opens a second native window with broken
@@ -216,6 +218,14 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   live animatedStyle left, a leaf button, no async children. Diagnosing a blank screen: ask what is
   INSIDE the missing region versus outside it (the boundary names the component), and whether a
   re-render fixes it (if not, the failure is below JS).
+- **The Timeline is a `@shopify/flash-list` v2 list (since 2026-09-28), not a SectionList.** Its
+  content-position maintenance is what stops a hard fling from "teleporting" the user (RN's
+  VirtualizedList places unmeasured cells at `average x index`); keep it ON, and NEVER add
+  `autoscrollToTopThreshold` (Android fires it on every anchor correction near the top). Insertions at the
+  top are revealed by `shouldRevealInsertion` in `components/timeline/timelineRows.ts`. Cells are RECYCLED:
+  per-item local state in a cell must be `useRecyclingState(init, [id])`, never `useState`. Photo boxes and
+  the list footer are fixed-height on purpose. Jest uses the probe at `__mocks__/@shopify/flash-list.tsx`
+  (reach it with `require`, not `jest.requireMock`). Detail: `frontend/tasks/lessons.md` 2026-09-28.
 - **Empty-database is a real code path** — a fresh install has zero entries. Date/aggregate logic must not throw
   on empty data (a heatmap `MIN(date)=NULL` once white-screened Stats). Test empty AND the empty->first-entry
   transition (a hooks-ordering bug crashed exactly there).

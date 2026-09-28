@@ -147,7 +147,10 @@ const forestColors: ThemeColors = {
     cardBackground: '#FAFCF7',
     secondaryBackground: '#F0F5E8',
     text: '#2D4A1E',
-    textSecondary: 'rgba(45, 74, 30, 0.7)',
+    // 0.78, not 0.7: at 0.7 this measured 3.98:1 on the forest page and 4.20:1
+    // on its cards, under WCAG AA's 4.5 for body text (found by
+    // __tests__/timelineContrast.test.ts, 2026-09-28). 0.78 = 4.87 / 5.19.
+    textSecondary: 'rgba(45, 74, 30, 0.78)',
     border: 'rgba(85, 145, 55, 0.2)',
     accent: '#558B2F',
     accentDark: '#3E7A1E',
