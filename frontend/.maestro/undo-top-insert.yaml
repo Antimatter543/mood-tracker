@@ -1,0 +1,21 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Delete -> Undo at the top of the Timeline (fix/timeline-top-insert-height QA, 2026-09-28).
+- launchApp
+- tapOn:
+    text: "Continue"
+    optional: true
+- tapOn:
+    point: 50%, 89%
+- assertVisible:
+    text: "Timeline"
+- takeScreenshot: undo-0-before
+- tapOn:
+    id: ".*"
+    text: "More actions"
+    index: 0
+- tapOn:
+    id: "entry-delete"
+- assertVisible: "UNDO"
+- tapOn: "UNDO"
+- takeScreenshot: undo-1-after
