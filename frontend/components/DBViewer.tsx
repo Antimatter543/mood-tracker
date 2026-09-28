@@ -323,9 +323,9 @@ export function DatabaseViewer() {
         if (!pending) return;
         revealPendingRef.current = null;
         const frame = requestAnimationFrame(() => {
+            // Offset and pill state follow from the scroll events this produces
+            // (handleScroll is their one writer).
             listRef.current?.scrollToOffset({ offset: 0, animated: pending.animated });
-            scrollOffsetRef.current = 0;
-            setShowBackToTop(false);
         });
         return () => cancelAnimationFrame(frame);
     }, [rows]);
