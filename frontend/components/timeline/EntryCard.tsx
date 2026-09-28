@@ -6,7 +6,8 @@ import { useRecyclingState } from '@shopify/flash-list';
 import { MoodEntry } from '../types';
 import { ThemeColors } from '@/styles/global';
 import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
-import { moodAccentRgb, moodAlpha, moodColor } from './moodColor';
+import { moodColor } from './moodColor';
+import { dangerColor, nodeFill } from './timelinePalette';
 import { ActivityRow } from './ActivityRow';
 import { EntryPhotos } from './EntryPhotos';
 
@@ -48,18 +49,6 @@ const formatTime = (iso: string): string => {
 /** A mood as the node prints it: integers bare, fractions to one decimal. */
 export const formatMood = (mood: number): string =>
     Number.isInteger(mood) ? String(mood) : mood.toFixed(1);
-
-/**
- * The node's soft fill: the same accent + alpha ramp as `moodColor`, scaled down
- * so the mood number printed on it keeps full text contrast in every theme
- * (a solid accent disc under `colors.text` fails 4.5:1 on the light themes).
- * The RING carries the full-strength ramp.
- */
-const nodeFill = (mood: number, accent: string): string => {
-    const { r, g, b } = moodAccentRgb(accent);
-    const alpha = Number.isFinite(mood) ? Math.round(moodAlpha(mood) * 0.3 * 1000) / 1000 : 0;
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-};
 
 const useStyles = (colors: ThemeColors) =>
     useMemo(
@@ -177,7 +166,7 @@ const useStyles = (colors: ThemeColors) =>
                     fontWeight: '600',
                 },
                 stripDeleteText: {
-                    color: '#E5484D',
+                    color: dangerColor(colors),
                     fontSize: 14,
                     fontWeight: '700',
                 },
@@ -301,7 +290,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
                             accessibilityRole="button"
                             accessibilityLabel="Delete entry"
                         >
-                            <Feather name="trash-2" color="#E5484D" size={16} />
+                            <Feather name="trash-2" color={dangerColor(colors)} size={16} />
                             <Text style={styles.stripDeleteText}>Delete</Text>
                         </Pressable>
                     </View>
