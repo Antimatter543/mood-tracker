@@ -20,9 +20,11 @@
  * returns a SEPARATE module instance, so scripting its jest.fns silently never
  * reaches the copy the component imported (cost a debug cycle, 2026-09-28).
  *
- * Everything else (useRecyclingState, types, RecyclerView, ...) is the REAL
- * package. A test that wants the real FlashList calls
- * `jest.unmock('@shopify/flash-list')` and loads the package's own jestSetup.
+ * Everything else (useRecyclingState, useLayoutState, types, ...) is the REAL
+ * package. A test that wants the REAL FlashList overrides this mock with
+ * `jest.mock('@shopify/flash-list', () => jest.requireActual(...))` plus the
+ * measureLayout stubs: see __tests__/timelineRealFlashList.test.tsx (don't copy
+ * the package's jestSetup.js verbatim, it maps to an export 2.0.2 removed).
  */
 import React from 'react';
 import { View } from 'react-native';
@@ -76,4 +78,3 @@ export const FlashList = React.forwardRef<unknown, any>(function FlashListProbe(
 export const useRecyclingState = actual.useRecyclingState;
 export const useLayoutState = actual.useLayoutState;
 export const useMappingHelper = actual.useMappingHelper;
-export const RecyclerView = actual.RecyclerView;
