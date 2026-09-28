@@ -1,5 +1,58 @@
 # SoulSync — Project Lessons
 
+## 2026-09-28 (b): A new entry "with no height" was drawn one row ABOVE the viewport, and our reveal lost a native ordering race
+
+Device QA of the first FlashList build (Expo Go AND the release APK): add an entry via the FAB near
+the top, or Undo a delete, and the day header counts it but no card appears; uiautomator gave the
+card `[221,579][358,578]`. A bin restore worked; a tab switch did not fix it; a cold start did.
+
+**`top > bottom` in a uiautomator dump is a node CLIPPED TO NOTHING, not a collapsed one.** 579 was
+the list's top edge: the card was fully laid out above the viewport, under the pinned day header.
+One swipe down showed it. Read a negative-height bound as "where is it clipped?", then look.
+
+**Root cause, instrumented on the Pixel (console.log in FlashList's dist) and read out of the
+sources, two faults stacked:**
+1. **FlashList 2.0.2 anchored at the wrong row.** It computes `firstItemOffset` as (first child's y
+   relative to the list) minus (the list's y from `measureLayout(view, view)`), and on Fabric the
+   latter is the list's origin in its PARENT. The search bar shares that parent, so the offset was
+   -102.9dp and every visible-index FlashList computed was ~103dp too deep: at scroll offset 0 its
+   content-position anchor was the first ENTRY, not the day header, so any entry inserted at the top
+   of today was "above the anchor" and got corrected away. (It also pins day headers early.)
+   Upstream #2105, fixed in 2.2.3; Expo 56 pins 2.0.2. Fix: the list sits ALONE in its own
+   `listFrame` View, at y=0, the geometry 2.0.2's arithmetic assumes. Logged after: offset 4 (the
+   content padding), anchor = the day header, the FAB add and Undo show in place with no scroll.
+2. **The reveal lost to the correction by construction, not by luck.** The reveal was
+   `scrollToOffset(0)` in a rAF after the rows committed. That is a native VIEW COMMAND; FlashList's
+   correction reaches native as a MOUNT (it moves its ScrollAnchor view and RN's
+   `MaintainVisibleScrollPositionHelper` follows it in `didMountItems`), and Fabric's
+   `MountItemDispatcher.dispatchMountItems` runs every queued view command BEFORE the batch's mount
+   items ("As an optimization, execute all ViewCommands first"). So: scroll to 0 (a no-op, already
+   there), then +92px. The log showed exactly `mvcp diff 92`, then `scrollToOffset 0`, and no scroll
+   event at all (FlashList also drops scroll events for 100ms after a data-changed correction, so our
+   offset ref never learnt it moved). The bin restore happened to split into two batches.
+   Fix: the reveal (and the filter reset, same race when the anchored entry survives the filter) is
+   `scrollToIndex({ index: 0, viewOffset: -getFirstItemOffset() })`, called in the committing run
+   BEFORE `setEntries`. `scrollToIndex` pauses FlashList's offset correction until it lands, so the
+   inserting commit is never corrected. Device log after: `jumpToTop`, `scrollToOffset 0`,
+   `mvcp diff 92 paused:true`, `scroll 0`, new card at real bounds.
+
+**General traps:**
+- A programmatic scroll that must win against content-position maintenance cannot be sequenced by
+  frames. Either stop the correction (FlashList: `scrollToIndex` pauses it) or move the scroll into
+  the same channel. Never "one more requestAnimationFrame".
+- `measureLayout(view, view)` is not (0,0) on Fabric. Any library that measures itself that way is
+  wrong whenever it is not at its parent's origin; give it its own parent.
+- `autoscrollToTopThreshold` would have "worked" here (the native helper applies it after the
+  correction) and is still banned: it fires on every correction near the top, not just insertions.
+
+**Tests.** `timelineRealFlashList.test.tsx` runs the REAL recycler and observes FlashList's
+correction directly (its ScrollAnchor's `top` = 1_000_000 + every correction applied): an insertion
+above the anchor near the top must not move it (fails on the old code: 1000000 -> 1000100 / 1000200;
+also fails if the scrollToIndex is deferred a frame past the commit). The probe tests pin
+`scrollToIndex` being issued while the list still held the pre-insert rows, and the list being the
+frame's only child. Jest has no Fabric, so the native ordering and the frame's geometry are pinned
+structurally and were verified on the Pixel.
+
 ## 2026-09-28: A fling that outruns rendering leaves cells unmeasured, and VirtualizedList places them at `average × index`
 
 "When I scroll down hard/fast enough it's still glitchy, and if I do it fast enough it'll teleport

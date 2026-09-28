@@ -222,10 +222,14 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   content-position maintenance is what stops a hard fling from "teleporting" the user (RN's
   VirtualizedList places unmeasured cells at `average x index`); keep it ON, and NEVER add
   `autoscrollToTopThreshold` (Android fires it on every anchor correction near the top). Insertions at the
-  top are revealed by `shouldRevealInsertion` in `components/timeline/timelineRows.ts`. Cells are RECYCLED:
+  top are revealed by `shouldRevealInsertion` in `components/timeline/timelineRows.ts`, and the reveal is
+  `scrollToIndex` issued BEFORE the rows commit (it pauses FlashList's correction); a `scrollToOffset` after
+  the commit is a view command Android runs before the correction's mount, so it loses. The list must stay
+  ALONE in its `listFrame` View: flash-list 2.0.2 mis-measures its offset when it is not at its parent's
+  origin (upstream #2105), which anchored the correction on the first entry. Cells are RECYCLED:
   per-item local state in a cell must be `useRecyclingState(init, [id])`, never `useState`. Photo boxes and
   the list footer are fixed-height on purpose. Jest uses the probe at `__mocks__/@shopify/flash-list.tsx`
-  (reach it with `require`, not `jest.requireMock`). Detail: `frontend/tasks/lessons.md` 2026-09-28.
+  (reach it with `require`, not `jest.requireMock`). Detail: `frontend/tasks/lessons.md` 2026-09-28 + 2026-09-28 (b).
 - **Empty-database is a real code path** — a fresh install has zero entries. Date/aggregate logic must not throw
   on empty data (a heatmap `MIN(date)=NULL` once white-screened Stats). Test empty AND the empty->first-entry
   transition (a hooks-ordering bug crashed exactly there).
