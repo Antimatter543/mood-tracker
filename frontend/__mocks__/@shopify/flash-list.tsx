@@ -13,7 +13,8 @@
  *   - renders EVERY row through the real `renderItem` (unvirtualized) plus the
  *     footer, so cards and headers are queryable;
  *   - exposes an imperative ref whose methods are jest.fns on `flashListProbe`, so
- *     a test can script `getFirstVisibleIndex()` and assert `scrollToOffset(...)`.
+ *     a test can script `getFirstVisibleIndex()` / `getFirstItemOffset()` and
+ *     assert `scrollToIndex(...)` / `scrollToOffset(...)`.
  *
  * Reach the probe with a plain `require('@shopify/flash-list')` in the test,
  * NEVER `jest.requireMock(...)`: for a root-__mocks__ package requireMock
@@ -37,12 +38,16 @@ export const flashListProbe = {
     scrollToTop: jest.fn(),
     /** -1 = "not laid out"; tests set a return value to script the viewport. */
     getFirstVisibleIndex: jest.fn(() => -1),
+    /** The content padding above the first row (DBViewer's `paddingTop: 4`). */
+    getFirstItemOffset: jest.fn(() => 4),
     reset() {
         this.scrollToOffset.mockReset();
         this.scrollToIndex.mockReset();
         this.scrollToTop.mockReset();
         this.getFirstVisibleIndex.mockReset();
         this.getFirstVisibleIndex.mockImplementation(() => -1);
+        this.getFirstItemOffset.mockReset();
+        this.getFirstItemOffset.mockImplementation(() => 4);
     },
 };
 
@@ -58,6 +63,7 @@ export const FlashList = React.forwardRef<unknown, any>(function FlashListProbe(
         scrollToIndex: flashListProbe.scrollToIndex,
         scrollToTop: flashListProbe.scrollToTop,
         getFirstVisibleIndex: flashListProbe.getFirstVisibleIndex,
+        getFirstItemOffset: flashListProbe.getFirstItemOffset,
     }));
     const { data, renderItem, keyExtractor, ListFooterComponent, ListHeaderComponent } = props;
     const rows: unknown[] = data ?? [];

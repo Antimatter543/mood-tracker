@@ -84,6 +84,17 @@ const useThemedStyles = (colors: ThemeColors, insetBottom: number) => {
         root: {
             flex: 1,
         },
+        // The FlashList's OWN parent, so the list sits at y=0 inside it.
+        // FlashList 2.0.2 computes its first-item offset as (first child's y
+        // relative to the list) minus (the list's y as `measureLayout(view,
+        // view)` reports it), and on Fabric the latter is the list's origin in
+        // its PARENT. Sharing `root` with the search bar made that ~107dp, which
+        // skewed every visible-index computation (the offset-correction anchor,
+        // sticky headers, `getFirstVisibleIndex`). Upstream #2105, fixed in
+        // flash-list 2.2.3. Nothing else may be rendered in this frame.
+        listFrame: {
+            flex: 1,
+        },
         listContent: {
             paddingTop: 4,
             // Timeline renders inside `<Layout useScrollView={false}>`, so it gets
@@ -190,9 +201,40 @@ const useThemedStyles = (colors: ThemeColors, insetBottom: number) => {
  * scrolling the new row off the top (device-QA'd 2026-09-03). FlashList's version
  * would do the same whenever the insertion lands ABOVE the first visible row. So
  * the refresh path decides, with the pure `shouldRevealInsertion`, whether it
- * inserted rows above the user while they were near the top, and if so scrolls
- * to the top once the new rows are laid out. Locked by
- * __tests__/timelineUndoDelete.test.tsx + timelineRows.test.ts.
+ * inserted rows above the user while they were near the top, and if so takes the
+ * list to the top AS PART OF the commit that inserts them (`jumpToTop`, below).
+ * Locked by __tests__/timelineUndoDelete.test.tsx + timelineRows.test.ts +
+ * timelineRealFlashList.test.tsx.
+ *
+ * ── THE REVEAL MUST NOT RACE FLASHLIST'S OWN CORRECTION (2026-09-28) ──────────
+ * Device QA of the first FlashList build: an entry added via the FAB, or put
+ * back by Undo, near the top was counted in its day header but never drawn. It
+ * was drawn, one row-height ABOVE the viewport, under the pinned day header
+ * (uiautomator's "[221,579][358,578]" is a node clipped to nothing, not a
+ * collapsed one). Two faults, both read out of the sources:
+ *   1. FlashList 2.0.2 measures its own offset inside its parent with
+ *      `measureLayout(view, view)`, which on Fabric returns the view's origin in
+ *      its PARENT, and subtracts it (upstream #2105, fixed in 2.2.3; Expo 56 pins
+ *      2.0.2). The search bar sat above the list in the same parent, so every
+ *      offset FlashList computed was ~107dp too deep: at the very top it
+ *      anchored content-position maintenance to the first ENTRY instead of the
+ *      day header, so ANY entry inserted above it was "above the anchor". (It
+ *      also pinned each day header ~107dp early.) The list now sits alone in
+ *      `listFrame`, at the origin of its parent, which is exactly the geometry
+ *      2.0.2's arithmetic assumes.
+ *   2. The reveal was `scrollToOffset(0)` a frame after the rows committed. That
+ *      is a native VIEW COMMAND, and Fabric on Android executes every queued
+ *      view command BEFORE the mount items of the same batch
+ *      (MountItemDispatcher.dispatchMountItems); FlashList's correction reaches
+ *      native as a MOUNT (it moves its ScrollAnchor view, and the native
+ *      maintainVisibleContentPosition helper follows it in didMountItems). So the
+ *      reveal ran first, as a no-op at offset 0, and the correction then pushed
+ *      the new row off the top. Timing decided which one won, which is why a bin
+ *      restore (the list behind an overlay) happened to work. The fix is
+ *      ordering, not timing: `scrollToIndex` PAUSES FlashList's correction while
+ *      it runs, so issuing it before `setEntries` means the inserting commit is
+ *      never corrected at all and the scroll is the only thing that moves the
+ *      list.
  *
  * We deliberately do NOT use v2's `autoscrollToTopThreshold`: Android's native
  * helper (MaintainVisibleScrollPositionHelper) fires it on EVERY anchor
@@ -273,9 +315,6 @@ export function DatabaseViewer() {
     const scrollOffsetRef = useRef(0);
     const viewportHeightRef = useRef(0);
     const [showBackToTop, setShowBackToTop] = useState(false);
-    // Set by the refresh path when it decided to reveal an insertion; consumed
-    // after the new rows commit (see the effect below the rows memo).
-    const revealPendingRef = useRef<null | { animated: boolean }>(null);
 
     // Search + mood filter. `searchQuery` is the RAW input (drives the field with
     // zero lag); `debouncedQuery` is what actually reaches SQL. `moodPresetKey`
@@ -314,21 +353,25 @@ export function DatabaseViewer() {
     rowsRef.current = rows;
     const stickyHeaderIndices = useMemo(() => stickyHeaderIndicesFor(rows), [rows]);
 
-    // Reveal an insertion the refresh decided the user must see. Runs after the
-    // rows commit, i.e. after FlashList has laid them out and applied its own
-    // content-position correction; the next frame lets that correction land
-    // natively before we scroll.
-    useEffect(() => {
-        const pending = revealPendingRef.current;
-        if (!pending) return;
-        revealPendingRef.current = null;
-        const frame = requestAnimationFrame(() => {
-            // Offset and pill state follow from the scroll events this produces
-            // (handleScroll is their one writer).
-            listRef.current?.scrollToOffset({ offset: 0, animated: pending.animated });
-        });
-        return () => cancelAnimationFrame(frame);
-    }, [rows]);
+    /**
+     * Take the list to its very top as PART OF the data commit the caller is
+     * about to make. Call it in the committing run, BEFORE the rows reach the
+     * list: keep it above that run's `setEntries`, never in an effect or a frame
+     * after the commit (see "THE REVEAL MUST NOT RACE" above the component).
+     * `scrollToIndex` pauses FlashList's content-position correction from this
+     * call until its scroll has landed, so the commit that inserts rows above
+     * the anchor is never corrected and nothing native can reorder against this
+     * scroll. A `scrollToOffset` issued after the commit loses to that
+     * correction on Android. `viewOffset` cancels FlashList's first-item offset
+     * (the content padding) so this lands at 0, the real top.
+     * Offset and pill state follow from the scroll events this produces
+     * (handleScroll is their one writer).
+     */
+    const jumpToTop = useCallback((animated: boolean) => {
+        const list = listRef.current;
+        if (!list) return;
+        void list.scrollToIndex({ index: 0, animated, viewOffset: -list.getFirstItemOffset() });
+    }, []);
 
     // Any active filter switches the empty branch from "add your first entry" to
     // the filter-specific "nothing matched" message (with a reset).
@@ -450,7 +493,7 @@ export function DatabaseViewer() {
             if (filterResetPendingRef.current) {
                 filterResetPendingRef.current = false;
                 // The rows on screen were replaced wholesale — start at the top.
-                revealPendingRef.current = { animated: false };
+                jumpToTop(false);
             } else if (
                 shouldRevealInsertion({
                     prevIds: new Set(prev.map(e => e.id)),
@@ -461,9 +504,11 @@ export function DatabaseViewer() {
                     nearTop: viewportHeightRef.current,
                 })
             ) {
-                revealPendingRef.current = { animated: true };
+                jumpToTop(true);
             }
 
+            // Only AFTER any jumpToTop above (it has to pause FlashList's
+            // correction before these rows reach it).
             setEntries(next);
             setHasMore(nextHasMore);
             setLoadError(false);
@@ -694,25 +739,27 @@ export function DatabaseViewer() {
                     <EmptyState />
                 )
             ) : (
-                <FlashList
-                    ref={listRef}
-                    testID="timeline-list"
-                    data={rows}
-                    renderItem={renderItem}
-                    keyExtractor={keyExtractor}
-                    getItemType={rowTypeOf}
-                    stickyHeaderIndices={stickyHeaderIndices}
-                    onEndReached={loadMoreData}
-                    onEndReachedThreshold={END_REACHED_SCREENS}
-                    drawDistance={DRAW_DISTANCE}
-                    onScroll={handleScroll}
-                    onLayout={handleLayout}
-                    scrollEventThrottle={16}
-                    keyboardDismissMode="on-drag"
-                    keyboardShouldPersistTaps="handled"
-                    ListFooterComponent={footer}
-                    contentContainerStyle={styles.listContent}
-                />
+                <View style={styles.listFrame} testID="timeline-list-frame">
+                    <FlashList
+                        ref={listRef}
+                        testID="timeline-list"
+                        data={rows}
+                        renderItem={renderItem}
+                        keyExtractor={keyExtractor}
+                        getItemType={rowTypeOf}
+                        stickyHeaderIndices={stickyHeaderIndices}
+                        onEndReached={loadMoreData}
+                        onEndReachedThreshold={END_REACHED_SCREENS}
+                        drawDistance={DRAW_DISTANCE}
+                        onScroll={handleScroll}
+                        onLayout={handleLayout}
+                        scrollEventThrottle={16}
+                        keyboardDismissMode="on-drag"
+                        keyboardShouldPersistTaps="handled"
+                        ListFooterComponent={footer}
+                        contentContainerStyle={styles.listContent}
+                    />
+                </View>
             )}
             {showBackToTop && pendingUndo === null && entries.length > 0 ? (
                 <BackToTopPill colors={colors} onPress={scrollToTop} />

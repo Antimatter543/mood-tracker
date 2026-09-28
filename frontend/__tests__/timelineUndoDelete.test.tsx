@@ -117,7 +117,7 @@ jest.mock('@/databases/entry-bin', () => ({
     purgeMoodEntry: (...args: unknown[]) => mockPurgeMoodEntry(...args),
 }));
 
-import { Alert } from 'react-native';
+import { Alert, StyleSheet } from 'react-native';
 import { OverlayProvider } from '@/context/OverlayHost';
 import { UNDO_SNACKBAR_DURATION_MS } from '@/components/UndoSnackbar';
 import { DatabaseViewer } from '@/components/DBViewer';
@@ -130,6 +130,7 @@ import { DatabaseViewer } from '@/components/DBViewer';
 const { flashListProbe } = require('@shopify/flash-list') as {
     flashListProbe: {
         scrollToOffset: jest.Mock;
+        scrollToIndex: jest.Mock;
         getFirstVisibleIndex: jest.Mock;
         reset: () => void;
     };
@@ -293,7 +294,15 @@ describe('Timeline list scroll anchoring', () => {
     // first visible row while the user was near the top. Layout is not
     // simulated in jest, so the scripted inputs are the probe's
     // `getFirstVisibleIndex()` and the list's own onScroll/onLayout; the
-    // observable output is the `scrollToOffset` call.
+    // observable output is the `scrollToIndex` call, and WHEN it happens
+    // relative to the data commit.
+    //
+    // The reveal is `scrollToIndex`, issued BEFORE the inserting rows reach the
+    // list (device QA 2026-09-28): scrollToIndex pauses FlashList's own offset
+    // correction, while a `scrollToOffset` after the commit is a native view
+    // command that Android runs BEFORE the mount carrying that correction, so
+    // the correction won and hid the new row. The real-list half of this
+    // contract is in timelineRealFlashList.test.tsx.
 
     const restoreAtTop = async (view: any) => {
         await pressDelete(view);
@@ -336,6 +345,30 @@ describe('Timeline list scroll anchoring', () => {
         expect(mvcp?.autoscrollToTopThreshold).toBeUndefined();
     });
 
+    it('renders the list ALONE in its own frame, so FlashList 2.0.2 measures its offset from 0', async () => {
+        // FlashList 2.0.2 subtracts the list's origin IN ITS PARENT (what Fabric
+        // reports for measureLayout(view, view)) from its first-item offset
+        // (upstream #2105, fixed in 2.2.3). Sharing a parent with the search bar
+        // made every visible-index FlashList computed ~107dp too deep: at the top
+        // it anchored its correction on the first ENTRY, so a new entry above it
+        // was pushed off-screen (device QA 2026-09-28). Jest has no layout, so
+        // this pins the structure that makes the arithmetic right on a device:
+        // the list is the frame's only child, hence at y=0 inside it.
+        mockDb.getAllAsync.mockResolvedValue([entryRow(1, 'delete-me'), entryRow(2, 'older sibling')]);
+        const view = await renderTimeline();
+        await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
+
+        const frame = view.getByTestId('timeline-list-frame');
+        expect(frame.children).toHaveLength(1);
+        expect(frame.children[0]).toBe(view.getByTestId('timeline-list'));
+        const style = StyleSheet.flatten(frame.props.style);
+        expect(style.flex).toBe(1);
+        // Nothing that would move the list off the frame's origin.
+        for (const key of ['padding', 'paddingTop', 'paddingVertical', 'borderWidth', 'borderTopWidth'] as const) {
+            expect(style[key] ?? 0).toBe(0);
+        }
+    });
+
     it('an entry restored ABOVE the first visible row, near the top, is scrolled into view', async () => {
         mockDb.getAllAsync.mockResolvedValue([entryRow(1, 'delete-me'), entryRow(2, 'older sibling')]);
         const view = await renderTimeline();
@@ -344,11 +377,29 @@ describe('Timeline list scroll anchoring', () => {
         flashListProbe.getFirstVisibleIndex.mockReturnValue(0);
         await scrollTo(view, 0);
 
+        // Record what the LIST held at the moment the reveal was issued.
+        let keysAtReveal: string[] | null = null;
+        flashListProbe.scrollToIndex.mockImplementation(() => {
+            keysAtReveal = view.getByTestId('timeline-list').props.data.map((r: { key: string }) => r.key);
+            return Promise.resolve();
+        });
+
         await restoreAtTop(view);
 
         await waitFor(() =>
-            expect(flashListProbe.scrollToOffset).toHaveBeenCalledWith({ offset: 0, animated: true })
+            // viewOffset cancels the first-item offset (content padding), so the
+            // list lands at 0, not 4px down.
+            expect(flashListProbe.scrollToIndex).toHaveBeenCalledWith({ index: 0, animated: true, viewOffset: -4 })
         );
+        expect(flashListProbe.scrollToIndex).toHaveBeenCalledTimes(1);
+        // Issued BEFORE the restored row was committed: the list still held the
+        // post-delete rows, so FlashList's correction is paused for the commit
+        // that brings entry 1 back.
+        expect(keysAtReveal).not.toBeNull();
+        expect(keysAtReveal).not.toContain('entry:1');
+        expect(view.getByTestId('timeline-list').props.data.map((r: { key: string }) => r.key)).toContain('entry:1');
+        // The racy form is gone for good.
+        expect(flashListProbe.scrollToOffset).not.toHaveBeenCalled();
         // …and it is the FIRST row in document order.
         const rendered = view.container
             .queryAll((node) => node.type === 'Text')
@@ -370,6 +421,7 @@ describe('Timeline list scroll anchoring', () => {
         await act(async () => {
             await new Promise((resolve) => setTimeout(resolve, 50));
         });
+        expect(flashListProbe.scrollToIndex).not.toHaveBeenCalled();
         expect(flashListProbe.scrollToOffset).not.toHaveBeenCalled();
     });
 
@@ -398,6 +450,7 @@ describe('Timeline list scroll anchoring', () => {
         await act(async () => {
             await new Promise((resolve) => setTimeout(resolve, 50));
         });
+        expect(flashListProbe.scrollToIndex).not.toHaveBeenCalled();
         expect(flashListProbe.scrollToOffset).not.toHaveBeenCalled();
     });
 });
@@ -455,11 +508,14 @@ describe('Timeline filter change', () => {
         mockDb.getAllAsync.mockResolvedValue([entryRow(1, 'delete-me'), entryRow(2, 'older sibling')]);
         const view = await renderTimeline();
         await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
-        flashListProbe.scrollToOffset.mockClear();
+        flashListProbe.scrollToIndex.mockClear();
 
         await fireEvent.press(view.getByTestId('mood-filter-low'));
+        // Same ordering rule as the reveal: if an entry the user was anchored
+        // on survives the filter, FlashList would otherwise "correct" to it and
+        // win against a scroll issued after the commit.
         await waitFor(() =>
-            expect(flashListProbe.scrollToOffset).toHaveBeenCalledWith({ offset: 0, animated: false })
+            expect(flashListProbe.scrollToIndex).toHaveBeenCalledWith({ index: 0, animated: false, viewOffset: -4 })
         );
     });
 });
