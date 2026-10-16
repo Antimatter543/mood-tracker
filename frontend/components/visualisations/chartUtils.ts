@@ -6,6 +6,7 @@
 // `SCREEN_WIDTH - padding` constant lying around is an invitation for the next
 // chart to guess its size again.
 import { localDateString } from '@/databases/dateHelpers';
+import { formatDate, type DateFormatPref } from '@/lib/dateFormat';
 
 /**
  * Parse a CSS hex (`#RGB` or `#RRGGBB`) into an `{r,g,b}` triple. Returns null
@@ -42,8 +43,19 @@ export const getLast7Days = () =>
         return localDateString(d);
     }).reverse();
 
-export const formatDayLabel = (date: string) =>
-    new Date(date).toLocaleDateString(undefined, { weekday: 'short' });
+/**
+ * Short weekday name ("Sun") for a local `YYYY-MM-DD` day key. Goes through the
+ * date-format authority like every other label, so under an explicit
+ * `date_format` it is English rather than whatever the device locale says, and
+ * the day key parses as LOCAL midnight (a bare `new Date('YYYY-MM-DD')` is UTC
+ * midnight, which names the previous weekday west of UTC).
+ *
+ * `pref` is REQUIRED (no default on purpose): a defaulted preference would let a
+ * new call site silently skip the setting.
+ */
+export const formatDayLabel = (date: string, pref: DateFormatPref) =>
+    formatDate(date, pref, 'weekdayShort');
+
 /**
  * Interpolates missing values in a data array and tracks which indices were originally null.
  * Linear interpolation is used to estimate values between existing data points.

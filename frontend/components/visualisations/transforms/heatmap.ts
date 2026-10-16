@@ -9,6 +9,8 @@
 // heatmap is *not* on that path — its grid is fully derived in JS from the
 // date string, so it can pick its own week convention safely.
 
+import { formatMonth, pinSystemTo, type DateFormatPref } from '@/lib/dateFormat';
+
 export type HeatmapInput = {
     date: string;            // "YYYY-MM-DD"
     mood: number | null;
@@ -25,7 +27,8 @@ export type HeatmapCell = {
 };
 
 export type MonthLabel = {
-    month: string;       // "Jan", "Feb", ...
+    /** "Jan", "Feb", ... — or "Jan 26" at a year start, or "2026-01" under ISO. */
+    month: string;
     weekIndex: number;
 };
 
@@ -90,7 +93,15 @@ const daysBetweenUTC = (a: string, b: string): number => {
  */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export const buildHeatmapGrid = (rows: HeatmapInput[]): HeatmapGrid => {
+export const buildHeatmapGrid = (
+    rows: HeatmapInput[],
+    /**
+     * The user's `date_format` setting, for the month labels. REQUIRED (no
+     * default on purpose): a defaulted preference would let a new call site
+     * silently skip the setting, which is how this transform missed it.
+     */
+    pref: DateFormatPref
+): HeatmapGrid => {
     // Drop any row whose date isn't a valid YYYY-MM-DD string before doing any
     // date math. Guards against null / undefined / garbage reaching `new Date`.
     const validRows = (rows ?? []).filter(
@@ -117,6 +128,12 @@ export const buildHeatmapGrid = (rows: HeatmapInput[]): HeatmapGrid => {
     const monthLabels: MonthLabel[] = [];
     const seenMonths = new Set<string>();
 
+    // This transform's pre-setting labels were a hardcoded `'en-US'` English
+    // month, NOT the device locale's. So its `system` must keep emitting exactly
+    // those bytes: pin it to the English month-name pref. (A month alone has no
+    // day/month order, so `mdy` and `dmy` agree; only `ymd` differs: `YYYY-MM`.)
+    const labelPref = pinSystemTo(pref, 'mdy');
+
     for (let week = 0; week < totalWeeks; week++) {
         for (let day = 0; day < 7; day++) {
             const dateStr = addDaysUTC(gridStart, week * 7 + day);
@@ -138,19 +155,25 @@ export const buildHeatmapGrid = (rows: HeatmapInput[]): HeatmapGrid => {
                 const monthKey = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
                 if (!seenMonths.has(monthKey)) {
                     seenMonths.add(monthKey);
-                    const month = d.toLocaleDateString('en-US', {
-                        month: 'short',
-                        timeZone: 'UTC',
-                    });
                     // Append the 2-digit year at each year boundary (January, or
                     // the very first label) so columns are unambiguous across
                     // year boundaries — e.g. "Jan 26" vs the prior "Jan 25".
                     const isYearStart =
                         d.getUTCMonth() === 0 || monthLabels.length === 0;
-                    const label = isYearStart
-                        ? `${month} ${String(d.getUTCFullYear()).slice(-2)}`
-                        : month;
-                    monthLabels.push({ month: label, weekIndex: week });
+                    // Format `dateStr`, not `d`: formatMonth reads LOCAL calendar
+                    // parts, and `d` is a UTC-midnight instant that names the
+                    // PREVIOUS day west of UTC (so a Monday that is the 1st of a
+                    // month would get the wrong month). The day key parses as
+                    // local midnight, i.e. the same calendar day everywhere.
+                    monthLabels.push({
+                        month: formatMonth(
+                            dateStr,
+                            labelPref,
+                            'short',
+                            isYearStart ? { yearJoiner: ' ' } : {}
+                        ),
+                        weekIndex: week,
+                    });
                 }
             }
         }

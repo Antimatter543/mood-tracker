@@ -3,23 +3,20 @@ import { View, Text, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { useThemeColors } from '@/styles/global';
 import { Card } from '@/components/Card';
 import { WINDOW_SUMMARY } from './queries';
 import { startOfLocalDay, endOfLocalDay, localDateString } from './transforms/dateHelpers';
 import {
   computeMonthOverMonth,
+  monthOverMonthLabels,
   type MonthMoodRow,
   type MonthOverMonthData,
 } from './transforms/monthOverMonth';
 
 /** Material red 300 — semantic "down" signal, not a brand color. */
 const FALLING_COLOR = '#e57373';
-
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
 
 /**
  * MonthOverMonthCard compares the current CALENDAR month against the previous
@@ -30,11 +27,12 @@ const MONTH_NAMES = [
 const MonthOverMonthCard = () => {
   const colors = useThemeColors();
   const db = useSQLiteContext();
+  const { pref: dateFormatPref } = useDateFormat();
   const [data, setData] = useState<MonthOverMonthData | null>(null);
-  const [labels, setLabels] = useState<{ current: string; previous: string }>({
-    current: '',
-    previous: '',
-  });
+  // The two months as DATES, not as text: the headings are spelled at render
+  // from the user's date format, so changing the setting re-labels the card
+  // immediately instead of waiting for the next refetch.
+  const [months, setMonths] = useState<{ current: Date; previous: Date } | null>(null);
 
   const styles = useMemo(() => StyleSheet.create({
     header: {
@@ -138,10 +136,7 @@ const MonthOverMonthCard = () => {
             daysInPrevious,
           ),
         );
-        setLabels({
-          current: MONTH_NAMES[month],
-          previous: MONTH_NAMES[(month + 11) % 12],
-        });
+        setMonths({ current: curFirst, previous: prevFirst });
       } catch (error) {
         console.error('Error fetching month-over-month data:', error);
         setData(null);
@@ -151,7 +146,7 @@ const MonthOverMonthCard = () => {
   // Focus-aware refetch (replaces useEffect([db, refreshCount])).
   useDataRefresh(fetchData, [db]);
 
-  if (!data) {
+  if (!data || !months) {
     return (
       <Card>
         <View style={styles.header}>
@@ -171,6 +166,7 @@ const MonthOverMonthCard = () => {
       ? colors.accent
       : FALLING_COLOR;
   const deltaIcon = trendFlat ? 'minus' : trendUp ? 'arrow-up-right' : 'arrow-down-right';
+  const labels = monthOverMonthLabels(months.current, months.previous, dateFormatPref);
 
   return (
     <Card>

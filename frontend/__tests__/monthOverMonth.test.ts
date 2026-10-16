@@ -1,8 +1,10 @@
 import {
   computeMonthOverMonth,
   FLAT_THRESHOLD,
+  monthOverMonthLabels,
   type MonthMoodRow,
 } from '@/components/visualisations/transforms/monthOverMonth';
+import { DATE_FORMAT_PREFS, type DateFormatPref } from '@/lib/dateFormat';
 
 const m = (avg: number | null, count: number): MonthMoodRow => ({
   avg_mood: avg,
@@ -59,5 +61,97 @@ describe('computeMonthOverMonth', () => {
     const out = computeMonthOverMonth(m(7, 5), m(6, 5), 0, 0);
     expect(out.currentConsistencyPct).toBe(0);
     expect(out.previousConsistencyPct).toBe(0);
+  });
+});
+
+/**
+ * THE BUG: the Stats "Month over Month" card captioned its two columns from a
+ * private hardcoded month table, so a user who picked ISO in Settings still read
+ * "January (this month)" over a screen of "2026-01-05" dates.
+ *
+ * A month name has no day/month order, so MM/DD and DD/MM legitimately agree
+ * here; only ISO differs. And `system` must keep the card's pre-setting bytes,
+ * which were ENGLISH month names (a hardcoded table, not the device locale),
+ * so it is checked against that table rather than against `toLocaleDateString`.
+ */
+describe('monthOverMonthLabels', () => {
+  // The table this fix deleted from MonthOverMonthCard, verbatim.
+  const LEGACY_MONTH_NAMES = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+  ];
+
+  // June 2026 against May 2026: nothing special about the year.
+  const JUNE = new Date(2026, 5, 1);
+  const MAY = new Date(2026, 4, 1);
+  // January against December: the previous month lives in the PREVIOUS YEAR.
+  const JANUARY = new Date(2026, 0, 1);
+  const DECEMBER = new Date(2025, 11, 1);
+
+  it.each([
+    ['system', 'June', 'May'],
+    ['mdy', 'June', 'May'],
+    ['dmy', 'June', 'May'],
+    ['ymd', '2026-06', '2026-05'],
+  ] as Array<[DateFormatPref, string, string]>)(
+    'captions June / May under %s -> %s / %s',
+    (pref, current, previous) => {
+      expect(monthOverMonthLabels(JUNE, MAY, pref)).toEqual({ current, previous });
+    },
+  );
+
+  it.each([
+    ['system', 'January', 'December'],
+    ['mdy', 'January', 'December'],
+    ['dmy', 'January', 'December'],
+    ['ymd', '2026-01', '2025-12'],
+  ] as Array<[DateFormatPref, string, string]>)(
+    'carries the year back across New Year under %s -> %s / %s',
+    (pref, current, previous) => {
+      expect(monthOverMonthLabels(JANUARY, DECEMBER, pref)).toEqual({ current, previous });
+    },
+  );
+
+  it('mdy and dmy agree for every month (a month alone has no day/month order)', () => {
+    for (let month = 0; month < 12; month++) {
+      const cur = new Date(2026, month, 1);
+      const prev = new Date(2026, month - 1, 1);
+      expect(monthOverMonthLabels(cur, prev, 'dmy')).toEqual(
+        monthOverMonthLabels(cur, prev, 'mdy'),
+      );
+    }
+  });
+
+  it("keeps `system` byte-identical to the card's old MONTH_NAMES lookup, all 12 months", () => {
+    for (let month = 0; month < 12; month++) {
+      // How the card used to derive its two headings from `now`'s month index.
+      const legacy = {
+        current: LEGACY_MONTH_NAMES[month],
+        previous: LEGACY_MONTH_NAMES[(month + 11) % 12],
+      };
+      const cur = new Date(2026, month, 1);
+      const prev = new Date(2026, month - 1, 1);
+      expect(monthOverMonthLabels(cur, prev, 'system')).toEqual(legacy);
+    }
+  });
+
+  it('writes every ISO heading as a full YYYY-MM', () => {
+    for (let month = 0; month < 12; month++) {
+      const { current, previous } = monthOverMonthLabels(
+        new Date(2026, month, 1),
+        new Date(2026, month - 1, 1),
+        'ymd',
+      );
+      expect(current).toMatch(/^\d{4}-\d{2}$/);
+      expect(previous).toMatch(/^\d{4}-\d{2}$/);
+    }
+  });
+
+  it('names a month from any day inside it (the card passes the 1st; a later day agrees)', () => {
+    for (const pref of DATE_FORMAT_PREFS) {
+      expect(monthOverMonthLabels(new Date(2026, 5, 30), new Date(2026, 4, 31), pref)).toEqual(
+        monthOverMonthLabels(JUNE, MAY, pref),
+      );
+    }
   });
 });

@@ -8,7 +8,7 @@
 // go through it, so the axes cannot drift apart.
 
 import { interpolateData } from '../chartUtils';
-import { formatDate, type DateFormatPref } from '@/lib/dateFormat';
+import { formatDate, formatMonth, type DateFormatPref } from '@/lib/dateFormat';
 
 export type MoodAvgRow = {
     date: string;          // "YYYY-MM-DD"
@@ -55,12 +55,16 @@ const isSparseLabelIndex = (index: number, totalPoints: number): boolean => {
     return Math.round(slot * step) === index;
 };
 
-/** "Jan '25" — month + 2-digit year, so adjacent years are unambiguous. */
-const monthYearLabel = (date: Date): string => {
-    const month = date.toLocaleDateString(undefined, { month: 'short' });
-    const yy = String(date.getFullYear()).slice(-2);
-    return `${month} '${yy}`;
-};
+/**
+ * "Jan '25" — month + 2-digit year, so adjacent years are unambiguous.
+ *
+ * Follows `date_format` like every other label here: `system` keeps this axis's
+ * pre-setting behaviour (the device locale's own month name), `mdy`/`dmy` spell
+ * the English month (a month alone has no day/month order, so they agree), and
+ * `ymd` writes `YYYY-MM`.
+ */
+const monthYearLabel = (date: Date, pref: DateFormatPref): string =>
+    formatMonth(date, pref, 'short', { yearJoiner: " '" });
 
 /**
  * Short enough for month/quarter axes on narrow phones, and in the user's chosen
@@ -92,7 +96,7 @@ export const formatLabel = (
 
     switch (timeframe) {
         case 'week':
-            return date.toLocaleDateString(undefined, { weekday: 'short' });
+            return formatDate(date, pref, 'weekdayShort');
 
         case 'month':
             return isSparseLabelIndex(index, totalPoints)
@@ -109,11 +113,11 @@ export const formatLabel = (
             // ~5 evenly-spaced labels, each "Mon 'YY" so the year is explicit
             // and you can tell e.g. Jan '25 from Jan '26. Everything else blank.
             return isSparseLabelIndex(index, totalPoints)
-                ? monthYearLabel(date)
+                ? monthYearLabel(date, pref)
                 : '';
 
         default:
-            return date.toLocaleDateString(undefined, { weekday: 'short' });
+            return formatDate(date, pref, 'weekdayShort');
     }
 };
 

@@ -4,6 +4,7 @@ import { Svg, Rect, Text as SvgText } from 'react-native-svg';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import { Card } from '@/components/Card';
 import InfoBubble from '../InfoBubble';
 import {
@@ -23,6 +24,7 @@ interface DayData {
 const CustomHeatmap: React.FC = () => {
     const colors = useThemeColors();
     const db = useSQLiteContext();
+    const { pref: dateFormatPref } = useDateFormat();
     const [moodData, setMoodData] = useState<DayData[]>([]);
 
     const styles = useMemo(() => StyleSheet.create({
@@ -142,7 +144,7 @@ const CustomHeatmap: React.FC = () => {
     // Pure grid layout from the transform; the component is purely a pixel
     // positioner on top.
     const generateCalendarData = useMemo(() => {
-        const grid = buildHeatmapGrid(moodData as HeatmapInput[]);
+        const grid = buildHeatmapGrid(moodData as HeatmapInput[], dateFormatPref);
         if (grid.cells.length === 0) {
             return { cells: [], monthLabels: [], totalWeeks: 0 };
         }
@@ -174,7 +176,9 @@ const CustomHeatmap: React.FC = () => {
             })),
             totalWeeks,
         };
-    }, [moodData]);
+    // The pref is a dependency so the month labels re-spell the moment the
+    // setting changes, without waiting for a refetch.
+    }, [moodData, dateFormatPref]);
 
     const renderMonthLabels = () => {
         return generateCalendarData.monthLabels.map(({ month, x, weekIndex }) => (

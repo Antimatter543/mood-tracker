@@ -12,6 +12,7 @@ import { ThemeColors, useThemeColors } from '@/styles/global';
 import { Card } from '@/components/Card';
 import InfoBubble from '@/components/InfoBubble';
 import { moodColor } from '@/components/timeline/moodColor';
+import { useDateFormat } from '@/hooks/useDateFormat';
 import {
     buildChartGeometry,
     indexToX,
@@ -23,6 +24,7 @@ import {
     buildMoodMetricOverlay,
     OVERLAY_METRICS,
     OVERLAY_MIN_POINTS,
+    overlayDayLabel,
     type MoodMetricOverlay,
     type OverlayMetricConfig,
     type OverlayMetricKey,
@@ -56,18 +58,6 @@ const METRIC_DOT_R = 3;
 const LABEL_SLOT_W = 56;
 const GAP_DASH = '4 4';
 const METRIC_LINE_OPACITY = 0.6;
-
-const MONTHS = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-];
-
-/** 'YYYY-MM-DD' → 'D Mon' (e.g. "1 Jul"). Fixed month names — no locale drift. */
-function formatDayLabel(ymd: string): string {
-    const [, m, d] = ymd.split('-').map(Number);
-    const month = MONTHS[(m ?? 1) - 1] ?? '';
-    return `${d ?? ''} ${month}`.trim();
-}
 
 /** Round a display metric for an axis label (1 dp for sleep hours, whole for bpm/ms). */
 function formatMetric(value: number, unit: string): string {
@@ -239,6 +229,7 @@ const OverlayPlot: React.FC<OverlayPlotProps> = ({
     colors,
     styles,
 }) => {
+    const { pref: dateFormatPref } = useDateFormat();
     const dims: ChartDims = useMemo(
         () => ({
             width: width || 1,
@@ -416,7 +407,7 @@ const OverlayPlot: React.FC<OverlayPlotProps> = ({
                                             : { left: x - LABEL_SLOT_W / 2, width: LABEL_SLOT_W, textAlign: 'center' },
                                 ]}
                             >
-                                {formatDayLabel(overlay.days[idx].date)}
+                                {overlayDayLabel(overlay.days[idx].date, dateFormatPref)}
                             </Text>
                         );
                     })}

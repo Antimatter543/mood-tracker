@@ -15,9 +15,12 @@ import {
     DEFAULT_DATE_FORMAT,
     dateFormatOptions,
     formatDate,
+    formatMonth,
     normalizeDateFormatPref,
+    pinSystemTo,
     type DateFormatPref,
     type DateStyle,
+    type MonthStyle,
 } from '@/lib/dateFormat';
 
 // Thursday, 18 September 2026, 13:42 LOCAL. Local constructor (month index 8).
@@ -33,7 +36,10 @@ const ALL_STYLES: DateStyle[] = [
     'medium',
     'mediumNoYear',
     'mediumWeekday',
+    'weekdayShort',
 ];
+
+const ALL_MONTH_STYLES: MonthStyle[] = ['long', 'short'];
 
 describe('normalizeDateFormatPref', () => {
     it('accepts every real preference', () => {
@@ -167,6 +173,143 @@ describe('formatDate — system preference', () => {
         expect(formatDate(SEP_18, 'system', 'longNoYear')).not.toContain('2026');
         expect(formatDate(SEP_18, 'system', 'mediumNoYear')).not.toContain('2026');
         expect(formatDate(SEP_18, 'system', 'numericShort')).not.toContain('2026');
+    });
+});
+
+describe('formatDate — weekdayShort (the week chart axis)', () => {
+    it('is the English short weekday under every explicit preference', () => {
+        // A weekday on its own has no day/month order and no numeric form, so the
+        // three explicit prefs agree — and ymd does NOT turn it into digits.
+        for (const pref of ['mdy', 'dmy', 'ymd'] as DateFormatPref[]) {
+            expect(formatDate(SEP_18, pref, 'weekdayShort')).toBe('Fri');
+            expect(formatDate(JAN_5, pref, 'weekdayShort')).toBe('Mon');
+        }
+    });
+
+    it("keeps `system` byte-identical to the old call sites' own toLocaleDateString", () => {
+        // weeklyMood's week axis (and chartUtils.formatDayLabel) used exactly this
+        // call before the setting reached them, so `system` must emit its bytes.
+        expect(formatDate(SEP_18, 'system', 'weekdayShort')).toBe(
+            SEP_18.toLocaleDateString(undefined, { weekday: 'short' }),
+        );
+    });
+
+    it('names all seven weekdays, Sunday first, by the LOCAL calendar day', () => {
+        // 2026-09-13 is a Sunday. Day keys parse as local midnight.
+        const names = Array.from({ length: 7 }, (_, i) =>
+            formatDate(`2026-09-${String(13 + i).padStart(2, '0')}`, 'dmy', 'weekdayShort'),
+        );
+        expect(names).toEqual(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+    });
+});
+
+describe('formatMonth — a month with no day', () => {
+    it('spells the English month for mdy and dmy, which agree (a month has no day/month order)', () => {
+        for (const pref of ['mdy', 'dmy'] as DateFormatPref[]) {
+            expect(formatMonth(SEP_18, pref, 'long')).toBe('September');
+            expect(formatMonth(SEP_18, pref, 'short')).toBe('Sep');
+            expect(formatMonth(JAN_5, pref, 'long')).toBe('January');
+            expect(formatMonth(JAN_5, pref, 'short')).toBe('Jan');
+        }
+    });
+
+    it('writes YYYY-MM under ymd, zero-padded, whichever style is asked for', () => {
+        // ymd emits no month name at any style (see longDate), so a month alone is
+        // the numeric YYYY-MM — the same spelling periodWindow uses.
+        for (const style of ALL_MONTH_STYLES) {
+            expect(formatMonth(SEP_18, 'ymd', style)).toBe('2026-09');
+            expect(formatMonth(JAN_5, 'ymd', style)).toBe('2026-01');
+        }
+    });
+
+    it('names every one of the twelve months (no off-by-one in the table)', () => {
+        const long = Array.from({ length: 12 }, (_, m) => formatMonth(new Date(2026, m, 15), 'dmy', 'long'));
+        const short = Array.from({ length: 12 }, (_, m) => formatMonth(new Date(2026, m, 15), 'mdy', 'short'));
+        expect(long).toEqual([
+            'January', 'February', 'March', 'April', 'May', 'June',
+            'July', 'August', 'September', 'October', 'November', 'December',
+        ]);
+        expect(short).toEqual([
+            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+        ]);
+    });
+
+    it('English names equal en-US Intl output, month by month (the heatmap + MoM baseline)', () => {
+        // The heatmap used toLocaleDateString('en-US', { month: 'short' }) and the
+        // Month-over-Month card a hardcoded long table. Both pin `system` to this
+        // English table, so it has to BE what those call sites emitted.
+        for (let m = 0; m < 12; m++) {
+            const d = new Date(2026, m, 15);
+            expect(formatMonth(d, 'mdy', 'short')).toBe(d.toLocaleDateString('en-US', { month: 'short' }));
+            expect(formatMonth(d, 'mdy', 'long')).toBe(d.toLocaleDateString('en-US', { month: 'long' }));
+        }
+    });
+
+    it('appends a 2-digit year after the joiner, for the name-based prefs', () => {
+        expect(formatMonth(SEP_18, 'mdy', 'short', { yearJoiner: ' ' })).toBe('Sep 26');
+        expect(formatMonth(SEP_18, 'dmy', 'short', { yearJoiner: " '" })).toBe("Sep '26");
+        // Zero-padded, not "5": 2005 -> "05".
+        expect(formatMonth(new Date(2005, 0, 15), 'mdy', 'short', { yearJoiner: " '" })).toBe("Jan '05");
+    });
+
+    it('ignores the joiner under ymd, which already carries the full year', () => {
+        expect(formatMonth(SEP_18, 'ymd', 'short', { yearJoiner: ' ' })).toBe('2026-09');
+        expect(formatMonth(SEP_18, 'ymd', 'long', { yearJoiner: " '" })).toBe('2026-09');
+    });
+
+    it("keeps `system` byte-identical to weeklyMood's old month call (device locale)", () => {
+        // monthYearLabel was `${toLocaleDateString(undefined,{month:'short'})} '${yy}`.
+        const old = `${SEP_18.toLocaleDateString(undefined, { month: 'short' })} '26`;
+        expect(formatMonth(SEP_18, 'system', 'short', { yearJoiner: " '" })).toBe(old);
+        expect(formatMonth(SEP_18, 'system', 'long')).toBe(
+            SEP_18.toLocaleDateString(undefined, { month: 'long' }),
+        );
+    });
+
+    it('reads a bare YYYY-MM-DD day key as LOCAL midnight (the 1st stays in its own month)', () => {
+        expect(formatMonth('2026-06-01', 'mdy', 'short')).toBe('Jun');
+        expect(formatMonth('2026-01-01', 'dmy', 'long')).toBe('January');
+        expect(formatMonth('2026-12-31', 'ymd', 'short')).toBe('2026-12');
+    });
+
+    it('returns an empty string for an unparseable date rather than throwing', () => {
+        for (const pref of DATE_FORMAT_PREFS) {
+            for (const style of ALL_MONTH_STYLES) {
+                expect(formatMonth('garbage', pref, style)).toBe('');
+                expect(formatMonth(new Date(NaN), pref, style, { yearJoiner: ' ' })).toBe('');
+            }
+        }
+    });
+
+    it('never returns an empty string for a valid date (every preference x month style)', () => {
+        for (const pref of DATE_FORMAT_PREFS) {
+            for (const style of ALL_MONTH_STYLES) {
+                expect(formatMonth(SEP_18, pref, style)).not.toBe('');
+                expect(formatMonth(JAN_5, pref, style, { yearJoiner: ' ' })).not.toBe('');
+            }
+        }
+    });
+});
+
+describe('pinSystemTo', () => {
+    it('resolves `system` to the pinned legacy preference', () => {
+        expect(pinSystemTo('system', 'mdy')).toBe('mdy');
+        expect(pinSystemTo('system', 'dmy')).toBe('dmy');
+    });
+
+    it('lets every explicit preference through untouched', () => {
+        for (const pref of ['mdy', 'dmy', 'ymd'] as const) {
+            expect(pinSystemTo(pref, 'dmy')).toBe(pref);
+            expect(pinSystemTo(pref, 'mdy')).toBe(pref);
+        }
+    });
+
+    it('is what keeps a hardcoded-English site from following the device locale', () => {
+        // The overlay's old label was a hand-written day-first "18 Sep". Routed
+        // through plain `system` it would follow the device (en-US: "Sep 18").
+        // Pinned, `system` is that exact string whatever the device says.
+        expect(formatDate(SEP_18, pinSystemTo('system', 'dmy'), 'mediumNoYear')).toBe('18 Sep');
     });
 });
 
