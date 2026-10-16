@@ -125,9 +125,27 @@ describe('getLast7Days', () => {
 describe('formatDayLabel', () => {
   it('returns a short weekday string for a known date', () => {
     // 2025-06-15 is a Sunday
-    const label = formatDayLabel('2025-06-15');
+    const label = formatDayLabel('2025-06-15', 'system');
     expect(typeof label).toBe('string');
     expect(label.length).toBeGreaterThan(0);
     expect(label.length).toBeLessThanOrEqual(4); // short weekday names are 2-4 chars
   });
+
+  it("under `system`, the device locale's own weekday for the LOCAL calendar day", () => {
+    // Built from local parts on purpose: a bare `new Date('2025-06-15')` is UTC
+    // midnight, which reads "Sat" west of UTC.
+    for (let day = 15; day <= 21; day++) {
+      expect(formatDayLabel(`2025-06-${day}`, 'system')).toBe(
+        new Date(2025, 5, day).toLocaleDateString(undefined, { weekday: 'short' }),
+      );
+    }
+  });
+
+  it.each(['mdy', 'dmy', 'ymd'] as const)(
+    'spells the week in English under %s, ISO included (a weekday has no numeric form)',
+    (pref) => {
+      const week = Array.from({ length: 7 }, (_, i) => formatDayLabel(`2025-06-${15 + i}`, pref));
+      expect(week).toEqual(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
+    },
+  );
 });

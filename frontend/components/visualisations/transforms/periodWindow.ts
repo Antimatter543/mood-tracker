@@ -270,11 +270,11 @@ const isoDay = (year: number, month: number, date: number, withYear: boolean): s
  *      "append it". Month granularity is `YYYY-MM` because lib/dateFormat.ts
  *      emits NO month name under `ymd` at ANY style — both `longDate` and
  *      `mediumDate` fall back to the numeric form — so spelling one here would
- *      be the policy contradicting itself. (Four surfaces DO still show a
- *      hardcoded English month under every pref: MonthOverMonthCard,
- *      transforms/heatmap.ts, weeklyMood.ts's `monthYearLabel`, and
- *      MoodMetricOverlayCard. They predate the setting exactly as this file
- *      did — the same unfinished migration, not a precedent to copy.)
+ *      be the policy contradicting itself. (The four sibling surfaces that once
+ *      ignored the setting for their month names — MonthOverMonthCard,
+ *      transforms/heatmap.ts, weeklyMood.ts's `monthYearLabel` and
+ *      MoodMetricOverlayCard — now go through `formatMonth` / `formatDate` in
+ *      lib/dateFormat.ts and spell a `ymd` month this same `YYYY-MM` way.)
  */
 export const formatDayRangeLabel = (
     { startDay, endDay }: DayRange,

@@ -17,6 +17,7 @@
 // on their side (rendered as gaps, never zeros).
 
 import { addDays } from '@/databases/dateHelpers';
+import { formatDate, pinSystemTo, type DateFormatPref } from '@/lib/dateFormat';
 import type { HealthMetricDay } from './healthMoodCorrelation';
 import type { DailyAverage } from './dailyAverages';
 
@@ -192,4 +193,20 @@ export function buildMoodMetricOverlay(
   }
 
   return { days, moodCount, metricCount, metricMin, metricMax };
+}
+
+/**
+ * An overlay x-axis label for one local day key: "1 Jul" / "Jul 1" / "07-01".
+ *
+ * Follows the user's `date_format` setting like every other date in the app.
+ * This chart's pre-setting label was a hand-written English DAY-FIRST string
+ * ("1 Jul") for everyone, so its `system` keeps exactly those bytes: it is pinned
+ * to the day-first pref. An explicit `mdy` therefore reads "Jul 1" (the bug this
+ * fixes: it used to read "1 Jul"), `dmy` stays "1 Jul", and `ymd` writes "07-01".
+ *
+ * `pref` is REQUIRED (no default on purpose): a defaulted preference would let a
+ * new call site silently skip the setting, which is how this chart missed it.
+ */
+export function overlayDayLabel(ymd: string, pref: DateFormatPref): string {
+  return formatDate(ymd, pinSystemTo(pref, 'dmy'), 'mediumNoYear');
 }

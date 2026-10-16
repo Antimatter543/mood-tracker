@@ -11,10 +11,12 @@ import {
   OVERLAY_METRICS,
   OVERLAY_MIN_POINTS,
   OVERLAY_WINDOW_DAYS,
+  overlayDayLabel,
   type OverlayMetricConfig,
   type OverlayMetricKey,
 } from '@/components/visualisations/transforms/moodMetricOverlay';
 import type { HealthMetricDay } from '@/components/visualisations/transforms/healthMoodCorrelation';
+import type { DateFormatPref } from '@/lib/dateFormat';
 
 const cfg = (key: OverlayMetricKey): OverlayMetricConfig =>
   OVERLAY_METRICS.find((m) => m.key === key)!;
@@ -184,5 +186,85 @@ describe('buildMoodMetricOverlay — window selection', () => {
 
   it('OVERLAY_MIN_POINTS is the small line-drawing threshold', () => {
     expect(OVERLAY_MIN_POINTS).toBeGreaterThanOrEqual(2);
+  });
+});
+
+/**
+ * THE BUG: the Insights "Mood over time" overlay hand-wrote its x-axis dates as
+ * English DAY-FIRST ("1 Jul") for everyone. A user on MM/DD/YYYY read "1 Jul"
+ * under a chart on a screen whose every other date said "Jul 1", and ISO users
+ * never got "07-01" either.
+ *
+ * `system` is the load-bearing half: this chart's old output was a hardcoded
+ * English day-first string, not the device locale's, so `system` must keep
+ * exactly those bytes (a US-locale device would otherwise start reading "Jul 1"
+ * on update without ever touching the setting). The oracle below is that old
+ * code, verbatim.
+ */
+describe('overlayDayLabel', () => {
+  const LEGACY_MONTHS = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  /** The MoodMetricOverlayCard `formatDayLabel` this fix deleted, verbatim. */
+  const legacyDayLabel = (ymd: string): string => {
+    const [, m, d] = ymd.split('-').map(Number);
+    const month = LEGACY_MONTHS[(m ?? 1) - 1] ?? '';
+    return `${d ?? ''} ${month}`.trim();
+  };
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  /** Every calendar day of a leap year, as local day keys. */
+  const everyDay = (): string[] => {
+    const out: string[] = [];
+    for (let m = 1; m <= 12; m++) {
+      const last = new Date(2024, m, 0).getDate();
+      for (let d = 1; d <= last; d++) out.push(`2024-${pad(m)}-${pad(d)}`);
+    }
+    return out;
+  };
+
+  it.each([
+    ['system', '1 Jul'],
+    ['mdy', 'Jul 1'],
+    ['dmy', '1 Jul'],
+    ['ymd', '07-01'],
+  ] as Array<[DateFormatPref, string]>)('writes 2026-07-01 as %s -> "%s"', (pref, expected) => {
+    expect(overlayDayLabel('2026-07-01', pref)).toBe(expected);
+  });
+
+  it.each([
+    ['system', '31 Dec'],
+    ['mdy', 'Dec 31'],
+    ['dmy', '31 Dec'],
+    ['ymd', '12-31'],
+  ] as Array<[DateFormatPref, string]>)('writes 2026-12-31 as %s -> "%s"', (pref, expected) => {
+    expect(overlayDayLabel('2026-12-31', pref)).toBe(expected);
+  });
+
+  it("keeps `system` byte-identical to the chart's old label for every day of a leap year", () => {
+    const days = everyDay();
+    expect(days).toHaveLength(366);
+    for (const day of days) expect(overlayDayLabel(day, 'system')).toBe(legacyDayLabel(day));
+  });
+
+  it('`dmy` is the old label exactly (day-first users see no change)', () => {
+    for (const day of everyDay()) expect(overlayDayLabel(day, 'dmy')).toBe(legacyDayLabel(day));
+  });
+
+  it('`mdy` flips the order, and only the order (the month name and the day are the same)', () => {
+    for (const day of everyDay()) {
+      const [dayNumber, monthName] = legacyDayLabel(day).split(' ');
+      expect(overlayDayLabel(day, 'mdy')).toBe(`${monthName} ${dayNumber}`);
+    }
+  });
+
+  it('`ymd` is the numeric MM-DD with no year (the chart is a rolling 30 days)', () => {
+    for (const day of everyDay()) expect(overlayDayLabel(day, 'ymd')).toBe(day.slice(5));
+  });
+
+  it('does not zero-pad the day under a month-name preference', () => {
+    expect(overlayDayLabel('2026-07-05', 'mdy')).toBe('Jul 5');
+    expect(overlayDayLabel('2026-07-05', 'dmy')).toBe('5 Jul');
   });
 });

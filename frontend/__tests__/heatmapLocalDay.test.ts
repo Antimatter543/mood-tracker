@@ -33,7 +33,7 @@ describe('heatmap places a backdated entry on its LOCAL day', () => {
     const dayRows = toDayRows([
       { date: localMidnight(2026, 5, 11), mood: 9 }, // Thu local / Wed UTC
     ]);
-    const grid = buildHeatmapGrid(dayRows);
+    const grid = buildHeatmapGrid(dayRows, 'system');
     const cell = grid.cells.find((c) => c.mood === 9);
     expect(cell).toBeDefined();
     expect(cell!.date).toBe('2026-06-11'); // Thursday
@@ -43,7 +43,7 @@ describe('heatmap places a backdated entry on its LOCAL day', () => {
   });
 
   it('empty input -> empty grid (no throw on a fresh DB)', () => {
-    expect(buildHeatmapGrid(toDayRows([]))).toEqual({
+    expect(buildHeatmapGrid(toDayRows([]), 'system')).toEqual({
       cells: [],
       monthLabels: [],
       totalWeeks: 0,

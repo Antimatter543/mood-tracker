@@ -45,6 +45,29 @@ export function normalizeDateFormatPref(raw: unknown): DateFormatPref {
 }
 
 /**
+ * For a call site whose PRE-SETTING output was a hardcoded English string rather
+ * than the device locale's: resolve `system` to the explicit pref that
+ * reproduces those bytes, and let an explicit pref through untouched.
+ *
+ *   formatDate(day, pinSystemTo(pref, 'dmy'), 'mediumNoYear')   // "1 Jul" under system
+ *
+ * WHY: `system` normally means "the device locale decides" (a
+ * `toLocaleDateString` call). That is only byte-identical to the old behaviour
+ * for sites that USED `toLocaleDateString`. A site that hand-wrote English
+ * day-first "1 Jul" would show a US-locale device "Jul 1" if it were routed
+ * through plain `system` — the regression the "an existing user sees no change"
+ * rule forbids. Pinning makes that per-site decision explicit and greppable
+ * instead of leaving it in a ternary, the same way periodWindow's
+ * `rangeOrderFor` maps `system` to month-first.
+ */
+export function pinSystemTo(
+    pref: DateFormatPref,
+    legacy: Exclude<DateFormatPref, 'system'>
+): Exclude<DateFormatPref, 'system'> {
+    return pref === 'system' ? legacy : pref;
+}
+
+/**
  * The display shapes the app needs. Each one corresponds to a real call site's
  * pre-existing format, so `system` can reproduce it byte-for-byte:
  *
@@ -55,6 +78,9 @@ export function normalizeDateFormatPref(raw: unknown): DateFormatPref {
  *   medium          short month + year         18 Sep 2026
  *   mediumNoYear    short month, no year       18 Sep
  *   mediumWeekday   short weekday + month      Thu, 18 Sep
+ *   weekdayShort    short weekday only         Thu                        (week chart axis)
+ *
+ * (A month with no day — `Sep`, `September`, `Sep '26` — is `formatMonth`.)
  */
 export type DateStyle =
     | 'numeric'
@@ -63,7 +89,8 @@ export type DateStyle =
     | 'longNoYear'
     | 'medium'
     | 'mediumNoYear'
-    | 'mediumWeekday';
+    | 'mediumWeekday'
+    | 'weekdayShort';
 
 /**
  * The `toLocaleDateString` options each style used BEFORE the setting existed.
@@ -80,6 +107,7 @@ const SYSTEM_OPTIONS: Record<DateStyle, Intl.DateTimeFormatOptions | undefined> 
     medium: { month: 'short', day: 'numeric', year: 'numeric' },
     mediumNoYear: { month: 'short', day: 'numeric' },
     mediumWeekday: { weekday: 'short', day: 'numeric', month: 'short' },
+    weekdayShort: { weekday: 'short' },
 };
 
 const MONTHS_LONG = [
@@ -156,7 +184,54 @@ export function formatDate(
             return mediumDate(p, pref, false);
         case 'mediumWeekday':
             return `${WEEKDAYS_SHORT[p.weekday]}, ${mediumDate(p, pref, false)}`;
+        case 'weekdayShort':
+            // A weekday on its own has no day/month order and no numeric form, so
+            // every explicit pref (ymd included) spells the same English name.
+            return WEEKDAYS_SHORT[p.weekday];
     }
+}
+
+/** Month-only shapes: no day, so there is no day/month order to apply. */
+export type MonthStyle = 'long' | 'short';
+
+/**
+ * Format the MONTH of a date for display, with no day: `January` / `Jan`,
+ * optionally followed by a 2-digit year (`Jan 26`, `Jan '26`).
+ *
+ * `mdy` and `dmy` agree here: they differ only in whether the day or the month
+ * comes first, and a month on its own has no such order. `ymd` is the numeric-
+ * only preference (see `longDate`: it emits no month name at ANY style), so it
+ * writes `YYYY-MM` — the same month spelling `formatDayRangeLabel` uses for its
+ * month granularity — and always carries the full year, which is why
+ * `yearJoiner` is ignored for it.
+ *
+ * `system` is the device locale's own month name, exactly as `formatDate` treats
+ * its styles. A call site whose pre-setting output was a hardcoded English month
+ * must pin `system` first (see `pinSystemTo`).
+ *
+ * `yearJoiner`: when set, a 2-digit year is appended after it (`' '` gives
+ * `Jan 26`, `" '"` gives `Jan '26`) so a label is unambiguous across years.
+ */
+export function formatMonth(
+    date: Date | string,
+    pref: DateFormatPref,
+    style: MonthStyle,
+    opts: { yearJoiner?: string } = {}
+): string {
+    const d = toLocalDate(date);
+    if (!d) return '';
+
+    const p = partsOf(d);
+    if (pref === 'ymd') return `${p.year}-${pad2(p.month)}`;
+
+    const name =
+        pref === 'system'
+            ? d.toLocaleDateString(undefined, { month: style })
+            : (style === 'long' ? MONTHS_LONG : MONTHS_SHORT)[p.month - 1];
+
+    return opts.yearJoiner === undefined
+        ? name
+        : `${name}${opts.yearJoiner}${String(p.year).slice(-2)}`;
 }
 
 /** `18/09/2026` · `09/18/2026` · `2026-09-18` (or without the year). */

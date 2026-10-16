@@ -6,6 +6,8 @@
 // TimeframeSelector window. The card that renders this must label it clearly so
 // users don't conflate it with the timeframe-scoped charts.
 
+import { formatMonth, pinSystemTo, type DateFormatPref } from '@/lib/dateFormat';
+
 export type MonthMoodRow = {
     avg_mood: number | null;
     entry_count: number;
@@ -24,6 +26,30 @@ export type MonthOverMonthData = {
 
 /** A mood delta smaller than this (absolute) is considered flat. */
 export const FLAT_THRESHOLD = 0.3;
+
+/**
+ * The two column headings: "January" / "December" — or "2026-01" / "2025-12"
+ * under the ISO setting. `current` / `previous` are any date inside each month.
+ *
+ * This card's pre-setting headings were a hardcoded English month name, NOT the
+ * device locale's, so its `system` keeps those bytes: it is pinned to the
+ * English month-name pref. A month alone has no day/month order, so `mdy` and
+ * `dmy` agree with it; only `ymd` differs (`YYYY-MM`).
+ *
+ * `pref` is REQUIRED (no default on purpose): a defaulted preference would let a
+ * new call site silently skip the setting, which is how this card missed it.
+ */
+export const monthOverMonthLabels = (
+    current: Date,
+    previous: Date,
+    pref: DateFormatPref
+): { current: string; previous: string } => {
+    const labelPref = pinSystemTo(pref, 'mdy');
+    return {
+        current: formatMonth(current, labelPref, 'long'),
+        previous: formatMonth(previous, labelPref, 'long'),
+    };
+};
 
 const num = (v: number | null): number =>
     typeof v === 'number' && Number.isFinite(v) ? v : 0;

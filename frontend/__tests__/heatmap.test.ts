@@ -3,10 +3,15 @@ import {
   mirrorWeekIndex,
   type HeatmapInput,
 } from '@/components/visualisations/transforms/heatmap';
+import { DATE_FORMAT_PREFS, type DateFormatPref } from '@/lib/dateFormat';
+
+// The grid tests below are about layout, not labels: they run under the default
+// preference, which is what an existing user has.
+const SYSTEM: DateFormatPref = 'system';
 
 describe('buildHeatmapGrid', () => {
   it('returns an empty grid for empty input', () => {
-    const out = buildHeatmapGrid([]);
+    const out = buildHeatmapGrid([], SYSTEM);
     expect(out.cells).toEqual([]);
     expect(out.monthLabels).toEqual([]);
     expect(out.totalWeeks).toBe(0);
@@ -19,7 +24,7 @@ describe('buildHeatmapGrid', () => {
     const rows = [{ date: null, mood: null }] as unknown as HeatmapInput[];
     let out: ReturnType<typeof buildHeatmapGrid>;
     expect(() => {
-      out = buildHeatmapGrid(rows);
+      out = buildHeatmapGrid(rows, SYSTEM);
     }).not.toThrow();
     expect(out!.cells).toEqual([]);
     expect(out!.monthLabels).toEqual([]);
@@ -30,7 +35,7 @@ describe('buildHeatmapGrid', () => {
     const rows = [{ date: 'garbage', mood: 5 }] as unknown as HeatmapInput[];
     let out: ReturnType<typeof buildHeatmapGrid>;
     expect(() => {
-      out = buildHeatmapGrid(rows);
+      out = buildHeatmapGrid(rows, SYSTEM);
     }).not.toThrow();
     expect(out!.cells).toEqual([]);
     expect(out!.totalWeeks).toBe(0);
@@ -42,7 +47,7 @@ describe('buildHeatmapGrid', () => {
       { date: '2025-06-16', mood: 5 },
       { date: 'garbage', mood: 9 },
     ] as unknown as HeatmapInput[];
-    const out = buildHeatmapGrid(rows);
+    const out = buildHeatmapGrid(rows, SYSTEM);
     const cell = out.cells.find((c) => c.date === '2025-06-16');
     expect(cell?.mood).toBe(5);
     expect(out.cells.length).toBeGreaterThan(0);
@@ -53,7 +58,7 @@ describe('buildHeatmapGrid', () => {
     const rows: HeatmapInput[] = [
       { date: '2025-06-15', mood: 7 },
     ];
-    const out = buildHeatmapGrid(rows);
+    const out = buildHeatmapGrid(rows, SYSTEM);
     const cell = out.cells.find((c) => c.date === '2025-06-15');
     expect(cell?.dayIndex).toBe(6);
   });
@@ -61,7 +66,7 @@ describe('buildHeatmapGrid', () => {
   it('aligns Monday to dayIndex 0', () => {
     // 2025-06-16 is a Monday
     const rows: HeatmapInput[] = [{ date: '2025-06-16', mood: 5 }];
-    const out = buildHeatmapGrid(rows);
+    const out = buildHeatmapGrid(rows, SYSTEM);
     const cell = out.cells.find((c) => c.date === '2025-06-16');
     expect(cell?.dayIndex).toBe(0);
     expect(cell?.weekIndex).toBe(0); // starts the grid
@@ -70,7 +75,7 @@ describe('buildHeatmapGrid', () => {
   it('snaps the grid start back to the previous Monday', () => {
     // 2025-06-15 is a Sunday. The grid should start on Monday 2025-06-09.
     const rows: HeatmapInput[] = [{ date: '2025-06-15', mood: 7 }];
-    const out = buildHeatmapGrid(rows);
+    const out = buildHeatmapGrid(rows, SYSTEM);
     expect(out.cells[0].date).toBe('2025-06-09');
     expect(out.cells[0].dayIndex).toBe(0);
   });
@@ -81,7 +86,7 @@ describe('buildHeatmapGrid', () => {
       const day = String(i + 1).padStart(2, '0');
       return { date: `2025-06-${day}`, mood: i % 3 === 0 ? 7 : null };
     });
-    const out = buildHeatmapGrid(rows);
+    const out = buildHeatmapGrid(rows, SYSTEM);
     // Every cell in [June 1..June 30] should have a mood lookup; gaps elsewhere stay null.
     const within = out.cells.filter(
       (c) => c.date >= '2025-06-01' && c.date <= '2025-06-30',
@@ -97,7 +102,7 @@ describe('buildHeatmapGrid', () => {
       { date: '2025-06-15', mood: 6 },
       { date: '2025-07-15', mood: 7 },
     ];
-    const out = buildHeatmapGrid(rows);
+    const out = buildHeatmapGrid(rows, SYSTEM);
     const months = out.monthLabels.map((m) => m.month);
     // First label carries the 2-digit year (year boundary / first label);
     // subsequent same-year months are bare. Verify all 3 are present.
@@ -112,10 +117,133 @@ describe('buildHeatmapGrid', () => {
       { date: '2026-01-15', mood: 6 },
       { date: '2026-02-15', mood: 7 },
     ];
-    const out = buildHeatmapGrid(rows);
+    const out = buildHeatmapGrid(rows, SYSTEM);
     const months = out.monthLabels.map((m) => m.month);
     // January of the new year is labelled "Jan 26"; Feb stays bare.
     expect(months).toEqual(expect.arrayContaining(['Jan 26', 'Feb']));
+  });
+});
+
+/**
+ * THE BUG: the heatmap's month-column labels ignored the `date_format` setting.
+ * They were hardcoded `toLocaleDateString('en-US', ...)`, so a user who picked
+ * ISO still read "Jan 26" over the columns while every other date said
+ * "2026-01-05".
+ *
+ * Month-name labels have no day/month order, so MM/DD and DD/MM legitimately
+ * agree; only ISO differs. `system` must keep the pre-setting bytes (English
+ * short month), which is why it is checked against the OLD implementation below
+ * rather than against a string typed from memory.
+ */
+describe('buildHeatmapGrid — month labels follow the date format setting', () => {
+  const monthsOf = (rows: HeatmapInput[], pref: DateFormatPref) =>
+    buildHeatmapGrid(rows, pref).monthLabels.map((m) => m.month);
+
+  // Mon 2025-12-15 .. Sun 2026-02-15: the first Mondays of Dec / Jan / Feb are
+  // 12-15, 01-05, 02-02, so the labels sit at weeks 0, 3, 7.
+  const ACROSS_NEW_YEAR: HeatmapInput[] = [
+    { date: '2025-12-15', mood: 5 },
+    { date: '2026-01-15', mood: 6 },
+    { date: '2026-02-15', mood: 7 },
+  ];
+
+  it.each([
+    ['system', ['Dec 25', 'Jan 26', 'Feb']],
+    ['mdy', ['Dec 25', 'Jan 26', 'Feb']],
+    ['dmy', ['Dec 25', 'Jan 26', 'Feb']],
+    ['ymd', ['2025-12', '2026-01', '2026-02']],
+  ] as Array<[DateFormatPref, string[]]>)(
+    'labels the columns for %s -> %j',
+    (pref, expected) => {
+      expect(monthsOf(ACROSS_NEW_YEAR, pref)).toEqual(expected);
+    },
+  );
+
+  it('mdy and dmy agree for every month (a month alone has no day/month order)', () => {
+    const rows: HeatmapInput[] = [
+      { date: '2025-03-10', mood: 5 },
+      { date: '2026-04-20', mood: 6 },
+    ];
+    expect(monthsOf(rows, 'dmy')).toEqual(monthsOf(rows, 'mdy'));
+  });
+
+  it("keeps `system` byte-identical to the heatmap's pre-setting labels, across 14 months", () => {
+    // The implementation this PR replaced, verbatim, as the oracle.
+    const legacy = (dateStr: string, isYearStart: boolean): string => {
+      const d = new Date(`${dateStr}T00:00:00Z`);
+      const month = d.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+      return isYearStart ? `${month} ${String(d.getUTCFullYear()).slice(-2)}` : month;
+    };
+    const grid = buildHeatmapGrid(
+      [
+        { date: '2025-05-15', mood: 5 },
+        { date: '2026-07-15', mood: 7 },
+      ],
+      'system',
+    );
+    expect(grid.monthLabels.length).toBeGreaterThanOrEqual(14);
+    grid.monthLabels.forEach((label, i) => {
+      // The label's own column: the Monday cell at that week.
+      const monday = grid.cells.find((c) => c.weekIndex === label.weekIndex && c.dayIndex === 0)!;
+      const isYearStart = i === 0 || monday.date.slice(5, 7) === '01';
+      expect(label.month).toBe(legacy(monday.date, isYearStart));
+    });
+  });
+
+  it('carries the year on the FIRST label even when it is not January, and on every January', () => {
+    const labels = monthsOf(
+      [
+        { date: '2025-09-10', mood: 5 },
+        { date: '2026-03-10', mood: 6 },
+      ],
+      'mdy',
+    );
+    expect(labels[0]).toBe('Sep 25');
+    expect(labels).toContain('Jan 26');
+    // Everything else is bare.
+    expect(labels.filter((l) => /\d/.test(l))).toEqual(['Sep 25', 'Jan 26']);
+  });
+
+  it('writes every ISO label as a full YYYY-MM (the year is part of the numeric month)', () => {
+    const labels = monthsOf(
+      [
+        { date: '2025-09-10', mood: 5 },
+        { date: '2026-03-10', mood: 6 },
+      ],
+      'ymd',
+    );
+    expect(labels.length).toBeGreaterThan(2);
+    for (const label of labels) expect(label).toMatch(/^\d{4}-\d{2}$/);
+  });
+
+  it('names the month of a Monday that is the 1st of the month (no UTC day slip)', () => {
+    // 2026-06-01 is a Monday. The label has to come from the day KEY: formatting
+    // the grid's internal UTC-midnight instant with local getters names May 31
+    // (so "May", not "Jun") for anyone west of UTC. The suite runs east of UTC
+    // and in UTC, where that bug is invisible — run it with
+    // `TZ=America/Los_Angeles npx jest __tests__/heatmap.test.ts` to see it bite.
+    const rows: HeatmapInput[] = [
+      { date: '2026-05-20', mood: 5 },
+      { date: '2026-06-20', mood: 6 },
+    ];
+    expect(monthsOf(rows, 'mdy')).toEqual(['May 26', 'Jun']);
+    expect(monthsOf(rows, 'ymd')).toEqual(['2026-05', '2026-06']);
+  });
+
+  it('only changes the label TEXT: the cells and the label columns are identical for every preference', () => {
+    const base = buildHeatmapGrid(ACROSS_NEW_YEAR, 'system');
+    for (const pref of DATE_FORMAT_PREFS) {
+      const grid = buildHeatmapGrid(ACROSS_NEW_YEAR, pref);
+      expect(grid.cells).toEqual(base.cells);
+      expect(grid.totalWeeks).toBe(base.totalWeeks);
+      expect(grid.monthLabels.map((m) => m.weekIndex)).toEqual([0, 3, 7]);
+    }
+  });
+
+  it('an empty grid stays empty under every preference', () => {
+    for (const pref of DATE_FORMAT_PREFS) {
+      expect(buildHeatmapGrid([], pref)).toEqual({ cells: [], monthLabels: [], totalWeeks: 0 });
+    }
   });
 });
 
