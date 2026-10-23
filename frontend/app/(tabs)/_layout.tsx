@@ -85,10 +85,8 @@ function NotificationReArm() {
                 return;
             }
 
-            // The same all-time streak every screen shows: the reminder copy
-            // ("N-day streak") must not disagree with Home/Stats/Insights, and a
-            // lookback window would cap it (issue #7). `days` = distinct LOCAL
-            // days with an entry, for the "already logged today?" check.
+            // `days` = distinct LOCAL days with an entry, for the "already
+            // logged today?" check.
             const { current, days } = await loadStreakStats(db, todayKey);
 
             await reconcileReminders({

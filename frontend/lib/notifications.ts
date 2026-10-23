@@ -328,7 +328,7 @@ export interface ReminderPlanInput {
   currentStreak: number;
   /** Today's YYYY-MM-DD in local time. */
   todayKey: string;
-  /** Recent local date strings, for the already-logged-today check. */
+  /** Local date strings that have an entry, for the already-logged-today check. */
   entryDates: readonly string[];
 }
 
@@ -444,7 +444,7 @@ async function applyReminderSchedulePlan(plan: ReminderSchedulePlan): Promise<vo
  * (local timezone).
  *
  * `todayKey`: today's YYYY-MM-DD in local time — pass localDateString(new Date()).
- * `entryDates`: the array of YYYY-MM-DD strings from the recent-entries query.
+ * `entryDates`: the YYYY-MM-DD strings (local days) that have an entry.
  * Pure function — unit-testable.
  */
 export function hasLoggedToday(todayKey: string, entryDates: string[]): boolean {
@@ -458,7 +458,7 @@ export interface RearmOptions {
   reminders: readonly Reminder[];
   currentStreak: number;
   todayKey: string; // YYYY-MM-DD local
-  entryDates: string[]; // recent local date strings
+  entryDates: string[]; // local date strings that have an entry
 }
 
 /**

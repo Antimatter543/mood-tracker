@@ -114,15 +114,10 @@ export const ENTRY_DETAILS_IN_RANGE = `
 // -----------------------------------------------------------------------------
 // Entry instants for the streak: EVERY live entry, RAW instants, NO window.
 //
-// Deliberately takes no `?start`. A streak's length depends on arbitrary
-// history, so any lookback silently caps the number: Home and Statistics passed
-// a 60-day window and showed "61-day streak / best 61" for a 90-day streak while
-// Insights, reading all-time, showed 90 (issue #7). Dropping the parameter makes
-// the screens agree by construction.
-//
-// Read it through `loadStreakStats` (loadStreakStats.ts), never directly: that
-// maps the instants to LOCAL days in JS via `streakStats` (SQL never day-buckets,
-// see queriesNoDateBucketing.test.ts; it was `SELECT DISTINCT date(date)` once).
+// Deliberately takes no `?start`: any lookback silently caps a streak's length
+// (issue #7). Read it through `loadStreakStats` (loadStreakStats.ts), never
+// directly: that maps the instants to LOCAL days in JS via `streakStats` (SQL
+// never day-buckets, see queriesNoDateBucketing.test.ts).
 // -----------------------------------------------------------------------------
 export const ALL_ENTRY_INSTANTS = `
   SELECT date

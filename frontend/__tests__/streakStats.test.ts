@@ -1,12 +1,8 @@
 /**
- * `streakStats` is THE streak authority (issue #7: Home/Statistics showed a
- * 61-day streak while Insights showed 90 for the same data). It takes the raw
- * stored instants (UTC ISO strings) and owns local-day keying + the rule, so
- * these tests feed it INSTANTS, never pre-keyed day strings.
- *
- * Every instant is built with the LOCAL Date constructor (`at`), per the
- * repo's testing rule: the suite is pinned to a non-UTC zone (jest.tz.js), so a
- * UTC-keyed implementation lands entries on the wrong day and these fail.
+ * `streakStats` is THE streak authority (issue #7). It takes the raw stored
+ * instants (UTC ISO strings) and owns local-day keying + the rule, so these tests
+ * feed it INSTANTS, never pre-keyed day strings, built with the LOCAL Date
+ * constructor (`at`) so a UTC-keyed implementation lands on the wrong day.
  */
 import { streakStats } from '@/components/visualisations/transforms/streak';
 import { localDateString } from '@/databases/dateHelpers';
@@ -17,7 +13,7 @@ const at = (y: number, m: number, d: number, h = 12, mi = 0): string =>
 
 /** `n` consecutive local days starting at the given day, one noon entry each. */
 const run = (y: number, m: number, d: number, n: number): string[] =>
-  Array.from({ length: n }, (_, i) => new Date(y, m - 1, d + i, 12).toISOString());
+  Array.from({ length: n }, (_, i) => at(y, m, d + i));
 
 describe('streakStats: the rule', () => {
   it('empty data is a zero streak, not a crash', () => {
