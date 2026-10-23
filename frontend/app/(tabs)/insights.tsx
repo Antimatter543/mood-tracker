@@ -16,11 +16,10 @@ import {
 import {
     DOW_MOOD_PATTERN,
     WINDOW_SUMMARY,
-    RECENT_ENTRY_DATES,
     ACTIVITY_CORRELATION,
     WEEKLY_MOOD_AVERAGES,
 } from '@/components/visualisations/queries';
-import { currentStreak, longestStreak } from '@/components/visualisations/transforms/streak';
+import { loadStreakStats } from '@/components/visualisations/loadStreakStats';
 import {
     buildDowPatternData,
     aggregateDowRows,
@@ -188,7 +187,7 @@ export default function InsightsScreen() {
                     const [
                         summary,
                         dowRawRows,
-                        dateRows,
+                        streak,
                         activityRawRows,
                         moodRawRows,
                         healthRows,
@@ -198,7 +197,7 @@ export default function InsightsScreen() {
                                 [start, end]
                             ),
                             db.getAllAsync<DowInstantRow>(DOW_MOOD_PATTERN, [start, end]),
-                            db.getAllAsync<{ date: string }>(RECENT_ENTRY_DATES, [start]),
+                            loadStreakStats(db, today),
                             db.getAllAsync<ActivityCorrelationRawRow>(
                                 ACTIVITY_CORRELATION,
                                 [start, end]
@@ -215,9 +214,6 @@ export default function InsightsScreen() {
 
                     // All sources return RAW instants/rows; day-keying happens
                     // in JS (localDateString / aggregate*) — see queries.ts.
-                    const dates = Array.from(
-                        new Set(dateRows.map((r) => localDateString(r.date)))
-                    );
                     const dow = buildDowPatternData(aggregateDowRows(dowRawRows));
                     const corr = computeActivityCorrelation(
                         aggregateActivityCorrelation(activityRawRows)
@@ -261,8 +257,8 @@ export default function InsightsScreen() {
                     setData({
                         totalEntries: summary?.entry_count ?? 0,
                         avgMood: summary?.avg_mood ?? 0,
-                        streak: currentStreak(dates, today),
-                        longest: longestStreak(dates),
+                        streak: streak.current,
+                        longest: streak.longest,
                         bestDay: dow.hasEnoughData ? dow.bestDay : null,
                         worstDay: dow.hasEnoughData ? dow.worstDay : null,
                         hasDowSignal: dow.hasEnoughData,
