@@ -112,7 +112,7 @@ const mockDb = {
             // entries" value the assertions below key on.
             return [{ activity_id: 1, n: 99 }];
         }
-        // WEEKLY_MOOD_AVERAGES / MONTHLY_DAILY_AVERAGES / RECENT_ENTRY_DATES all
+        // WEEKLY_MOOD_AVERAGES / MONTHLY_DAILY_AVERAGES / ALL_ENTRY_INSTANTS all
         // read {date, mood} rows off the same table.
         return entries.map(e => ({ date: e.date, mood: e.mood }));
     }),

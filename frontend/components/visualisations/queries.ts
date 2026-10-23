@@ -112,20 +112,22 @@ export const ENTRY_DETAILS_IN_RANGE = `
 `;
 
 // -----------------------------------------------------------------------------
-// Entry instants for streak computation — RAW instants.
+// Entry instants for the streak: EVERY live entry, RAW instants, NO window.
 //
-// Was `SELECT DISTINCT date(date)`, which both UTC-keyed the day AND collapsed
-// to a day-string the caller could no longer re-key. Now returns the raw stored
-// instants; the caller maps them through `localDateString` and de-dupes in JS
-// before `currentStreak` (which already tolerates duplicates).
+// Deliberately takes no `?start`. A streak's length depends on arbitrary
+// history, so any lookback silently caps the number: Home and Statistics passed
+// a 60-day window and showed "61-day streak / best 61" for a 90-day streak while
+// Insights, reading all-time, showed 90 (issue #7). Dropping the parameter makes
+// the screens agree by construction.
 //
-// Caller supplies `?start` (typically 60 days ago in local time).
+// Read it through `loadStreakStats` (loadStreakStats.ts), never directly: that
+// maps the instants to LOCAL days in JS via `streakStats` (SQL never day-buckets,
+// see queriesNoDateBucketing.test.ts; it was `SELECT DISTINCT date(date)` once).
 // -----------------------------------------------------------------------------
-export const RECENT_ENTRY_DATES = `
+export const ALL_ENTRY_INSTANTS = `
   SELECT date
   FROM entries
-  WHERE deleted_at IS NULL AND date >= ?
-  ORDER BY date DESC
+  WHERE deleted_at IS NULL
 `;
 
 // -----------------------------------------------------------------------------
