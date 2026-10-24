@@ -21,7 +21,7 @@
  */
 import { aggregateDailyAverages } from '@/components/visualisations/transforms/dailyAverages';
 import { localDateString } from '@/databases/dateHelpers';
-import { currentStreak } from '@/components/visualisations/transforms/streak';
+import { currentStreak, streakStats } from '@/components/visualisations/transforms/streak';
 
 // What SQLite's `date(date)` produced: the UTC calendar day of the instant.
 const utcDayKey = (iso: string) => new Date(iso).toISOString().slice(0, 10);
@@ -63,8 +63,8 @@ describe('backdated entry lands on the correct LOCAL day (the reported chart bug
 
 describe('streak counts the backdated day (the reported "1 instead of 2" bug)', () => {
   // Today = Friday 2026-06-12. Two entries: one today, one backdated to
-  // Thursday at local midnight. Mapped through localDateString (as the app now
-  // does) the streak must be 2.
+  // Thursday at local midnight. Fed to streakStats (the app's one streak
+  // pipeline) the streak must be 2.
   const todayLocal = '2026-06-12'; // Friday
   // Friday AFTERNOON (2pm Brisbane = 04:00 UTC) so today's entry is Friday in
   // BOTH local and UTC — it's the backdated Thursday entry alone that mis-keys.
@@ -72,9 +72,9 @@ describe('streak counts the backdated day (the reported "1 instead of 2" bug)', 
   const yesterdayBackdated = new Date(2026, 5, 11, 0, 0, 0).toISOString(); // Thu local midnight
 
   it('streak is 2 when entries are today + yesterday-backdated-at-local-midnight', () => {
-    const localDays = [todayInstant, yesterdayBackdated].map(localDateString);
-    expect(localDays).toEqual(['2026-06-12', '2026-06-11']);
-    expect(currentStreak(localDays, todayLocal)).toBe(2);
+    const s = streakStats([todayInstant, yesterdayBackdated], todayLocal);
+    expect(s.days).toEqual(['2026-06-11', '2026-06-12']);
+    expect(s.current).toBe(2);
   });
 
   it('would have been 1 under the old UTC keying (proves the guard bites)', () => {
@@ -88,13 +88,16 @@ describe('streak counts the backdated day (the reported "1 instead of 2" bug)', 
   });
 
   it('duplicate local days (multiple entries one day) still streak correctly', () => {
-    // currentStreak tolerates duplicates, so mapping raw instants (no dedupe)
-    // is safe — verify with two entries on the same backdated Thursday.
-    const localDays = [
-      todayInstant,
-      yesterdayBackdated,
-      new Date(2026, 5, 11, 20, 0, 0).toISOString(), // 2nd Thu entry
-    ].map(localDateString);
-    expect(currentStreak(localDays, todayLocal)).toBe(2);
+    // streakStats dedupes by local day: two entries on the same backdated
+    // Thursday are still one day.
+    const s = streakStats(
+      [
+        todayInstant,
+        yesterdayBackdated,
+        new Date(2026, 5, 11, 20, 0, 0).toISOString(), // 2nd Thu entry
+      ],
+      todayLocal
+    );
+    expect(s.current).toBe(2);
   });
 });

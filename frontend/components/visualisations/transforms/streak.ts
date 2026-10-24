@@ -1,16 +1,16 @@
 // streak.ts
 //
 // THE streak authority. Every streak number the app shows (Home, Statistics,
-// Insights, the reminder copy) comes from `streakStats` below, fed by ALL of the
-// user's live entries via `loadStreakStats` (../loadStreakStats.ts). Pure JS;
-// REPLACES the recursive-CTE `GET_CURRENT_STREAK` SQL, which was:
+// Insights, the reminder copy) comes from `streakStats` below. The user's streak
+// is fed ALL live entries via `loadStreakStats` (../loadStreakStats.ts);
+// Statistics' past-period "Best streak" feeds it that period's own entries.
+// Pure JS; REPLACES the recursive-CTE `GET_CURRENT_STREAK` SQL, which was:
 //   1. Timezone-broken (used SQLite's UTC `date('now')`).
 //   2. Hard to test.
 //   3. Subtly wrong: it counted entries up-to-and-including any day, even
 //      with gaps before the "current" anchor.
 //
-// THE RULE (issue #7: Home/Statistics said 61, Insights said 90, same data,
-// because each screen fed this transform a different slice of history):
+// THE RULE (issue #7):
 //   - A "day" is a LOCAL calendar day (`localDateString`), never a UTC or SQL
 //     `date()` day.
 //   - Any number of entries on one day count as one day.
@@ -19,9 +19,8 @@
 //     morning before the user logs). Neither today nor yesterday -> 0.
 //   - longest: the longest run of consecutive days anywhere in the history.
 //   - A missing day breaks a run; nothing bridges a gap.
-//   - The history is EVERY live entry. No screen may pass a lookback window:
-//     a streak's length depends on arbitrary history, so any window silently
-//     caps the number.
+//   - The user's history is EVERY live entry: a lookback window silently caps
+//     the number.
 
 import { addDays, localDateString } from './dateHelpers';
 
@@ -107,7 +106,9 @@ export interface StreakStats {
  * Unparseable instants are skipped rather than thrown on (degenerate input
  * must never blank a screen), the same guard the other transforms use.
  *
- * @param entryInstants - Every live entry's stored instant; duplicates, any order.
+ * @param entryInstants - Stored instants to count; duplicates, any order. The
+ *                        user's streak passes every live entry (see
+ *                        `loadStreakStats`).
  * @param today - Today's local-date string. Defaults to local today.
  */
 export const streakStats = (

@@ -488,8 +488,6 @@ export default function Home() {
                         [weekStart, todayEnd]
                     ),
 
-                    // All-time on purpose: a lookback window caps the streak
-                    // (issue #7). The one streak rule lives in streakStats.
                     loadStreakStats(db, todayLocal),
 
                     db.getFirstAsync<{ count: number }>(TOTAL_ENTRIES),

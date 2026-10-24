@@ -11,7 +11,7 @@ import { useTimeframe } from '@/context/TimeframeContext';
 import { WINDOW_SUMMARY } from './queries';
 import { type Timeframe } from './transforms/windowHelpers';
 import { localDateString } from './transforms/dateHelpers';
-import { longestStreak } from './transforms/streak';
+import { streakStats } from './transforms/streak';
 import { loadStreakStats } from './loadStreakStats';
 import { computeMovingAverage } from './transforms/movingAverage';
 import { buildWeeklyMoodChartData, type MoodAvgRow } from './transforms/weeklyMood';
@@ -92,8 +92,6 @@ const StatSummaryCard: React.FC = () => {
                             WINDOW_SUMMARY,
                             [start, end]
                         ),
-                        // All-time on purpose: a lookback window caps both the
-                        // streak and "best" (issue #7). Same call Home/Insights use.
                         isCurrentPeriod ? loadStreakStats(db, today) : Promise.resolve(null),
                         db.getAllAsync<{ date: string; mood: number }>(
                             WEEKLY_MOOD_AVERAGES,
@@ -105,13 +103,12 @@ const StatSummaryCard: React.FC = () => {
                     // Per-LOCAL-day averages from the raw rows for the MA slope.
                     const dailyRows: MoodAvgRow[] = dailyAverageRows(rawDailyRows);
 
-                    // Distinct logged days INSIDE the window: the honest streak
-                    // basis for a past period. Free, since rawDailyRows is already
-                    // fetched for the moving average.
-                    const daysLoggedInPeriod = Array.from(
-                        new Set(rawDailyRows.map((r) => localDateString(r.date)))
-                    );
-                    const bestStreakInPeriod = longestStreak(daysLoggedInPeriod);
+                    // A past period's "best streak" is the longest run INSIDE that
+                    // window, the honest basis there. Free, since rawDailyRows is
+                    // already fetched for the moving average.
+                    const bestStreakInPeriod = streakStats(
+                        rawDailyRows.map((r) => r.date)
+                    ).longest;
 
                     // Moving-average slope over the window's gap-filled daily avgs.
                     // Only `.data` is consumed here (the axis labels this also
@@ -135,8 +132,8 @@ const StatSummaryCard: React.FC = () => {
                     setStreakScope(isCurrentPeriod ? 'current' : 'period');
                     setSummary(
                         buildStatSummary({
-                            currentStreak: streak ? streak.current : bestStreakInPeriod,
-                            longestStreak: streak ? streak.longest : bestStreakInPeriod,
+                            currentStreak: streak?.current ?? bestStreakInPeriod,
+                            longestStreak: streak?.longest ?? bestStreakInPeriod,
                             avgMoodInWindow: windowRow?.avg_mood ?? 0,
                             totalEntries: windowRow?.entry_count ?? 0,
                             // The REAL inclusive length of the window on screen —
