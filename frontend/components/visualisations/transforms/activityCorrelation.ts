@@ -22,8 +22,8 @@ import type { Window } from './windowHelpers';
 
 export type ActivityCorrelationRow = {
     activity_name: string;
-    avg_with: number | null; // AVG(mood) on days the activity was logged
-    avg_without: number | null; // AVG(mood) on days it was NOT logged
+    avg_with: number | null; // AVG(mood) when the activity was logged
+    avg_without: number | null; // AVG(mood) when the activity was NOT logged
     count_with: number; // sample size when present
     count_without: number; // sample size when absent
 };
@@ -99,6 +99,11 @@ export type AggregateActivityCorrelationOptions = {
      */
     carryover?: boolean;
     /**
+     * Whether the activity contribution should be calculated as difference
+     * between single mood entries instead of the daily averages.
+     */
+    perEntry?: boolean;
+    /**
      * UTC ISO instant marking the TRUE window start. Rows earlier than this are
      * treated as activity INSTANCES only — they feed forward decay into the
      * window but are excluded from the day-mood samples and from the with/without
@@ -138,16 +143,17 @@ export const aggregateActivityCorrelation = (
     opts: AggregateActivityCorrelationOptions = {}
 ): ActivityCorrelationRow[] => {
     const carryover = opts.carryover === true;
+    const perEntry = opts.perEntry === true;
     // Rows strictly before windowStart are activity instances only (pre-window).
     const windowLowerMs =
         typeof opts.windowStart === 'string' && !Number.isNaN(new Date(opts.windowStart).getTime())
             ? new Date(opts.windowStart).getTime()
             : Number.NEGATIVE_INFINITY;
 
-    // In-window entries, de-duped by id: id -> { t, mood, day }.
-    const entries = new Map<number, { t: number; mood: number; day: string }>();
-    // Activity name -> set of LOCAL days it appears on (ALL rows: pre + in-window).
-    const activityDays = new Map<string, Set<string>>();
+    // In-window entries, de-duped by id: id -> { t, mood, key: string }().
+    const entries = new Map<number, { t: number; mood: number; key: string }>();
+    // Activity name -> set of LOCAL days or entry_ids it appears on (ALL rows: pre + in-window).
+    const withActivity = new Map<string, Set<string>>();
     // Activity name -> instance timestamps (ALL rows), keyed by entry id so each
     // (entry × activity) contributes at most one instant.
     const activityInstances = new Map<string, Map<number, number>>();
@@ -159,25 +165,25 @@ export const aggregateActivityCorrelation = (
         const t = new Date(row.date).getTime();
         if (Number.isNaN(t)) continue;
 
-        const day = localDateString(row.date);
+        const key = !perEntry ? localDateString(row.date) : row.entry_id.toString();
         const inWindow = t >= windowLowerMs;
 
-        // Day-mood universe: IN-WINDOW entries only, de-duped by id (the join
+        // Mood universe: IN-WINDOW entries only, de-duped by id (the join
         // repeats an entry once per activity it has).
         if (inWindow && !entries.has(row.entry_id)) {
-            entries.set(row.entry_id, { t, mood: row.mood, day });
+            entries.set(row.entry_id, { t, mood: row.mood, key: key });
         }
 
         // Activity day-membership + forward-decay instances: ALL rows.
         if (row.activity_name != null && row.activity_id != null) {
             activityNames.add(row.activity_name);
 
-            let days = activityDays.get(row.activity_name);
-            if (!days) {
-                days = new Set<string>();
-                activityDays.set(row.activity_name, days);
+            let withEntries = withActivity.get(row.activity_name);
+            if (!withEntries) {
+                withEntries = new Set<string>();
+                withActivity.set(row.activity_name, withEntries);
             }
-            days.add(day);
+            withEntries.add(key);
 
             let inst = activityInstances.get(row.activity_name);
             if (!inst) {
@@ -188,27 +194,28 @@ export const aggregateActivityCorrelation = (
         }
     }
 
-    // Per local day: mean mood + the day's entry instants (for dayExposure).
-    const daySum = new Map<string, { sum: number; count: number }>();
-    const dayEntries = new Map<string, { t: number }[]>();
-    for (const { t, mood, day } of entries.values()) {
-        const acc = daySum.get(day);
+    // perEntry = false: calculates per local day mean mood + the day's entry instants (for dayExposure).
+    // perEntry = true: stores the entry mood + the entry instant (for dayExposure).
+    const sums = new Map<string, { sum: number; count: number }>();
+    const keyedEntries = new Map<string, { time: number }[]>();
+    for (const { t: time, mood, key } of entries.values()) {
+        const acc = sums.get(key);
         if (acc) {
             acc.sum += mood;
             acc.count += 1;
         } else {
-            daySum.set(day, { sum: mood, count: 1 });
+            sums.set(key, { sum: mood, count: 1 });
         }
-        let list = dayEntries.get(day);
+        let list = keyedEntries.get(key);
         if (!list) {
             list = [];
-            dayEntries.set(day, list);
+            keyedEntries.set(key, list);
         }
-        list.push({ t });
+        list.push({ time: time });
     }
-    const dayMood = new Map<string, number>();
-    for (const [day, { sum, count }] of daySum) dayMood.set(day, sum / count);
-    const allDays = [...dayMood.keys()];
+    const moods = new Map<string, number>();
+    for (const [day, { sum, count }] of sums) moods.set(day, sum / count);
+    const allEntries = [...moods.keys()];
 
     // Ascending instance timestamps per activity — only needed with carryover on.
     const sortedInstances = new Map<string, number[]>();
@@ -220,34 +227,35 @@ export const aggregateActivityCorrelation = (
 
     const out: ActivityCorrelationRow[] = [];
     for (const name of activityNames) {
-        const withDays = activityDays.get(name);
+        const withEntries = withActivity.get(name);
         const instances = sortedInstances.get(name) ?? EMPTY_INSTANCES;
 
-        let sumWith = 0; // Σ dayExposure · dayMood
-        let sumWithout = 0; // Σ (1 − dayExposure) · dayMood
-        let weightWith = 0; // Σ dayExposure          == count_with
-        let weightWithout = 0; // Σ (1 − dayExposure)  == count_without
+        let sumWith = 0; // Σ exposure · mood
+        let sumWithout = 0; // Σ (1 − exposure) · mood
+        let weightWith = 0; // Σ exposure          == count_with
+        let weightWithout = 0; // Σ (1 − exposure)  == count_without
 
-        for (const day of allDays) {
-            const mood = dayMood.get(day)!;
-            const sameDay = withDays?.has(day) ? 1 : 0;
-            let dayExposure: number;
+        for (const entry of allEntries) {
+            const mood = moods.get(entry)!;
+            const sameEntry = withEntries?.has(entry) ? 1 : 0;
+            let exposure: number;
             if (!carryover) {
-                // Binary same-day membership — identical to the legacy model.
-                dayExposure = sameDay;
+                // Binary same-day or same-entry membership.
+                exposure = sameEntry;
             } else {
-                // Mean over the day's entries of max(sameDayTerm, forwardTerm).
-                const list = dayEntries.get(day)!;
+                // Mean over the day's entries of max(sameDayTerm, forwardTerm), when perEntry is false.
+                // Otherwise gets just the single entry as list for convenience.
+                const list = keyedEntries.get(entry)!;
                 let acc = 0;
                 for (const e of list) {
-                    acc += Math.max(sameDay, forwardExposure(instances, e.t));
+                    acc += Math.max(sameEntry, forwardExposure(instances, e.time));
                 }
-                dayExposure = acc / list.length;
+                exposure = acc / list.length;
             }
-            sumWith += dayExposure * mood;
-            weightWith += dayExposure;
-            sumWithout += (1 - dayExposure) * mood;
-            weightWithout += 1 - dayExposure;
+            sumWith += exposure * mood;
+            weightWith += exposure;
+            sumWithout += (1 - exposure) * mood;
+            weightWithout += 1 - exposure;
         }
 
         out.push({

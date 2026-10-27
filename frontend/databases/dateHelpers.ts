@@ -82,6 +82,26 @@ export function localDateString(date: Date | string): string {
 }
 
 /**
+ * Returns the local-timezone date and time as `YYYY-MM-DDTHH:mm:00`. Accepts either a Date or
+ * an ISO string (which will be parsed and then formatted in local TZ).
+ *
+ * This is what you'd use as a key when grouping entries by day for display.
+ */
+export function localDateTimeString(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(d.getTime())) {
+    throw new Error(`Invalid date and time passed to localDateTimeString: ${date}`);
+  }
+  // Use local getters (NOT getUTC*) so the date reflects the user's TZ.
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hour = String(d.getHours()).padStart(2, '0');
+  const minute = String(d.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hour}:${minute}:00`;
+}
+
+/**
  * Returns the integer number of *local-timezone calendar days* between two
  * ISO timestamps. Sign indicates direction (`daysBetween(earlier, later)`
  * is positive).

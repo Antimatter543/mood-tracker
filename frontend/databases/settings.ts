@@ -60,6 +60,14 @@ export const SETTINGS_REGISTRY = {
         description:
             'Count activities toward your mood for the next ~36 hours, with fading weight — not just the day you log them',
     },
+    activity_perEntry: {
+        key: 'activity_perEntry',
+        default: false,
+        type: 'switch',
+        label: 'Per Entry Activity Correlation',
+        description:
+            'Count activities toward your mood for single mood entries instead of daily averages',
+    },
     date_format: {
         key: 'date_format',
         // The user's numeric-date ordering. Raised by a Play reviewer ("is there
@@ -106,6 +114,7 @@ export type SettingValues = {
     mood_precision: 'high' | 'low';
     show_mood_benchmarks: boolean;
     activity_carryover: boolean;
+    activity_perEntry: boolean;
     date_format: DateFormatPref;  // 'system' | 'mdy' | 'dmy' | 'ymd', see lib/dateFormat.ts
     reminders: string;  // JSON-encoded Reminder[] — parse with lib/reminders.parseReminders
 };

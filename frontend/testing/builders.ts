@@ -39,25 +39,29 @@ const seed = () => jest.requireActual<SeedData>('@/components/seedData');
 /** The fixed day every wall-clock default is pinned to. Never the real clock. */
 export const FIXED_DAY = '2026-06-15';
 
-const DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DAY_RE = /^(\d{4})-(\d{2})-(\d{2})(T(\d{2}):(\d{2}):(\d{2})(\.\d{3})?Z?)?$/;
 
 /** [year, 0-based month, day]; throws on a malformed OR impossible day ('2026-02-30'). */
-function parseDay(day: string): [number, number, number] {
+function parseDay(day: string): [number, number, number, number?, number?] {
     const m = DAY_RE.exec(day);
-    if (!m) throw new Error(`testing/builders: expected a 'YYYY-MM-DD' day, got '${day}'`);
-    const parts: [number, number, number] = [Number(m[1]), Number(m[2]) - 1, Number(m[3])];
+    if (!m) throw new Error(`testing/builders: expected a 'YYYY-MM-DD' day + optional 'HH:mm:ss[.mmm]' time, got '${day}'`);
+    const parts: [number, number, number, number?, number?] = [
+        Number(m[1]), Number(m[2]) - 1, Number(m[3]), // date
+        Number(m[5]), Number(m[6]), // time
+    ];
     // Date silently rolls '2026-02-30' to Mar 2 and month 00 to December: a
     // month off-by-one in a converted fixture would shift the input and the
-    // expectation together and still pass. Round-trip instead.
-    if (dayKey(new Date(parts[0], parts[1], parts[2], 12)) !== day) {
-        throw new Error(`testing/builders: '${day}' is not a real calendar day`);
+    // expectation together and still pass. Round-trip instead. Compare against
+    // the day part of the input string.
+    if (dayKey(new Date(parts[0], parts[1], parts[2], 12)) !== day.split('T')[0]) {
+        throw new Error(`testing/builders: '${day.split('T')[0]}' is not a real calendar day`);
     }
     return parts;
 }
 
 /** Local time on a 'YYYY-MM-DD' day (default local noon). */
-export function localAt(day: string, hour = 12, minute = 0): Date {
-    const [y, m0, d] = parseDay(day);
+export function localAt(date: string, hour = 12, minute = 0): Date {
+    const [y, m0, d] = parseDay(date);
     return new Date(y, m0, d, hour, minute, 0, 0);
 }
 
@@ -66,9 +70,15 @@ export function localMidnight(day: string): Date {
     return localAt(day, 0, 0);
 }
 
-/** UTC ISO string of a local time: the form entries.date is stored in (`.toISOString()`). */
+/** UTC ISO string of a local date: the form entries.date is stored in (`.toISOString()`). */
 export function localIso(day: string, hour = 12, minute = 0): string {
     return localAt(day, hour, minute).toISOString();
+}
+
+/** UTC ISO string of a local date and time: the form entries.date is stored in (`.toISOString()`). */
+export function localDateTimeIso(datetime: string): string {
+    const [y, m0, d, h, m] = parseDay(datetime);
+    return new Date(y, m0, d, h ?? 12, m ?? 0).toISOString();
 }
 
 /** The local 'YYYY-MM-DD' key of a Date. */
