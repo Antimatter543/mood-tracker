@@ -64,14 +64,39 @@ export function endOfLocalDay(date: Date | string): string {
 }
 
 /**
+ * Accepts either a Date or an ISO string and returns a Date.
+ * String is parsed in either UTC time zone (ends with 'Z') or 
+ * local time zone. If the string doesn't include time part,
+ * midnight (UTC or local) is assumed.
+ */
+export function convertStringToDate(date: Date | string): Date {
+  return typeof date === 'string' 
+      // Handle strings
+      ? (
+          date.endsWith('Z') && !date.includes('T')
+            // Date only string in UTC
+            ? new Date(date.slice(0, date.length - 1) + 'T00:00:00Z')
+            : (
+                // Date only string in local TZ
+                !date.includes('T')
+                  ? new Date(date + 'T00:00:00')
+                  // Date-time string in UTC or local TZ
+                  : new Date(date)
+              )
+        )
+      // Use date objects as is  
+      : date;
+}
+
+/**
  * Returns the local-timezone date as `YYYY-MM-DD`. Accepts either a Date or
  * an ISO string (which will be parsed and then formatted in local TZ).
  *
  * This is what you'd use as a key when grouping entries by day for display.
  */
 export function localDateString(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  if (isNaN(d.getTime())) {
+  const d = convertStringToDate(date);
+  if (!d || isNaN(d.getTime())) {
     throw new Error(`Invalid date passed to localDateString: ${date}`);
   }
   // Use local getters (NOT getUTC*) so the date reflects the user's TZ.
@@ -82,9 +107,29 @@ export function localDateString(date: Date | string): string {
 }
 
 /**
- * Returns the integer number of *local-timezone calendar days* between two
- * ISO timestamps. Sign indicates direction (`daysBetween(earlier, later)`
- * is positive).
+ * Returns the local-timezone date as `YYYY-MM-DDTHH:mm[:ss[.sss]]`.
+ * Accepts either a Date or an ISO string (which will be parsed in
+ * either local or UTC time depending on whether it ends with 'Z'),
+ * and then formatted in local TZ.
+ */
+export function localDateTimeString(date: Date | string): string {
+  const d = convertStringToDate(date);
+  if (!d || isNaN(d.getTime())) {
+    throw new Error(`Invalid date passed to localDateTimeString: ${date}`);
+  }
+  // Use local getters (NOT getUTC*) so the date reflects the user's TZ.
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+/**
+ * Returns the integer number of calendar days between two ISO timestamps
+ * in local TZ or UTC (if the string ends with Z). Sign indicates direction
+ * (`localDaysBetween(earlier, later)` is positive).
  *
  * "Calendar days" means we ignore time-of-day — two timestamps one minute
  * apart but on different sides of local midnight count as 1 day apart.
@@ -92,13 +137,18 @@ export function localDateString(date: Date | string): string {
  * correctly handles DST transitions where a calendar day is 23 or 25 hours
  * long.
  */
-export function daysBetween(a: string, b: string): number {
+export function daysBetween(a: string, b: string, inclusive: boolean=false): number {
   const dayA = new Date(localDateString(a) + 'T00:00:00');
   const dayB = new Date(localDateString(b) + 'T00:00:00');
+
   // Round to handle DST 23h/25h days — the difference will be very close
   // to an integer multiple of 86_400_000 but not exact across DST.
   const MS_PER_DAY = 86_400_000;
-  return Math.round((dayB.getTime() - dayA.getTime()) / MS_PER_DAY);
+  const days = Math.round((dayB.getTime() - dayA.getTime()) / MS_PER_DAY);
+  if (!inclusive)
+    return days;
+  else
+    return days + (days != 0 ? Math.sign(days) * 1 : 1);
 }
 
 /**

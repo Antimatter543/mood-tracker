@@ -3,9 +3,11 @@ import {
   type MoodActivityRow,
 } from '@/components/visualisations/transforms/recoveryPatterns';
 
+let nextId = 1;
+
 // Helper: build descending-by-date rows (matches the SQL's ORDER BY DESC).
 const series = (...pairs: Array<[string, number]>): MoodActivityRow[] =>
-  pairs.map(([date, mood]) => ({ date, mood }));
+  pairs.map(([date, mood]) => ({ id: nextId++, date: date, mood: mood, activities: []}));
 
 describe('analyseRecoveryPatterns', () => {
   it('handles empty input gracefully (was a crash risk)', () => {
@@ -37,7 +39,7 @@ describe('analyseRecoveryPatterns', () => {
       series(['2025-06-01', 3]),
     );
     expect(r.currentEpisode).not.toBeNull();
-    expect(r.currentEpisode?.startMood).toBe(3);
+    expect(r.currentEpisode?.worstMood).toBe(3);
     expect(r.currentEpisode?.recovered).toBe(false);
   });
 
@@ -98,10 +100,133 @@ describe('analyseRecoveryPatterns', () => {
   });
 
   it('ignores NaN mood values without crashing', () => {
-    const rows: MoodActivityRow[] = [
-      { date: '2025-06-01', mood: NaN },
-      { date: '2025-06-02', mood: 5 },
-    ];
+    const rows = series(['2025-06-01', NaN], ['2025-06-02', 5]);
     expect(() => analyseRecoveryPatterns(rows)).not.toThrow();
+  });
+
+  it('stores the worst mood during the period', () => {
+    const r = analyseRecoveryPatterns(
+      series(
+        // ep 1
+        ['2025-06-01T09:00:00', 3],
+        ['2025-06-01T18:00:00', 2],
+        ['2025-06-01T21:00:00', 1],
+        ['2025-06-02T12:00:00', 7],
+        ['2025-06-02T21:00:00', 7],
+        ['2025-06-03T12:00:00', 8],
+        // ep 2
+        ['2025-06-07T09:00:00', 3],
+        ['2025-06-07T18:00:00', 0],
+        ['2025-06-07T21:00:00', 3],
+        ['2025-06-08T12:00:00', 4],
+        ['2025-06-09T12:00:00', 5],
+        ['2025-06-10T21:00:00', 7],
+        ['2025-06-11T09:00:00', 9],
+      ),
+    );
+    expect(r.historicalEpisodes.length).toBe(2);
+    expect(r.historicalEpisodes.at(0)?.worstMood).toBe(0);
+    expect(r.historicalEpisodes.at(0)?.currentMood).toBe(9);
+    expect(r.historicalEpisodes.at(1)?.worstMood).toBe(1);
+    expect(r.historicalEpisodes.at(1)?.currentMood).toBe(8);
+  });
+
+
+  it('doesn\'t count days with dip towards recovery time', () => {
+    const r = analyseRecoveryPatterns(
+      series(
+        ['2025-06-01T09:00:00', 3],
+        ['2025-06-01T18:00:00', 0],
+        ['2025-06-01T21:00:00', 3],
+        ['2025-06-02T12:00:00', 4],
+        ['2025-06-03T12:00:00', 5],
+        ['2025-06-04T21:00:00', 7],
+        ['2025-06-05T09:00:00', 9],
+
+        ['2025-06-10T09:00:00', 3],
+        ['2025-06-10T18:00:00', 2],
+        ['2025-06-10T21:00:00', 1],
+        ['2025-06-11T12:00:00', 5],
+        ['2025-06-11T18:00:00', 4],
+        ['2025-06-11T21:00:00', 7],
+        ['2025-06-12T12:00:00', 8],
+      ),
+    );
+    expect(r.historicalEpisodes.length).toBe(1);
+    expect(r.historicalEpisodes.at(0)?.durationDays).toBe(5);
+    expect(r.historicalEpisodes.at(0)?.worstMood).toBe(0);
+
+    expect(r.currentEpisode).not.toBeNull
+    expect(r.currentEpisode!.endDate).toBeNull
+    expect(r.currentEpisode!.worstMood).toBe(1)
+  });
+
+  it('doesn\'t count days with dips after the end recovery towards recovery time', () => {
+    const r = analyseRecoveryPatterns(
+      series(
+        ['2025-06-01T09:00:00', 3],
+        ['2025-06-01T18:00:00', 0],
+        ['2025-06-01T21:00:00', 3],
+        ['2025-06-02T12:00:00', 4],
+        ['2025-06-03T12:00:00', 5],
+        ['2025-06-04T21:00:00', 7],
+        ['2025-06-05T09:00:00', 9],
+        ['2025-06-05T12:00:00', 4],
+      ),
+    );
+    expect(r.historicalEpisodes.length).toBe(0);
+    expect(r.currentEpisode).not.toBeNull
+    expect(r.currentEpisode!.endDate).toBeNull
+    expect(r.currentEpisode!.worstMood).toBe(0)
+    expect(r.currentEpisode!.entries.length).toBe(8)
+  });
+
+  it('calculates duration as days, not as number of entries for date time entries', () => {
+    const r = analyseRecoveryPatterns(
+      series(
+        // ep 1
+        ['2025-06-01T09:00:00', 3],
+        ['2025-06-01T18:00:00', 2],
+        ['2025-06-01T21:00:00', 1],
+        ['2025-06-02T12:00:00', 5],
+        ['2025-06-02T18:00:00', 7],
+        ['2025-06-02T21:00:00', 7],
+        ['2025-06-03T12:00:00', 8],
+        // ep 2
+        ['2025-06-07T09:00:00', 3],
+        ['2025-06-07T18:00:00', 0],
+        ['2025-06-07T21:00:00', 3],
+        ['2025-06-08T12:00:00', 4],
+        ['2025-06-09T12:00:00', 5],
+        ['2025-06-10T18:00:00', 7],
+        ['2025-06-10T21:00:00', 7],
+        ['2025-06-11T12:00:00', 9],
+      ),
+    );
+    expect(r.historicalEpisodes.length).toBe(2);
+    expect(r.historicalEpisodes.at(0)?.durationDays).toBe(5);
+    expect(r.historicalEpisodes.at(0)?.worstMood).toBe(0);
+    expect(r.historicalEpisodes.at(0)?.currentMood).toBe(9);
+    expect(r.historicalEpisodes.at(1)?.durationDays).toBe(3);
+    expect(r.historicalEpisodes.at(1)?.worstMood).toBe(1);
+    expect(r.historicalEpisodes.at(1)?.currentMood).toBe(8);
+  });
+
+  it('calculates duration correctly for date only entries', () => {
+    const r = analyseRecoveryPatterns(
+      series(
+        // ep 1
+        ['2025-06-01', 3],
+        ['2025-06-02', 7], ['2025-06-03', 7],
+        // ep 2
+        ['2025-06-09', 2],
+        ['2025-06-10', 4],
+        ['2025-06-11', 6], ['2025-06-12', 6],
+      ),
+    );
+    expect(r.historicalEpisodes.length).toBe(2);
+    expect(r.historicalEpisodes.at(0)?.durationDays).toBe(4);
+    expect(r.historicalEpisodes.at(1)?.durationDays).toBe(3);
+    expect(r.avgDuration).toBeGreaterThan(0);
   });
 });

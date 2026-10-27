@@ -14,6 +14,7 @@
 
 export {
   localDateString,
+  localDateTimeString,
   startOfLocalDay,
   endOfLocalDay,
   daysBetween,

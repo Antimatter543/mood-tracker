@@ -22,6 +22,7 @@ import { todaysMoodValue, monthlyOverview, formatAverageDisplay } from '@/compon
 import { loadStreakStats } from '@/components/visualisations/loadStreakStats';
 import ActivityExplorer from '@/components/ActivityExplorer';
 import { now } from '@/lib/clock';
+import RecoveryAnalysis from '@/components/visualisations/RecoveryPatterns';
 
 // Screen-level error boundary (expo-router convention): re-exporting a symbol
 // named `ErrorBoundary` makes expo-router wrap THIS screen in
@@ -563,6 +564,7 @@ export default function Home() {
                     View (no FlatList) so it composes safely inside Home's
                     ScrollView (no nested virtualization). */}
                 <ActivityExplorer />
+                <RecoveryAnalysis />
             </View>
         </Layout>
     );

@@ -4,6 +4,7 @@ import {
   localDateString,
   daysBetween,
   getDefaultEntryDate,
+  localDateTimeString,
 } from '@/databases/dateHelpers';
 import { freezeNow } from '@/testing/clock';
 
@@ -74,11 +75,73 @@ describe('localDateString', () => {
   });
 });
 
+
+describe('localDateTimeString', () => {
+  it('formats a Date as YYYY-MM-DD\'T\'HHM:mm in local TZ', () => {
+    const date = new Date(2025, 4, 19, 12, 13, 30, 15); // local May 19
+    expect(localDateTimeString(date)).toBe('2025-05-19T12:13');
+  });
+
+  it('formats an UTC date-time string as YYYY-MM-DD\'T\'HHM:mm in local TZ', () => {
+    expect(localDateTimeString('2025-05-19T12:13:15Z')).toBe('2025-05-19T22:13');
+  });
+
+  it('formats an UTC Date as YYYY-MM-DD\'T\'HHM:mm in local TZ', () => {
+    const date = new Date('2025-05-19T12:13:15Z'); // local May 19
+    expect(localDateTimeString(date)).toBe('2025-05-19T22:13');
+  });
+
+  it('pads month, day, hour and minute to two digits', () => {
+    const date = new Date(2025, 0, 5, 1, 5, 0); // local Jan 5
+    expect(localDateTimeString(date)).toBe('2025-01-05T01:05');
+  });
+
+  it('accepts an ISO date-time string and reformats it', () => {
+    // Use a local-time string (no Z/offset) so it's interpreted as local
+    const result = localDateTimeString('2025-12-31T15:25:30');
+    expect(result).toBe('2025-12-31T15:25');
+  });
+
+  it('accepts an ISO date only string', () => {
+    // Use a local-time string (no Z/offset) so it's interpreted as local
+    const result = localDateTimeString('2025-12-31');
+    expect(result).toBe('2025-12-31T00:00');
+  });
+
+  it('throws on invalid input', () => {
+    expect(() => localDateTimeString('not a date')).toThrow();
+  });
+});
+
 describe('daysBetween', () => {
   it('returns 0 for two times on the same local day', () => {
     const a = '2025-05-19T01:00:00';
     const b = '2025-05-19T23:00:00';
     expect(daysBetween(a, b)).toBe(0);
+  });
+
+  it('returns 0 for two date-only times on the same local day', () => {
+    const a = '2025-05-19';
+    const b = '2025-05-19';
+    expect(daysBetween(a, b)).toBe(0);
+  });
+
+  it('returns 0 for two times in UTC on the same local day', () => {
+    const a = '2025-05-18T15:00:00Z';
+    const b = '2025-05-19T12:00:00Z';
+    expect(daysBetween(a, b)).toBe(0);
+  });
+
+  it('returns 0 for two date-only times in UTC on the same day', () => {
+    const a = '2025-05-19Z';
+    const b = '2025-05-19Z';
+    expect(daysBetween(a, b)).toBe(0);
+  });
+
+  it('when inclusive = true, returns 1 for two times in UTC on the same local day', () => {
+    const a = '2025-05-18T15:00:00Z';
+    const b = '2025-05-19T12:00:00Z';
+    expect(daysBetween(a, b, true)).toBe(1);
   });
 
   it('returns 1 for consecutive local days even across only minutes', () => {
@@ -87,24 +150,63 @@ describe('daysBetween', () => {
     expect(daysBetween(a, b)).toBe(1);
   });
 
+  it('when inclusive = true, returns 2 for consecutive local days even across only minutes', () => {
+    const a = '2025-05-19T23:59:00';
+    const b = '2025-05-20T00:01:00';
+    expect(daysBetween(a, b, true)).toBe(2);
+  });
+
   it('is signed (positive when b > a, negative when b < a)', () => {
-    const a = '2025-05-19T12:00:00';
-    const b = '2025-05-22T12:00:00';
+    // Local time
+    let a = '2025-05-19T12:00:00';
+    let b = '2025-05-22T12:00:00';
+    expect(daysBetween(a, b)).toBe(3);
+    expect(daysBetween(b, a)).toBe(-3);
+
+    a = '2025-05-19';
+    b = '2025-05-22';
+    expect(daysBetween(a, b)).toBe(3);
+    expect(daysBetween(b, a)).toBe(-3);
+
+    // UTC time
+    a = '2025-05-19T12:00:00Z';
+    b = '2025-05-22T12:00:00Z';
+    expect(daysBetween(a, b)).toBe(3);
+    expect(daysBetween(b, a)).toBe(-3);
+
+    a = '2025-05-19Z';
+    b = '2025-05-22Z';
     expect(daysBetween(a, b)).toBe(3);
     expect(daysBetween(b, a)).toBe(-3);
   });
 
+  it('when inclusive = true, is signed (positive when b > a, negative when b < a)', () => {
+    const a = '2025-05-19T12:00:00';
+    const b = '2025-05-22T12:00:00';
+    expect(daysBetween(a, b, true)).toBe(4);
+    expect(daysBetween(b, a, true)).toBe(-4);
+  });
+
   it('counts calendar days correctly across a typical week', () => {
     expect(daysBetween('2025-05-12T08:00:00', '2025-05-19T08:00:00')).toBe(7);
+    expect(daysBetween('2025-05-12', '2025-05-19')).toBe(7);
+    // Inclusive
+    expect(daysBetween('2025-05-12T08:00:00', '2025-05-19T08:00:00', true)).toBe(8);
+    expect(daysBetween('2025-05-12', '2025-05-19', true)).toBe(8);
   });
 
   it('handles DST-style transitions by rounding to nearest whole day', () => {
     // Spring forward in US is the 2nd Sunday of March. Picking 2025-03-09.
     // Even with a 23-hour calendar day, two midnights one local-day apart
     // should still report as 1 day.
-    const a = '2025-03-08T12:00:00';
-    const b = '2025-03-09T12:00:00';
+    let a = '2025-03-08T12:00:00';
+    let b = '2025-03-09T12:00:00';
     expect(daysBetween(a, b)).toBe(1);
+
+    // Inclusive version
+    a = '2025-03-08T12:00:00';
+    b = '2025-03-09T12:00:00';
+    expect(daysBetween(a, b, true)).toBe(2);
   });
 });
 

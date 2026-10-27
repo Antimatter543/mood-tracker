@@ -15,7 +15,7 @@
 // `localDateString` / `aggregateDailyAverages` (the one authority), never a
 // SQL date() bucket — see databases/dateHelpers.ts READ CONTRACT.
 
-import { localDateString } from '@/databases/dateHelpers';
+import { convertStringToDate, localDateString, localDateTimeString } from '@/databases/dateHelpers';
 import {
     aggregateDailyAverages,
     dailyAverageMap,
@@ -302,6 +302,39 @@ export const sparklinePoints = (
         const x = n === 1 ? width / 2 : (i / (n - 1)) * width;
         const y = height - (clamped / 10) * height;
         return { x: round1(x), y: round1(y) };
+    });
+};
+
+/**
+ * Map trend values to sparkline pixel coordinates. Pure path math (per the
+ * app's "path math lives in a tested transform" doctrine): mood 10 → top
+ * (y=0), mood 0 → bottom (y=height); x spread evenly by index; a single point
+ * centres horizontally. Values are clamped to 0..10 so a point can never
+ * overshoot the [0, height] band. Empty / non-positive dims → [].
+ */
+export const sparklineDatePoints = (
+    values: {date: string | number, mood: number}[],
+    width: number,
+    height: number,
+): { x: number; y: number }[] => {
+    if (values.length === 0 || !(width > 0) || !(height > 0)) return [];
+    
+    const dateAsNumber = (date: string | number): number => {
+        if (typeof date === 'string')
+            return convertStringToDate(date).getTime();
+        else
+            return date;
+    }
+
+    const n = values.length
+    const min = dateAsNumber(values[0].date);
+    const max = dateAsNumber(values[n - 1].date);
+    return values.map((v, i) => {
+        const date = dateAsNumber(v.date);
+        const clamped = Math.min(10, Math.max(0, v.mood));
+        const x = n === 1 ? width / 2 : (date - min) * (width / (max - min));
+        const y = height - clamped * (height / 10);
+        return { x: x, y: round1(y) };
     });
 };
 
