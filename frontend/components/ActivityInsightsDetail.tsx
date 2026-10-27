@@ -39,12 +39,13 @@ import {
     type CoOccurringRow,
 } from '@/components/visualisations/transforms/activityDetail';
 import { now } from '@/lib/clock';
+import { getActivity } from '@/databases/activities';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
 /** Minimum distinct logged days before the optional trend sparkline is worth it. */
 const MIN_TREND_DAYS = 6;
-const SPARK_HEIGHT = 48;
+const SPARK_HEIGHT = 96;
 const HISTOGRAM_HEIGHT = 132;
 
 type EntryRow = { id: number; date: string; mood: number };
@@ -77,6 +78,7 @@ export const ActivityInsightsDetail: React.FC<{
     activity: Activity;
     onClose: () => void;
 }> = ({ activity, onClose }) => {
+    const [currentActivity, setActivity] = useState<Activity>(activity);
     const colors = useThemeColors();
     const { format } = useDateFormat();
     /** "18 Sep 2026" in the user's chosen order (setting `date_format`). */
@@ -94,12 +96,12 @@ export const ActivityInsightsDetail: React.FC<{
                 const start = startOfLocalDay(new Date(0));
                 const end = endOfLocalDay(now());
                 const [activityRows, allRows, coRows] = await Promise.all([
-                    db.getAllAsync<EntryRow>(ENTRIES_FOR_ACTIVITY, [activity.id]),
+                    db.getAllAsync<EntryRow>(ENTRIES_FOR_ACTIVITY, [currentActivity.id]),
                     db.getAllAsync<{ date: string; mood: number }>(WEEKLY_MOOD_AVERAGES, [
                         start,
                         end,
                     ]),
-                    db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES, [activity.id]),
+                    db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES, [currentActivity.id]),
                 ]);
                 if (active) setData({ activityRows, allRows, coRows });
             } catch (e) {
@@ -110,15 +112,15 @@ export const ActivityInsightsDetail: React.FC<{
         return () => {
             active = false;
         };
-    }, [db, activity.id]);
-    useDataRefresh(load, [db, activity.id]);
+    }, [db, currentActivity.id]);
+    useDataRefresh(load, [db, currentActivity.id]);
 
     const model = useMemo(() => {
         const d = data ?? EMPTY_DATA;
         const moods = d.activityRows.map((r) => r.mood);
         return {
             stats: activityMoodStats(moods),
-            variability: classifyVariability(moods, { label: activity.name }),
+            variability: classifyVariability(moods, { label: currentActivity.name }),
             impact: activityMoodImpact(d.allRows, d.activityRows),
             buckets: bucketMoodHistogram(d.activityRows),
             trend: moodTrendForActivity(d.activityRows),
@@ -126,12 +128,12 @@ export const ActivityInsightsDetail: React.FC<{
             firstDate: d.activityRows[0]?.date ?? null,
             lastDate: d.activityRows[d.activityRows.length - 1]?.date ?? null,
         };
-    }, [data, activity.name]);
+    }, [data, currentActivity.name]);
 
     const header = (
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
             <Text style={styles.topTitle} numberOfLines={1}>
-                {activity.name}
+                {currentActivity.name}
             </Text>
             <Pressable
                 onPress={onClose}
@@ -165,15 +167,15 @@ export const ActivityInsightsDetail: React.FC<{
                 <View style={styles.centerFill}>
                     <View style={[styles.iconHalo, { backgroundColor: colors.accentLight }]}>
                         <ActivityIcon
-                            iconName={activity.icon_name}
-                            iconFamily={activity.icon_family}
+                            iconName={currentActivity.icon_name}
+                            iconFamily={currentActivity.icon_family}
                             color={colors.accent}
                             size={30}
                         />
                     </View>
-                    <Text style={styles.emptyTitle}>No {activity.name} entries yet</Text>
+                    <Text style={styles.emptyTitle}>No {currentActivity.name} entries yet</Text>
                     <Text style={styles.emptyBody}>
-                        Log {activity.name} alongside your mood a few times and its pattern will
+                        Log {currentActivity.name} alongside your mood a few times and its pattern will
                         show up here.
                     </Text>
                 </View>
@@ -214,14 +216,14 @@ export const ActivityInsightsDetail: React.FC<{
                     <View style={styles.headerRow}>
                         <View style={[styles.iconChip, { backgroundColor: colors.accentLight }]}>
                             <ActivityIcon
-                                iconName={activity.icon_name}
-                                iconFamily={activity.icon_family}
+                                iconName={currentActivity.icon_name}
+                                iconFamily={currentActivity.icon_family}
                                 color={colors.accent}
                                 size={26}
                             />
                         </View>
                         <View style={styles.grow}>
-                            <Text style={styles.activityTitle}>{activity.name}</Text>
+                            <Text style={styles.activityTitle}>{currentActivity.name}</Text>
                             <Text style={styles.activitySub}>
                                 {s.count} {s.count === 1 ? 'entry' : 'entries'}
                                 {rangeText ? ` · ${rangeText}` : ''}
@@ -253,11 +255,11 @@ export const ActivityInsightsDetail: React.FC<{
 
                 {/* (b) Mood when doing X — vs your usual */}
                 <Card>
-                    <Text style={styles.cardTitle}>Mood when doing {activity.name}</Text>
+                    <Text style={styles.cardTitle}>Mood when doing {currentActivity.name}</Text>
                     {imp.isMeaningful && imp.withAvg !== null && imp.withoutAvg !== null ? (
                         <>
                             <Text style={styles.cardBody}>
-                                On {activity.name} days your mood averages{' '}
+                                On {currentActivity.name} your mood averages{' '}
                                 <Text style={styles.emphasis}>{imp.withAvg.toFixed(1)}</Text> —
                                 that's{' '}
                                 <Text
@@ -274,18 +276,18 @@ export const ActivityInsightsDetail: React.FC<{
                                     {(imp.delta ?? 0) >= 0 ? '+' : ''}
                                     {(imp.delta ?? 0).toFixed(1)}
                                 </Text>{' '}
-                                vs {imp.withoutAvg.toFixed(1)} on your other days.
+                                vs {imp.withoutAvg.toFixed(1)} without it.
                             </Text>
                             <View style={styles.compare}>
                                 <CompareBar
-                                    label={`With ${activity.name}`}
+                                    label={`With ${currentActivity.name}`}
                                     value={imp.withAvg}
                                     fill={colors.accent}
                                     styles={styles}
                                     colors={colors}
                                 />
                                 <CompareBar
-                                    label="Other days"
+                                    label="Without"
                                     value={imp.withoutAvg}
                                     fill={colors.textSecondary}
                                     styles={styles}
@@ -295,14 +297,14 @@ export const ActivityInsightsDetail: React.FC<{
                         </>
                     ) : (
                         <Text style={styles.cardBody}>
-                            You've logged {activity.name} on{' '}
+                            You've logged {currentActivity.name} on{' '}
                             <Text style={styles.emphasis}>
                                 {imp.withDays} {imp.withDays === 1 ? 'day' : 'days'}
                             </Text>
                             {imp.withAvg !== null
                                 ? ` (averaging ${imp.withAvg.toFixed(1)})`
                                 : ''}
-                            . Log it a few more times — and some days without it — to compare it to
+                            . Log it a few more times — and few times without it — to compare it to
                             your usual mood.
                         </Text>
                     )}
@@ -312,7 +314,7 @@ export const ActivityInsightsDetail: React.FC<{
                 <Card>
                     <Text style={styles.cardTitle}>How those days are distributed</Text>
                     <Text style={styles.cardBody}>
-                        How often your mood on {activity.name} days lands at each level.
+                        How often your mood on {currentActivity.name} lands at each level.
                     </Text>
                     <View style={styles.histRow}>
                         {model.buckets.map((count, i) => (
@@ -344,16 +346,25 @@ export const ActivityInsightsDetail: React.FC<{
                         <Text style={styles.cardTitle}>Often paired with</Text>
                         <View style={styles.chipWrap}>
                             {model.co.map((c) => (
-                                <View key={c.id} style={styles.pairChip}>
-                                    <ActivityIcon
-                                        iconName={c.icon_name}
-                                        iconFamily={c.icon_family}
-                                        color={colors.text}
-                                        size={14}
-                                    />
-                                    <Text style={styles.pairName}>{c.name}</Text>
-                                    <Text style={styles.pairCount}>×{c.n}</Text>
-                                </View>
+                                <Pressable
+                                    key={'button-' + c.id}
+                                    onPress={() => setActivity(getActivity(db, c.id)!)}
+                                    style={({ pressed }) => [pressed && styles.chipPressed]}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Open ${activity.name} insights`}
+                                >
+                                    <View key={c.id} style={styles.pairChip}>
+                                        <ActivityIcon
+                                            iconName={c.icon_name}
+                                            iconFamily={c.icon_family}
+                                            color={colors.text}
+                                            size={14}
+                                        />
+                                        <Text style={styles.pairName}>{c.name}</Text>
+                                        <Text style={styles.pairCount}>×{c.n}</Text>
+                                        <Feather name='chevron-right' size={14} color={colors.textSecondary} />
+                                    </View>
+                                </Pressable>
                             ))}
                         </View>
                     </Card>
@@ -364,7 +375,7 @@ export const ActivityInsightsDetail: React.FC<{
                     <Card>
                         <Text style={styles.cardTitle}>Trend over time</Text>
                         <Text style={styles.cardBody}>
-                            Your daily average mood on {activity.name} days, oldest to newest.
+                            Your daily average mood on {currentActivity.name} days, oldest to newest.
                         </Text>
                         <Sparkline
                             values={model.trend.map((t) => t.avg)}
@@ -566,6 +577,7 @@ const makeStyles = (colors: ThemeColors) =>
             color: colors.text,
             textAlign: 'right',
         },
+
         histRow: {
             flexDirection: 'row',
             alignItems: 'flex-end',
@@ -604,6 +616,9 @@ const makeStyles = (colors: ThemeColors) =>
             gap: 8,
             marginTop: 10,
         },
+        chipPressed: {
+            opacity: 0.6,
+        },
         pairChip: {
             flexDirection: 'row',
             alignItems: 'center',
@@ -611,9 +626,15 @@ const makeStyles = (colors: ThemeColors) =>
             paddingVertical: 7,
             paddingHorizontal: 12,
             borderRadius: 16,
-            backgroundColor: colors.overlays.tag,
             borderWidth: StyleSheet.hairlineWidth,
             borderColor: colors.overlays.tagBorder,
+            backgroundColor: colors.accentLight,
+            justifyContent: 'center',
+        },
+        activityUnit: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
         },
         pairName: {
             fontSize: 13,

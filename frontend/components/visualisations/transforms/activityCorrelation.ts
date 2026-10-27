@@ -21,6 +21,7 @@ import { localDateString } from '@/databases/dateHelpers';
 import type { Window } from './windowHelpers';
 
 export type ActivityCorrelationRow = {
+    activity_id: number;
     activity_name: string;
     avg_with: number | null; // AVG(mood) on days the activity was logged
     avg_without: number | null; // AVG(mood) on days it was NOT logged
@@ -151,7 +152,7 @@ export const aggregateActivityCorrelation = (
     // Activity name -> instance timestamps (ALL rows), keyed by entry id so each
     // (entry × activity) contributes at most one instant.
     const activityInstances = new Map<string, Map<number, number>>();
-    const activityNames = new Set<string>();
+    const activityIds = new Map<number, string>();
 
     for (const row of rows ?? []) {
         if (!row || typeof row.date !== 'string') continue;
@@ -170,7 +171,7 @@ export const aggregateActivityCorrelation = (
 
         // Activity day-membership + forward-decay instances: ALL rows.
         if (row.activity_name != null && row.activity_id != null) {
-            activityNames.add(row.activity_name);
+            activityIds.set(row.activity_id, row.activity_name);
 
             let days = activityDays.get(row.activity_name);
             if (!days) {
@@ -219,7 +220,7 @@ export const aggregateActivityCorrelation = (
     }
 
     const out: ActivityCorrelationRow[] = [];
-    for (const name of activityNames) {
+    for (const [ id, name ] of activityIds.entries()) {
         const withDays = activityDays.get(name);
         const instances = sortedInstances.get(name) ?? EMPTY_INSTANCES;
 
@@ -251,6 +252,7 @@ export const aggregateActivityCorrelation = (
         }
 
         out.push({
+            activity_id: id,
             activity_name: name,
             avg_with: weightWith > 0 ? Math.round((sumWith / weightWith) * 100) / 100 : null,
             avg_without:
@@ -284,6 +286,7 @@ export const carryoverQueryBounds = (
 };
 
 export type ActivityCorrelationResult = {
+    activity_id: number;
     activity_name: string;
     avg_with: number;
     avg_without: number;
@@ -323,6 +326,7 @@ export const computeActivityCorrelation = (
         const countWith = num(r.count_with);
         const countWithout = num(r.count_without);
         return {
+            activity_id: r.activity_id,
             activity_name: r.activity_name,
             avg_with: avgWith,
             avg_without: avgWithout,
