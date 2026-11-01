@@ -31,6 +31,9 @@ jest.mock('react-native-safe-area-context', () => ({
 // Reanimated's worklet runtime is unavailable under jest. The mock renders a
 // plain View and — crucially — forwards every prop, so the assertions below can
 // see whether an `exiting` animation was passed.
+// OverlayProvider observes the keyboard (see context/OverlayHost.tsx); the
+// reanimated mock below has no useAnimatedKeyboard, so stub the hook.
+jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
 jest.mock('react-native-reanimated', () => {
     const ReactLocal = require('react');
     const { View } = require('react-native');
