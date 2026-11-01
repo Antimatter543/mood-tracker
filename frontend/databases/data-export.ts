@@ -11,6 +11,69 @@ import { SQLiteDatabase } from 'expo-sqlite';
 import { GROUP_ORDER_BY } from '@/databases/groups';
 import { deriveMediaExt, writeBase64ToMediaDir } from '@/databases/mediaHelpers';
 import { withWriteTransaction } from '@/databases/writeTransaction';
+import {
+  BackupDecryptionError,
+  EncryptedBackupEnvelope,
+  assertSupportedEnvelope,
+  decryptBackup,
+  deriveBackupKey,
+  encryptBackup,
+  isEncryptedBackup,
+  sameKdf,
+} from '@/lib/backupCrypto';
+import { getBackupKey } from '@/lib/backupKeyStore';
+
+/**
+ * Asks the user for an encrypted backup's password. Resolves to the typed
+ * password, or `null` if they cancelled. `wrongPassword` is true when the
+ * previous attempt did not open the file, so the prompt can say so.
+ */
+export type RequestBackupPassword = (state: { wrongPassword: boolean }) => Promise<string | null>;
+
+export interface ImportOptions {
+  requestPassword?: RequestBackupPassword;
+}
+
+/**
+ * Decrypt an encrypted backup, transparently when possible: if the file was
+ * made with the key this device has stored (same salt and params), it opens
+ * with no prompt. Otherwise (another device, an older password, encryption
+ * since turned off) the user is asked for the password, repeatedly until it
+ * is right or they cancel. Returns the plain backup JSON, or `null` on cancel.
+ */
+export async function openEncryptedBackup(
+  envelope: EncryptedBackupEnvelope,
+  requestPassword?: RequestBackupPassword
+): Promise<string | null> {
+  assertSupportedEnvelope(envelope);
+
+  const stored = await getBackupKey();
+  if (stored && sameKdf(stored.kdf, envelope.kdf)) {
+    try {
+      return await decryptBackup(envelope, stored);
+    } catch (error) {
+      if (!(error instanceof BackupDecryptionError)) throw error;
+      // Same salt but the key does not fit (should not happen): ask instead.
+    }
+  }
+
+  if (!requestPassword) {
+    throw new Error('This backup is encrypted and needs its password.');
+  }
+
+  let wrongPassword = false;
+  for (;;) {
+    const password = await requestPassword({ wrongPassword });
+    if (password === null) return null;
+    const key = await deriveBackupKey(password, envelope.kdf);
+    try {
+      return await decryptBackup(envelope, key);
+    } catch (error) {
+      if (!(error instanceof BackupDecryptionError)) throw error;
+      wrongPassword = true;
+    }
+  }
+}
 
 /**
  * Shape of a single photo embedded in a v3 export. `data_base64` carries the
@@ -148,13 +211,21 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
   
       // Convert to JSON
       const jsonData = JSON.stringify(exportData, null, 2);
-      
+
+      // Opt-in encryption (Settings > Data Management > Encrypt backups). When
+      // a key is stored, ONLY the encrypted envelope is ever written to disk;
+      // the plain JSON stays in memory. See lib/backupCrypto.ts.
+      const backupKey = await getBackupKey();
+      const fileContents = backupKey ? await encryptBackup(jsonData, backupKey) : jsonData;
+
       // Create a temporary file
       const fileDate = new Date().toISOString().split('T')[0];
-      const fileName = `mood_tracker_export_${fileDate}.json`;
+      const fileName = backupKey
+        ? `mood_tracker_export_${fileDate}_encrypted.json`
+        : `mood_tracker_export_${fileDate}.json`;
       const tempFilePath = `${FileSystem.documentDirectory}${fileName}`;
-      
-      await FileSystem.writeAsStringAsync(tempFilePath, jsonData);
+
+      await FileSystem.writeAsStringAsync(tempFilePath, fileContents);
 
       // ONE delivery path: hand the file to the OS share sheet. That single
       // surface already exposes "Save to Drive", "Save to device/Files", Gmail,
@@ -189,7 +260,10 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
       };
     }
   }
-  export async function importDatabaseData(_db: SQLiteDatabase): Promise<DatabaseResult> {
+  export async function importDatabaseData(
+    _db: SQLiteDatabase,
+    options: ImportOptions = {}
+  ): Promise<DatabaseResult> {
     try {
       // Pick a document
       const result = await DocumentPicker.getDocumentAsync({
@@ -209,7 +283,21 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
       const jsonData = await FileSystem.readAsStringAsync(fileUri);
       
       // Parse the JSON
-      const importData = JSON.parse(jsonData);
+      let importData = JSON.parse(jsonData);
+
+      // An encrypted backup is an envelope around the same plain JSON: open it
+      // (silently with this device's stored key, else by asking for the
+      // password) and continue with the decrypted backup.
+      if (isEncryptedBackup(importData)) {
+        const decrypted = await openEncryptedBackup(importData, options.requestPassword);
+        if (decrypted === null) {
+          return {
+            success: false,
+            message: 'Import cancelled'
+          };
+        }
+        importData = JSON.parse(decrypted);
+      }
       
       // Validate the data structure
       if (!importData || !importData.data || !importData.version) {
