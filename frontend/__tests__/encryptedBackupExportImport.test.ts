@@ -77,8 +77,9 @@ beforeEach(() => {
 const writtenFiles = (): [string, string][] =>
   (FileSystem.writeAsStringAsync as jest.Mock).mock.calls.map(c => [String(c[0]), String(c[1])]);
 
+/** Restore reads the file's first bytes (format probe), then the whole file. */
 const pickFileWithContents = (contents: string) =>
-  (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce(contents);
+  (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce('eyJk').mockResolvedValueOnce(contents);
 
 const entryInserts = (db: ReturnType<typeof createMockDatabase>) =>
   db.runAsync.mock.calls.filter((c: any[]) => /INSERT OR REPLACE INTO entries/i.test(c[0]));

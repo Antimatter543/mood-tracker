@@ -77,6 +77,17 @@ function getExportedJson() {
   return JSON.parse(jsonCall[1]);
 }
 
+/**
+ * Queue a picked file's contents. Restore first reads the file's first bytes
+ * (base64) to tell SoulSync JSON from a Daylio ZIP, then the whole file, so
+ * two reads are queued: a non-ZIP head ("{\"d" in base64), then the contents.
+ */
+function queuePickedFile(contents: string) {
+  (FileSystem.readAsStringAsync as jest.Mock)
+    .mockResolvedValueOnce('eyJk')
+    .mockResolvedValueOnce(contents);
+}
+
 /** entry_media INSERT calls issued against a mock DB during import. */
 function mediaInserts(db: ReturnType<typeof createMockDatabase>) {
   return db.runAsync.mock.calls.filter((c: any[]) => /INSERT INTO entry_media/i.test(c[0]));
@@ -100,7 +111,7 @@ describe('importDatabaseData', () => {
       canceled: false,
       assets: [{ uri: 'file:///mock/bad.json' }],
     });
-    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce('not valid json{{{');
+    queuePickedFile('not valid json{{{');
 
     const result = await importDatabaseData(db as any);
     expect(result.success).toBe(false);
@@ -132,7 +143,7 @@ describe('importDatabaseData', () => {
       canceled: false,
       assets: [{ uri: 'file:///mock/data.json' }],
     });
-    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce(
+    queuePickedFile(
       JSON.stringify(importPayload)
     );
 
@@ -178,7 +189,7 @@ describe('importDatabaseData', () => {
       canceled: false,
       assets: [{ uri: 'file:///mock/data.json' }],
     });
-    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce(
+    queuePickedFile(
       JSON.stringify(importPayload)
     );
 
@@ -224,7 +235,7 @@ describe('importDatabaseData', () => {
       canceled: false,
       assets: [{ uri: 'file:///mock/v3.json' }],
     });
-    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce(JSON.stringify(payload));
+    queuePickedFile(JSON.stringify(payload));
     // First embedded photo writes fine; second one's write throws.
     (FileSystem.writeAsStringAsync as jest.Mock)
       .mockResolvedValueOnce(undefined)
@@ -269,7 +280,7 @@ describe('importDatabaseData', () => {
       canceled: false,
       assets: [{ uri: 'file:///mock/starred.json' }],
     });
-    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce(JSON.stringify(payload));
+    queuePickedFile(JSON.stringify(payload));
 
     db.getAllAsync
       .mockResolvedValueOnce([]) // existing groups
@@ -304,7 +315,7 @@ describe('importDatabaseData', () => {
       canceled: false,
       assets: [{ uri: 'file:///mock/legacy-no-star.json' }],
     });
-    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce(JSON.stringify(payload));
+    queuePickedFile(JSON.stringify(payload));
 
     db.getAllAsync
       .mockResolvedValueOnce([]) // existing groups
@@ -342,7 +353,7 @@ describe('importDatabaseData', () => {
       canceled: false,
       assets: [{ uri: 'file:///mock/v2.json' }],
     });
-    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce(JSON.stringify(payload));
+    queuePickedFile(JSON.stringify(payload));
 
     db.getAllAsync
       .mockResolvedValueOnce([]) // existing groups
