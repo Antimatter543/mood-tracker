@@ -19,7 +19,9 @@ const FileSystem = require('expo-file-system/legacy');
 
 jest.mock('expo-sqlite');
 jest.mock('expo-document-picker');
-jest.mock('expo-file-system/legacy');
+// The hand-written mock (not the auto-mock): it defines EncodingType, which
+// Restore's format probe reads with (EncodingType.Base64).
+jest.mock('expo-file-system/legacy', () => require('../../__mocks__/expo-file-system'));
 jest.mock('expo-sharing');
 jest.mock('react-native', () => ({
   Platform: { OS: 'ios' },
@@ -69,7 +71,11 @@ async function runImport(payload) {
     canceled: false,
     assets: [{ uri: 'file:///mock/demo.json' }],
   });
-  FileSystem.readAsStringAsync.mockResolvedValueOnce(JSON.stringify(payload));
+  // Restore first reads the file's first bytes as base64 (to tell SoulSync
+  // JSON from a Daylio ZIP), then the whole file: a non-ZIP head, then the JSON.
+  FileSystem.readAsStringAsync
+    .mockResolvedValueOnce('eyJk')
+    .mockResolvedValueOnce(JSON.stringify(payload));
   // The importer reads existing groups then existing activities; empty install.
   db.getAllAsync.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
   db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });

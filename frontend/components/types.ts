@@ -63,6 +63,8 @@ export type MoodEntry = {
     message: string;
     data?: any;
     filePath?: string;  // Add this optional property
+    /** Machine-readable reason for a failure the UI handles specially. */
+    code?: string;
   };
   
   // Component Props Types

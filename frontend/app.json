@@ -72,7 +72,8 @@
       "./plugins/withReleaseAbis",
       "react-native-health-connect",
       "./plugins/withHealthConnect.js",
-      "expo-image"
+      "expo-image",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true

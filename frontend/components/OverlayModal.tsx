@@ -3,8 +3,7 @@ import { BackHandler, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
-import { useOverlay } from '@/context/OverlayHost';
-import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
+import { useOverlay, useOverlayKeyboardHeight } from '@/context/OverlayHost';
 import { useThemeColors } from '@/styles/global';
 
 /**
@@ -87,7 +86,9 @@ const OverlayModalContent: React.FC<{
     // no-op (verified on the release APK). So we consume the IME inset in JS:
     // pad the container by the keyboard height so a centered dialog lifts above
     // the keyboard / a full-screen panel gains scroll range. See useKeyboardHeight.
-    const keyboardHeight = useKeyboardHeight();
+    // Read from the host, never measured here: an observer mounted together
+    // with an autoFocus field misses the keyboard (see OverlayHost).
+    const keyboardHeight = useOverlayKeyboardHeight();
 
     useEffect(() => {
         const sub = BackHandler.addEventListener('hardwareBackPress', () => {
