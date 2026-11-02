@@ -43,7 +43,7 @@
 <td width="50%" valign="top">
 
 **Statistics & Insights**
-- Mood trend chart, hold to scrub day-by-day, tap for a full-screen **Fit**-scale view
+- Mood trend chart, hold to scrub day-by-day, tap for a full-screen **Fit**-scale view with each day's low and high
 - Swipe (or tap the arrows) to step through weeks, months, quarters, years
 - Day-of-week pattern (your best and toughest days)
 - Rigorous with/without activity correlation
@@ -51,7 +51,8 @@
 
 **Customization & Privacy**
 - 5 themes: Dark, Light, Cherry Blossom, Midnight Blue, Forest
-- JSON import/export for full data portability
+- Backup and restore to a file, optionally **encrypted with a password**
+- **Import from Daylio** (moods, notes, activities and photos)
 - 100% local SQLite database (photos stay on-device too)
 
 </td>
@@ -170,14 +171,11 @@ Migrations run automatically on app launch via `databases/migrations.ts`.
 **Planned**
 - CSV/PDF export
 - AMOLED dark theme
-- Photo attachment cloud-free encrypted backup
 - Biometric app lock
 
 ## Contributing
 
-1. Fork the repo and create a feature branch
-2. Make changes, then run `npm run check` (typecheck + lint + tests)
-3. Open a Pull Request
+PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the checks to run, and what to include (screenshots help a lot for UI changes).
 
 **Tips:** Dev-only features appear when `__DEV__` is true. Add tabs by creating files in `app/(tabs)/`. Themes live in `styles/global.ts`. Database changes go through `databases/migrations.ts`.
 
