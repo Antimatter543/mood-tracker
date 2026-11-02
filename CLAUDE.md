@@ -23,8 +23,18 @@ Public repo: `Antimatter543/mood-tracker` (Anti's). Releases: GitHub Releases (A
 Portfolio policy 2026-07-03: EAS cloud builds are prod/iOS-only (`eas-build-guard.sh` hook-enforced);
 this app is Android-only, so the free CI gradlew lane is the ONLY build path. (The old EAS lane was
 removed from `release.sh` the same day — git history has it if ever needed.)
-  - **Cut a release** = ONE command: `scripts/release.sh patch|minor|major` — gates (tsc+jest) -> bump ->
+  - **Cut a release** = ONE command: `scripts/release.sh patch|minor|major` — gates -> bump ->
     commit -> tag -> push. The `v*` tag push fires CI, which builds + signs + creates the GitHub Release.
+    **Gate (since 2026-11-02):** tsc locally, but jest is NOT run on the laptop: the script requires a green
+    `pr-checks.yml` run on a commit with the IDENTICAL git tree as HEAD (a squash-merge of an up-to-date PR
+    matches its PR head). No match: `gh workflow run pr-checks.yml -R Antimatter543/mood-tracker --ref main`,
+    wait, rerun. `LOCAL_JEST=1` restores the old local run.
+  - **Community PRs (since 2026-11-02):** `.github/workflows/pr-checks.yml` runs tsc + full jest (TZ pinned to
+    Australia/Brisbane: ~10 suites assume it) on every PR; `CONTRIBUTING.md` + a PR template ask for
+    screenshots. Fork runs can need approval: `gh api -X POST repos/Antimatter543/mood-tracker/actions/runs/<id>/approve`.
+    Fixups go on the contributor's branch (maintainerCanModify) as new commits, never a force-push, so credit
+    stays theirs. Stacked PRs conflict after the lower one is squashed: merge main into the upper branch and
+    check the resolved tree against a QA'd integration build with `git diff <integration> --stat`.
     Manual equivalent (if the script itself is broken):
     ```bash
     cd frontend
