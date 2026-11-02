@@ -14,9 +14,8 @@ import { SettingsProvider, useSettings } from "@/context/SettingsContext";
 import { initializeDatabase } from "@/databases/database";
 import { DATABASE_NAME } from "@/databases/writeTransaction";
 import { SQLiteProvider, useSQLiteContext } from "expo-sqlite";
-import { localDateString, startOfLocalDay } from "@/databases/dateHelpers";
-import { RECENT_ENTRY_DATES } from "@/components/visualisations/queries";
-import { currentStreak } from "@/components/visualisations/transforms/streak";
+import { localDateString } from "@/databases/dateHelpers";
+import { loadStreakStats } from "@/components/visualisations/loadStreakStats";
 import { reconcileReminders } from "@/lib/notifications";
 import { enabledReminders, parseReminders } from "@/lib/reminders";
 import { OverlayProvider } from "@/context/OverlayHost";
@@ -86,25 +85,15 @@ function NotificationReArm() {
                 return;
             }
 
-            // Recent entry dates (last 90 days is plenty for streak accuracy).
-            const since = startOfLocalDay(
-                new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
-            );
-            // Raw instants (RECENT_ENTRY_DATES no longer day-buckets in SQL) ->
-            // map to LOCAL day strings + de-dupe in JS, so the streak/reminder
-            // logic keys days the same way the rest of the app does.
-            const rows = await db.getAllAsync<{ date: string }>(
-                RECENT_ENTRY_DATES,
-                [since]
-            );
-            const entryDates = Array.from(new Set(rows.map(r => localDateString(r.date))));
-            const streak = currentStreak(entryDates, todayKey);
+            // `days` = distinct LOCAL days with an entry, for the "already
+            // logged today?" check.
+            const { current, days } = await loadStreakStats(db, todayKey);
 
             await reconcileReminders({
                 reminders,
-                currentStreak: streak,
+                currentStreak: current,
                 todayKey,
-                entryDates,
+                entryDates: days,
             });
         } catch (e) {
             // Notifications are non-critical; never crash the app.

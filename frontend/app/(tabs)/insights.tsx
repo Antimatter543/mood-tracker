@@ -16,11 +16,10 @@ import {
 import {
     DOW_MOOD_PATTERN,
     WINDOW_SUMMARY,
-    RECENT_ENTRY_DATES,
     ACTIVITY_CORRELATION,
     WEEKLY_MOOD_AVERAGES,
 } from '@/components/visualisations/queries';
-import { currentStreak, longestStreak } from '@/components/visualisations/transforms/streak';
+import { loadStreakStats } from '@/components/visualisations/loadStreakStats';
 import {
     buildDowPatternData,
     aggregateDowRows,
@@ -40,6 +39,7 @@ import {
     buildMoodDrivers,
     type MoodDriversData,
 } from '@/components/visualisations/transforms/moodDrivers';
+import TopActivitiesCard, { type TopActivity } from '@/components/visualisations/TopActivitiesCard';
 import MoodDriversCard from '@/components/visualisations/MoodDriversCard';
 import HealthMoodPagerCard from '@/components/visualisations/HealthMoodPagerCard';
 import MoodMetricOverlayCard from '@/components/visualisations/MoodMetricOverlayCard';
@@ -72,7 +72,7 @@ type Insights = {
     bestDay: string | null;
     worstDay: string | null;
     hasDowSignal: boolean;
-    topActivity: { name: string; avgWith: number; avgWithout: number; delta: number } | null;
+    topActivities: TopActivity[];
     moodState: MoodState;
     drivers: MoodDriversData;
     // Health Connect (Android + feature-flag only). Cards render only when the
@@ -141,7 +141,7 @@ const EMPTY: Insights = {
     bestDay: null,
     worstDay: null,
     hasDowSignal: false,
-    topActivity: null,
+    topActivities: [],
     moodState: EMPTY_MOOD_STATE,
     drivers: EMPTY_DRIVERS,
     showHealth: false,
@@ -188,7 +188,7 @@ export default function InsightsScreen() {
                     const [
                         summary,
                         dowRawRows,
-                        dateRows,
+                        streak,
                         activityRawRows,
                         moodRawRows,
                         healthRows,
@@ -198,7 +198,7 @@ export default function InsightsScreen() {
                                 [start, end]
                             ),
                             db.getAllAsync<DowInstantRow>(DOW_MOOD_PATTERN, [start, end]),
-                            db.getAllAsync<{ date: string }>(RECENT_ENTRY_DATES, [start]),
+                            loadStreakStats(db, today),
                             db.getAllAsync<ActivityCorrelationRawRow>(
                                 ACTIVITY_CORRELATION,
                                 [start, end]
@@ -215,18 +215,16 @@ export default function InsightsScreen() {
 
                     // All sources return RAW instants/rows; day-keying happens
                     // in JS (localDateString / aggregate*) — see queries.ts.
-                    const dates = Array.from(
-                        new Set(dateRows.map((r) => localDateString(r.date)))
-                    );
                     const dow = buildDowPatternData(aggregateDowRows(dowRawRows));
                     const corr = computeActivityCorrelation(
                         aggregateActivityCorrelation(activityRawRows)
                     );
-                    // Most uplifting activity = largest positive, meaningful delta.
-                    const positives = corr.meaningful
+                    // Most uplifting activities = largest positive, meaningful deltas
+                    // (top 3). Empty when none lift mood, which drives the empty state.
+                    const topActivities = corr.meaningful
                         .filter((m) => m.delta > 0)
-                        .sort((a, b) => b.delta - a.delta);
-                    const top = positives[0] ?? null;
+                        .sort((a, b) => b.delta - a.delta)
+                        .slice(0, 3);
 
                     // 2-axis "how you've been" state over all recorded local days,
                     // and the state-conditioned forward-looking drivers (reusing
@@ -261,19 +259,17 @@ export default function InsightsScreen() {
                     setData({
                         totalEntries: summary?.entry_count ?? 0,
                         avgMood: summary?.avg_mood ?? 0,
-                        streak: currentStreak(dates, today),
-                        longest: longestStreak(dates),
+                        streak: streak.current,
+                        longest: streak.longest,
                         bestDay: dow.hasEnoughData ? dow.bestDay : null,
                         worstDay: dow.hasEnoughData ? dow.worstDay : null,
                         hasDowSignal: dow.hasEnoughData,
-                        topActivity: top
-                            ? {
-                                  name: top.activity_name,
-                                  avgWith: top.avg_with,
-                                  avgWithout: top.avg_without,
-                                  delta: top.delta,
-                              }
-                            : null,
+                        topActivities: topActivities.map((t) => ({
+                            name: t.activity_name,
+                            avgWith: t.avg_with,
+                            avgWithout: t.avg_without,
+                            delta: t.delta,
+                        })),
                         moodState,
                         drivers,
                         showHealth,
@@ -402,37 +398,8 @@ export default function InsightsScreen() {
                 </View>
             </Card>
 
-            {/* Top activity correlation */}
-            <Card>
-                <View style={styles.row}>
-                    <View style={[styles.iconCircle, { backgroundColor: colors.accentLight }]}>
-                        <Ionicons name="sparkles-outline" size={20} color={colors.accent} />
-                    </View>
-                    <View style={styles.grow}>
-                        <Text style={styles.cardTitle}>What lifts your mood</Text>
-                        {d.topActivity ? (
-                            <Text style={styles.cardBody}>
-                                When you log{' '}
-                                <Text style={styles.emphasis}>{d.topActivity.name}</Text>, your
-                                mood averages{' '}
-                                <Text style={styles.emphasis}>
-                                    {d.topActivity.avgWith.toFixed(1)}
-                                </Text>{' '}
-                                — that's{' '}
-                                <Text style={[styles.emphasis, { color: colors.accent }]}>
-                                    +{d.topActivity.delta.toFixed(1)}
-                                </Text>{' '}
-                                above days without it ({d.topActivity.avgWithout.toFixed(1)}).
-                            </Text>
-                        ) : (
-                            <Text style={styles.cardBody}>
-                                Log activities alongside your mood and we'll surface which ones
-                                tend to lift you most.
-                            </Text>
-                        )}
-                    </View>
-                </View>
-            </Card>
+            {/* Top activity correlations */}
+            <TopActivitiesCard activities={d.topActivities} />
 
             {/* State-conditioned, forward-looking drivers */}
             <MoodDriversCard data={d.drivers} />

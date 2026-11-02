@@ -1,17 +1,26 @@
 // streak.ts
 //
-// Pure JS streak computation. REPLACES the recursive-CTE
-// `GET_CURRENT_STREAK` SQL, which was:
+// THE streak authority. Every streak number the app shows (Home, Statistics,
+// Insights, the reminder copy) comes from `streakStats` below. The user's streak
+// is fed ALL live entries via `loadStreakStats` (../loadStreakStats.ts);
+// Statistics' past-period "Best streak" feeds it that period's own entries.
+// Pure JS; REPLACES the recursive-CTE `GET_CURRENT_STREAK` SQL, which was:
 //   1. Timezone-broken (used SQLite's UTC `date('now')`).
 //   2. Hard to test.
 //   3. Subtly wrong: it counted entries up-to-and-including any day, even
 //      with gaps before the "current" anchor.
 //
-// The contract: given a sorted list of entry-date strings ("YYYY-MM-DD") and
-// "today" (local-date string), the current streak is the count of consecutive
-// days ending at today (or yesterday, if you allow a one-day grace) that have
-// at least one entry. We require today OR yesterday to anchor the streak —
-// otherwise the streak is 0.
+// THE RULE (issue #7):
+//   - A "day" is a LOCAL calendar day (`localDateString`), never a UTC or SQL
+//     `date()` day.
+//   - Any number of entries on one day count as one day.
+//   - current: consecutive days with an entry, ending TODAY, or ending
+//     YESTERDAY if today has no entry yet (the streak must not break in the
+//     morning before the user logs). Neither today nor yesterday -> 0.
+//   - longest: the longest run of consecutive days anywhere in the history.
+//   - A missing day breaks a run; nothing bridges a gap.
+//   - The user's history is EVERY live entry: a lookback window silently caps
+//     the number.
 
 import { addDays, localDateString } from './dateHelpers';
 
@@ -77,4 +86,44 @@ export const longestStreak = (entryDates: string[]): number => {
         }
     }
     return best;
+};
+
+export interface StreakStats {
+    /** Consecutive local days with an entry, ending today (or yesterday if today isn't logged yet). */
+    current: number;
+    /** Longest run of consecutive local days with an entry, anywhere in the history. */
+    longest: number;
+    /** Distinct LOCAL days ("YYYY-MM-DD") that have at least one entry, ascending. */
+    days: string[];
+}
+
+/**
+ * The one streak computation, from the raw stored entry instants (UTC ISO
+ * strings, straight off `entries.date`). Keys each instant to its LOCAL day
+ * and applies the rule in the header, so a caller can't key days differently
+ * or hand `currentStreak` a different slice of history than another screen.
+ *
+ * Unparseable instants are skipped rather than thrown on (degenerate input
+ * must never blank a screen), the same guard the other transforms use.
+ *
+ * @param entryInstants - Stored instants to count; duplicates, any order. The
+ *                        user's streak passes every live entry (see
+ *                        `loadStreakStats`).
+ * @param today - Today's local-date string. Defaults to local today.
+ */
+export const streakStats = (
+    entryInstants: readonly string[],
+    today: string = localDateString(new Date())
+): StreakStats => {
+    const distinct = new Set<string>();
+    for (const instant of entryInstants) {
+        const when = new Date(instant);
+        if (!isNaN(when.getTime())) distinct.add(localDateString(when));
+    }
+    const days = Array.from(distinct).sort();
+    return {
+        current: currentStreak(days, today),
+        longest: longestStreak(days),
+        days,
+    };
 };

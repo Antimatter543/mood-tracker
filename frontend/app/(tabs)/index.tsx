@@ -8,7 +8,7 @@ import { greetingForHour, greetingIconForHour } from '@/lib/greeting';
 import { Card } from '@/components/Card';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useState, memo, useMemo } from 'react';
-import { WEEKLY_MOOD_AVERAGES, MONTHLY_DAILY_AVERAGES, RECENT_ENTRY_DATES, TOTAL_ENTRIES } from '@/components/visualisations/queries';
+import { WEEKLY_MOOD_AVERAGES, MONTHLY_DAILY_AVERAGES, TOTAL_ENTRIES } from '@/components/visualisations/queries';
 import { isWeekEmpty } from '@/components/visualisations/chartUtils';
 import { MoodWeekChart } from '@/components/visualisations/MoodWeekChart';
 import { StatTile } from '@/components/StatTile';
@@ -19,7 +19,7 @@ import { useDateFormat } from '@/hooks/useDateFormat';
 import { startOfLocalDay, endOfLocalDay, localDateString } from '@/databases/dateHelpers';
 import { dailyAverageMap } from '@/components/visualisations/transforms/dailyAverages';
 import { todaysMoodValue, monthlyOverview, formatAverageDisplay } from '@/components/visualisations/transforms/homeSummary';
-import { currentStreak } from '@/components/visualisations/transforms/streak';
+import { loadStreakStats } from '@/components/visualisations/loadStreakStats';
 import ActivityExplorer from '@/components/ActivityExplorer';
 
 // Screen-level error boundary (expo-router convention): re-exporting a symbol
@@ -442,14 +442,13 @@ export default function Home() {
                 const todayEnd = endOfLocalDay(now);
                 const weekStart = startOfLocalDay(new Date(now.getTime() - 7 * DAY_MS));
                 const monthStart = startOfLocalDay(new Date(now.getTime() - 30 * DAY_MS));
-                const streakWindowStart = startOfLocalDay(new Date(now.getTime() - 60 * DAY_MS));
 
                 const [
                     today,
                     monthRows,
                     activities,
                     weeklyRows,
-                    streakEntryRows,
+                    streakResult,
                     totals,
                 ] = await Promise.all([
                     db.getFirstAsync<{ mood: number }>(
@@ -489,10 +488,7 @@ export default function Home() {
                         [weekStart, todayEnd]
                     ),
 
-                    db.getAllAsync<{ date: string }>(
-                        RECENT_ENTRY_DATES,
-                        [streakWindowStart]
-                    ),
+                    loadStreakStats(db, todayLocal),
 
                     db.getFirstAsync<{ count: number }>(TOTAL_ENTRIES),
                 ]);
@@ -533,9 +529,7 @@ export default function Home() {
                 }
                 setWeeklyData(weekly);
 
-                // Map raw instants -> local day strings before the streak; the
-                // streak transform de-dupes internally so mapping alone is fine.
-                setStreak(currentStreak(streakEntryRows.map(r => localDateString(r.date)), todayLocal));
+                setStreak(streakResult.current);
             } catch (error) {
                 console.error('Error fetching dashboard data:', error);
             }

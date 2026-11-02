@@ -17,7 +17,7 @@
  *
  * Coverage note: the previously-INLINE SQL in app/(tabs)/index.tsx (monthStats)
  * and app/(tabs)/_layout.tsx (notification re-arm) was moved into queries.ts as
- * named exports (MONTHLY_DAILY_AVERAGES / RECENT_ENTRY_DATES) precisely so this
+ * named exports (MONTHLY_DAILY_AVERAGES / ALL_ENTRY_INSTANTS) precisely so this
  * invariant covers it too. A grep guard below also fails if those screens grow
  * a new inline `date(date)` / `strftime` over a stored timestamp.
  */
