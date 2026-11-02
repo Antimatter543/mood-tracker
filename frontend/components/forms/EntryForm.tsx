@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import Animated, { FadeIn, useAnimatedRef } from 'react-native-reanimated';
 import type { AnimatedRef } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -29,9 +30,11 @@ import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
 import { useSingleFlight } from '@/hooks/useSingleFlight';
 import { useEntryDraft, EntryDraft } from './hooks/useEntryDraft';
 import { selectPhotosToAdd } from './photoSelection';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const MAX_PHOTOS = 5;
+
+// Breathing room between the top safe-area edge and the overlay's header row.
+const MODAL_TOP_GAP = 8;
 
 /**
  * Inline photo-attachment affordance for the entry form. Offers camera +
@@ -187,6 +190,12 @@ type EntryFormProps = {
     initialData?: EntryFormData;
     onSubmit: (data: EntryFormData) => Promise<void>;
     onCancel: () => void;
+    /**
+     * Bottom safe-area inset of the window the form is drawn in (the overlay
+     * passes it). Added to the scroll content's bottom padding so the last
+     * button scrolls clear of the Android nav bar. Defaults to 0.
+     */
+    bottomInset?: number;
 };
 
 // Kept for backward compatibility with callers (AddEntryButton etc.) — the
@@ -341,8 +350,13 @@ const EntryFormOverlay: React.FC<{
     onSubmit: (data: EntryFormData) => Promise<void>;
 }> = ({ onClose, initialData, onSubmit }) => {
     const colors = useThemeColors();
+    const styles = useThemedStyles(colors);
+    // The overlay is StyleSheet.absoluteFill at the window root, so under
+    // edge-to-edge it sits behind BOTH system bars and owns both insets. The top
+    // one is applied ONCE, on the container below (the header and the form's
+    // scroll area both sit under it); the bottom one is handed to the form so
+    // its last button can scroll clear of the nav bar.
     const insets = useSafeAreaInsets();
-    const styles = useThemedStyles(colors, insets.top, insets.bottom);
 
     // Replicate <Modal onRequestClose>: Android hardware back closes the overlay
     // while it's up (and swallows the event so it doesn't pop the route under it).
@@ -357,14 +371,18 @@ const EntryFormOverlay: React.FC<{
     return (
         <Animated.View
             entering={FadeIn.duration(150)}
-            style={[styles.modalContainer, StyleSheet.absoluteFill]}
+            style={[
+                styles.modalContainer,
+                StyleSheet.absoluteFill,
+                { paddingTop: insets.top + MODAL_TOP_GAP },
+            ]}
         >
             <View style={styles.modalHeader}>
                 <Pressable style={styles.closeButton} onPress={onClose}>
                     <Ionicons name="close" color={colors.text} size={24} />
                 </Pressable>
 
-                <InfoBubble style={styles.infoBubble}
+                <InfoBubble
                     text="Hold an activity to edit or delete it"
                     position="top-right"
                 />
@@ -381,6 +399,7 @@ const EntryFormOverlay: React.FC<{
                 initialData={initialData}
                 onSubmit={onSubmit}
                 onCancel={onClose}
+                bottomInset={insets.bottom}
             />
         </Animated.View>
     );
@@ -427,6 +446,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     initialData,
     onSubmit,
     onCancel: _onCancel,
+    bottomInset = 0,
 }) => {
     const [currentStep, setCurrentStep] = useState(1);
     const {
@@ -447,8 +467,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     // edge-to-edge — without it the content fits the window exactly and there's
     // nothing to scroll, so the keyboard sits on top of the Notes field.
     const keyboardHeight = useKeyboardHeight();
-    const insets = useSafeAreaInsets();
-    const styles = useThemedStyles(colors, insets.top, insets.bottom);
+    const styles = useThemedStyles(colors);
     // Animated ref to the form's scroll container, threaded into the activity
     // drag-reorder grid so it can auto-scroll the form while a chip is dragged
     // near an edge (react-native-sortables scrollableRef). Its `.current` also
@@ -497,9 +516,13 @@ export const EntryForm: React.FC<EntryFormProps> = ({
             style={styles.scroll}
             contentContainerStyle={[
                 styles.contentContainer,
-                // Extra bottom room == keyboard height so the last field can sit
-                // above the keyboard. 0 when hidden (no-op).
-                { paddingBottom: styles.contentContainer.paddingBottom + keyboardHeight },
+                // The bottom inset keeps the buttons clear of the nav bar; the
+                // extra room == keyboard height lets the last field sit above
+                // the keyboard (0 when hidden, a no-op).
+                {
+                    paddingBottom:
+                        styles.contentContainer.paddingBottom + bottomInset + keyboardHeight,
+                },
             ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator
@@ -535,18 +558,18 @@ export const EntryForm: React.FC<EntryFormProps> = ({
 };
 
 // Styles
-const useThemedStyles = (colors: ThemeColors, insetTop: number = 16, insetBottom: number = 0) =>
+const useThemedStyles = (colors: ThemeColors) =>
     StyleSheet.create({
         modalContainer: {
             // Rendered as an in-tree overlay (StyleSheet.absoluteFill, applied at
             // the call site) — it fills the whole window via the root portal slot,
             // so no explicit Dimensions sizing is needed (that was the old native
             // <Modal> Fabric flex-collapse workaround, gone with the Modal).
+            // The top safe-area padding is added at the call site (it needs the
+            // live insets); horizontal gutters belong to `contentContainer`.
             backgroundColor: colors.background,
-            paddingHorizontal: 20,            
         },
         modalHeader: {
-            paddingTop: insetTop + 8,
             paddingHorizontal: 12,
             flexDirection: 'row',
             justifyContent: 'flex-start',
@@ -555,12 +578,6 @@ const useThemedStyles = (colors: ThemeColors, insetTop: number = 16, insetBottom
         closeButton: {
             padding: 8,
         },
-        infoBubble: {
-            paddingTop: insetTop + 8,
-            paddingLeft: 8,
-            paddingRight: 8,
-            paddingBottom: 8,
-        },        
         scroll: {
             flex: 1,
         },
@@ -568,10 +585,12 @@ const useThemedStyles = (colors: ThemeColors, insetTop: number = 16, insetBottom
             // flexGrow (not flex) so the content stays vertically centred when it
             // fits the viewport, but grows past it and scrolls when it doesn't —
             // guarantees the Continue/Submit button is always reachable on small
-            // screens. Vertical padding gives breathing room at both ends.
+            // screens. Vertical padding gives breathing room at both ends. The
+            // bottom safe-area inset and the keyboard height are added on top of
+            // paddingBottom at the call site.
             flexGrow: 1,
-            paddingTop: insetTop + 8,
-            paddingBottom: insetBottom + 24,
+            paddingTop: 8,
+            paddingBottom: 24,
             alignItems: 'center',
             justifyContent: 'center',
             paddingHorizontal: 20,

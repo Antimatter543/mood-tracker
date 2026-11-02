@@ -43,7 +43,7 @@ const MoodDriversCard: React.FC<MoodDriversCardProps> = ({ data }) => {
     return (
         <Card>
             {/* InfoBubble is absolutely positioned (top-right) by the component. */}
-            <InfoBubble text={METHOD_NOTE} style={{position: 'absolute', zIndex: 1000}} />
+            <InfoBubble text={METHOD_NOTE} />
 
             <View style={styles.headerRow}>
                 <View style={[styles.iconCircle, { backgroundColor: colors.accentLight }]}>
