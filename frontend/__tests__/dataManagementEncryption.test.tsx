@@ -457,7 +457,11 @@ describe('restoring an encrypted backup from elsewhere', () => {
     await fireEvent.press(screen.getByLabelText('Unlock and restore'));
 
     await waitFor(() =>
-      expect(alerts).toHaveBeenCalledWith('Data restored', 'Keep encrypting new backups with this password?', expect.any(Array))
+      expect(alerts).toHaveBeenCalledWith(
+        'Data restored',
+        expect.stringMatching(/Keep encrypting new backups with this password\?$/),
+        expect.any(Array)
+      )
     );
     await waitFor(() => expect(encryptionSwitch().props.value).toBe(true));
     // A fresh salt on THIS phone, not the other phone's.

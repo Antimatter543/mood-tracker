@@ -5,7 +5,12 @@ import { useThemeColors } from '@/styles/global';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useDataContext } from '@/context/DataContext';
 import Feather from '@expo/vector-icons/Feather';
-import { exportDatabaseData, importDatabaseData } from '@/databases/data-export';
+import {
+  exportDatabaseData,
+  importDatabaseData,
+  SUPPORTED_RESTORE_SOURCES,
+} from '@/databases/data-export';
+import { describeDaylioImport } from '@/databases/daylio-import';
 import { KdfHeader } from '@/lib/backupCrypto';
 import { useBackupEncryption } from '@/hooks/useBackupEncryption';
 import { BackupPasswordDialog } from './BackupPasswordDialog';
@@ -41,6 +46,7 @@ export const DataManagementSection = () => {
   const { refetchEntries } = useDataContext();
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const busy = isExporting || isImporting;
   // Declared before the hook so "Back up now" (after a password change) can call it.
   const exportRef = React.useRef<() => void>(() => {});
   const encryption = useBackupEncryption({ onBackupNow: () => exportRef.current() });
@@ -68,56 +74,72 @@ export const DataManagementSection = () => {
   };
   exportRef.current = handleExport;
 
-  const handleImport = async () => {
-    // Show confirmation dialog first
-    Alert.alert(
-      'Import Data',
-      'This will replace your current data with the imported data. Are you sure you want to continue?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        },
-        {
-          text: 'Continue',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setIsImporting(true);
-              const result = await importDatabaseData(db, {
-                requestPassword: encryption.requestPassword,
-                onPasswordAccepted: encryption.onPasswordAccepted,
-              });
-
-              if (result.success) {
-                refetchEntries(); // Refresh the app's data
-                const keepPassword = await encryption.takeKeepPasswordOffer();
-                if (keepPassword !== null) {
-                  Alert.alert('Data restored', 'Keep encrypting new backups with this password?', [
-                    { text: 'No', style: 'cancel' },
-                    { text: 'Yes', onPress: () => encryption.keepPassword(keepPassword) },
-                  ]);
-                } else {
-                  Alert.alert('Success', 'Your data has been imported successfully');
-                }
-              } else {
-                Alert.alert('Import Failed', result.message);
-              }
-            } catch (error) {
-              console.error('Error during import:', error);
-              Alert.alert('Import Error', 'An unexpected error occurred during import');
-            } finally {
-              setIsImporting(false);
-              encryption.discardAcceptedPassword();
-              // The unlock dialog (if one was needed) stays up while the
-              // backup decrypts and imports; close it once that is over.
-              encryption.finishImport();
-            }
-          }
-        }
-      ]
+  /** A two-button native confirm as a promise: true = `confirmText` pressed. */
+  const confirmAlert = (title: string, message: string, confirmText: string, destructive = false) =>
+    new Promise<boolean>(resolve =>
+      Alert.alert(
+        title,
+        message,
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+          { text: confirmText, style: destructive ? 'destructive' : 'default', onPress: () => resolve(true) },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) }
+      )
     );
+
+  // Restore: pick a file first, then confirm what it turned out to be. A
+  // SoulSync backup replaces data; another app's backup (Daylio) is ADDED,
+  // after a preview of what it contains.
+  const handleImport = async () => {
+    try {
+      setIsImporting(true);
+      const result = await importDatabaseData(db, {
+        requestPassword: encryption.requestPassword,
+        onPasswordAccepted: encryption.onPasswordAccepted,
+        confirmRestore: () =>
+          confirmAlert(
+            'Import Data',
+            'This will replace your current data with the imported data. Are you sure you want to continue?',
+            'Continue',
+            true
+          ),
+        confirmDaylio: summary => confirmAlert('Import from Daylio', describeDaylioImport(summary), 'Import'),
+      });
+
+      if (result.success) {
+        refetchEntries(); // Refresh the app's data
+        // Restored with a typed password on a phone without encryption:
+        // offer to keep encrypting new backups with it.
+        const keepPassword = await encryption.takeKeepPasswordOffer();
+        if (keepPassword !== null) {
+          Alert.alert('Data restored', `${result.message}\n\nKeep encrypting new backups with this password?`, [
+            { text: 'No', style: 'cancel' },
+            { text: 'Yes', onPress: () => encryption.keepPassword(keepPassword) },
+          ]);
+        } else {
+          Alert.alert('Success', result.message);
+        }
+      } else if (result.message !== 'Import cancelled') {
+        Alert.alert('Import Failed', result.message);
+      }
+    } catch (error) {
+      console.error('Error during import:', error);
+      Alert.alert('Import Error', 'An unexpected error occurred during import');
+    } finally {
+      setIsImporting(false);
+      encryption.discardAcceptedPassword();
+      // The unlock dialog (if one was needed) stays up while the
+      // backup decrypts and imports; close it once that is over.
+      encryption.finishImport();
+    }
   };
+
+  const showSupportedApps = () =>
+    Alert.alert(
+      'Supported apps',
+      SUPPORTED_RESTORE_SOURCES.map(({ app, detail }) => `${app}: ${detail}.`).join('\n\n')
+    );
 
   const styles = StyleSheet.create({
     section: {
@@ -207,6 +229,16 @@ export const DataManagementSection = () => {
       lineHeight: 18,
       marginTop: 2,
     },
+    restoreNote: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      lineHeight: 18,
+      marginTop: 10,
+    },
+    restoreNoteLink: {
+      color: colors.accent,
+      fontWeight: '500',
+    },
     encryptionLinks: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -255,7 +287,7 @@ export const DataManagementSection = () => {
           <Switch
             value={encryption.status === 'on' || encryption.status === 'unreadable'}
             onValueChange={encryption.handleToggle}
-            disabled={encryption.status === 'loading' || isExporting || isImporting}
+            disabled={encryption.status === 'loading' || busy}
             trackColor={{ false: '#767577', true: colors.accent }}
             thumbColor="#f4f3f4"
             accessibilityLabel="Encrypt backups"
@@ -280,7 +312,7 @@ export const DataManagementSection = () => {
             <Pressable
               style={styles.linkButton}
               onPress={encryption.openChange}
-              disabled={isExporting || isImporting}
+              disabled={busy}
               accessibilityRole="button"
               accessibilityLabel="Change backup password"
             >
@@ -309,7 +341,7 @@ export const DataManagementSection = () => {
           ]}
           // Not awaited: the backup may wait on "Confirm your backup password".
           onPress={() => { void handleExport(); }}
-          disabled={isExporting || isImporting}
+          disabled={busy}
         >
           <Feather name="upload-cloud" color="#fff" size={18} />
           {isExporting ? (
@@ -325,8 +357,10 @@ export const DataManagementSection = () => {
             styles.importButton,
             pressed && styles.buttonPressed
           ]}
-          onPress={handleImport}
-          disabled={isExporting || isImporting}
+          // Fire and forget: the import can wait on dialogs (password,
+          // confirmations), so the press must not hold on to its promise.
+          onPress={() => { void handleImport(); }}
+          disabled={busy}
         >
           <Feather name="rotate-ccw" color={colors.text} size={18} />
           {isImporting ? (
@@ -336,6 +370,19 @@ export const DataManagementSection = () => {
           )}
         </Pressable>
       </View>
+
+      {/* Restore also understands other apps' backups (SUPPORTED_RESTORE_SOURCES). */}
+      <Text style={styles.restoreNote}>
+        Restore also accepts backups from other mood apps.{' '}
+        <Text
+          style={styles.restoreNoteLink}
+          onPress={showSupportedApps}
+          accessibilityRole="link"
+          accessibilityLabel="Supported apps"
+        >
+          Supported apps
+        </Text>
+      </Text>
 
       <BackupPasswordDialog {...encryption.dialogProps} />
     </View>
