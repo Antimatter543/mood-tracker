@@ -1,19 +1,14 @@
 // DataManagementSection.tsx
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator, Switch } from 'react-native';
 import { useThemeColors } from '@/styles/global';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useDataContext } from '@/context/DataContext';
 import Feather from '@expo/vector-icons/Feather';
-import { exportDatabaseData, importDatabaseData, RequestBackupPassword } from '@/databases/data-export';
-import { KdfHeader, KdfParams, validateNewBackupPassword } from '@/lib/backupCrypto';
-import { calibrateKdfParams } from '@/lib/backupKdfCalibration';
-import {
-  clearBackupPassword,
-  getBackupKey,
-  setBackupPassword,
-} from '@/lib/backupKeyStore';
-import { BackupPasswordDialog, BackupPasswordDialogMode } from './BackupPasswordDialog';
+import { exportDatabaseData, importDatabaseData } from '@/databases/data-export';
+import { KdfHeader } from '@/lib/backupCrypto';
+import { useBackupEncryption } from '@/hooks/useBackupEncryption';
+import { BackupPasswordDialog } from './BackupPasswordDialog';
 
 /** "Argon2id, 48 MiB × 2 passes, 4 lanes": the calibrated strength. */
 export function describeKdf(kdf: KdfHeader): string {
@@ -34,7 +29,11 @@ export function backupTechnicalDetails(kdf: KdfHeader): string {
   ].join('\n\n');
 }
 
-type PasswordDialogState = { mode: BackupPasswordDialogMode; error: string } | null;
+const ENCRYPTION_HINT = {
+  on: 'Backups are locked with your password. It cannot be shown or recovered, only changed.',
+  off: 'Lock backups with a password so nobody else can open them.',
+  unreadable: "Your backup password couldn't be read. Enter it again to keep encrypting backups.",
+} as const;
 
 export const DataManagementSection = () => {
   const colors = useThemeColors();
@@ -42,135 +41,22 @@ export const DataManagementSection = () => {
   const { refetchEntries } = useDataContext();
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  // Backup encryption is ON exactly when a key is in secure storage. Mirrors
-  // that key's KDF header (its calibrated strength, shown in the hint):
-  // `undefined` until the store has been read, `null` when encryption is off.
-  const [encryptionKdf, setEncryptionKdf] = useState<KdfHeader | null | undefined>(undefined);
-  const encryptionEnabled = encryptionKdf === undefined ? null : encryptionKdf !== null;
-  const [passwordDialog, setPasswordDialog] = useState<PasswordDialogState>(null);
-  const [passwordBusy, setPasswordBusy] = useState(false);
-  // While a restore waits for a password, the pending answer for importDatabaseData.
-  const unlockResolver = useRef<((password: string | null) => void) | null>(null);
-  // The on-device Argon2id benchmark, started the moment the set/change dialog
-  // opens so it has finished (native: tens of ms) before the password is typed.
-  // `null` result = it failed; setBackupPassword then calibrates itself.
-  const calibration = useRef<Promise<KdfParams | null> | null>(null);
-
-  const openNewPasswordDialog = (mode: 'set' | 'change') => {
-    calibration.current = calibrateKdfParams()
-      .then(c => c.params)
-      .catch(error => {
-        console.warn('Backup KDF calibration failed, retrying on submit:', error);
-        return null;
-      });
-    setPasswordDialog({ mode, error: '' });
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    getBackupKey()
-      .then(key => { if (!cancelled) setEncryptionKdf(key?.kdf ?? null); })
-      .catch(error => {
-        console.error('Error reading backup encryption state:', error);
-        if (!cancelled) setEncryptionKdf(null);
-      });
-    return () => { cancelled = true; };
-  }, []);
-
-  const handleEncryptionToggle = (next: boolean) => {
-    if (next) {
-      openNewPasswordDialog('set');
-      return;
-    }
-    Alert.alert(
-      'Stop encrypting backups?',
-      'New backups will be saved without a password. Backups you already made stay encrypted and still need their password to restore.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Turn off',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await clearBackupPassword();
-              setEncryptionKdf(null);
-            } catch (error) {
-              console.error('Error turning off backup encryption:', error);
-              Alert.alert('Error', 'Could not turn off backup encryption.');
-            }
-          }
-        }
-      ]
-    );
-  };
-
-  /** importDatabaseData's prompt: open the unlock dialog and wait for the answer. */
-  const requestPassword: RequestBackupPassword = ({ wrongPassword }) =>
-    new Promise(resolve => {
-      unlockResolver.current = resolve;
-      setPasswordBusy(false);
-      setPasswordDialog({
-        mode: 'unlock',
-        error: wrongPassword ? 'Wrong password, or the backup file is damaged.' : '',
-      });
-    });
-
-  const settleUnlock = (password: string | null) => {
-    const resolve = unlockResolver.current;
-    unlockResolver.current = null;
-    resolve?.(password);
-  };
-
-  const handlePasswordSubmit = async (password: string, confirmation: string) => {
-    if (!passwordDialog) return;
-
-    if (passwordDialog.mode === 'unlock') {
-      // Key derivation + decryption run inside importDatabaseData; the dialog
-      // stays up (busy) until it either asks again or the import finishes.
-      setPasswordBusy(true);
-      settleUnlock(password);
-      return;
-    }
-
-    const problem = validateNewBackupPassword(password, confirmation);
-    if (problem) {
-      setPasswordDialog({ ...passwordDialog, error: problem });
-      return;
-    }
-    const wasChange = passwordDialog.mode === 'change';
-    setPasswordBusy(true);
-    try {
-      // Derives the key with the params the background benchmark picked
-      // (~0.5 s on this phone by construction).
-      const params = (await calibration.current) ?? undefined;
-      await setBackupPassword(password, params);
-      setEncryptionKdf((await getBackupKey())?.kdf ?? null);
-      setPasswordDialog(null);
-      Alert.alert(
-        wasChange ? 'Password changed' : 'Backups are encrypted',
-        'New backups are locked with your password. Keep it somewhere safe: it cannot be shown again or recovered.'
-      );
-    } catch (error) {
-      console.error('Error setting backup password:', error);
-      setPasswordDialog({ ...passwordDialog, error: 'Could not save the password. Please try again.' });
-    } finally {
-      setPasswordBusy(false);
-    }
-  };
-
-  const handlePasswordDialogClose = () => {
-    if (passwordDialog?.mode === 'unlock') settleUnlock(null);
-    setPasswordDialog(null);
-  };
+  // Declared before the hook so "Back up now" (after a password change) can call it.
+  const exportRef = React.useRef<() => void>(() => {});
+  const encryption = useBackupEncryption({ onBackupNow: () => exportRef.current() });
+  const encryptionKdf = encryption.kdf;
 
   const handleExport = async () => {
     try {
       setIsExporting(true);
+      // Unreadable key or a pending "Confirm your backup password": the hook
+      // shows what is needed and says whether to go ahead.
+      if (!(await encryption.beforeExport())) return;
       const result = await exportDatabaseData(db);
 
       if (result.success) {
         Alert.alert('Backup ready', 'Choose where to save it — Google Drive, your device, or send it anywhere.');
-      } else {
+      } else if (!encryption.handleExportFailure(result)) {
         Alert.alert('Backup Failed', result.message);
       }
     } catch (error) {
@@ -180,7 +66,8 @@ export const DataManagementSection = () => {
       setIsExporting(false);
     }
   };
-  
+  exportRef.current = handleExport;
+
   const handleImport = async () => {
     // Show confirmation dialog first
     Alert.alert(
@@ -197,11 +84,22 @@ export const DataManagementSection = () => {
           onPress: async () => {
             try {
               setIsImporting(true);
-              const result = await importDatabaseData(db, { requestPassword });
-              
+              const result = await importDatabaseData(db, {
+                requestPassword: encryption.requestPassword,
+                onPasswordAccepted: encryption.onPasswordAccepted,
+              });
+
               if (result.success) {
-                Alert.alert('Success', 'Your data has been imported successfully');
                 refetchEntries(); // Refresh the app's data
+                const keepPassword = await encryption.takeKeepPasswordOffer();
+                if (keepPassword !== null) {
+                  Alert.alert('Data restored', 'Keep encrypting new backups with this password?', [
+                    { text: 'No', style: 'cancel' },
+                    { text: 'Yes', onPress: () => encryption.keepPassword(keepPassword) },
+                  ]);
+                } else {
+                  Alert.alert('Success', 'Your data has been imported successfully');
+                }
               } else {
                 Alert.alert('Import Failed', result.message);
               }
@@ -210,11 +108,10 @@ export const DataManagementSection = () => {
               Alert.alert('Import Error', 'An unexpected error occurred during import');
             } finally {
               setIsImporting(false);
+              encryption.discardAcceptedPassword();
               // The unlock dialog (if one was needed) stays up while the
               // backup decrypts and imports; close it once that is over.
-              unlockResolver.current = null;
-              setPasswordBusy(false);
-              setPasswordDialog(null);
+              encryption.finishImport();
             }
           }
         }
@@ -352,25 +249,37 @@ export const DataManagementSection = () => {
           <View style={styles.encryptionText}>
             <Text style={styles.encryptionTitle}>Encrypt backups</Text>
             <Text style={styles.encryptionHint}>
-              {encryptionKdf
-                ? 'Backups are locked with your password. It cannot be shown or recovered, only changed.'
-                : 'Lock backups with a password so nobody else can open them.'}
+              {ENCRYPTION_HINT[encryption.status === 'loading' ? 'off' : encryption.status]}
             </Text>
           </View>
           <Switch
-            value={encryptionEnabled === true}
-            onValueChange={handleEncryptionToggle}
-            disabled={encryptionEnabled === null || isExporting || isImporting}
+            value={encryption.status === 'on' || encryption.status === 'unreadable'}
+            onValueChange={encryption.handleToggle}
+            disabled={encryption.status === 'loading' || isExporting || isImporting}
             trackColor={{ false: '#767577', true: colors.accent }}
             thumbColor="#f4f3f4"
             accessibilityLabel="Encrypt backups"
           />
         </View>
+        {encryption.status === 'unreadable' ? (
+          <View style={styles.encryptionLinks}>
+            <Pressable
+              style={styles.linkButton}
+              onPress={encryption.openReenter}
+              disabled={isExporting || isImporting}
+              accessibilityRole="button"
+              accessibilityLabel="Enter backup password"
+            >
+              <Feather name="key" color={colors.accent} size={14} />
+              <Text style={styles.linkText}>Enter password</Text>
+            </Pressable>
+          </View>
+        ) : null}
         {encryptionKdf ? (
           <View style={styles.encryptionLinks}>
             <Pressable
               style={styles.linkButton}
-              onPress={() => openNewPasswordDialog('change')}
+              onPress={encryption.openChange}
               disabled={isExporting || isImporting}
               accessibilityRole="button"
               accessibilityLabel="Change backup password"
@@ -398,7 +307,8 @@ export const DataManagementSection = () => {
             styles.button,
             pressed && styles.buttonPressed
           ]}
-          onPress={handleExport}
+          // Not awaited: the backup may wait on "Confirm your backup password".
+          onPress={() => { void handleExport(); }}
           disabled={isExporting || isImporting}
         >
           <Feather name="upload-cloud" color="#fff" size={18} />
@@ -427,14 +337,7 @@ export const DataManagementSection = () => {
         </Pressable>
       </View>
 
-      <BackupPasswordDialog
-        visible={passwordDialog !== null}
-        mode={passwordDialog?.mode ?? 'set'}
-        busy={passwordBusy}
-        error={passwordDialog?.error ?? ''}
-        onSubmit={handlePasswordSubmit}
-        onClose={handlePasswordDialogClose}
-      />
+      <BackupPasswordDialog {...encryption.dialogProps} />
     </View>
   );
 };

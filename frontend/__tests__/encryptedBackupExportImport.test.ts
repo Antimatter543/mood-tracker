@@ -32,7 +32,7 @@ jest.mock('@/components/types', () => ({}));
 jest.mock('@/components/seedData', () => ({ initialActivities: [], initialActivityGroups: [] }));
 jest.mock('@/databases/migrations', () => ({ runMigrations: jest.fn() }));
 
-import { exportDatabaseData, importDatabaseData } from '@/databases/data-export';
+import { BACKUP_KEY_UNREADABLE, exportDatabaseData, importDatabaseData } from '@/databases/data-export';
 import { createBackupKey, encryptBackup, KdfParams } from '@/lib/backupCrypto';
 import { setBackupPassword } from '@/lib/backupKeyStore';
 import {
@@ -60,6 +60,9 @@ const PLAIN_BACKUP = {
 };
 
 beforeEach(() => {
+  // restoreAllMocks first: a spy (e.g. on SecureStore) would otherwise stay
+  // attached after resetAllMocks, answering undefined in later tests.
+  jest.restoreAllMocks();
   jest.resetAllMocks();
   __resetWriteTransactionForTests();
   (SecureStore as any).__reset();
@@ -118,6 +121,24 @@ describe('export', () => {
     expect(JSON.parse(contents).format).toBe('soulsync-encrypted-backup');
     expect(Sharing.shareAsync).toHaveBeenCalledWith(path, expect.objectContaining({ mimeType: 'application/json' }));
   });
+  // Unreadable must never fall back to a PLAIN backup for someone who turned
+  // encryption on.
+  it.each([
+    ['a corrupt stored key', async () => { await SecureStore.setItemAsync('backup_encryption_key_v1', 'not json{'); }],
+    ['secure storage failing', async () => {
+      await setBackupPassword('my secret passphrase', FAST_KDF);
+      jest.spyOn(SecureStore, 'getItemAsync').mockRejectedValueOnce(new Error('KeyStore unavailable'));
+    }],
+  ])('stops and writes nothing on %s', async (_name, arrange) => {
+    await arrange();
+    const db = exportingDb();
+    const result = await exportDatabaseData(db as any);
+
+    expect(result).toEqual({ success: false, code: BACKUP_KEY_UNREADABLE, message: expect.stringMatching(/Enter your backup password again/) });
+    expect(writtenFiles()).toEqual([]);
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+    expect(db.getAllAsync).not.toHaveBeenCalled(); // checked before any data is read
+  });
 });
 
 describe('import of an encrypted backup', () => {
@@ -158,6 +179,46 @@ describe('import of an encrypted backup', () => {
     pickFileWithContents(await encryptBackup(JSON.stringify(PLAIN_BACKUP), oldKey));
     await setBackupPassword('new passphrase', FAST_KDF);
     const requestPassword = jest.fn().mockResolvedValueOnce('old passphrase');
+    const db = makeDb();
+    db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
+
+    const result = await importDatabaseData(db as any, { requestPassword });
+
+    expect(result.success).toBe(true);
+    expect(requestPassword).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a TYPED password through onPasswordAccepted, so the app can offer to keep it', async () => {
+    const key = await createBackupKey('other device pass', FAST_KDF);
+    pickFileWithContents(await encryptBackup(JSON.stringify(PLAIN_BACKUP), key));
+    const onPasswordAccepted = jest.fn();
+    const requestPassword = jest.fn().mockResolvedValueOnce('a wrong guess').mockResolvedValueOnce('other device pass');
+    const db = makeDb();
+    db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
+
+    await importDatabaseData(db as any, { requestPassword, onPasswordAccepted });
+
+    expect(onPasswordAccepted.mock.calls).toEqual([['other device pass']]);
+  });
+
+  it('does not call onPasswordAccepted when the backup opened with the key stored on this phone', async () => {
+    await setBackupPassword('my secret passphrase', FAST_KDF);
+    const { getBackupKey } = require('@/lib/backupKeyStore');
+    pickFileWithContents(await encryptBackup(JSON.stringify(PLAIN_BACKUP), await getBackupKey()));
+    const onPasswordAccepted = jest.fn();
+    const db = makeDb();
+    db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
+
+    await importDatabaseData(db as any, { requestPassword: jest.fn(), onPasswordAccepted });
+
+    expect(onPasswordAccepted).not.toHaveBeenCalled();
+  });
+
+  it('asks for the password when the stored key is unreadable (restore still works)', async () => {
+    const key = await createBackupKey('other device pass', FAST_KDF);
+    pickFileWithContents(await encryptBackup(JSON.stringify(PLAIN_BACKUP), key));
+    await SecureStore.setItemAsync('backup_encryption_key_v1', 'not json{');
+    const requestPassword = jest.fn().mockResolvedValueOnce('other device pass');
     const db = makeDb();
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 

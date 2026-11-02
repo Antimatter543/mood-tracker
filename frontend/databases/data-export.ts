@@ -21,7 +21,7 @@ import {
   isEncryptedBackup,
   sameKdf,
 } from '@/lib/backupCrypto';
-import { getBackupKey } from '@/lib/backupKeyStore';
+import { readBackupKeyState } from '@/lib/backupKeyStore';
 
 /**
  * Asks the user for an encrypted backup's password. Resolves to the typed
@@ -32,7 +32,16 @@ export type RequestBackupPassword = (state: { wrongPassword: boolean }) => Promi
 
 export interface ImportOptions {
   requestPassword?: RequestBackupPassword;
+  /**
+   * Called with the password that opened an encrypted backup (not when it
+   * opened silently with this phone's stored key), so the caller can offer to
+   * keep encrypting new backups with it.
+   */
+  onPasswordAccepted?: (password: string) => void;
 }
+
+/** `DatabaseResult.code` when export stopped because the stored key is unreadable. */
+export const BACKUP_KEY_UNREADABLE = 'backup-key-unreadable';
 
 /**
  * Decrypt an encrypted backup, transparently when possible: if the file was
@@ -43,11 +52,15 @@ export interface ImportOptions {
  */
 export async function openEncryptedBackup(
   envelope: EncryptedBackupEnvelope,
-  requestPassword?: RequestBackupPassword
+  requestPassword?: RequestBackupPassword,
+  onPasswordAccepted?: (password: string) => void
 ): Promise<string | null> {
   assertSupportedEnvelope(envelope);
 
-  const stored = await getBackupKey();
+  // An unreadable stored key is simply not used here: asking for the
+  // password is the right fallback for a restore.
+  const keyState = await readBackupKeyState();
+  const stored = keyState.status === 'on' ? keyState.key : null;
   if (stored && sameKdf(stored.kdf, envelope.kdf)) {
     try {
       return await decryptBackup(envelope, stored);
@@ -67,7 +80,9 @@ export async function openEncryptedBackup(
     if (password === null) return null;
     const key = await deriveBackupKey(password, envelope.kdf);
     try {
-      return await decryptBackup(envelope, key);
+      const plaintext = await decryptBackup(envelope, key);
+      onPasswordAccepted?.(password);
+      return plaintext;
     } catch (error) {
       if (!(error instanceof BackupDecryptionError)) throw error;
       wrongPassword = true;
@@ -117,6 +132,15 @@ async function readPhotoBase64(filePath: string): Promise<string | null> {
 
 export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseResult> {
     try {
+      // Opt-in encryption (Settings > Data Management > Encrypt backups),
+      // checked FIRST. A key that is stored but unreadable stops the export:
+      // the user asked for encrypted backups, so never fall back to plain.
+      const keyState = await readBackupKeyState();
+      if (keyState.status === 'unreadable') {
+        return { success: false, code: BACKUP_KEY_UNREADABLE, message: keyState.message };
+      }
+      const backupKey = keyState.status === 'on' ? keyState.key : null;
+
       // Fetch all the necessary data.
       //
       // SOFT DELETE (migration 12): entries sitting in the recycle bin are
@@ -212,10 +236,8 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
       // Convert to JSON
       const jsonData = JSON.stringify(exportData, null, 2);
 
-      // Opt-in encryption (Settings > Data Management > Encrypt backups). When
-      // a key is stored, ONLY the encrypted envelope is ever written to disk;
-      // the plain JSON stays in memory. See lib/backupCrypto.ts.
-      const backupKey = await getBackupKey();
+      // When a key is stored, ONLY the encrypted envelope is ever written to
+      // disk; the plain JSON stays in memory. See lib/backupCrypto.ts.
       const fileContents = backupKey ? await encryptBackup(jsonData, backupKey) : jsonData;
 
       // Create a temporary file
@@ -289,7 +311,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
       // (silently with this device's stored key, else by asking for the
       // password) and continue with the decrypted backup.
       if (isEncryptedBackup(importData)) {
-        const decrypted = await openEncryptedBackup(importData, options.requestPassword);
+        const decrypted = await openEncryptedBackup(importData, options.requestPassword, options.onPasswordAccepted);
         if (decrypted === null) {
           return {
             success: false,

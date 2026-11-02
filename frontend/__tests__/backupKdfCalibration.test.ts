@@ -11,6 +11,7 @@
  */
 import {
   ENCRYPTED_BACKUP_FORMAT,
+  KDF_FILE_LIMITS,
   KdfParams,
   assertSupportedEnvelope,
 } from '@/lib/backupCrypto';
@@ -18,6 +19,7 @@ import {
   KDF_FLOOR_PARAMS,
   KDF_PARALLELISM,
   KDF_TARGET_MS,
+  MAX_CALIBRATED_ITERATIONS,
   MAX_CALIBRATED_MEMORY_KIB,
   calibrateKdfParams,
   paramsForBudget,
@@ -36,6 +38,22 @@ describe('KDF floor', () => {
   it('targets half a second with 4 lanes', () => {
     expect(KDF_PARALLELISM).toBe(4);
     expect(KDF_TARGET_MS).toBe(500);
+  });
+});
+
+describe('writer vs reader limits', () => {
+  // A backup must open on a 2-3 GB phone, and a phone must never write a
+  // backup that the file check on another phone (or itself) would refuse.
+  it('caps calibrated memory at 128 MiB', () => {
+    expect(MAX_CALIBRATED_MEMORY_KIB).toBe(128 * MiB);
+  });
+
+  it('the file limits accept everything calibration (and the floor) can produce', () => {
+    expect(KDF_FILE_LIMITS.maxMemoryKiB).toBeGreaterThanOrEqual(MAX_CALIBRATED_MEMORY_KIB);
+    expect(KDF_FILE_LIMITS.maxMemoryKiB).toBeGreaterThanOrEqual(KDF_FLOOR_PARAMS.memoryKiB);
+    expect(KDF_FILE_LIMITS.maxIterations).toBeGreaterThanOrEqual(MAX_CALIBRATED_ITERATIONS);
+    expect(KDF_FILE_LIMITS.maxIterations).toBeGreaterThanOrEqual(KDF_FLOOR_PARAMS.iterations);
+    expect(KDF_FILE_LIMITS.maxParallelism).toBeGreaterThanOrEqual(KDF_PARALLELISM);
   });
 });
 
@@ -59,16 +77,17 @@ describe('paramsForBudget', () => {
   });
 
   it('caps memory on a very fast phone and adds passes instead', () => {
-    // 2000 KiB-passes/ms => 256 MiB costs 131 ms per pass => 3 passes fit
-    const c = paramsForBudget(perPassOnly(2000));
+    // 1000 KiB-passes/ms => 128 MiB costs 131 ms per pass => 3 passes fit
+    const c = paramsForBudget(perPassOnly(1000));
     expect(c.params.memoryKiB).toBe(MAX_CALIBRATED_MEMORY_KIB);
     expect(c.params.iterations).toBe(3);
   });
 
-  it('matches a real phone: a current flagship, 256 MiB x 3 x 4 lanes in 258 ms', () => {
+  it('matches a real phone: a current flagship (256 MiB x 3 x 4 lanes in 258 ms) lands on both ceilings', () => {
     // Fitted from that phone's numbers: 64 MiB x 3 = 67 ms, 256 MiB x 3 = 258 ms.
+    // 128 MiB is 43 ms per pass there, so 11 would fit; passes stop at 6.
     const c = paramsForBudget(perPassOnly((256 * MiB * 3) / 258));
-    expect(c.params).toMatchObject({ memoryKiB: 256 * MiB, iterations: 5 });
+    expect(c.params).toMatchObject({ memoryKiB: 128 * MiB, iterations: MAX_CALIBRATED_ITERATIONS });
     expect(c.estimatedMs).toBeLessThanOrEqual(KDF_TARGET_MS);
   });
 
@@ -92,6 +111,7 @@ describe('paramsForBudget', () => {
       expect(c.params.memoryKiB % MiB).toBe(0);
     }
     expect(c.params.memoryKiB).toBeLessThanOrEqual(MAX_CALIBRATED_MEMORY_KIB);
+    expect(c.params.iterations).toBeLessThanOrEqual(MAX_CALIBRATED_ITERATIONS);
     expect(() =>
       assertSupportedEnvelope({
         format: ENCRYPTED_BACKUP_FORMAT,
@@ -99,6 +119,7 @@ describe('paramsForBudget', () => {
         _note: '',
         kdf: { ...c.params, salt: 'AAAAAAAAAAAAAAAAAAAAAA==' },
         cipher: 'aes-256-gcm',
+        iv: 'AAAAAAAAAAAAAAAA',
         payload: '',
       })
     ).not.toThrow();

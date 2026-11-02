@@ -4,9 +4,11 @@ import type { KdfParams } from '@/lib/backupCrypto';
 
 /**
  * Argon2id for backup passwords: NATIVE (expo-argon2, the reference C
- * implementation via argon2kt / Argon2Swift) in every real build, with a
- * pure-JS fallback (@noble/hashes) only where the native module is absent,
- * i.e. Expo Go, so the Go iteration loop keeps working.
+ * implementation via argon2kt / Argon2Swift) in every real build. The pure-JS
+ * fallback (@noble/hashes) runs ONLY in jest and Expo Go, so those loops keep
+ * working. A real build without the native module refuses (Argon2UnavailableError)
+ * instead of silently falling back: at JS speed the calibration would pick
+ * the floor and every password action would take many seconds.
  *
  * Why native, measured on a real phone (a current flagship, release build,
  * 2026-11-01): native Argon2id did 64 MiB x 3 passes x 4 lanes in 67 ms and
@@ -44,6 +46,36 @@ export function hasNativeArgon2(): boolean {
   return getNative() !== null;
 }
 
+export class Argon2UnavailableError extends Error {
+  constructor() {
+    super("This build of SoulSync can't encrypt backups. Install the latest version from the store and try again.");
+    this.name = 'Argon2UnavailableError';
+  }
+}
+
+/** Where the slow JS implementation is acceptable: jest and Expo Go. */
+function jsFallbackAllowed(): boolean {
+  if (process.env.NODE_ENV === 'test') return true;
+  try {
+    // Loaded here, not at the top: only needed off the native path, and some
+    // test environments stub native modules that expo-constants reads on import.
+    const { default: Constants, ExecutionEnvironment } =
+      require('expo-constants') as typeof import('expo-constants');
+    return Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Can this build derive backup keys at all? False only in a real build that
+ * is missing the native module. The UI checks it before offering to turn
+ * encryption on or to set a password.
+ */
+export function canDeriveBackupKeys(): boolean {
+  return hasNativeArgon2() || jsFallbackAllowed();
+}
+
 /** Derive `dkLen` bytes with Argon2id (v1.3). */
 export async function argon2id(
   password: Uint8Array,
@@ -62,12 +94,13 @@ export async function argon2id(
     });
     return new Uint8Array(result.raw);
   }
+  if (!jsFallbackAllowed()) throw new Argon2UnavailableError();
   return argon2idAsync(password, salt, {
     m: params.memoryKiB,
     t: params.iterations,
     p: params.parallelism,
     dkLen,
-    // Above any memory a file may request (backupCrypto's MAX_MEMORY_KIB).
+    // Above any memory a file may request (backupCrypto's KDF_FILE_LIMITS).
     maxmem: 2 ** 31,
   });
 }
