@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { FlashList, type FlashListRef, type ListRenderItemInfo } from '@shopify/flash-list';
 import { useSQLiteContext } from 'expo-sqlite';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import { LAYOUT_FAB_CLEARANCE } from '@/styles/layout';
 import { useDataContext } from '@/context/DataContext';
@@ -77,7 +76,7 @@ const END_REACHED_SCREENS = 2;
  */
 const DRAW_DISTANCE = 600;
 
-const useThemedStyles = (colors: ThemeColors, insetBottom: number) => {
+const useThemedStyles = (colors: ThemeColors) => {
     return useMemo(() => StyleSheet.create({
         // Root fills the tab body so the search bar pins at the top and the list
         // (or the loading / empty branch below it) takes the remaining space.
@@ -161,7 +160,7 @@ const useThemedStyles = (colors: ThemeColors, insetBottom: number) => {
             fontSize: 15,
             fontWeight: '600',
         },
-    }), [colors, insetBottom]);
+    }), [colors]);
 };
 
 /**
@@ -260,8 +259,7 @@ const useThemedStyles = (colors: ThemeColors, insetBottom: number) => {
  */
 export function DatabaseViewer() {
     const colors = useThemeColors();
-    const insets = useSafeAreaInsets();
-    const styles = useThemedStyles(colors, insets.bottom);
+    const styles = useThemedStyles(colors);
     const db = useSQLiteContext();
     // `broadcastWrite` is THE way this component announces a write — every write
     // path below calls it, none calls `refetchEntries` directly. It is a stable
