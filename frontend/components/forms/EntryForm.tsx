@@ -5,6 +5,9 @@ import {
     Text,
     StyleSheet,
     Pressable,
+    LayoutChangeEvent,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
     TextInput,
     Image,
     ScrollView,
@@ -14,6 +17,7 @@ import {
 } from 'react-native';
 import Animated, { FadeIn, useAnimatedRef } from 'react-native-reanimated';
 import type { AnimatedRef } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -29,8 +33,18 @@ import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
 import { useSingleFlight } from '@/hooks/useSingleFlight';
 import { useEntryDraft, EntryDraft } from './hooks/useEntryDraft';
 import { selectPhotosToAdd } from './photoSelection';
+import {
+    FLOATING_ACTION_SIZE,
+    floatingActionBottom,
+    floatingActionOffsets,
+    isRowFullyVisible,
+    RowLayout,
+} from './floatingActions';
 
 const MAX_PHOTOS = 5;
+
+// Breathing room between the top safe-area edge and the overlay's header row.
+const MODAL_TOP_GAP = 8;
 
 /**
  * Inline photo-attachment affordance for the entry form. Offers camera +
@@ -186,6 +200,12 @@ type EntryFormProps = {
     initialData?: EntryFormData;
     onSubmit: (data: EntryFormData) => Promise<void>;
     onCancel: () => void;
+    /**
+     * Bottom safe-area inset of the window the form is drawn in (the overlay
+     * passes it). Added to the scroll content's bottom padding so the last
+     * button scrolls clear of the Android nav bar. Defaults to 0.
+     */
+    bottomInset?: number;
 };
 
 // Kept for backward compatibility with callers (AddEntryButton etc.) — the
@@ -237,6 +257,8 @@ const MoodStep = ({
                 onPress={onContinue}
                 accessibilityState={{ disabled: !!moodError }}
                 disabled={!!moodError}
+                accessibilityRole="button"
+                accessibilityLabel="Continue to the details step"
             >
                 <Text style={styles.continueButtonText}>Continue</Text>
             </Pressable>
@@ -255,6 +277,7 @@ const DetailsStep = ({
     onRemovePhoto,
     onBack,
     onSubmit,
+    onButtonRowLayout,
     submitDisabled,
     submitBusy,
     scrollableRef,
@@ -270,6 +293,8 @@ const DetailsStep = ({
     onRemovePhoto: (uri: string) => void;
     onBack: () => void;
     onSubmit: () => void;
+    /** Where the Back + Submit row sits in the scroll content (drives the floating pair). */
+    onButtonRowLayout?: (event: LayoutChangeEvent) => void;
     submitDisabled?: boolean;
     /** In-flight save: the button is disabled AND announced busy. */
     submitBusy?: boolean;
@@ -305,7 +330,11 @@ const DetailsStep = ({
                 onRemove={onRemovePhoto}
             />
 
-            <View style={styles.buttonContainer}>
+            <View
+                testID="entry-form-button-row"
+                style={styles.buttonContainer}
+                onLayout={onButtonRowLayout}
+            >
                 <Pressable
                     style={[styles.navigationButton, styles.backButton]}
                     onPress={onBack}
@@ -341,6 +370,12 @@ const EntryFormOverlay: React.FC<{
 }> = ({ onClose, initialData, onSubmit }) => {
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
+    // The overlay is StyleSheet.absoluteFill at the window root, so under
+    // edge-to-edge it sits behind BOTH system bars and owns both insets. The top
+    // one is applied ONCE, on the container below (the header and the form's
+    // scroll area both sit under it); the bottom one is handed to the form so
+    // its last button can scroll clear of the nav bar.
+    const insets = useSafeAreaInsets();
 
     // Replicate <Modal onRequestClose>: Android hardware back closes the overlay
     // while it's up (and swallows the event so it doesn't pop the route under it).
@@ -355,7 +390,11 @@ const EntryFormOverlay: React.FC<{
     return (
         <Animated.View
             entering={FadeIn.duration(150)}
-            style={[styles.modalContainer, StyleSheet.absoluteFill]}
+            style={[
+                styles.modalContainer,
+                StyleSheet.absoluteFill,
+                { paddingTop: insets.top + MODAL_TOP_GAP },
+            ]}
         >
             <View style={styles.modalHeader}>
                 <Pressable style={styles.closeButton} onPress={onClose}>
@@ -379,6 +418,7 @@ const EntryFormOverlay: React.FC<{
                 initialData={initialData}
                 onSubmit={onSubmit}
                 onCancel={onClose}
+                bottomInset={insets.bottom}
             />
         </Animated.View>
     );
@@ -425,6 +465,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     initialData,
     onSubmit,
     onCancel: _onCancel,
+    bottomInset = 0,
 }) => {
     const [currentStep, setCurrentStep] = useState(1);
     const {
@@ -453,6 +494,78 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     // the keyboard.
     const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
+    // Is the inline Back + Submit row fully on screen? When it is not (a long
+    // entry pushed it below the fold), a floating Back / Save pair stands in for
+    // it. Worked out from the row's onLayout + the ScrollView's scroll offset,
+    // viewport height and the keyboard height (see floatingActions.ts): no
+    // polling, and it only does work while the details step is mounted, since
+    // that is the only step that reports a row layout. The metrics live in refs
+    // so scrolling re-renders nothing; only a flip of the boolean does.
+    const [buttonsVisible, setButtonsVisible] = useState(true);
+    const rowLayoutRef = useRef<RowLayout | null>(null);
+    const scrollYRef = useRef(0);
+    const viewportHeightRef = useRef(0);
+    const keyboardHeightRef = useRef(keyboardHeight);
+    keyboardHeightRef.current = keyboardHeight;
+
+    const recomputeButtonsVisible = useCallback(() => {
+        setButtonsVisible(
+            isRowFullyVisible({
+                row: rowLayoutRef.current,
+                scrollY: scrollYRef.current,
+                viewportHeight: viewportHeightRef.current,
+                keyboardHeight: keyboardHeightRef.current,
+            })
+        );
+    }, []);
+
+    const handleScroll = useCallback(
+        (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+            const { contentOffset, layoutMeasurement } = event.nativeEvent;
+            scrollYRef.current = contentOffset.y;
+            viewportHeightRef.current = layoutMeasurement.height;
+            if (rowLayoutRef.current) recomputeButtonsVisible();
+        },
+        [recomputeButtonsVisible]
+    );
+
+    const handleViewportLayout = useCallback(
+        (event: LayoutChangeEvent) => {
+            viewportHeightRef.current = event.nativeEvent.layout.height;
+            recomputeButtonsVisible();
+        },
+        [recomputeButtonsVisible]
+    );
+
+    const handleButtonRowLayout = useCallback(
+        (event: LayoutChangeEvent) => {
+            const { y, height } = event.nativeEvent.layout;
+            rowLayoutRef.current = { y, height };
+            recomputeButtonsVisible();
+        },
+        [recomputeButtonsVisible]
+    );
+
+    // The keyboard changes the visible band without a scroll or layout event.
+    useEffect(() => {
+        recomputeButtonsVisible();
+    }, [keyboardHeight, recomputeButtonsVisible]);
+
+    // Leaving the details step unmounts the row: forget its stale position so
+    // coming back starts from "visible" until the row lays out again.
+    useEffect(() => {
+        if (currentStep !== 2) {
+            rowLayoutRef.current = null;
+            setButtonsVisible(true);
+        }
+    }, [currentStep]);
+
+    const { settings } = useSettings();
+    // `fab_position` honors the user's left/right preference. The settings
+    // registry constrains the value to `'left' | 'right'` so we don't risk
+    // injecting a runtime style key here.
+    const fabPosition = settings.fab_position;
+
     // submit() runs validation again before invoking onSubmit, so we never hit
     // the DB with a bad mood value - the pre-submit UI guard is duplicated by
     // the hook for safety.
@@ -467,6 +580,9 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     // one; the flag releases on settle, so a FAILED save re-enables the button
     // and the user can retry.
     const { inFlight: isSubmitting, run: handleSubmit } = useSingleFlight(doSubmit);
+    const floatingOffsets = floatingActionOffsets(fabPosition);
+    const floatingBottom = floatingActionBottom(bottomInset, keyboardHeight);
+    const submitDisabled = !isValid || isSubmitting;
 
     // Scroll the bottom of the form (Notes + photos + Submit) into view above
     // the keyboard. Notes is the last input, so scrollToEnd reliably brings it
@@ -489,45 +605,94 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     }, [keyboardHeight, currentStep, scrollToBottom]);
 
     return (
-        <Animated.ScrollView
-            ref={scrollRef}
-            style={styles.scroll}
-            contentContainerStyle={[
-                styles.contentContainer,
-                // Extra bottom room == keyboard height so the last field can sit
-                // above the keyboard. 0 when hidden (no-op).
-                { paddingBottom: styles.contentContainer.paddingBottom + keyboardHeight },
-            ]}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator
-        >
-            {currentStep === 1 ? (
-                <MoodStep
-                    value={draft.mood}
-                    onChange={setMood}
-                    onContinue={() => setCurrentStep(2)}
-                    date={draft.date}
-                    onDateChange={setDate}
-                    moodError={validation.errors.mood}
-                />
-            ) : (
-                <DetailsStep
-                    activities={draft.activities}
-                    notes={draft.notes}
-                    photos={draft.photos}
-                    onToggleActivity={toggleActivity}
-                    onNotesChange={setNotes}
-                    onNotesFocus={scrollToBottom}
-                    onAddPhoto={addPhoto}
-                    onRemovePhoto={removePhoto}
-                    onBack={() => setCurrentStep(1)}
-                    onSubmit={handleSubmit}
-                    submitDisabled={!isValid || isSubmitting}
-                    submitBusy={isSubmitting}
-                    scrollableRef={scrollRef}
-                />
+        <>
+            <Animated.ScrollView
+                ref={scrollRef}
+                style={styles.scroll}
+                contentContainerStyle={[
+                    styles.contentContainer,
+                    // The bottom inset keeps the buttons clear of the nav bar; the
+                    // extra room == keyboard height lets the last field sit above
+                    // the keyboard (0 when hidden, a no-op).
+                    {
+                        paddingBottom:
+                            styles.contentContainer.paddingBottom + bottomInset + keyboardHeight,
+                    },
+                ]}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator
+                onLayout={handleViewportLayout}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+            >
+                {currentStep === 1 ? (
+                    <MoodStep
+                        value={draft.mood}
+                        onChange={setMood}
+                        onContinue={() => setCurrentStep(2)}
+                        date={draft.date}
+                        onDateChange={setDate}
+                        moodError={validation.errors.mood}
+                    />
+                ) : (
+                    <DetailsStep
+                        activities={draft.activities}
+                        notes={draft.notes}
+                        photos={draft.photos}
+                        onToggleActivity={toggleActivity}
+                        onNotesChange={setNotes}
+                        onNotesFocus={scrollToBottom}
+                        onAddPhoto={addPhoto}
+                        onRemovePhoto={removePhoto}
+                        onBack={() => setCurrentStep(1)}
+                        onSubmit={handleSubmit}
+                        onButtonRowLayout={handleButtonRowLayout}
+                        submitDisabled={submitDisabled}
+                        submitBusy={isSubmitting}
+                        scrollableRef={scrollRef}
+                    />
+                )}
+            </Animated.ScrollView>
+
+            {!buttonsVisible && currentStep === 2 && (
+                <>
+                    <Pressable
+                        testID="entry-form-floating-back"
+                        style={[
+                            styles.floatingButton,
+                            styles.floatingBackButton,
+                            { bottom: floatingBottom },
+                            floatingOffsets.back,
+                        ]}
+                        onPress={() => setCurrentStep(1)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Back to mood"
+                    >
+                        <Feather name="chevron-left" size={28} color={colors.text} />
+                    </Pressable>
+
+                    {/* Same guarded handler + disabled state as the inline Submit:
+                        useSingleFlight's ref gate makes a double-tap ONE write. */}
+                    <Pressable
+                        testID="entry-form-floating-save"
+                        style={[
+                            styles.floatingButton,
+                            styles.submitButton,
+                            { bottom: floatingBottom },
+                            floatingOffsets.save,
+                            submitDisabled && styles.continueButtonDisabled,
+                        ]}
+                        onPress={handleSubmit}
+                        disabled={submitDisabled}
+                        accessibilityRole="button"
+                        accessibilityLabel="Save entry"
+                        accessibilityState={{ disabled: submitDisabled, busy: isSubmitting }}
+                    >
+                        <Feather name="check" size={26} color={colors.text} />
+                    </Pressable>
+                </>
             )}
-        </Animated.ScrollView>
+        </>
     );
 };
 
@@ -539,8 +704,9 @@ const useThemedStyles = (colors: ThemeColors) =>
             // the call site) — it fills the whole window via the root portal slot,
             // so no explicit Dimensions sizing is needed (that was the old native
             // <Modal> Fabric flex-collapse workaround, gone with the Modal).
+            // The top safe-area padding is added at the call site (it needs the
+            // live insets); horizontal gutters belong to `contentContainer`.
             backgroundColor: colors.background,
-            paddingTop: 16,
         },
         modalHeader: {
             paddingHorizontal: 12,
@@ -558,7 +724,9 @@ const useThemedStyles = (colors: ThemeColors) =>
             // flexGrow (not flex) so the content stays vertically centred when it
             // fits the viewport, but grows past it and scrolls when it doesn't —
             // guarantees the Continue/Submit button is always reachable on small
-            // screens. Vertical padding gives breathing room at both ends.
+            // screens. Vertical padding gives breathing room at both ends. The
+            // bottom safe-area inset and the keyboard height are added on top of
+            // paddingBottom at the call site.
             flexGrow: 1,
             paddingTop: 8,
             paddingBottom: 24,
@@ -594,6 +762,26 @@ const useThemedStyles = (colors: ThemeColors) =>
             justifyContent: 'space-between',
             width: '100%',
             marginTop: 20,
+        },
+        floatingButton: {
+            // `bottom` and the left/right offset are set at the call site (live
+            // insets/keyboard + the fab_position side, see floatingActions.ts).
+            position: 'absolute',
+            zIndex: 1000,
+            width: FLOATING_ACTION_SIZE,
+            height: FLOATING_ACTION_SIZE,
+            borderRadius: FLOATING_ACTION_SIZE / 2,
+            justifyContent: 'center',
+            alignItems: 'center',
+            // Theme-aware shadow for visual depth.
+            shadowColor: colors.elevation.shadowColor,
+            shadowOffset: { width: 0, height: 3 },
+            shadowOpacity: colors.elevation.shadowOpacity + 0.05,
+            shadowRadius: colors.elevation.shadowRadius,
+            elevation: colors.elevation.elevation + 2,
+        },
+        floatingBackButton: {
+            backgroundColor: colors.secondaryBackground,
         },
         navigationButton: {
             flex: 1,

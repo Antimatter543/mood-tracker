@@ -1,8 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Pressable, Text, View, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemeColors } from '@/styles/global';
+import { FAB_BOTTOM_GAP, FAB_SIZE } from '@/styles/layout';
 
 /**
  * Show the pill once the user is this many viewports deep. Shallower than that,
@@ -14,13 +14,15 @@ export const BACK_TO_TOP_VIEWPORTS = 3;
 export const shouldShowBackToTop = (offset: number, viewport: number): boolean =>
     viewport > 0 && offset > viewport * BACK_TO_TOP_VIEWPORTS;
 
-// Mirrors AddEntryButton's geometry so the pill sits on the FAB's centre line:
-// the FAB floats FAB_BOTTOM_GAP + insetBottom above the tab body's bottom and is
-// 56dp tall. The pill is horizontally CENTRED and the FAB hugs a side (left or
-// right, per the `fab_position` setting), so the two never overlap.
-const FAB_BOTTOM_GAP = 24;
-const FAB_SIZE = 56;
-const PILL_HEIGHT = 40;
+// Shares AddEntryButton's geometry (styles/layout.ts) so the pill sits on the
+// FAB's centre line: the FAB floats FAB_BOTTOM_GAP above the tab body's bottom
+// (no safe-area inset, the tab body already ends above the inset-grown tab bar)
+// and is FAB_SIZE tall. The pill is horizontally CENTRED and the FAB hugs a side
+// (left or right, per the `fab_position` setting), so the two never overlap.
+export const PILL_HEIGHT = 40;
+
+/** The pill's `bottom`, centred on the FAB. Exported for the geometry test. */
+export const BACK_TO_TOP_BOTTOM = FAB_BOTTOM_GAP + (FAB_SIZE - PILL_HEIGHT) / 2;
 
 const styles = StyleSheet.create({
     slot: {
@@ -57,15 +59,13 @@ export const BackToTopPill: React.FC<{ colors: ThemeColors; onPress: () => void 
     colors,
     onPress,
 }) => {
-    const insets = useSafeAreaInsets();
     const appear = useRef(new Animated.Value(0)).current;
     useEffect(() => {
         Animated.timing(appear, { toValue: 1, duration: 180, useNativeDriver: true }).start();
     }, [appear]);
 
-    const bottom = FAB_BOTTOM_GAP + insets.bottom + (FAB_SIZE - PILL_HEIGHT) / 2;
     return (
-        <View style={[styles.slot, { bottom }]} pointerEvents="box-none">
+        <View style={[styles.slot, { bottom: BACK_TO_TOP_BOTTOM }]} pointerEvents="box-none">
             <Animated.View
                 style={{
                     opacity: appear,

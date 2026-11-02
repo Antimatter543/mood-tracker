@@ -9,7 +9,7 @@ import {
     firstNoteLine,
     formatEntryTime,
     formatReadoutDay,
-    latestEntryPerDay,
+    sortedEntriesPerDay,
     type EntryDetailRow,
 } from '@/components/visualisations/transforms/latestEntry';
 
@@ -20,19 +20,34 @@ const entry = (
     notes: string | null = null
 ): EntryDetailRow => ({ id, date, mood, notes });
 
-describe('latestEntryPerDay', () => {
+describe('sortedEntriesPerDay', () => {
     it('is empty for no rows', () => {
-        expect(latestEntryPerDay([]).size).toBe(0);
+        expect(sortedEntriesPerDay([]).size).toBe(0);
     });
 
-    it('keeps the MOST RECENT entry when a day has several', () => {
-        const map = latestEntryPerDay([
+    it('puts the MOST RECENT entry first when a day has several', () => {
+        const map = sortedEntriesPerDay([
             entry(1, '2026-09-02T00:00:00.000Z', 3, 'morning'),
             entry(2, '2026-09-02T09:00:00.000Z', 8, 'evening'),
         ]);
         // 00:00Z = 10am local, 09:00Z = 7pm local — same local day, later wins.
-        expect(map.get('2026-09-02')?.mood).toBe(8);
-        expect(map.get('2026-09-02')?.note).toBe('evening');
+        expect(map.get('2026-09-02')?.at(0)?.mood).toBe(8);
+        expect(map.get('2026-09-02')?.at(0)?.note).toBe('evening');
+    });
+
+    it('lists ALL of the day newest-first by real time, across am/pm and 12h boundaries', () => {
+        // Brisbane (UTC+10). Local times on 2 Sep: 12:05 am, 9:00 am, 12:05 pm, 11:55 pm.
+        // Sorting the FORMATTED strings gets this wrong ("12:05 pm" < "9:00 am").
+        const map = sortedEntriesPerDay([
+            entry(1, '2026-09-02T02:05:00.000Z', 3), // 12:05 pm
+            entry(2, '2026-09-01T14:05:00.000Z', 1), // 12:05 am
+            entry(3, '2026-09-02T13:55:00.000Z', 4), // 11:55 pm
+            entry(4, '2026-09-01T23:00:00.000Z', 2), // 9:00 am
+        ]);
+        const list = map.get('2026-09-02')!;
+        expect(list.map((e) => e.mood)).toEqual([4, 3, 2, 1]);
+        expect(list[0].time).toMatch(/\b(23|11):55\b/);
+        expect(list[3].time).toMatch(/\b(0|00|12):05\b/);
     });
 
     it('does not depend on row order', () => {
@@ -40,41 +55,41 @@ describe('latestEntryPerDay', () => {
             entry(2, '2026-09-02T09:00:00.000Z', 8),
             entry(1, '2026-09-02T00:00:00.000Z', 3),
         ];
-        expect(latestEntryPerDay(rows).get('2026-09-02')?.mood).toBe(8);
+        expect(sortedEntriesPerDay(rows).get('2026-09-02')?.at(0)?.mood).toBe(8);
     });
 
     it('keys to the LOCAL day across the UTC midnight boundary', () => {
         // 15:30Z on the 2nd is 01:30 on the 3rd in Brisbane.
-        const map = latestEntryPerDay([entry(1, '2026-09-02T15:30:00.000Z', 6)]);
+        const map = sortedEntriesPerDay([entry(1, '2026-09-02T15:30:00.000Z', 6)]);
         expect(map.has('2026-09-03')).toBe(true);
         expect(map.has('2026-09-02')).toBe(false);
     });
 
     it('separates two entries that share a UTC day but not a local one', () => {
-        const map = latestEntryPerDay([
+        const map = sortedEntriesPerDay([
             entry(1, '2026-09-02T02:00:00.000Z', 4), // 2nd, noon local
             entry(2, '2026-09-02T20:00:00.000Z', 9), // 3rd, 6am local
         ]);
-        expect(map.get('2026-09-02')?.mood).toBe(4);
-        expect(map.get('2026-09-03')?.mood).toBe(9);
+        expect(map.get('2026-09-02')?.at(0)?.mood).toBe(4);
+        expect(map.get('2026-09-03')?.at(0)?.mood).toBe(9);
     });
 
     it('skips degenerate rows instead of throwing (a half-imported DB is real)', () => {
-        const map = latestEntryPerDay([
+        const map = sortedEntriesPerDay([
             entry(1, 'not-a-date', 5),
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             { id: 2, date: '2026-09-02T01:00:00.000Z', mood: 'x' as any, notes: null },
             entry(3, '2026-09-02T02:00:00.000Z', 7),
         ]);
         expect(map.size).toBe(1);
-        expect(map.get('2026-09-02')?.mood).toBe(7);
+        expect(map.get('2026-09-02')?.at(0)?.mood).toBe(7);
     });
 
     it('carries the time and the first note line for the winning entry', () => {
-        const map = latestEntryPerDay([
+        const map = sortedEntriesPerDay([
             entry(1, '2026-09-02T04:30:00.000Z', 6, '  \n  went for a run\nthen slept  '),
         ]);
-        const got = map.get('2026-09-02')!;
+        const got = map.get('2026-09-02')!.at(0)!;
         expect(got.note).toBe('went for a run');
         // 04:30Z = 14:30 Brisbane. Matched loosely because the format is
         // LOCALE-driven: a 12-hour locale renders "2:30 pm", a 24-hour one "14:30".

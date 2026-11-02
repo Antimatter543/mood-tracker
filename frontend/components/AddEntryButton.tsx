@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { StyleSheet, Pressable, Alert } from 'react-native';
 import Animated, {
     useAnimatedStyle,
@@ -6,29 +6,33 @@ import Animated, {
     withSpring,
 } from 'react-native-reanimated';
 import Feather from '@expo/vector-icons/Feather';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemeColors, useThemeColors } from '@/styles/global';
+import { FAB_BOTTOM_GAP, FAB_SIZE } from '@/styles/layout';
 import { useDataContext } from '@/context/DataContext';
 import { addMoodEntry } from '@/databases/database';
 import { useSettings } from '@/context/SettingsContext';
 import * as SQLite from 'expo-sqlite';
 import { EntryFormData, EntryFormModal } from './forms/EntryForm';
+import { subscribeToReminderTaps, dismissNotifications } from '@/lib/notifications';
+import { useFocusEffect } from 'expo-router';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-// Gap between the FAB and the bottom safe-area edge, matching the original 24px
-// float above a zero-inset bottom.
-const FAB_BOTTOM_GAP = 24;
-
 export function AddEntryButton() {
     const colors = useThemeColors();
-    const insets = useSafeAreaInsets();
-    const styles = useThemedStyles(colors, insets.bottom);
+    const styles = useThemedStyles(colors);
     const db = SQLite.useSQLiteContext();
     const [modalVisible, setModalVisible] = useState(false);
     const { refetchEntries } = useDataContext();
     const { settings } = useSettings();
+
+    // Tapping one of our reminder notifications (warm, or the tap that
+    // launched the app) opens the entry form. Setting an already-true flag is
+    // a no-op, so a tap while the form is open does not double-open it.
+    useFocusEffect(
+        useCallback(() => subscribeToReminderTaps(() => setModalVisible(true)), [])
+    );
 
     // `fab_position` honors the user's left/right preference. The settings
     // registry constrains the value to `'left' | 'right'` so we don't risk
@@ -56,6 +60,7 @@ export function AddEntryButton() {
                 formData.photos
             );
             if (result.success) {
+                dismissNotifications();
                 setModalVisible(false);
                 refetchEntries();
             } else {
@@ -100,21 +105,22 @@ export function AddEntryButton() {
     );
 }
 
-const useThemedStyles = (colors: ThemeColors, insetBottom: number) => {
+const useThemedStyles = (colors: ThemeColors) => {
     return useMemo(
         () =>
             StyleSheet.create({
                 floatingButton: {
                     position: 'absolute',
-                    // Float above the system-nav area (3-button ≈ 48dp, gesture
-                    // ≈ 24dp, 0 on no-inset displays) so the FAB never overlaps
-                    // the Android nav buttons / gesture pill.
-                    bottom: FAB_BOTTOM_GAP + insetBottom,
+                    // Measured from the bottom of the tab scene, which already
+                    // ends at the top of the inset-grown tab bar, so NO bottom
+                    // safe-area inset belongs here (see FAB_BOTTOM_GAP in
+                    // styles/layout.ts).
+                    bottom: FAB_BOTTOM_GAP,
                     zIndex: 1000,
                     backgroundColor: colors.accent,
-                    width: 56,
-                    height: 56,
-                    borderRadius: 28,
+                    width: FAB_SIZE,
+                    height: FAB_SIZE,
+                    borderRadius: FAB_SIZE / 2,
                     justifyContent: 'center',
                     alignItems: 'center',
                     // Theme-aware shadow for visual depth.
@@ -125,6 +131,6 @@ const useThemedStyles = (colors: ThemeColors, insetBottom: number) => {
                     elevation: colors.elevation.elevation + 2,
                 },
             }),
-        [colors, insetBottom]
+        [colors]
     );
 };
