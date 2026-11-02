@@ -14,8 +14,8 @@ npm ci
 npx expo start          # then press "a", or scan the QR code with Expo Go
 ```
 
-The project runs fine in Expo Go (no custom native modules), so you don't need a native build to try
-your change.
+Most changes can be tried in Expo Go without a native build. Native-only features (e.g. Health
+Connect) need a dev or release build.
 
 ## Before you open a PR
 
