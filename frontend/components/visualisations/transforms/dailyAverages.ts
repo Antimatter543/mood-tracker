@@ -28,6 +28,8 @@ export type InstantValueRow = {
 export type DailyAverage = {
   day: string; // local "YYYY-MM-DD"
   avg: number; // average mood that local day, 1 dp
+  min: number; // lowest mood that local day (== max on a single-entry day)
+  max: number; // highest mood that local day
   count: number; // entries that local day
 };
 
@@ -43,7 +45,7 @@ export type DailyAverage = {
  * `ROUND(AVG(mood), 1)` SQL produced.
  */
 export function aggregateDailyAverages(rows: InstantValueRow[]): DailyAverage[] {
-  const sums = new Map<string, { sum: number; count: number }>();
+  const values = new Map<string, { sum: number; count: number; min: number; max: number }>();
 
   for (const row of rows ?? []) {
     if (!row || typeof row.date !== 'string') continue;
@@ -52,18 +54,20 @@ export function aggregateDailyAverages(rows: InstantValueRow[]): DailyAverage[] 
     if (typeof row.mood !== 'number' || !Number.isFinite(row.mood)) continue;
 
     const day = localDateString(row.date);
-    const bucket = sums.get(day);
+    const bucket = values.get(day);
     if (bucket) {
       bucket.sum += row.mood;
+      if (row.mood < bucket.min) bucket.min = row.mood;
+      if (row.mood > bucket.max) bucket.max = row.mood;
       bucket.count += 1;
     } else {
-      sums.set(day, { sum: row.mood, count: 1 });
+      values.set(day, { sum: row.mood, count: 1, min: row.mood, max: row.mood });
     }
   }
 
   const out: DailyAverage[] = [];
-  for (const [day, { sum, count }] of sums) {
-    out.push({ day, avg: Math.round((sum / count) * 10) / 10, count });
+  for (const [day, { sum, count, min, max }] of values) {
+    out.push({ day, avg: Math.round((sum / count) * 10) / 10, min, max, count });
   }
   out.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
   return out;
@@ -79,8 +83,8 @@ export function dailyAverageMap(rows: InstantValueRow[]): Map<string, number> {
   return map;
 }
 
-/** One `{date, avgMood}` row, ascending by local day. */
-export type DayAvgRow = { date: string; avgMood: number };
+/** One `{date, avgMood, minMood, maxMood}` row, ascending by local day. */
+export type DayAvgRow = { date: string; avgMood: number; minMood?: number; maxMood?: number };
 
 /**
  * Per-local-day `{date: 'YYYY-MM-DD', avgMood}` rows — the exact shape the chart
@@ -89,7 +93,7 @@ export type DayAvgRow = { date: string; avgMood: number };
  * `aggregateDailyAverages(...).map(...)` dance per screen.
  */
 export function dailyAverageRows(rows: InstantValueRow[]): DayAvgRow[] {
-  return aggregateDailyAverages(rows).map((d) => ({ date: d.day, avgMood: d.avg }));
+  return aggregateDailyAverages(rows).map((d) => ({ date: d.day, avgMood: d.avg, minMood: d.min, maxMood: d.max }));
 }
 
 /**

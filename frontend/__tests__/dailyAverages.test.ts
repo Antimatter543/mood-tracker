@@ -21,8 +21,8 @@ describe('aggregateDailyAverages', () => {
       { date: localMidnight(2026, 5, 12), mood: 4 }, // Fri 12th
     ];
     expect(aggregateDailyAverages(rows)).toEqual([
-      { day: '2026-06-11', avg: 7, count: 2 },
-      { day: '2026-06-12', avg: 4, count: 1 },
+      { day: '2026-06-11', avg: 7, min: 6, max: 8, count: 2 },
+      { day: '2026-06-12', avg: 4, min: 4, max: 4, count: 1 },
     ]);
   });
 
@@ -39,13 +39,28 @@ describe('aggregateDailyAverages', () => {
     ]);
   });
 
+  it('tracks the lowest and highest mood per local day, in any row order', () => {
+    const rows = [
+      { date: new Date(2026, 5, 11, 20, 0, 0).toISOString(), mood: 5 },
+      { date: new Date(2026, 5, 11, 8, 0, 0).toISOString(), mood: 9 },
+      { date: new Date(2026, 5, 11, 12, 0, 0).toISOString(), mood: 2 },
+    ];
+    expect(aggregateDailyAverages(rows)[0]).toMatchObject({ min: 2, max: 9, count: 3 });
+  });
+
+  it('a single-entry day has min == max == its mood (a real value, not null)', () => {
+    const [d] = aggregateDailyAverages([{ date: localMidnight(2026, 5, 11), mood: 7 }]);
+    expect(d.min).toBe(7);
+    expect(d.max).toBe(7);
+  });
+
   it('rounds to 1 dp like the old ROUND(AVG(mood),1)', () => {
     const rows = [
       { date: localMidnight(2026, 2, 1), mood: 5 },
       { date: localMidnight(2026, 2, 1), mood: 6 },
       { date: localMidnight(2026, 2, 1), mood: 6 },
     ]; // 17/3 = 5.666... -> 5.7
-    expect(aggregateDailyAverages(rows)[0]).toEqual({ day: '2026-03-01', avg: 5.7, count: 3 });
+    expect(aggregateDailyAverages(rows)[0]).toEqual({ day: '2026-03-01', avg: 5.7, min: 5, max: 6, count: 3 });
   });
 
   it('never throws on degenerate input (empty / null date / non-finite mood)', () => {
@@ -66,7 +81,7 @@ describe('aggregateDailyAverages', () => {
       { date: localMidnight(2026, 5, 11), mood: 9 },
     ];
     expect(aggregateDailyAverages(rows)).toEqual([
-      { day: '2026-06-11', avg: 9, count: 1 },
+      { day: '2026-06-11', avg: 9, min: 9, max: 9, count: 1 },
     ]);
   });
 });
@@ -90,8 +105,8 @@ describe('dailyAverageRows', () => {
       { date: localMidnight(2026, 5, 12), mood: 8 },
     ]);
     expect(rows).toEqual([
-      { date: '2026-06-11', avgMood: 6 },
-      { date: '2026-06-12', avgMood: 8 },
+      { date: '2026-06-11', avgMood: 6, minMood: 6, maxMood: 6 },
+      { date: '2026-06-12', avgMood: 8, minMood: 8, maxMood: 8 },
     ]);
   });
 

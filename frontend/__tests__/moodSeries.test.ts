@@ -25,9 +25,21 @@ describe('fillDailyGaps', () => {
     it('leaves a contiguous run untouched', () => {
         const rows = [row('2026-09-01', 5), row('2026-09-02', 6), row('2026-09-03', 7)];
         expect(fillDailyGaps(rows)).toEqual([
-            { date: '2026-09-01', value: 5 },
-            { date: '2026-09-02', value: 6 },
-            { date: '2026-09-03', value: 7 },
+            { date: '2026-09-01', value: 5, min: null, max: null },
+            { date: '2026-09-02', value: 6, min: null, max: null },
+            { date: '2026-09-03', value: 7, min: null, max: null },
+        ]);
+    });
+
+    it('carries min/max through, and nulls them (with the value) on an unlogged day', () => {
+        const filled = fillDailyGaps([
+            { date: '2026-09-01', avgMood: 5, minMood: 2, maxMood: 8 },
+            { date: '2026-09-03', avgMood: 6, minMood: 6, maxMood: 6 },
+        ]);
+        expect(filled).toEqual([
+            { date: '2026-09-01', value: 5, min: 2, max: 8 },
+            { date: '2026-09-02', value: null, min: null, max: null },
+            { date: '2026-09-03', value: 6, min: 6, max: 6 },
         ]);
     });
 
@@ -63,7 +75,7 @@ describe('fillDailyGaps', () => {
 
     it('a single logged day stays a single point', () => {
         expect(fillDailyGaps([row('2026-09-04', 7)])).toEqual([
-            { date: '2026-09-04', value: 7 },
+            { date: '2026-09-04', value: 7, min: null, max: null },
         ]);
     });
 

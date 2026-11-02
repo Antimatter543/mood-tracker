@@ -39,7 +39,10 @@ jest.mock('@/styles/global', () => ({
     }),
 }));
 
-import MoodTrendReadout from '@/components/visualisations/MoodTrendReadout';
+import MoodTrendReadout, {
+    BUBBLE_MAX_ENTRIES,
+    PANEL_MAX_ENTRIES,
+} from '@/components/visualisations/MoodTrendReadout';
 import { maWindowFor } from '@/components/visualisations/transforms/moodSeries';
 import type { LatestEntry } from '@/components/visualisations/transforms/latestEntry';
 
@@ -49,7 +52,7 @@ const entry: LatestEntry = { time: '2:30 pm', mood: 7, note: 'went for a run' };
 describe('MoodTrendReadout — a logged day', () => {
     it('names the day, its average, and the entry behind it', async () => {
         const view = await render(
-            <MoodTrendReadout day={DAY} average={6.4} entry={entry} />
+            <MoodTrendReadout day={DAY} average={6.4} entries={[entry]} />
         );
         expect(view.queryByText(/Wed/)).not.toBeNull();
         expect(view.queryByText('Avg mood 6.4')).not.toBeNull();
@@ -59,7 +62,7 @@ describe('MoodTrendReadout — a logged day', () => {
 
     it('renders the mood line and nothing more when the entry has no note', async () => {
         const view = await render(
-            <MoodTrendReadout day={DAY} average={6.4} entry={{ ...entry, note: null }} />
+            <MoodTrendReadout day={DAY} average={6.4} entries={[{ ...entry, note: null }]} />
         );
         expect(view.queryByText('2:30 pm · mood 7.0')).not.toBeNull();
         expect(view.queryByText('went for a run')).toBeNull();
@@ -67,17 +70,59 @@ describe('MoodTrendReadout — a logged day', () => {
 
     it('still shows the average when the day has no entry detail to show', async () => {
         const view = await render(
-            <MoodTrendReadout day={DAY} average={5} entry={null} />
+            <MoodTrendReadout day={DAY} average={5} entries={null} />
         );
         expect(view.queryByText('Avg mood 5.0')).not.toBeNull();
         expect(view.queryByText(/mood 7/)).toBeNull();
     });
 });
 
+describe('MoodTrendReadout — a day with several entries', () => {
+    const many = (n: number): LatestEntry[] =>
+        Array.from({ length: n }, (_, i) => ({
+            time: `${i + 1}:00 pm`,
+            mood: 5,
+            note: `note ${i + 1}`,
+        }));
+
+    it('lists every entry, in the order given (newest first), when under the cap', async () => {
+        const view = await render(
+            <MoodTrendReadout day={DAY} average={5} entries={many(3)} variant="panel" />
+        );
+        const rows = view.queryAllByText(/pm · mood/).map((n) => String(n.props.children.join('')));
+        expect(rows).toEqual(['1:00 pm · mood 5.0', '2:00 pm · mood 5.0', '3:00 pm · mood 5.0']);
+        expect(view.queryByText(/more$/)).toBeNull();
+    });
+
+    it('caps a busy day and counts the rest (bubble)', async () => {
+        const view = await render(
+            <MoodTrendReadout day={DAY} average={5} entries={many(9)} variant="bubble" />
+        );
+        expect(view.queryAllByText(/pm · mood/)).toHaveLength(BUBBLE_MAX_ENTRIES);
+        expect(view.queryByText(`+${9 - BUBBLE_MAX_ENTRIES} more`)).not.toBeNull();
+    });
+
+    it('caps a busy day and counts the rest (panel)', async () => {
+        const view = await render(
+            <MoodTrendReadout day={DAY} average={5} entries={many(9)} variant="panel" />
+        );
+        expect(view.queryAllByText(/pm · mood/)).toHaveLength(PANEL_MAX_ENTRIES);
+        expect(view.queryByText(`+${9 - PANEL_MAX_ENTRIES} more`)).not.toBeNull();
+    });
+
+    it('does not warn about missing keys', async () => {
+        const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        await render(<MoodTrendReadout day={DAY} average={5} entries={many(4)} />);
+        const keyWarnings = spy.mock.calls.filter((c) => String(c[0]).includes('unique "key"'));
+        spy.mockRestore();
+        expect(keyWarnings).toHaveLength(0);
+    });
+});
+
 describe('MoodTrendReadout — a day with no entry', () => {
     it('says the point is interpolated, and shows NO average', async () => {
         const view = await render(
-            <MoodTrendReadout day={DAY} average={null} entry={null} />
+            <MoodTrendReadout day={DAY} average={null} entries={null} />
         );
         // The line still crosses this day (dashed). An interpolated crossing
         // must never be presented as a recorded mood.
@@ -89,10 +134,10 @@ describe('MoodTrendReadout — a day with no entry', () => {
 describe('MoodTrendReadout — variants agree', () => {
     it('the panel says exactly what the bubble says', async () => {
         const bubble = await render(
-            <MoodTrendReadout day={DAY} average={6.4} entry={entry} variant="bubble" />
+            <MoodTrendReadout day={DAY} average={6.4} entries={[entry]} variant="bubble" />
         );
         const panel = await render(
-            <MoodTrendReadout day={DAY} average={6.4} entry={entry} variant="panel" />
+            <MoodTrendReadout day={DAY} average={6.4} entries={[entry]} variant="panel" />
         );
         for (const text of ['Avg mood 6.4', '2:30 pm · mood 7.0', 'went for a run']) {
             expect(bubble.queryByText(text)).not.toBeNull();

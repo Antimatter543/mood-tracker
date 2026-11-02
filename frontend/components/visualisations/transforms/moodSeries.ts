@@ -61,6 +61,10 @@ export type MoodSeriesPoint = {
     date: string;
     /** Average mood that day, or null when the user logged nothing. */
     value: number | null;
+    /** Lowest mood that day; null when nothing was logged. Equals `max` on a one-entry day. */
+    min?: number | null;
+    /** Highest mood that day; null when nothing was logged. */
+    max?: number | null;
 };
 
 /**
@@ -87,7 +91,13 @@ const MAX_FILLED_DAYS = 4000;
 export const fillDailyGaps = (rows: readonly DayAvgRow[]): MoodSeriesPoint[] => {
     if (!rows || rows.length === 0) return [];
 
-    const unfilled = () => rows.map((r) => ({ date: r.date, value: r.avgMood }));
+    const toPoint = (r: DayAvgRow): MoodSeriesPoint => ({
+        date: r.date,
+        value: r.avgMood,
+        min: r.minMood ?? null,
+        max: r.maxMood ?? null,
+    });
+    const unfilled = () => rows.map(toPoint);
 
     const first = rows[0].date;
     const last = rows[rows.length - 1].date;
@@ -104,14 +114,14 @@ export const fillDailyGaps = (rows: readonly DayAvgRow[]): MoodSeriesPoint[] => 
         return unfilled();
     }
 
-    const byDay = new Map<string, number>();
-    for (const r of rows) byDay.set(r.date, r.avgMood);
+    const byDay = new Map<string, DayAvgRow>();
+    for (const r of rows) byDay.set(r.date, r);
 
     const out: MoodSeriesPoint[] = [];
     let day = first;
     for (let i = 0; i <= span; i++) {
-        const value = byDay.get(day);
-        out.push({ date: day, value: value === undefined ? null : value });
+        const row = byDay.get(day);
+        out.push(row ? toPoint(row) : { date: day, value: null, min: null, max: null });
         day = addDays(day, 1);
     }
     return out;
