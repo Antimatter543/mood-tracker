@@ -149,6 +149,59 @@ export async function ensureAndroidChannel(): Promise<void> {
   });
 }
 
+/** What a handler learns about a tap on one of OUR reminder notifications. */
+export interface ReminderTap {
+  identifier: string;
+  title: string | null;
+  body: string | null;
+}
+
+// Key of the last tap we handled. Reminder identifiers are stable (one per
+// reminder, reused daily), so the identifier alone can't tell two taps apart;
+// `notification.date` (delivery time) makes the key unique per firing.
+let lastHandledTapKey: string | null = null;
+
+/**
+ * Subscribe to taps on SoulSync reminder notifications. Covers both:
+ *  - warm taps (app running/backgrounded) via the response listener, and
+ *  - the tap that LAUNCHED the app from a killed state, via the last stored
+ *    response (read once at subscribe time).
+ * Only the default tap action on a notification we own is delivered; each
+ * response is delivered at most once, then cleared so it can't re-fire on a
+ * later mount/foreground. Delivered notifications are dismissed on a tap.
+ */
+export function subscribeToReminderTaps(handler: (tap: ReminderTap) => void): () => void {
+  const Notifications = getNotifications();
+  if (!Notifications) return () => {};
+
+  const handle = (response: NotificationsModule.NotificationResponse) => {
+    const { identifier, content } = response.notification.request;
+    if (
+      response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER ||
+      !isManagedNotificationIdentifier(identifier)
+    ) {
+      return;
+    }
+    const key = `${identifier}@${response.notification.date}`;
+    if (key === lastHandledTapKey) return;
+    lastHandledTapKey = key;
+
+    Notifications.clearLastNotificationResponse();
+    dismissNotifications();
+    handler({ identifier, title: content.title, body: content.body });
+  };
+
+  const subscription = Notifications.addNotificationResponseReceivedListener(handle);
+  const coldStart = Notifications.getLastNotificationResponse();
+  if (coldStart) handle(coldStart);
+  return () => subscription.remove();
+}
+
+/** Dismiss every notification of ours still showing in the tray. */
+export function dismissNotifications(): void {
+  void getNotifications()?.dismissAllNotificationsAsync();
+}
+
 // ─── Permission ───────────────────────────────────────────────────────────────
 
 /**
