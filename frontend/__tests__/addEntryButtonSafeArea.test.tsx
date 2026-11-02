@@ -64,6 +64,12 @@ jest.mock('@/components/forms/EntryForm', () => ({
     EntryFormModal: () => null,
 }));
 
+// expo-router's ESM entry can't load under jest; the FAB only needs useFocusEffect.
+jest.mock('expo-router', () => {
+    const ReactActual = require('react');
+    return { useFocusEffect: (cb: () => void) => ReactActual.useEffect(() => cb(), [cb]) };
+});
+
 import { AddEntryButton } from '@/components/AddEntryButton';
 import { BACK_TO_TOP_BOTTOM, PILL_HEIGHT } from '@/components/timeline/BackToTopPill';
 import { FAB_BOTTOM_GAP, FAB_SIZE, LAYOUT_FAB_CLEARANCE } from '@/styles/layout';

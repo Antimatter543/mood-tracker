@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { StyleSheet, Pressable, Alert } from 'react-native';
 import Animated, {
     useAnimatedStyle,
@@ -14,6 +14,8 @@ import { addMoodEntry } from '@/databases/database';
 import { useSettings } from '@/context/SettingsContext';
 import * as SQLite from 'expo-sqlite';
 import { EntryFormData, EntryFormModal } from './forms/EntryForm';
+import { subscribeToReminderTaps, dismissNotifications } from '@/lib/notifications';
+import { useFocusEffect } from 'expo-router';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -24,6 +26,13 @@ export function AddEntryButton() {
     const [modalVisible, setModalVisible] = useState(false);
     const { refetchEntries } = useDataContext();
     const { settings } = useSettings();
+
+    // Tapping one of our reminder notifications (warm, or the tap that
+    // launched the app) opens the entry form. Setting an already-true flag is
+    // a no-op, so a tap while the form is open does not double-open it.
+    useFocusEffect(
+        useCallback(() => subscribeToReminderTaps(() => setModalVisible(true)), [])
+    );
 
     // `fab_position` honors the user's left/right preference. The settings
     // registry constrains the value to `'left' | 'right'` so we don't risk
@@ -51,6 +60,7 @@ export function AddEntryButton() {
                 formData.photos
             );
             if (result.success) {
+                dismissNotifications();
                 setModalVisible(false);
                 refetchEntries();
             } else {
