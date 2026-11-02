@@ -144,7 +144,7 @@ it('Restore with a SoulSync backup asks the "replace your data" question', async
 });
 
 it('reports a file it cannot restore', async () => {
-  const message = 'This file is not a backup SoulSync can restore. Supported: SoulSync and Daylio backups.';
+  const message = "SoulSync can't open this file. Pick a backup made with SoulSync or Daylio.";
   mockImport.mockResolvedValue({ success: false, message });
   const alerts = alertPressing();
   await renderSection();

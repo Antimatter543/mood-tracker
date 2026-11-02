@@ -20,8 +20,17 @@ import { base64ToBytes } from '@/lib/backupCrypto';
  *    `minute` plus `timeZoneOffset` (ms east of UTC). `datetime` is the epoch
  *    ms, but files rewritten by tools carry placeholders there, so the
  *    explicit fields are the source of truth.
- *  - `assets`: `{ id, type: 1 photo | 2 audio, checksum }`; the bytes are the
- *    zip member whose path ends with the checksum (no extension).
+ *  - `assets`: `{ id, type: 1 photo | 2 audio, checksum }`. A photo's bytes
+ *    are the zip member `assets/photos/<year>/<month>/<checksum>` (no
+ *    extension). Matched on the exact file name (extension stripped), by
+ *    checksum, or by asset id as other readers fall back to.
+ *  - `tags[].state`: 0 = in use; anything else is archived in Daylio.
+ *
+ * MEMORY: a phone has far less RAM than a backup can claim. Only
+ * `backup.daylio` and the photos actually used are ever inflated, each under
+ * a size ceiling checked BEFORE inflating (fflate allocates a member's
+ * claimed size up front), and photos are inflated a batch at a time while
+ * they are written (daylioPhotoReader), never all at once.
  */
 
 /** Daylio mood level (1 = rad ... 5 = awful) -> SoulSync 0-10 mood. */
@@ -38,6 +47,13 @@ export const UNGROUPED_ACTIVITIES_GROUP = 'Daylio';
 
 const PHOTO_ASSET = 1;
 const AUDIO_ASSET = 2;
+
+/** Largest `backup.daylio` (base64 JSON text) that is inflated. Real ones are a few MB. */
+export const MAX_DAYLIO_JSON_BYTES = 64 * 1024 * 1024;
+/** Largest single photo that is inflated; a bigger one is left out. */
+export const MAX_DAYLIO_PHOTO_BYTES = 30 * 1024 * 1024;
+/** Photos inflated together at most (one unzip pass per batch). */
+const PHOTO_BATCH_BYTES = 48 * 1024 * 1024;
 
 /**
  * A user-readable reason the file cannot be imported. `notDaylio` = the file
@@ -61,6 +77,8 @@ interface DaylioTag {
   name: string;
   order?: number;
   id_tag_group?: number;
+  /** 0 = in use; other values = archived. */
+  state?: number;
 }
 
 interface DaylioTagGroup {
@@ -99,28 +117,55 @@ export interface DaylioBackup {
   assets?: DaylioAsset[];
 }
 
+/** A zip member as its central directory describes it (nothing inflated). */
+export interface DaylioZipMember {
+  name: string;
+  /** The uncompressed size the archive CLAIMS (inflating allocates this much). */
+  originalSize: number;
+}
+
 export interface DaylioArchive {
   backup: DaylioBackup;
-  /** Every other zip member, by path (photo bytes live here). */
-  files: Record<string, Uint8Array>;
+  /** Every other zip member (photos live here), not inflated. */
+  members: DaylioZipMember[];
+  /** The whole .daylio file, to inflate photos from as they are needed. */
+  bytes: Uint8Array;
 }
+
+const isMainMember = (name: string) => name === 'backup.daylio' || name.endsWith('/backup.daylio');
 
 /** Open a .daylio file (raw bytes). Throws DaylioFormatError if it is not one. */
 export function readDaylioArchive(bytes: Uint8Array): DaylioArchive {
-  let members: Record<string, Uint8Array>;
+  const members: DaylioZipMember[] = [];
+  const found: { main?: DaylioZipMember } = {};
+  let inflated: Record<string, Uint8Array>;
   try {
-    members = unzipSync(bytes);
+    // Only backup.daylio is inflated here, and only when its claimed size is
+    // sane; everything else is just listed.
+    inflated = unzipSync(bytes, {
+      filter: ({ name, originalSize }) => {
+        if (!found.main && isMainMember(name)) {
+          found.main = { name, originalSize };
+          return originalSize <= MAX_DAYLIO_JSON_BYTES;
+        }
+        if (!name.endsWith('/')) members.push({ name, originalSize });
+        return false;
+      },
+    });
   } catch {
     throw new DaylioFormatError('This is not a Daylio backup (expected a .daylio file).', true);
   }
-  const mainPath = Object.keys(members).find(path => path === 'backup.daylio' || path.endsWith('/backup.daylio'));
-  if (!mainPath) {
+  const main = found.main;
+  if (!main) {
     throw new DaylioFormatError('This file does not contain a Daylio backup.', true);
+  }
+  if (main.originalSize > MAX_DAYLIO_JSON_BYTES) {
+    throw new DaylioFormatError('This Daylio backup is too large to import.');
   }
 
   let backup: unknown;
   try {
-    const base64 = new TextDecoder().decode(members[mainPath]).replace(/\s+/g, '');
+    const base64 = new TextDecoder().decode(inflated[main.name]).replace(/\s+/g, '');
     backup = JSON.parse(new TextDecoder().decode(base64ToBytes(base64)));
   } catch {
     throw new DaylioFormatError('The Daylio backup inside this file is damaged.');
@@ -136,9 +181,64 @@ export function readDaylioArchive(bytes: Uint8Array): DaylioArchive {
     throw new DaylioFormatError('This file does not contain a Daylio backup.', true);
   }
 
-  const files = { ...members };
-  delete files[mainPath];
-  return { backup: backup as DaylioBackup, files };
+  return { backup: backup as DaylioBackup, members, bytes };
+}
+
+/** A zip member's file name without folders or extension, lowercased: how photos are matched. */
+const memberStem = (name: string) =>
+  (name.split('/').pop() ?? '').replace(/\.[^.]*$/, '').toLowerCase();
+
+/** Photo bytes as base64 plus the extension detected from them. */
+export interface DaylioPhoto {
+  base64: string;
+  ext: string;
+}
+
+/**
+ * Reads photo members on demand, for the import to write one at a time.
+ * `order` is the order photos will be asked for; each unzip pass inflates the
+ * asked-for photo plus the next ones up to PHOTO_BATCH_BYTES, so memory stays
+ * bounded and the archive is not rescanned per photo. Returns null for a
+ * missing, oversized or non-image member.
+ */
+export function daylioPhotoReader(
+  archive: Pick<DaylioArchive, 'members' | 'bytes'>,
+  order: readonly string[]
+): (member: string) => DaylioPhoto | null {
+  const sizeOf = new Map(archive.members.map(m => [m.name, m.originalSize]));
+  const fits = (name: string) => (sizeOf.get(name) ?? Infinity) <= MAX_DAYLIO_PHOTO_BYTES;
+  const queue = [...new Set(order)].filter(fits);
+  let batch: Record<string, Uint8Array> = {};
+
+  const inflateBatchFrom = (member: string) => {
+    const wanted = new Set<string>([member]);
+    let total = sizeOf.get(member) ?? 0;
+    const start = queue.indexOf(member);
+    for (let i = start + 1; start >= 0 && i < queue.length; i++) {
+      const size = sizeOf.get(queue[i]) ?? 0;
+      if (total + size > PHOTO_BATCH_BYTES) break;
+      wanted.add(queue[i]);
+      total += size;
+    }
+    batch = {}; // let the previous batch go before inflating the next
+    batch = unzipSync(archive.bytes, {
+      filter: ({ name, originalSize }) => wanted.has(name) && originalSize <= MAX_DAYLIO_PHOTO_BYTES,
+    });
+  };
+
+  return (member: string) => {
+    if (!fits(member)) return null;
+    if (!(member in batch)) {
+      try {
+        inflateBatchFrom(member);
+      } catch {
+        return null;
+      }
+    }
+    const bytes = batch[member];
+    const ext = bytes ? detectImageExtension(bytes) : null;
+    return bytes && ext ? { base64: bytesToBase64Chunked(bytes), ext } : null;
+  };
 }
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
@@ -148,7 +248,8 @@ export function daylioHtmlToText(html: string): string {
   return html
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
+    // Only things shaped like tags: "I <3 you" and "a < b" are text.
+    .replace(/<\/?[a-z][^<>]*>/gi, '')
     .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, code: string) => {
       if (code[0] === '#') {
         const n = code[1] === 'x' || code[1] === 'X' ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
@@ -236,12 +337,18 @@ export interface DaylioConversion {
     };
   };
   summary: DaylioImportSummary;
+  /**
+   * The zip member of every photo in `backup`, in the order the import reads
+   * them (for daylioPhotoReader). Photos in `backup` carry only
+   * `daylio_member`, no bytes, until they are written.
+   */
+  photoMembers: string[];
 }
 
 const key = (name: string) => name.trim().toLowerCase();
 
 /** Convert an opened Daylio archive into a SoulSync v3 backup object plus a summary. */
-export function convertDaylio({ backup, files }: DaylioArchive): DaylioConversion {
+export function convertDaylio({ backup, members }: Pick<DaylioArchive, 'backup' | 'members'>): DaylioConversion {
   // Groups, in Daylio's order; same-named groups merge. Ungrouped tags get one extra group.
   const groups: { id: number; name: string }[] = [];
   const groupIdByKey = new Map<string, number>();
@@ -264,7 +371,12 @@ export function convertDaylio({ backup, files }: DaylioArchive): DaylioConversio
   const activities: { id: number; name: string; group_id: number; icon_family: string; icon_name: string; position: number }[] = [];
   const activityIdByTagId = new Map<number, number>();
   const activityIdByKey = new Map<string, number>();
-  const tags = [...(backup.tags ?? [])].filter(t => typeof t?.name === 'string' && t.name.trim());
+  // An archived tag (state != 0) only comes along when an entry still uses it.
+  const usedTagIds = new Set(backup.dayEntries.flatMap(e => (Array.isArray(e?.tags) ? e.tags : [])));
+  const isArchived = (t: DaylioTag) => typeof t.state === 'number' && t.state !== 0;
+  const tags = [...(backup.tags ?? [])].filter(
+    t => typeof t?.name === 'string' && t.name.trim() && (!isArchived(t) || usedTagIds.has(t.id))
+  );
   tags.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   for (const tag of tags) {
     const groupId = groupFor(daylioGroupName.get(tag.id_tag_group ?? 0) ?? UNGROUPED_ACTIVITIES_GROUP);
@@ -296,14 +408,19 @@ export function convertDaylio({ backup, files }: DaylioArchive): DaylioConversio
   for (const asset of backup.assets ?? []) {
     if (asset && Number.isInteger(asset.id)) assetsById.set(asset.id, asset);
   }
-  const filePaths = Object.keys(files);
+  // Photo members by exact file name (extension stripped); first one wins.
+  const memberByStem = new Map<string, DaylioZipMember>();
+  for (const member of members) {
+    const stem = memberStem(member.name);
+    if (stem && !memberByStem.has(stem)) memberByStem.set(stem, member);
+  }
+  const photoMembers: string[] = [];
   const photoFor = (asset: DaylioAsset) => {
-    if (typeof asset.checksum !== 'string' || !asset.checksum) return null;
-    const path = filePaths.find(p => p.endsWith(asset.checksum));
-    const bytes = path ? files[path] : undefined;
-    const ext = bytes ? detectImageExtension(bytes) : null;
-    if (!bytes || !ext) return null;
-    return { media_type: 'image', file_path: '', ext, data_base64: bytesToBase64Chunked(bytes) };
+    const byChecksum = typeof asset.checksum === 'string' && asset.checksum ? memberByStem.get(asset.checksum.toLowerCase()) : undefined;
+    const member = byChecksum ?? memberByStem.get(String(asset.id));
+    if (!member || member.originalSize > MAX_DAYLIO_PHOTO_BYTES) return null;
+    photoMembers.push(member.name);
+    return { media_type: 'image', file_path: '', daylio_member: member.name };
   };
 
   const summary: DaylioImportSummary = {
@@ -363,5 +480,6 @@ export function convertDaylio({ backup, files }: DaylioArchive): DaylioConversio
       data: { entries, activities, activityGroups: groups, settings: [] },
     },
     summary,
+    photoMembers,
   };
 }

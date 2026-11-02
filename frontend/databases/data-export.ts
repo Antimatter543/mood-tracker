@@ -10,7 +10,7 @@ import { SQLiteDatabase } from 'expo-sqlite';
 
 import { GROUP_ORDER_BY } from '@/databases/groups';
 import { deriveMediaExt, writeBase64ToMediaDir } from '@/databases/mediaHelpers';
-import { withWriteTransaction } from '@/databases/writeTransaction';
+import { withWriteLock, withWriteTransaction } from '@/databases/writeTransaction';
 import {
   BackupDecryptionError,
   EncryptedBackupEnvelope,
@@ -55,7 +55,7 @@ export const BACKUP_KEY_UNREADABLE = 'backup-key-unreadable';
 /** Shown for any file Restore cannot read as one of SUPPORTED_RESTORE_SOURCES. */
 export function unsupportedFileMessage(): string {
   const apps = SUPPORTED_RESTORE_SOURCES.map(s => s.app);
-  return `This file is not a backup SoulSync can restore. Supported: ${apps.slice(0, -1).join(', ')} and ${apps[apps.length - 1]} backups.`;
+  return `SoulSync can't open this file. Pick a backup made with ${apps.slice(0, -1).join(', ')} or ${apps[apps.length - 1]}.`;
 }
 
 /**
@@ -417,14 +417,14 @@ async function importDaylioFile(
   confirm?: (summary: DaylioImportSummary) => Promise<boolean>
 ): Promise<DatabaseResult> {
   try {
-    const { backup, summary } = await readDaylioFile(uri);
+    const { backup, summary, readPhoto } = await readDaylioFile(uri);
     if (summary.entries === 0) {
       return { success: false, message: 'This Daylio backup has no entries to import.' };
     }
     if (confirm && !(await confirm(summary))) {
       return { success: false, message: 'Import cancelled' };
     }
-    const result = await applyBackupData(backup, { appendEntries: true });
+    const result = await applyBackupData(backup, { appendEntries: true, readPhoto });
     return { success: true, message: daylioImportMessage(result) };
   } catch (error) {
     if (error instanceof DaylioFormatError) {
@@ -441,12 +441,32 @@ export interface ApplyBackupOptions {
    * would otherwise overwrite unrelated local entries.
    */
   appendEntries?: boolean;
+  /**
+   * Bytes for a photo that does not embed them as `data_base64` (a Daylio
+   * photo still inside its zip). Called for one photo at a time, right before
+   * it is written, so all photos are never held in memory together.
+   */
+  readPhoto?: (photo: any) => EmbeddedPhoto | null | Promise<EmbeddedPhoto | null>;
+}
+
+/** A photo's bytes (base64) and file extension, ready to write to the media dir. */
+export interface EmbeddedPhoto {
+  base64: string;
+  ext: string;
 }
 
 export interface ApplyBackupResult {
   importedEntries: number;
   skippedDuplicates: number;
+  /** Photos whose bytes could not be read or written; left out. */
+  unreadablePhotos: number;
 }
+
+/** A live entry with the same instant, mood and note: the duplicate test for append mode. */
+const FIND_DUPLICATE_ENTRY_SQL = `SELECT id FROM entries
+  WHERE date = ? AND mood = ? AND COALESCE(notes, '') = COALESCE(?, '') AND deleted_at IS NULL
+  LIMIT 1`;
+const duplicateParams = (entry: any) => [entry.date, entry.mood, entry.notes ?? null];
 
 /**
  * Write a parsed, validated v1-v3 backup object into the database: photos to
@@ -455,41 +475,66 @@ export interface ApplyBackupResult {
  */
 export async function applyBackupData(
   importData: any,
-  { appendEntries = false }: ApplyBackupOptions = {}
+  { appendEntries = false, readPhoto }: ApplyBackupOptions = {}
 ): Promise<ApplyBackupResult> {
-  const result: ApplyBackupResult = { importedEntries: 0, skippedDuplicates: 0 };
+  const result: ApplyBackupResult = { importedEntries: 0, skippedDuplicates: 0, unreadablePhotos: 0 };
   // Backup-side ids of entries skipped as duplicates (append mode only).
   const skippedEntryIds = new Set<number>();
 
-  // v3 backups embed photo BYTES (base64). Materialise them to the new
-  // app's media directory BEFORE the DB transaction — this is slow
-  // FileSystem IO and must NOT run while we hold the exclusive SQLite lock
-  // (see the lesson on non-exclusive transactions racing reads). We write
-  // each embedded photo under a FRESH unique local path, then the in-txn
-  // step below inserts entry_media rows pointing at those new paths. A bad
-  // base64 / write failure for one photo is skipped (warn + continue) so a
-  // single corrupt image never aborts the whole import. Legacy (v1/v2)
-  // photos carry no `data_base64`, produce nothing here, and fall through
-  // to the path-reference insert (best-effort, unchanged).
-  const restoredPhotosByEntryId: Record<number, { newPath: string; media_type: string }[]> = {};
   const importEntries = importData.data.entries;
+
+  // Append mode: entries that already exist are known BEFORE any photo is
+  // written, so their photos are never written at all. (Duplicates within
+  // the file itself are caught in the transaction below.)
+  const existingEntryIds = new Set<number>();
+  if (appendEntries && Array.isArray(importEntries)) {
+    await withWriteLock(async (conn) => {
+      for (const entry of importEntries) {
+        if (entry && (await conn.getFirstAsync<{ id: number }>(FIND_DUPLICATE_ENTRY_SQL, duplicateParams(entry)))) {
+          existingEntryIds.add(entry.id);
+        }
+      }
+    });
+  }
+
+  // Photo bytes are materialised to the media directory BEFORE the DB
+  // transaction: this is slow FileSystem IO and must NOT run while we hold
+  // the exclusive SQLite lock (see the lesson on non-exclusive transactions
+  // racing reads). Each photo gets a FRESH unique local path; the in-txn step
+  // below inserts entry_media rows pointing at those paths. Bytes come from
+  // `data_base64` (SoulSync v3) or `readPhoto` (Daylio), one photo at a time.
+  // A photo that cannot be read or written is skipped (warn + count) so one
+  // corrupt image never aborts the import. Legacy (v1/v2) photos carry no
+  // bytes, produce nothing here, and fall through to the path-reference
+  // insert (best-effort, unchanged).
+  const restoredPhotosByEntryId: Record<number, { newPath: string; media_type: string }[]> = {};
+  const writtenPaths: string[] = [];
+  const bytesOf = async (photo: any): Promise<EmbeddedPhoto | null> => {
+    if (typeof photo.data_base64 === 'string' && photo.data_base64.length > 0) {
+      return { base64: photo.data_base64, ext: typeof photo.ext === 'string' && photo.ext ? photo.ext : 'jpg' };
+    }
+    return readPhoto ? await readPhoto(photo) : null;
+  };
   if (Array.isArray(importEntries)) {
     for (const entry of importEntries) {
-      if (!entry || !Array.isArray(entry.photos)) continue;
+      if (!entry || !Array.isArray(entry.photos) || existingEntryIds.has(entry.id)) continue;
       for (const photo of entry.photos) {
-        if (!photo || typeof photo.data_base64 !== 'string' || photo.data_base64.length === 0) {
-          continue; // legacy path-ref photo, or no embedded bytes — handled in-txn
-        }
+        const embedded = !!photo && (typeof photo.data_base64 === 'string' || (!!readPhoto && !photo.file_path));
+        if (!embedded) continue; // legacy path-ref photo: handled in-txn
         try {
-          const newPath = await writeBase64ToMediaDir(
-            photo.data_base64,
-            typeof photo.ext === 'string' && photo.ext ? photo.ext : 'jpg'
-          );
+          const bytes = await bytesOf(photo);
+          if (!bytes) {
+            result.unreadablePhotos += 1;
+            continue;
+          }
+          const newPath = await writeBase64ToMediaDir(bytes.base64, bytes.ext);
+          writtenPaths.push(newPath);
           (restoredPhotosByEntryId[entry.id] ??= []).push({
             newPath,
             media_type: photo.media_type ?? 'image',
           });
         } catch (error) {
+          result.unreadablePhotos += 1;
           console.warn(`Skipping embedded photo (write failed): ${error}`);
         }
       }
@@ -622,12 +667,9 @@ export async function applyBackupData(
               // mean nothing here, so never write them. An entry identical
               // to a live one (same instant, mood and note) is skipped, so
               // re-importing a newer export only adds what is new.
-              const duplicate = await txn.getFirstAsync<{ id: number }>(
-                `SELECT id FROM entries
-                 WHERE date = ? AND mood = ? AND COALESCE(notes, '') = COALESCE(?, '') AND deleted_at IS NULL
-                 LIMIT 1`,
-                [entry.date, entry.mood, entry.notes ?? null]
-              );
+              const duplicate =
+                existingEntryIds.has(entry.id) ||
+                (await txn.getFirstAsync<{ id: number }>(FIND_DUPLICATE_ENTRY_SQL, duplicateParams(entry)));
               if (duplicate) {
                 result.skippedDuplicates += 1;
                 skippedEntryIds.add(entry.id);
@@ -745,10 +787,17 @@ export async function applyBackupData(
         }
       }
     }
+  }).catch(async (error) => {
+    // Rolled back, so no row points at the photos written above: delete them
+    // all rather than leave orphan files behind, then fail as before.
+    for (const path of writtenPaths) {
+      await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => {});
+    }
+    throw error;
   });
 
   // Photos were written before the transaction; drop the ones that belonged
-  // to entries skipped as duplicates so they don't linger unreferenced.
+  // to entries skipped as duplicates within the file so they don't linger.
   for (const id of skippedEntryIds) {
     for (const media of restoredPhotosByEntryId[id] ?? []) {
       await FileSystem.deleteAsync(media.newPath, { idempotent: true }).catch(() => {});

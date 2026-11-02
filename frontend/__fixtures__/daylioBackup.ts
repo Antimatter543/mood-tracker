@@ -89,3 +89,30 @@ export function buildDaylioArchive(
   const payload = strToU8(Buffer.from(JSON.stringify(json), 'utf8').toString('base64'));
   return zipSync({ 'backup.daylio': payload, ...files }, { level: compress ? 6 : 0 });
 }
+
+/**
+ * A copy of `zip` whose member `name` CLAIMS to be `size` bytes uncompressed
+ * (both the local header and the central directory say so), as a damaged or
+ * hostile archive could. The real data is unchanged.
+ */
+export function claimUncompressedSize(zip: Uint8Array, name: string, size: number): Uint8Array {
+  const out = zip.slice();
+  const view = new DataView(out.buffer, out.byteOffset, out.byteLength);
+  const target = Buffer.from(name, 'utf8');
+  let patched = 0;
+  for (let i = 0; i + 4 <= out.length; i++) {
+    const sig = view.getUint32(i, true);
+    // local file header: name length at 26, name at 30, uncompressed size at 22
+    // central directory header: name length at 28, name at 46, uncompressed size at 24
+    const layout =
+      sig === 0x04034b50 ? { len: 26, at: 30, size: 22 } : sig === 0x02014b50 ? { len: 28, at: 46, size: 24 } : null;
+    if (!layout || i + layout.at > out.length) continue;
+    const nameLength = view.getUint16(i + layout.len, true);
+    if (Buffer.from(out.subarray(i + layout.at, i + layout.at + nameLength)).equals(target)) {
+      view.setUint32(i + layout.size, size, true);
+      patched += 1;
+    }
+  }
+  if (patched !== 2) throw new Error(`expected a local and a central header for ${name}, patched ${patched}`);
+  return out;
+}

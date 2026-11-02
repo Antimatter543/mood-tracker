@@ -12,19 +12,54 @@
  *  - Notes: title + body, Daylio's HTML turned into plain text.
  *  - Activities: groups in Daylio's order, ungrouped tags in "Daylio",
  *    duplicates merged, every entry link mapped.
- *  - Photos: embedded with a detected extension; audio and unreadable files
- *    are counted, not imported.
+ *  - Photos: matched on the exact file name (checksum or asset id), read on
+ *    demand with a detected extension; audio and unreadable files are
+ *    counted, not imported.
+ *  - Memory: nothing is inflated whose CLAIMED size is over its ceiling
+ *    (fflate allocates the claimed size), and photos inflate in batches.
  */
 import { strToU8, zipSync } from 'fflate';
+
+// unzipSync, recording which members its filter let through (inflated) and
+// how many passes ran. Kept on the module: jest.mock factories run before
+// this file's own variables exist.
+jest.mock('fflate', () => {
+  const actual = jest.requireActual('fflate');
+  const mock = {
+    ...actual,
+    __inflated: [] as string[],
+    __passes: 0,
+    unzipSync: (data: Uint8Array, opts?: { filter?: (f: { name: string }) => boolean }) => {
+      mock.__passes += 1;
+      return actual.unzipSync(data, {
+        ...opts,
+        filter: (f: { name: string }) => {
+          const ok = opts?.filter ? opts.filter(f) : true;
+          if (ok) mock.__inflated.push(f.name);
+          return ok;
+        },
+      });
+    },
+  };
+  return mock;
+});
+const unzipProbe = () => require('fflate') as { __inflated: string[]; __passes: number };
+beforeEach(() => {
+  unzipProbe().__inflated.length = 0;
+  unzipProbe().__passes = 0;
+});
 
 import {
   DAYLIO_MOOD_VALUES,
   DaylioFormatError,
+  MAX_DAYLIO_JSON_BYTES,
+  MAX_DAYLIO_PHOTO_BYTES,
   UNGROUPED_ACTIVITIES_GROUP,
   convertDaylio,
   daylioEntryDate,
   daylioHtmlToText,
   daylioNote,
+  daylioPhotoReader,
   detectImageExtension,
   readDaylioArchive,
 } from '@/lib/daylioImport';
@@ -32,6 +67,7 @@ import {
   JPEG_BYTES,
   PNG_BYTES,
   buildDaylioArchive,
+  claimUncompressedSize,
   daylioBackupJson,
   daylioEntry,
 } from '../__fixtures__/daylioBackup';
@@ -50,11 +86,12 @@ describe('readDaylioArchive', () => {
     expect(archive.backup.dayEntries).toHaveLength(1);
   });
 
-  it('keeps the other members (photos) and drops backup.daylio from them', () => {
+  it('lists the other members (photos) without inflating them, and drops backup.daylio from them', () => {
     const archive = readDaylioArchive(
       buildDaylioArchive(daylioBackupJson(), { files: { 'assets/photos/2024/3/abc': JPEG_BYTES } })
     );
-    expect(Object.keys(archive.files)).toEqual(['assets/photos/2024/3/abc']);
+    expect(archive.members).toEqual([{ name: 'assets/photos/2024/3/abc', originalSize: JPEG_BYTES.length }]);
+    expect(unzipProbe().__inflated).toEqual(['backup.daylio']);
   });
 
   it.each([
@@ -90,6 +127,21 @@ describe('readDaylioArchive', () => {
   it('a damaged Daylio backup is NOT flagged as foreign', () => {
     expect(errorOf(zipSync({ 'backup.daylio': strToU8('%%%not base64%%%') })).notDaylio).toBe(false);
   });
+
+  it.each([true, false])(
+    'refuses a backup.daylio that claims to be too large, without inflating it (deflated: %s)',
+    compress => {
+      const zip = claimUncompressedSize(
+        buildDaylioArchive(daylioBackupJson(), { compress }),
+        'backup.daylio',
+        MAX_DAYLIO_JSON_BYTES + 1
+      );
+      const error = errorOf(zip);
+      expect(error.message).toBe('This Daylio backup is too large to import.');
+      expect(error.notDaylio).toBe(false);
+      expect(unzipProbe().__inflated).toEqual([]);
+    }
+  );
 });
 
 describe('moods', () => {
@@ -154,6 +206,16 @@ describe('notes', () => {
     );
   });
 
+  it.each([
+    ['I <3 you', 'I <3 you'],
+    ['a < b and c > d', 'a < b and c > d'],
+    ['x<y', 'x<y'],
+    ['5 <= 6 <span class="h">ok</span>', '5 <= 6 ok'],
+    ['<p>one</p><p>two</p>', 'one\ntwo'],
+  ])('keeps a bare "<" that is not a tag: %j', (html, text) => {
+    expect(daylioHtmlToText(html)).toBe(text);
+  });
+
   it('joins title and body, and is null when both are empty', () => {
     expect(daylioNote({ note_title: 'Title', note: 'Body<br>line' })).toBe('Title\n\nBody\nline');
     expect(daylioNote({ note_title: '', note: 'Only body' })).toBe('Only body');
@@ -197,6 +259,21 @@ describe('activities', () => {
   it('an entry without tags has no activity_ids', () => {
     expect(entriesOf(convert(daylioBackupJson()))[0].activity_ids).toBeNull();
   });
+
+  it('leaves out archived tags no entry uses, but keeps archived tags that are used', () => {
+    const json = daylioBackupJson({
+      tags: [
+        ...daylioBackupJson().tags,
+        { id: 20, name: 'Old hobby', createdAt: 0, icon: 1, order: 6, state: 1, id_tag_group: 2 },
+        { id: 21, name: 'Old but used', createdAt: 0, icon: 1, order: 7, state: 2, id_tag_group: 2 },
+        { id: 22, name: 'No state field', createdAt: 0, icon: 1, order: 8, id_tag_group: 2 },
+      ],
+      dayEntries: [daylioEntry({ tags: [21] })],
+    });
+    const names = activitiesOf(convert(json)).map(a => a.name);
+    expect(names).not.toContain('Old hobby');
+    expect(names).toEqual(expect.arrayContaining(['Old but used', 'No state field', 'Family', 'Reading']));
+  });
 });
 
 describe('photos and audio', () => {
@@ -213,15 +290,92 @@ describe('photos and audio', () => {
     'assets/audio/2024/3/ccc333': new Uint8Array(20),
     'assets/photos/2024/3/ddd444': strToU8('not an image at all'),
   };
+  const open = (zip: Uint8Array) => {
+    const archive = readDaylioArchive(zip);
+    const c = convertDaylio(archive);
+    return { c, read: daylioPhotoReader(archive, c.photoMembers) };
+  };
+  const membersOf = (c: ReturnType<typeof convert>) => entriesOf(c)[0].photos.map((p: any) => p.daylio_member);
 
-  it('embeds readable photos and counts what is left out', () => {
-    const c = convert(daylioBackupJson({ assets, dayEntries: [daylioEntry({ assets: [1, 2, 3, 4, 5, 77] })] }), files);
+  it('matches photos, holds no bytes until they are read, and counts what is left out', () => {
+    const { c, read } = open(
+      buildDaylioArchive(daylioBackupJson({ assets, dayEntries: [daylioEntry({ assets: [1, 2, 3, 4, 5, 77] })] }), {
+        files,
+      })
+    );
     const photos = entriesOf(c)[0].photos;
-    expect(photos.map((p: any) => p.ext)).toEqual(['jpg', 'png']);
-    expect(Buffer.from(photos[0].data_base64, 'base64').equals(Buffer.from(JPEG_BYTES))).toBe(true);
-    expect(c.summary.photos).toBe(2);
-    // audio 3; unreadable file 4, missing file 5, unknown asset 77
-    expect(c.summary.skipped).toEqual({ audioNotes: 1, missingPhotos: 3, unreadableEntries: 0 });
+    expect(photos).toEqual([
+      { media_type: 'image', file_path: '', daylio_member: 'assets/photos/2024/3/aaa111' },
+      { media_type: 'image', file_path: '', daylio_member: 'assets/photos/2024/3/bbb222' },
+      { media_type: 'image', file_path: '', daylio_member: 'assets/photos/2024/3/ddd444' },
+    ]);
+    expect(c.summary.photos).toBe(3);
+    // audio 3; missing file 5, unknown asset 77
+    expect(c.summary.skipped).toEqual({ audioNotes: 1, missingPhotos: 2, unreadableEntries: 0 });
+    expect(unzipProbe().__inflated).toEqual(['backup.daylio']);
+
+    const jpeg = read('assets/photos/2024/3/aaa111');
+    expect(jpeg?.ext).toBe('jpg');
+    expect(Buffer.from(jpeg!.base64, 'base64').equals(Buffer.from(JPEG_BYTES))).toBe(true);
+    expect(read('assets/photos/2024/3/bbb222')?.ext).toBe('png');
+    expect(read('assets/photos/2024/3/ddd444')).toBeNull(); // not an image
+    expect(read('assets/photos/2024/3/nope')).toBeNull();
+  });
+
+  it('matches the exact file name: checksum or asset id, any case, extension ignored, never a suffix', () => {
+    const json = daylioBackupJson({
+      assets: [
+        { id: 1, type: 1, checksum: 'AbC123' },
+        { id: 2, type: 1, checksum: 'not-in-the-zip' },
+        { id: 3, type: 1, checksum: 'aaa111' },
+      ],
+      dayEntries: [daylioEntry({ assets: [1, 2, 3] })],
+    });
+    const { c } = open(
+      buildDaylioArchive(json, {
+        files: {
+          'assets/photos/2024/3/abc123.jpg': JPEG_BYTES,
+          'assets/photos/2024/3/2.png': PNG_BYTES,
+          // Neither is "aaa111": the old endsWith() match took the first.
+          'assets/photos/2024/3/xaaa111': JPEG_BYTES,
+          'assets/photos/2024/3/aaa1111': JPEG_BYTES,
+        },
+      })
+    );
+    expect(membersOf(c)).toEqual(['assets/photos/2024/3/abc123.jpg', 'assets/photos/2024/3/2.png']);
+    expect(c.summary.skipped.missingPhotos).toBe(1);
+  });
+
+  it.each([true, false])(
+    'never inflates a photo whose claimed size is over the ceiling (deflated: %s)',
+    compress => {
+      const json = daylioBackupJson({ assets, dayEntries: [daylioEntry({ assets: [1, 2] })] });
+      const zip = claimUncompressedSize(
+        buildDaylioArchive(json, { files, compress }),
+        'assets/photos/2024/3/aaa111',
+        0x7fffffff
+      );
+      const { c, read } = open(zip);
+      expect(membersOf(c)).toEqual(['assets/photos/2024/3/bbb222']);
+      expect(c.summary.skipped.missingPhotos).toBe(1);
+      expect(read('assets/photos/2024/3/aaa111')).toBeNull();
+      expect(read('assets/photos/2024/3/bbb222')?.ext).toBe('png');
+      expect(unzipProbe().__inflated).not.toContain('assets/photos/2024/3/aaa111');
+      expect(0x7fffffff).toBeGreaterThan(MAX_DAYLIO_PHOTO_BYTES);
+    }
+  );
+
+  it('inflates photos a batch at a time, not once per photo and not all up front', () => {
+    const json = daylioBackupJson({ assets, dayEntries: [daylioEntry({ assets: [1] }), daylioEntry({ day: 16, assets: [2] })] });
+    const { read } = open(buildDaylioArchive(json, { files }));
+    const passesAfterOpen = unzipProbe().__passes;
+    expect(read('assets/photos/2024/3/aaa111')?.ext).toBe('jpg');
+    expect(read('assets/photos/2024/3/bbb222')?.ext).toBe('png');
+    expect(unzipProbe().__passes - passesAfterOpen).toBe(1);
+    // Only the photos in use were inflated, never the audio or the unused photo.
+    expect(unzipProbe().__inflated.sort()).toEqual(
+      ['assets/photos/2024/3/aaa111', 'assets/photos/2024/3/bbb222', 'backup.daylio'].sort()
+    );
   });
 
   it.each([
