@@ -14,7 +14,7 @@ import {
     MAX_POINTS,
     type MoodSeriesPoint,
 } from './transforms/moodSeries';
-import { latestEntryPerDay, type EntryDetailRow, type LatestEntry } from './transforms/latestEntry';
+import { sortedEntriesPerDay, type EntryDetailRow, type LatestEntry } from './transforms/latestEntry';
 import { formatLabel } from './transforms/weeklyMood';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { type Timeframe } from './transforms/windowHelpers';
@@ -37,7 +37,7 @@ export type MoodTrendData = {
      */
     labels: string[];
     /** Local day -> that day's most recent entry, for the scrub readout. */
-    latestEntries: Map<string, LatestEntry>;
+    entries: Map<string, LatestEntry[]>;
     /** Days in the moving-average window (0 = no overlay). */
     maWindow: number;
     loading: boolean;
@@ -45,7 +45,7 @@ export type MoodTrendData = {
     isEmpty: boolean;
 };
 
-const EMPTY_ENTRIES: Map<string, LatestEntry> = new Map();
+const EMPTY_ENTRIES: Map<string, LatestEntry[]> = new Map();
 
 export const useMoodTrendData = (): MoodTrendData => {
     const db = useSQLiteContext();
@@ -110,7 +110,7 @@ export const useMoodTrendData = (): MoodTrendData => {
             setLoaded({
                 series,
                 overlay: maFull ? keep.map((i) => maFull[i].value) : null,
-                latestEntries: latestEntryPerDay(detailRows),
+                entries: sortedEntriesPerDay(detailRows),
                 maWindow: window,
             });
         } catch (error) {
@@ -137,7 +137,7 @@ export const useMoodTrendData = (): MoodTrendData => {
             series: [],
             overlay: null,
             labels: [],
-            latestEntries: EMPTY_ENTRIES,
+            entries: EMPTY_ENTRIES,
             maWindow: 0,
             loading,
             isEmpty: !loading,

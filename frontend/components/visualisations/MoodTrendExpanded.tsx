@@ -153,6 +153,7 @@ export const MoodTrendExpanded: React.FC<MoodTrendExpandedProps> = ({
                         testID="mood-trend-chart-expanded"
                         series={data.series}
                         overlay={data.overlay}
+                        showMinMax
                         height={chartHeight}
                         domain={scale}
                         xLabelFor={xLabelFor}
@@ -164,7 +165,7 @@ export const MoodTrendExpanded: React.FC<MoodTrendExpandedProps> = ({
                             <MoodTrendReadout
                                 day={point.date}
                                 average={point.value}
-                                entry={data.latestEntries.get(point.date) ?? null}
+                                entries={data.entries.get(point.date) ?? null}
                                 variant="panel"
                             />
                         ) : (

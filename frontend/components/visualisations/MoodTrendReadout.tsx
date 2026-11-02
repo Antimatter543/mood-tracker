@@ -19,11 +19,15 @@ export type MoodTrendReadoutProps = {
     day: string;
     /** That day's average mood, or null when nothing was logged. */
     average: number | null;
-    /** The day's most recent entry, or null when there is none. */
-    entry: LatestEntry | null;
+    /** The day's entries, newest first, or null when there are none. */
+    entries: LatestEntry[] | null;
     /** `'panel'` gets more room to breathe than the floating `'bubble'`. */
     variant?: 'bubble' | 'panel';
 };
+
+/** Entries listed before collapsing the rest into "+N more". The floating bubble is smaller. */
+export const BUBBLE_MAX_ENTRIES = 3;
+export const PANEL_MAX_ENTRIES = 5;
 
 /** Averages are shown to 1 dp — the same precision the daily aggregate stores. */
 const formatMood = (mood: number): string => mood.toFixed(1);
@@ -31,7 +35,7 @@ const formatMood = (mood: number): string => mood.toFixed(1);
 export const MoodTrendReadout: React.FC<MoodTrendReadoutProps> = ({
     day,
     average,
-    entry,
+    entries,
     variant = 'bubble',
 }) => {
     const colors = useThemeColors();
@@ -80,6 +84,12 @@ export const MoodTrendReadout: React.FC<MoodTrendReadoutProps> = ({
         [colors, panel]
     );
 
+    // Newest first (see sortedEntriesPerDay). A busy day must not grow the
+    // readout without bound, so show the newest few and count the rest.
+    const cap = panel ? PANEL_MAX_ENTRIES : BUBBLE_MAX_ENTRIES;
+    const visible = entries ? entries.slice(0, cap) : [];
+    const hidden = entries ? entries.length - visible.length : 0;
+
     return (
         <View style={styles.wrap} testID="mood-trend-readout">
             <Text style={styles.day}>{formatReadoutDay(day, dateFormatPref)}</Text>
@@ -93,8 +103,10 @@ export const MoodTrendReadout: React.FC<MoodTrendReadoutProps> = ({
                 <Text style={styles.average}>Avg mood {formatMood(average)}</Text>
             )}
 
-            {entry && (
-                <>
+            {visible.map((entry, index) => (
+                // Index key: the list is derived, never reordered in place, and two
+                // entries can share a minute, so time/mood is not unique.
+                <React.Fragment key={index}>
                     <View style={styles.entryRow}>
                         <View
                             style={[
@@ -117,8 +129,9 @@ export const MoodTrendReadout: React.FC<MoodTrendReadoutProps> = ({
                             {entry.note}
                         </Text>
                     )}
-                </>
-            )}
+                </React.Fragment>
+            ))}
+            {hidden > 0 && <Text style={styles.muted}>+{hidden} more</Text>}
         </View>
     );
 };

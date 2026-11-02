@@ -116,11 +116,11 @@ const MoodTrendChart = () => {
         <MoodTrendReadout
           day={point.date}
           average={point.value}
-          entry={data.latestEntries.get(point.date) ?? null}
+          entries={data.entries.get(point.date) ?? null}
         />
       );
     },
-    [data.series, data.latestEntries],
+    [data.series, data.entries],
   );
 
   // A custom range has no period NAME — calling a user-picked Aug 15 – Sep 13

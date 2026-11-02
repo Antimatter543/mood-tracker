@@ -60,6 +60,10 @@ export type MoodLinePoint = {
     date: string;
     /** Average mood, or null for a day with no entry (drawn as a dashed gap). */
     value: number | null;
+    /** Lowest mood that day. Only read when `showMinMax` is on. */
+    min?: number | null;
+    /** Highest mood that day. Only read when `showMinMax` is on. */
+    max?: number | null;
 };
 
 export type MoodLineChartProps = {
@@ -70,6 +74,13 @@ export type MoodLineChartProps = {
      * `series`. Drawn dashed on top so the trend reads over the raw signal.
      */
     overlay?: readonly (number | null)[] | null;
+    /**
+     * Draw each day's lowest and highest mood as faint dashed lines. The dots
+     * appear only on days where they differ (a single-entry day has no spread,
+     * so its min/max would just sit under the average dot). Off on the small
+     * card, on in the expanded view.
+     */
+    showMinMax?: boolean;
     /** Plot height in px (excludes the x-label row). */
     height?: number;
     /** `'fixed'` = always 0..10 (comparable); `'fit'` = zoom to the data. */
@@ -135,6 +146,12 @@ const GAP_STROKE_OPACITY = 0.7;
 const OVERLAY_DASH = '7 5';
 const OVERLAY_WIDTH = 2;
 const OVERLAY_OPACITY = 0.6;
+/** Daily min/max: thinner and fainter than the average line, in theme text colour. */
+const MINMAX_R = 2.5;
+const MINMAX_LINE_WIDTH = 1.5;
+const MINMAX_LINE_OPACITY = 0.55;
+const MINMAX_DOT_OPACITY = 0.9;
+const MINMAX_DASH = '3 4';
 const GRID_OPACITY = 0.4;
 const GRID_LABEL_SIZE = 10;
 
@@ -162,6 +179,7 @@ const LINE_GRADIENT_ID = 'moodLineStroke';
 export const MoodLineChart: React.FC<MoodLineChartProps> = ({
     series,
     overlay = null,
+    showMinMax = false,
     height = 240,
     domain = 'fixed',
     xLabelFor,
@@ -183,7 +201,19 @@ export const MoodLineChart: React.FC<MoodLineChartProps> = ({
     const lingerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const values = useMemo(() => series.map((p) => p.value), [series]);
-    const activeDomain = useMemo(() => resolveDomain(values, domain), [values, domain]);
+    const min = useMemo(
+        () => (showMinMax ? series.map((p) => p.min ?? null) : null),
+        [series, showMinMax]
+    );
+    const max = useMemo(
+        () => (showMinMax ? series.map((p) => p.max ?? null) : null),
+        [series, showMinMax]
+    );
+    // `fit` must zoom to the extremes too, or min/max fall outside the plot.
+    const activeDomain = useMemo(
+        () => resolveDomain(min && max ? [...values, ...min, ...max] : values, domain),
+        [values, min, max, domain]
+    );
 
     const dims: ChartDims = useMemo(
         () => ({
@@ -208,6 +238,26 @@ export const MoodLineChart: React.FC<MoodLineChartProps> = ({
         () => buildChartGeometry(values, dims, activeDomain, { areaSpansGaps: true }),
         [values, dims, activeDomain]
     );
+    const geoMin = useMemo(
+        () => (min ? buildChartGeometry(min, dims, activeDomain) : null),
+        [min, dims, activeDomain]
+    );
+    const geoMax = useMemo(
+        () => (max ? buildChartGeometry(max, dims, activeDomain) : null),
+        [max, dims, activeDomain]
+    );
+
+    const extremes = useMemo(
+        () =>
+            geoMin && geoMax
+                ? [
+                      { kind: 'min', geo: geoMin },
+                      { kind: 'max', geo: geoMax },
+                  ]
+                : [],
+        [geoMin, geoMax]
+    );
+
     const gridLines = useMemo(
         () => buildGridLines(activeDomain, dims),
         [activeDomain, dims]
@@ -459,6 +509,27 @@ export const MoodLineChart: React.FC<MoodLineChartProps> = ({
                                 />
                             ))}
 
+                            {/* Daily min / max: faint dashed lines UNDER the average. A
+                                one-entry day has min == max == its mood, so the line
+                                runs through it unbroken (the extremes are real values,
+                                not missing ones); only an unlogged day breaks it. */}
+                            {extremes.map(({ kind, geo: g }) =>
+                                g.linePath ? (
+                                    <Path
+                                        key={`${kind}line`}
+                                        testID={`${testID}-${kind}line`}
+                                        d={g.linePath}
+                                        stroke={colors.textSecondary}
+                                        strokeOpacity={MINMAX_LINE_OPACITY}
+                                        strokeWidth={MINMAX_LINE_WIDTH}
+                                        strokeDasharray={MINMAX_DASH}
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        fill="none"
+                                    />
+                                ) : null
+                            )}
+
                             {geo.linePath ? (
                                 <>
                                     {/* Glow first, so the crisp line sits on top of it. */}
@@ -497,6 +568,27 @@ export const MoodLineChart: React.FC<MoodLineChartProps> = ({
                                     fill="none"
                                 />
                             ) : null}
+
+                            {/* Min / max dots only on days with a real spread; on a
+                                day where they coincide they would hide under the
+                                average dot and just add noise. */}
+                            {extremes.map(({ kind, geo: g }) =>
+                                g.realPoints
+                                    .filter((p) => series[p.index].min !== series[p.index].max)
+                                    .map((p) => (
+                                        <Circle
+                                            key={`dot${kind}-${p.index}`}
+                                            testID={`${testID}-dot${kind}`}
+                                            cx={p.x}
+                                            cy={p.y}
+                                            r={MINMAX_R}
+                                            fill={colors.cardBackground}
+                                            stroke={colors.textSecondary}
+                                            strokeWidth={1.5}
+                                            opacity={MINMAX_DOT_OPACITY}
+                                        />
+                                    ))
+                            )}
 
                             {/* Real points only. A day with no entry gets NO dot —
                                 the gap is the information. */}
