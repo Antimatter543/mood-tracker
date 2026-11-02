@@ -8,12 +8,14 @@ on:
     paths:
       - 'frontend/**'
       - '.github/workflows/pr-checks.yml'
+  # Manual run on any ref. `scripts/release.sh` needs a green run on the exact tree it releases.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number }}
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

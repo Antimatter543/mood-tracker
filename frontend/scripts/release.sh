@@ -36,13 +36,39 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 # 1. Quality gates BEFORE we cut a version.
-# --runInBand: under parallel workers, reanimated's worker-order poisoning makes
-# a handful of DBViewer suites time out FLAKILY (they pass serially — verified
-# 2026-07-17 when the flake aborted the v2.6.0 cut). A release gate must be
-# deterministic, so we trade ~1min of wall clock for zero false aborts.
-echo "==> typecheck + tests"
+# tsc runs here. The full jest suite runs on CI, not on this machine (it pegs the
+# laptop, portfolio rule 2026-10-01): the release needs a green `PR checks` run
+# (tsc + full jest, TZ pinned) on a commit whose TREE is identical to HEAD's.
+# Tree, not commit: a squash-merge creates a new commit, but squash-merging an
+# up-to-date PR yields exactly the PR head's tree, so merge -> release needs no
+# extra run. If nothing matches, dispatch the workflow on main and rerun.
+# LOCAL_JEST=1 runs jest here instead. Keep --runInBand for that: parallel
+# workers make a few DBViewer suites time out flakily (seen on the v2.6.0 cut,
+# 2026-07-17).
+echo "==> typecheck"
 npx tsc --noEmit
-npx jest --silent --runInBand
+if [ "${LOCAL_JEST:-}" = "1" ]; then
+  echo "==> tests (local)"
+  npx jest --silent --runInBand
+else
+  echo "==> tests: looking for a green PR-checks run on this exact tree"
+  HEAD_TREE="$(git rev-parse 'HEAD^{tree}')"
+  GREEN=""
+  # 40 recent green runs is weeks of PR traffic; an older match is stale anyway.
+  for sha in $(gh run list -R "$REPO" --workflow pr-checks.yml --status success --limit 40 \
+                 --json headSha --jq '.[].headSha' | awk '!seen[$0]++'); do
+    # Fork PR commits are readable through the parent repo's API, so no fetch needed.
+    tree="$(gh api "repos/$REPO/git/commits/$sha" --jq .tree.sha 2>/dev/null || true)"
+    if [ "$tree" = "$HEAD_TREE" ]; then GREEN="$sha"; break; fi
+  done
+  if [ -z "$GREEN" ]; then
+    echo "ERROR: no green PR-checks run has HEAD's tree ($HEAD_TREE)." >&2
+    echo "  Run it on CI: gh workflow run pr-checks.yml -R $REPO --ref main" >&2
+    echo "  then rerun this once it's green (or LOCAL_JEST=1 to run jest here)." >&2
+    exit 1
+  fi
+  echo "    green CI run on ${GREEN:0:7} has the identical tree"
+fi
 
 # 2. Bump version (writes app.json version + derived versionCode/buildNumber).
 VERSION="$(node scripts/bump-version.js "$BUMP")"

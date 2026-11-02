@@ -3,6 +3,22 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.16.0] - 2026-11-02
+
+### Added
+- **Encrypted backups:** lock backups with a password.
+- **Import from Daylio**, photos included.
+- **Mood chart:** the expanded chart shows each day's low and high, and every entry.
+- **Top 3 activities** on Insights.
+- **Floating Back and Save** on long entries.
+
+### Fixed
+- **Tapping a reminder** opens a new entry, even from a closed app.
+- **Layout** on phones with a notch or on-screen nav buttons.
+- **Notification icon** in the status bar.
+
+Thanks to makusuko and JamesCullum for these!
+
 ## [2.15.0] - 2026-09-28
 
 ### Changed
