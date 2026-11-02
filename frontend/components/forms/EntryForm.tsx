@@ -5,6 +5,9 @@ import {
     Text,
     StyleSheet,
     Pressable,
+    LayoutChangeEvent,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
     TextInput,
     Image,
     ScrollView,
@@ -19,7 +22,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Feather from '@expo/vector-icons/Feather';
-import { VisibilitySensor } from '@futurejj/react-native-visibility-sensor';
 
 import { ActivitySelector } from './ActivitySelector';
 import MoodSelector from './MoodSelector';
@@ -31,6 +33,13 @@ import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
 import { useSingleFlight } from '@/hooks/useSingleFlight';
 import { useEntryDraft, EntryDraft } from './hooks/useEntryDraft';
 import { selectPhotosToAdd } from './photoSelection';
+import {
+    FLOATING_ACTION_SIZE,
+    floatingActionBottom,
+    floatingActionOffsets,
+    isRowFullyVisible,
+    RowLayout,
+} from './floatingActions';
 
 const MAX_PHOTOS = 5;
 
@@ -208,7 +217,6 @@ const MoodStep = ({
     value,
     onChange,
     onContinue,
-    onCancel,
     date,
     onDateChange,
     moodError,
@@ -216,7 +224,6 @@ const MoodStep = ({
     value: number;
     onChange: (mood: number) => void;
     onContinue: () => void;
-    onCancel: () => void;
     date: Date;
     onDateChange: (date: Date) => void;
     moodError?: string;
@@ -245,27 +252,16 @@ const MoodStep = ({
                 </Text>
             ) : null}
 
-            <View style={styles.buttonContainer}>
-                <Pressable
-                    style={[styles.navigationButton, styles.cancelButton]}
-                    onPress={onCancel}
-                    accessibilityRole="button"
-                    accessibilityLabel="Cancel editing or adding the entry"
-                >
-                    <Text style={styles.buttonText}>Cancel</Text>
-                </Pressable>
-
-                <Pressable
-                    style={[styles.navigationButton, styles.continueButton, !!moodError && styles.continueButtonDisabled]}
-                    onPress={onContinue}
-                    accessibilityState={{ disabled: !!moodError }}
-                    disabled={!!moodError}
-                    accessibilityRole="button"
-                    accessibilityLabel="Continue to the details step"
-                >
-                    <Text style={styles.continueButtonText}>Continue</Text>
-                </Pressable>
-            </View>
+            <Pressable
+                style={[styles.continueButton, !!moodError && styles.continueButtonDisabled]}
+                onPress={onContinue}
+                accessibilityState={{ disabled: !!moodError }}
+                disabled={!!moodError}
+                accessibilityRole="button"
+                accessibilityLabel="Continue to the details step"
+            >
+                <Text style={styles.continueButtonText}>Continue</Text>
+            </Pressable>
         </>
     );
 };
@@ -281,7 +277,7 @@ const DetailsStep = ({
     onRemovePhoto,
     onBack,
     onSubmit,
-    onButtonsVisibleChange,
+    onButtonRowLayout,
     submitDisabled,
     submitBusy,
     scrollableRef,
@@ -297,7 +293,8 @@ const DetailsStep = ({
     onRemovePhoto: (uri: string) => void;
     onBack: () => void;
     onSubmit: () => void;
-    onButtonsVisibleChange: (visible: boolean) => void;
+    /** Where the Back + Submit row sits in the scroll content (drives the floating pair). */
+    onButtonRowLayout?: (event: LayoutChangeEvent) => void;
     submitDisabled?: boolean;
     /** In-flight save: the button is disabled AND announced busy. */
     submitBusy?: boolean;
@@ -333,28 +330,30 @@ const DetailsStep = ({
                 onRemove={onRemovePhoto}
             />
 
-            <VisibilitySensor onChange={onButtonsVisibleChange}>
-                <View style={styles.buttonContainer}>
-                    <Pressable
-                        style={[styles.navigationButton, styles.backButton]}
-                        onPress={onBack}
-                    >
-                        <Text style={styles.buttonText}>Back</Text>
-                    </Pressable>
-                    <Pressable
-                        style={[
-                            styles.navigationButton,
-                            styles.submitButton,
-                            submitDisabled && styles.continueButtonDisabled,
-                        ]}
-                        onPress={onSubmit}
-                        disabled={submitDisabled}
-                        accessibilityState={{ disabled: !!submitDisabled, busy: !!submitBusy }}
-                    >
-                        <Text style={styles.buttonText}>Submit</Text>
-                    </Pressable>
-                </View>
-            </VisibilitySensor>
+            <View
+                testID="entry-form-button-row"
+                style={styles.buttonContainer}
+                onLayout={onButtonRowLayout}
+            >
+                <Pressable
+                    style={[styles.navigationButton, styles.backButton]}
+                    onPress={onBack}
+                >
+                    <Text style={styles.buttonText}>Back</Text>
+                </Pressable>
+                <Pressable
+                    style={[
+                        styles.navigationButton,
+                        styles.submitButton,
+                        submitDisabled && styles.continueButtonDisabled,
+                    ]}
+                    onPress={onSubmit}
+                    disabled={submitDisabled}
+                    accessibilityState={{ disabled: !!submitDisabled, busy: !!submitBusy }}
+                >
+                    <Text style={styles.buttonText}>Submit</Text>
+                </Pressable>
+            </View>
         </>
     );
 };
@@ -495,11 +494,71 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     // the keyboard.
     const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
-    // Track whether the bottom buttons (Back + Submit) are visible in the viewport
-    // so the floating FAB can appear when they scroll out of view. VisibilitySensor
-    // is used instead of onLayout + scroll position because the latter is a pain
-    // to get right with the keyboard padding changing the scrollable height.
+    // Is the inline Back + Submit row fully on screen? When it is not (a long
+    // entry pushed it below the fold), a floating Back / Save pair stands in for
+    // it. Worked out from the row's onLayout + the ScrollView's scroll offset,
+    // viewport height and the keyboard height (see floatingActions.ts): no
+    // polling, and it only does work while the details step is mounted, since
+    // that is the only step that reports a row layout. The metrics live in refs
+    // so scrolling re-renders nothing; only a flip of the boolean does.
     const [buttonsVisible, setButtonsVisible] = useState(true);
+    const rowLayoutRef = useRef<RowLayout | null>(null);
+    const scrollYRef = useRef(0);
+    const viewportHeightRef = useRef(0);
+    const keyboardHeightRef = useRef(keyboardHeight);
+    keyboardHeightRef.current = keyboardHeight;
+
+    const recomputeButtonsVisible = useCallback(() => {
+        setButtonsVisible(
+            isRowFullyVisible({
+                row: rowLayoutRef.current,
+                scrollY: scrollYRef.current,
+                viewportHeight: viewportHeightRef.current,
+                keyboardHeight: keyboardHeightRef.current,
+            })
+        );
+    }, []);
+
+    const handleScroll = useCallback(
+        (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+            const { contentOffset, layoutMeasurement } = event.nativeEvent;
+            scrollYRef.current = contentOffset.y;
+            viewportHeightRef.current = layoutMeasurement.height;
+            if (rowLayoutRef.current) recomputeButtonsVisible();
+        },
+        [recomputeButtonsVisible]
+    );
+
+    const handleViewportLayout = useCallback(
+        (event: LayoutChangeEvent) => {
+            viewportHeightRef.current = event.nativeEvent.layout.height;
+            recomputeButtonsVisible();
+        },
+        [recomputeButtonsVisible]
+    );
+
+    const handleButtonRowLayout = useCallback(
+        (event: LayoutChangeEvent) => {
+            const { y, height } = event.nativeEvent.layout;
+            rowLayoutRef.current = { y, height };
+            recomputeButtonsVisible();
+        },
+        [recomputeButtonsVisible]
+    );
+
+    // The keyboard changes the visible band without a scroll or layout event.
+    useEffect(() => {
+        recomputeButtonsVisible();
+    }, [keyboardHeight, recomputeButtonsVisible]);
+
+    // Leaving the details step unmounts the row: forget its stale position so
+    // coming back starts from "visible" until the row lays out again.
+    useEffect(() => {
+        if (currentStep !== 2) {
+            rowLayoutRef.current = null;
+            setButtonsVisible(true);
+        }
+    }, [currentStep]);
 
     const { settings } = useSettings();
     // `fab_position` honors the user's left/right preference. The settings
@@ -521,6 +580,9 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     // one; the flag releases on settle, so a FAILED save re-enables the button
     // and the user can retry.
     const { inFlight: isSubmitting, run: handleSubmit } = useSingleFlight(doSubmit);
+    const floatingOffsets = floatingActionOffsets(fabPosition);
+    const floatingBottom = floatingActionBottom(bottomInset, keyboardHeight);
+    const submitDisabled = !isValid || isSubmitting;
 
     // Scroll the bottom of the form (Notes + photos + Submit) into view above
     // the keyboard. Notes is the last input, so scrollToEnd reliably brings it
@@ -559,13 +621,15 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                 ]}
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator
+                onLayout={handleViewportLayout}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
             >
                 {currentStep === 1 ? (
                     <MoodStep
                         value={draft.mood}
                         onChange={setMood}
                         onContinue={() => setCurrentStep(2)}
-                        onCancel={_onCancel}
                         date={draft.date}
                         onDateChange={setDate}
                         moodError={validation.errors.mood}
@@ -582,8 +646,8 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                         onRemovePhoto={removePhoto}
                         onBack={() => setCurrentStep(1)}
                         onSubmit={handleSubmit}
-                        onButtonsVisibleChange={(visible) => setButtonsVisible(visible)}
-                        submitDisabled={!isValid || isSubmitting}
+                        onButtonRowLayout={handleButtonRowLayout}
+                        submitDisabled={submitDisabled}
                         submitBusy={isSubmitting}
                         scrollableRef={scrollRef}
                     />
@@ -593,21 +657,38 @@ export const EntryForm: React.FC<EntryFormProps> = ({
             {!buttonsVisible && currentStep === 2 && (
                 <>
                     <Pressable
-                        style={[styles.floatingButton, { backgroundColor: colors.secondaryBackground, bottom: bottomInset + 18, [fabPosition]: 16 }]}
+                        testID="entry-form-floating-back"
+                        style={[
+                            styles.floatingButton,
+                            styles.floatingBackButton,
+                            { bottom: floatingBottom },
+                            floatingOffsets.back,
+                        ]}
                         onPress={() => setCurrentStep(1)}
                         accessibilityRole="button"
-                        accessibilityLabel="Go back to the mood selection"
+                        accessibilityLabel="Back to mood"
                     >
-                        <Feather name="chevron-left" size={30} color={colors.text} />
+                        <Feather name="chevron-left" size={28} color={colors.text} />
                     </Pressable>
 
+                    {/* Same guarded handler + disabled state as the inline Submit:
+                        useSingleFlight's ref gate makes a double-tap ONE write. */}
                     <Pressable
-                        style={[styles.floatingButton, styles.submitButton, { bottom: bottomInset + 18, [fabPosition]: 70 }]}
+                        testID="entry-form-floating-save"
+                        style={[
+                            styles.floatingButton,
+                            styles.submitButton,
+                            { bottom: floatingBottom },
+                            floatingOffsets.save,
+                            submitDisabled && styles.continueButtonDisabled,
+                        ]}
                         onPress={handleSubmit}
+                        disabled={submitDisabled}
                         accessibilityRole="button"
-                        accessibilityLabel="Submit the mood entry"
+                        accessibilityLabel="Save entry"
+                        accessibilityState={{ disabled: submitDisabled, busy: isSubmitting }}
                     >
-                        <Feather name="chevron-right" size={30} color={colors.text} />
+                        <Feather name="check" size={26} color={colors.text} />
                     </Pressable>
                 </>
             )}
@@ -683,12 +764,13 @@ const useThemedStyles = (colors: ThemeColors) =>
             marginTop: 20,
         },
         floatingButton: {
-            // `bottom` is set at the call site: it needs the live bottom inset.
+            // `bottom` and the left/right offset are set at the call site (live
+            // insets/keyboard + the fab_position side, see floatingActions.ts).
             position: 'absolute',
             zIndex: 1000,
-            width: 48,
-            height: 48,
-            borderRadius: 24,
+            width: FLOATING_ACTION_SIZE,
+            height: FLOATING_ACTION_SIZE,
+            borderRadius: FLOATING_ACTION_SIZE / 2,
             justifyContent: 'center',
             alignItems: 'center',
             // Theme-aware shadow for visual depth.
@@ -697,6 +779,9 @@ const useThemedStyles = (colors: ThemeColors) =>
             shadowOpacity: colors.elevation.shadowOpacity + 0.05,
             shadowRadius: colors.elevation.shadowRadius,
             elevation: colors.elevation.elevation + 2,
+        },
+        floatingBackButton: {
+            backgroundColor: colors.secondaryBackground,
         },
         navigationButton: {
             flex: 1,
@@ -716,11 +801,13 @@ const useThemedStyles = (colors: ThemeColors) =>
             fontSize: 16,
             fontWeight: '600',
         },
-        cancelButton: {
-            backgroundColor: colors.overlays.tag,
-        },
         continueButton: {
             backgroundColor: colors.accent,
+            margin: 20,
+            padding: 15,
+            borderRadius: 25,
+            alignItems: 'center',
+            width: '100%',
         },
         continueButtonDisabled: {
             opacity: 0.5,
