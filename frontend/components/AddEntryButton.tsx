@@ -14,9 +14,8 @@ import { addMoodEntry } from '@/databases/database';
 import { useSettings } from '@/context/SettingsContext';
 import * as SQLite from 'expo-sqlite';
 import { EntryFormData, EntryFormModal } from './forms/EntryForm';
-import { addNotificationResponseReceivedListener, dismissNotifications } from '@/lib/notifications';
-import { useFocusEffect } from 'expo-router/build/react-navigation';
-
+import { subscribeToReminderTaps, dismissNotifications } from '@/lib/notifications';
+import { useFocusEffect } from 'expo-router';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -33,14 +32,11 @@ export function AddEntryButton() {
     const { refetchEntries } = useDataContext();
     const { settings } = useSettings();
 
-    // Add handler for notification responses (taps).
-    // When the user taps a notification, open the entry form.
+    // Tapping one of our reminder notifications (warm, or the tap that
+    // launched the app) opens the entry form. Setting an already-true flag is
+    // a no-op, so a tap while the form is open does not double-open it.
     useFocusEffect(
-        useCallback(() => {
-            return addNotificationResponseReceivedListener((_) => {
-                setModalVisible(true);
-            });
-        }, [])
+        useCallback(() => subscribeToReminderTaps(() => setModalVisible(true)), [])
     );
 
     // `fab_position` honors the user's left/right preference. The settings

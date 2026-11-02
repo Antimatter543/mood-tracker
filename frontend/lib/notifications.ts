@@ -43,17 +43,6 @@ import Constants, { ExecutionEnvironment } from 'expo-constants';
 import type * as NotificationsModule from 'expo-notifications';
 
 /**
- * A lightweight object representing a triggered notification response.
- */
-export interface Notification {
-  identifier: string;
-  actionIdentifier: string;
-  userText: string | undefined;
-  title: string | null;
-  body: string | null;
-}
-
-/**
  * True in Expo Go on Android, where expo-notifications' native module is
  * STRIPPED (SDK 53+). `Constants.executionEnvironment === 'storeClient'`
  * identifies the Expo Go client; standalone/bare (real dev-client + release
@@ -160,34 +149,57 @@ export async function ensureAndroidChannel(): Promise<void> {
   });
 }
 
+/** What a handler learns about a tap on one of OUR reminder notifications. */
+export interface ReminderTap {
+  identifier: string;
+  title: string | null;
+  body: string | null;
+}
+
+// Key of the last tap we handled. Reminder identifiers are stable (one per
+// reminder, reused daily), so the identifier alone can't tell two taps apart;
+// `notification.date` (delivery time) makes the key unique per firing.
+let lastHandledTapKey: string | null = null;
+
 /**
- * Register a listener that is called when the user interacts with a notification.
+ * Subscribe to taps on SoulSync reminder notifications. Covers both:
+ *  - warm taps (app running/backgrounded) via the response listener, and
+ *  - the tap that LAUNCHED the app from a killed state, via the last stored
+ *    response (read once at subscribe time).
+ * Only the default tap action on a notification we own is delivered; each
+ * response is delivered at most once, then cleared so it can't re-fire on a
+ * later mount/foreground. Delivered notifications are dismissed on a tap.
  */
-export function addNotificationResponseReceivedListener(handler: (notification: Notification) => void): () => void {
+export function subscribeToReminderTaps(handler: (tap: ReminderTap) => void): () => void {
   const Notifications = getNotifications();
   if (!Notifications) return () => {};
 
-  const subscription = Notifications.addNotificationResponseReceivedListener(response => {
-    // Build wrapped notification object with the properties we care about and
-    // pass that to the handler function.
-    const request = response.notification.request;
-    handler({identifier: request.identifier,actionIdentifier: response.actionIdentifier,
-      userText: response.userText, title: request.content.title, body: request.content.body});
+  const handle = (response: NotificationsModule.NotificationResponse) => {
+    const { identifier, content } = response.notification.request;
+    if (
+      response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER ||
+      !isManagedNotificationIdentifier(identifier)
+    ) {
+      return;
+    }
+    const key = `${identifier}@${response.notification.date}`;
+    if (key === lastHandledTapKey) return;
+    lastHandledTapKey = key;
 
-    // Dismiss all pending notifications when any one is tapped.
-    Notifications.dismissAllNotificationsAsync();
-  });
+    Notifications.clearLastNotificationResponse();
+    dismissNotifications();
+    handler({ identifier, title: content.title, body: content.body });
+  };
+
+  const subscription = Notifications.addNotificationResponseReceivedListener(handle);
+  const coldStart = Notifications.getLastNotificationResponse();
+  if (coldStart) handle(coldStart);
   return () => subscription.remove();
 }
 
-/**
- * Dismiss all pending notifications.
- */
-export function dismissNotifications() {
-  const Notifications = getNotifications();
-  if (!Notifications) return;
-
-  Notifications.dismissAllNotificationsAsync();
+/** Dismiss every notification of ours still showing in the tray. */
+export function dismissNotifications(): void {
+  void getNotifications()?.dismissAllNotificationsAsync();
 }
 
 // ─── Permission ───────────────────────────────────────────────────────────────
