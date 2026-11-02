@@ -14,6 +14,7 @@ import { withWriteLock, withWriteTransaction } from '@/databases/writeTransactio
 import {
   BackupDecryptionError,
   EncryptedBackupEnvelope,
+  KdfHeader,
   assertSupportedEnvelope,
   decryptBackup,
   deriveBackupKey,
@@ -21,6 +22,7 @@ import {
   isEncryptedBackup,
   sameKdf,
 } from '@/lib/backupCrypto';
+import { exceedsCompatibility } from '@/lib/backupKdfProfiles';
 import { readBackupKeyState } from '@/lib/backupKeyStore';
 import { daylioImportMessage, isZipHeader, readDaylioFile } from '@/databases/daylio-import';
 import { DaylioFormatError, DaylioImportSummary } from '@/lib/daylioImport';
@@ -47,6 +49,12 @@ export interface ImportOptions {
    * keep encrypting new backups with it.
    */
   onPasswordAccepted?: (password: string) => void;
+  /**
+   * Asked before opening an encrypted backup whose settings are stronger
+   * than Compatibility (Security / Manual), i.e. before any key is derived
+   * for it. Resolve false to cancel. Omitted = proceed.
+   */
+  confirmStrongKdf?: (kdf: KdfHeader) => Promise<boolean>;
 }
 
 /** `DatabaseResult.code` when export stopped because the stored key is unreadable. */
@@ -77,7 +85,8 @@ export const SUPPORTED_RESTORE_SOURCES: readonly { app: string; detail: string }
 export async function openEncryptedBackup(
   envelope: EncryptedBackupEnvelope,
   requestPassword?: RequestBackupPassword,
-  onPasswordAccepted?: (password: string) => void
+  onPasswordAccepted?: (password: string) => void,
+  confirmStrongKdf?: (kdf: KdfHeader) => Promise<boolean>
 ): Promise<string | null> {
   assertSupportedEnvelope(envelope);
 
@@ -96,6 +105,12 @@ export async function openEncryptedBackup(
 
   if (!requestPassword) {
     throw new Error('This backup is encrypted and needs its password.');
+  }
+
+  // Deriving the key costs what the FILE asks for. Above Compatibility that
+  // may be more than this phone can take: say so first.
+  if (exceedsCompatibility(envelope.kdf) && confirmStrongKdf && !(await confirmStrongKdf(envelope.kdf))) {
+    return null;
   }
 
   let wrongPassword = false;
@@ -374,7 +389,12 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
       // (silently with this device's stored key, else by asking for the
       // password) and continue with the decrypted backup.
       if (isEncryptedBackup(importData)) {
-        const decrypted = await openEncryptedBackup(importData, options.requestPassword, options.onPasswordAccepted);
+        const decrypted = await openEncryptedBackup(
+          importData,
+          options.requestPassword,
+          options.onPasswordAccepted,
+          options.confirmStrongKdf
+        );
         if (decrypted === null) {
           return {
             success: false,

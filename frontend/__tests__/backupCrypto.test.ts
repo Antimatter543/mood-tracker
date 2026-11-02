@@ -264,6 +264,26 @@ describe('backup key store', () => {
     await expect(decryptBackup(oldBackup, second)).rejects.toBeInstanceOf(BackupDecryptionError);
   });
 
+  it('stores the strength mode next to the key; default Compatibility', async () => {
+    await setBackupPassword('my secret passphrase', FAST_KDF);
+    expect(await readBackupKeyState()).toMatchObject({ status: 'on', profile: 'compatibility' });
+    await setBackupPassword('my secret passphrase', FAST_KDF, 'manual');
+    expect(await readBackupKeyState()).toMatchObject({ status: 'on', profile: 'manual' });
+  });
+
+  it('a key stored before modes existed reads as Compatibility', async () => {
+    await setBackupPassword('my secret passphrase', FAST_KDF);
+    const raw = JSON.parse(SecureStoreMock.__dump().backup_encryption_key_v1);
+    delete raw.profile;
+    await SecureStore.setItemAsync('backup_encryption_key_v1', JSON.stringify(raw));
+    expect(await readBackupKeyState()).toMatchObject({ status: 'on', profile: 'compatibility' });
+  });
+
+  it('Manual without params is refused (there is nothing to calibrate)', async () => {
+    await expect(setBackupPassword('my secret passphrase', undefined, 'manual')).rejects.toThrow(/explicit parameters/);
+    expect(await isBackupEncryptionEnabled()).toBe(false);
+  });
+
   it('turning encryption off removes the key', async () => {
     await setBackupPassword('my secret passphrase', FAST_KDF);
     await clearBackupPassword();
