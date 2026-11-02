@@ -14,10 +14,12 @@ const consecutive = (avgs: number[], startDay = 1): DailyAverage[] =>
     avgs.map((avg, i) => ({
         day: `2026-01-${String(startDay + i).padStart(2, '0')}`,
         avg,
+        min: avg,
+        max: avg,
         count: 1,
     }));
 
-const D = (day: string, avg: number): DailyAverage => ({ day, avg, count: 1 });
+const D = (day: string, avg: number): DailyAverage => ({ day, avg, min: avg, max: avg, count: 1 });
 
 describe('buildMoodState — data gate', () => {
     it('returns building for empty input (never throws)', () => {
@@ -59,7 +61,7 @@ describe('buildMoodState — data gate', () => {
     it('drops non-finite avgs before the gate (NaN day ignored)', () => {
         const withBad: DailyAverage[] = [
             ...consecutive([5, 5, 5, 5]),
-            { day: '2026-01-05', avg: NaN, count: 1 },
+            { day: '2026-01-05', avg: NaN, min: NaN, max: NaN, count: 1 },
         ];
         // The NaN day is filtered, leaving only 4 valid days -> building.
         expect(buildMoodState(withBad).state).toBe('building');

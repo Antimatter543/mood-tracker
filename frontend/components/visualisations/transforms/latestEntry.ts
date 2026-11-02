@@ -24,7 +24,7 @@ export type EntryDetailRow = {
     notes: string | null;
 };
 
-/** The day's most recent entry, formatted for display. */
+/** One entry, formatted for display. */
 export type LatestEntry = {
     /** Local clock time, e.g. "2:30 pm". */
     time: string;
@@ -80,6 +80,10 @@ export const formatReadoutDay = (day: string, pref: DateFormatPref): string => {
 /**
  * Map of local day -> that day's entries.
  *
+ * Newest first, index 0 = the day's most recent entry. Ordering uses the real
+ * instant, never the formatted `time` string ("12:05 pm" sorts before "9:00 am"
+ * as text). Each day is sorted once, after bucketing.
+ *
  * Rows may arrive in any order. Rows with an unparseable date or a non-finite mood
  * are skipped rather than throwing (degenerate data must never break the chart —
  * an empty database and a half-imported one are both real code paths here).
@@ -87,8 +91,7 @@ export const formatReadoutDay = (day: string, pref: DateFormatPref): string => {
 export const sortedEntriesPerDay = (
     rows: readonly EntryDetailRow[]
 ): Map<string, LatestEntry[]> => {
-    // Track the winning instant per day so a later row can displace an earlier one.
-    const out = new Map<string, LatestEntry[]>();
+    const buckets = new Map<string, { t: number; entry: LatestEntry }[]>();
 
     for (const row of rows ?? []) {
         if (!row || typeof row.date !== 'string') continue;
@@ -97,20 +100,28 @@ export const sortedEntriesPerDay = (
         if (typeof row.mood !== 'number' || !Number.isFinite(row.mood)) continue;
 
         const day = localDateString(row.date);
-        var list = out.get(day);
+        let list = buckets.get(day);
         if (!list) {
             list = [];
-            out.set(day, list);
+            buckets.set(day, list);
         }
-
         list.push({
-            time: formatEntryTime(row.date),
-            mood: row.mood,
-            note: firstNoteLine(row.notes),
+            t,
+            entry: {
+                time: formatEntryTime(row.date),
+                mood: row.mood,
+                note: firstNoteLine(row.notes),
+            },
         });
-        // Sort the entries by time reversed: latest entry is first.
-        list.sort((a, b) => b.time.localeCompare(a.time));
     }
 
+    const out = new Map<string, LatestEntry[]>();
+    for (const [day, list] of buckets) {
+        list.sort((a, b) => b.t - a.t);
+        out.set(
+            day,
+            list.map((x) => x.entry)
+        );
+    }
     return out;
 };

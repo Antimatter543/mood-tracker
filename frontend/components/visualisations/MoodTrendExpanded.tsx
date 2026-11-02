@@ -153,6 +153,7 @@ export const MoodTrendExpanded: React.FC<MoodTrendExpandedProps> = ({
                         testID="mood-trend-chart-expanded"
                         series={data.series}
                         overlay={data.overlay}
+                        showMinMax
                         height={chartHeight}
                         domain={scale}
                         xLabelFor={xLabelFor}

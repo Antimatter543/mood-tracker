@@ -173,7 +173,7 @@ const MoodTrendChart = () => {
       {header}
       <MoodLineChart
         testID="mood-trend-chart"
-        series={data.series.map((point) => ({ ...point, min: null, max: null }))}
+        series={data.series}
         overlay={data.overlay}
         height={CARD_CHART_HEIGHT}
         domain="fixed"

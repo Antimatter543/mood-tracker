@@ -92,8 +92,8 @@ export const MOOD_POINTS_IN_RANGE = `
 //
 // The mood-trend chart plots a day's AVERAGE; when the user holds the chart on
 // a day, an average is not what they remember, the entry is. This feeds
-// `latestEntryPerDay` (transforms/latestEntry.ts), which keys the rows to LOCAL
-// days and keeps the most recent one per day for the scrub readout.
+// `sortedEntriesPerDay` (transforms/latestEntry.ts), which keys the rows to LOCAL
+// days and lists each day's entries newest-first for the scrub readout.
 //
 // `notes` (plural) is the real column name, see databases/lifecycle.ts.
 //

@@ -203,6 +203,45 @@ describe('MoodLineChart — degenerate series never throw', () => {
     });
 });
 
+describe('MoodLineChart — daily min/max', () => {
+    // day 1: spread 2..8; day 2: single entry (min == max); day 3: unlogged; day 4: spread.
+    const withExtremes: MoodLinePoint[] = [
+        { date: day(1), value: 5, min: 2, max: 8 },
+        { date: day(2), value: 6, min: 6, max: 6 },
+        { date: day(3), value: null, min: null, max: null },
+        { date: day(4), value: 7, min: 6, max: 9 },
+    ];
+
+    it('draws nothing extra unless showMinMax is on (the small card stays clean)', async () => {
+        const view = await render(<MoodLineChart series={withExtremes} />);
+        await measure(view);
+        expect(view.queryByTestId('mood-line-chart-minline')).toBeNull();
+        expect(view.queryByTestId('mood-line-chart-maxline')).toBeNull();
+        expect(view.queryAllByTestId('mood-line-chart-dotmin')).toHaveLength(0);
+    });
+
+    it('draws a min line and a max line when on', async () => {
+        const view = await render(<MoodLineChart series={withExtremes} showMinMax />);
+        await measure(view);
+        expect(view.queryByTestId('mood-line-chart-minline')).not.toBeNull();
+        expect(view.queryByTestId('mood-line-chart-maxline')).not.toBeNull();
+    });
+
+    it('dots only on days with a spread: a single-entry day and an unlogged day get none', async () => {
+        const view = await render(<MoodLineChart series={withExtremes} showMinMax />);
+        await measure(view);
+        // Days 1 and 4 only.
+        expect(view.queryAllByTestId('mood-line-chart-dotmin')).toHaveLength(2);
+        expect(view.queryAllByTestId('mood-line-chart-dotmax')).toHaveLength(2);
+    });
+
+    it('a series with no extremes data at all renders without throwing', async () => {
+        const view = await render(<MoodLineChart series={mixed} showMinMax />);
+        await measure(view);
+        expect(view.queryAllByTestId('mood-line-chart-dotmin')).toHaveLength(0);
+    });
+});
+
 describe('MoodLineChart — overlay + labels', () => {
     it('draws the moving-average overlay when one is supplied, and not otherwise', async () => {
         const withOverlay = await render(
