@@ -1,12 +1,16 @@
 /**
- * The FAB ("Add mood entry") must float ABOVE the bottom safe-area so it never
- * overlaps the Android nav buttons / gesture pill. We mock useSafeAreaInsets to
- * a 3-button-nav inset (48dp) and assert the floating button's `bottom` is the
- * base gap (24) PLUS the inset. Math, not pixels.
+ * The FAB ("Add mood entry") floats a fixed FAB_BOTTOM_GAP above the bottom of
+ * the TAB SCENE and must NOT add the bottom safe-area inset.
  *
- * jest-expo's safe-area is NOT auto-mocked and its default insets are all 0, so
- * we mock the module explicitly to return a non-zero bottom (mirrors a real
- * Pixel 3 in 3-button mode).
+ * react-navigation lays the tab scene out above the tab bar (flex column, the
+ * bar is not absolutely positioned), and the bar has already grown by the inset
+ * (lib/tabBarStyle.ts). So the scene's bottom edge already clears the Android
+ * nav buttons; the old `24 + insetBottom` floated the FAB a whole nav-bar
+ * height (48dp on 3-button nav) too high. Fixed in #20.
+ *
+ * We mock useSafeAreaInsets to a 3-button-nav inset (48dp) so a regression that
+ * re-adds the inset fails loudly. Math, not pixels. jest-expo's safe-area is NOT
+ * auto-mocked, so the module is mocked explicitly.
  */
 import { render } from '@testing-library/react-native';
 import type { RenderResult } from '@testing-library/react-native';
@@ -61,22 +65,34 @@ jest.mock('@/components/forms/EntryForm', () => ({
 }));
 
 import { AddEntryButton } from '@/components/AddEntryButton';
+import { BACK_TO_TOP_BOTTOM, PILL_HEIGHT } from '@/components/timeline/BackToTopPill';
+import { FAB_BOTTOM_GAP, FAB_SIZE, LAYOUT_FAB_CLEARANCE } from '@/styles/layout';
 
 const styleOf = (node: any) => StyleSheet.flatten(node?.props?.style) || {};
 
-describe('AddEntryButton — bottom safe-area float', () => {
-    it('floats the FAB at (24 + insetBottom) above the bottom edge', async () => {
+describe('AddEntryButton: float above the tab scene, no double-counted inset', () => {
+    it('floats the FAB FAB_BOTTOM_GAP above the scene bottom, ignoring the 48dp inset', async () => {
         const view: RenderResult = await render(<AddEntryButton />);
-        // The floating button is the round 56x56 absolute accent circle.
+        // The floating button is the round absolute accent circle.
         const fabs = view.container.queryAll((node: any) => {
             const s = styleOf(node);
-            return s.width === 56 && s.height === 56 && s.position === 'absolute';
+            return s.width === FAB_SIZE && s.height === FAB_SIZE && s.position === 'absolute';
         });
         expect(fabs).toHaveLength(1);
 
         const fab = styleOf(fabs[0]);
-        expect(fab.bottom).toBe(24 + 48); // base gap + 3-button-nav inset
+        expect(fab.bottom).toBe(FAB_BOTTOM_GAP);
+        expect(fab.bottom).toBe(24);
         // Honors the right-hand fab_position from settings.
         expect(fab.right).toBe(24);
+    });
+
+    it('keeps the FAB clearance consistent with the FAB geometry', () => {
+        // Every tab scroller pads its tail by this; it must clear the FAB top.
+        expect(LAYOUT_FAB_CLEARANCE).toBeGreaterThan(FAB_BOTTOM_GAP + FAB_SIZE);
+    });
+
+    it("centres the Timeline's back-to-top pill on the FAB's centre line", () => {
+        expect(BACK_TO_TOP_BOTTOM + PILL_HEIGHT / 2).toBe(FAB_BOTTOM_GAP + FAB_SIZE / 2);
     });
 });
