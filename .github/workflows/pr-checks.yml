@@ -5,6 +5,9 @@ name: PR checks
 on:
   pull_request:
     branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/pr-checks.yml'
 
 permissions:
   contents: read
@@ -17,6 +20,9 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Several tests assert local-day behaviour for Brisbane (UTC+10); GitHub runners default to UTC.
+      TZ: Australia/Brisbane
     defaults:
       run:
         working-directory: frontend
