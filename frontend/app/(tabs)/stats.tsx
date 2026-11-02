@@ -4,7 +4,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Layout } from '@/components/PageContainer';
 import { PageHeader, pageHeaderFullHeightInset } from '@/components/PageHeader';
-import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
+import { LAYOUT_CONTENT_PADDING, LAYOUT_FAB_CLEARANCE } from '@/styles/layout';
 import { EmptyState } from '@/components/EmptyState';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { TOTAL_ENTRIES } from '@/components/visualisations/queries';
@@ -101,7 +101,7 @@ const StatisticsContent = () => {
           paddingHorizontal: LAYOUT_CONTENT_PADDING,
           // Measured header height + a small gap, instead of a magic 120.
           paddingTop: headerHeight + 12,
-          paddingBottom: 32,
+          paddingBottom: LAYOUT_FAB_CLEARANCE,
         },
         chartsContainer: {
           gap: 4,

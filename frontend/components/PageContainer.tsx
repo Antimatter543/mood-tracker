@@ -14,7 +14,7 @@ type LayoutProps = {
     showFab?: boolean;
 } & ViewProps;
 
-const useThemedStyles = (colors: ThemeColors, insetTop: number, insetBottom: number) => {
+const useThemedStyles = (colors: ThemeColors, insetTop: number) => {
     return useMemo(
         () =>
             StyleSheet.create({
@@ -36,19 +36,19 @@ const useThemedStyles = (colors: ThemeColors, insetTop: number, insetBottom: num
                     padding: LAYOUT_CONTENT_PADDING,
                     flexGrow: 1,
                     // Pad the bottom past the FAB so the last item scrolls fully
-                    // into view above the floating button; the clearance tracks the
-                    // FAB as it rises with the bottom safe-area inset. (The tab-bar
-                    // height itself is already excluded from the scene by
-                    // react-navigation, so we only clear the FAB here.) Screens that
+                    // into view above the floating button. No bottom safe-area
+                    // inset: the tab scene already ends at the top of the tab bar,
+                    // which has grown by that inset itself (lib/tabBarStyle.ts),
+                    // so we only clear the FAB here. Screens that
                     // opt OUT of this ScrollView owe themselves the same padding —
                     // hence the shared constant, see styles/layout.ts.
-                    paddingBottom: LAYOUT_FAB_CLEARANCE + insetBottom,
+                    paddingBottom: LAYOUT_FAB_CLEARANCE,
                 },
                 fullHeightContent: {
                     flex: 1,
                 },
             }),
-        [colors, insetTop, insetBottom]
+        [colors, insetTop]
     );
 };
 
@@ -62,7 +62,7 @@ export function Layout({
 }: LayoutProps) {
     const colors = useThemeColors();
     const insets = useSafeAreaInsets();
-    const styles = useThemedStyles(colors, insets.top, insets.bottom);
+    const styles = useThemedStyles(colors, insets.top);
 
     // NO entrance animation. `Layout` used to fade+slide its content in through a
     // reanimated `useAnimatedStyle`, and that live animated style is the app's
