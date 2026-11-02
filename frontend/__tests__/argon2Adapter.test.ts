@@ -1,6 +1,7 @@
 /**
  * lib/argon2.ts: native expo-argon2 in real builds, @noble only where the
- * native module is missing (Expo Go, where importing expo-argon2 throws).
+ * native module is missing AND the app runs in jest or Expo Go (where
+ * importing expo-argon2 throws). A real build without it refuses.
  *
  * What this locks:
  *  - The native module is used when present, with the params mapped 1:1
@@ -45,4 +46,44 @@ it('falls back to JS with an identical key when the native module is missing (Ex
 
   expect(hasNativeArgon2()).toBe(false);
   expect(Buffer.from(key).equals(Buffer.from(expected()))).toBe(true);
+});
+
+describe('outside jest and Expo Go (a real build)', () => {
+  const realEnv = process.env.NODE_ENV;
+  afterEach(() => {
+    process.env.NODE_ENV = realEnv;
+  });
+
+  const loadWithoutNative = (executionEnvironment: string) => {
+    jest.doMock('expo-argon2', () => {
+      throw new Error("Cannot find native module 'ExpoArgon2'");
+    });
+    jest.doMock('expo-constants', () => ({
+      __esModule: true,
+      default: { executionEnvironment },
+      ExecutionEnvironment: { Bare: 'bare', Standalone: 'standalone', StoreClient: 'storeClient' },
+    }));
+    process.env.NODE_ENV = 'production';
+    return require('@/lib/argon2');
+  };
+
+  it('refuses with a clear message instead of silently using the slow JS path', async () => {
+    const { argon2id, canDeriveBackupKeys, Argon2UnavailableError } = loadWithoutNative('standalone');
+    expect(canDeriveBackupKeys()).toBe(false);
+    await expect(argon2id(PW, SALT, PARAMS)).rejects.toBeInstanceOf(Argon2UnavailableError);
+    await expect(argon2id(PW, SALT, PARAMS)).rejects.toThrow(/can't encrypt backups/);
+  });
+
+  it('still allows the JS path in Expo Go', async () => {
+    const { argon2id, canDeriveBackupKeys } = loadWithoutNative('storeClient');
+    expect(canDeriveBackupKeys()).toBe(true);
+    const key = await argon2id(PW, SALT, PARAMS);
+    expect(Buffer.from(key).equals(Buffer.from(expected()))).toBe(true);
+  });
+
+  it('a real build with the native module is unaffected', async () => {
+    process.env.NODE_ENV = 'production';
+    const { canDeriveBackupKeys } = require('@/lib/argon2');
+    expect(canDeriveBackupKeys()).toBe(true);
+  });
 });

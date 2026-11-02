@@ -12,7 +12,8 @@ import { KdfParams } from '@/lib/backupCrypto';
  * "Turn on encryption" / "Change password" and when restoring a backup with a
  * typed password; ordinary backups never re-derive (the key is stored, see
  * lib/backupKeyStore.ts). For scale: a current flagship phone did
- * 256 MiB x 3 passes x 4 lanes in 258 ms natively.
+ * 256 MiB x 3 passes x 4 lanes in 258 ms natively, so it lands on the
+ * 128 MiB ceiling with extra passes.
  *
  * The cost model (see KdfCostModel): Argon2 time is linear in memory, with a
  * per-pass part and a fixed allocation part, fitted from two probes. Memory is
@@ -39,12 +40,16 @@ export const KDF_FLOOR_PARAMS: KdfParams = {
 };
 
 /**
- * Memory ceiling. A fast phone gets more passes beyond this rather than more
- * memory, so restoring its backups on a lower-RAM phone stays possible.
- * Must stay within backupCrypto's MAX_MEMORY_KIB (the limit a FILE may ask for).
+ * Ceilings. A fast phone gets more passes beyond the memory cap rather than
+ * more memory, so its backups still open on a 2-3 GB phone (128 MiB is safe
+ * to allocate there; 256 MiB on top of the app risks an OS kill). Passes are
+ * capped at 6 so a phone ~10x slower than the one that wrote the backup
+ * still opens it in a few seconds (a flagship does 128 MiB x 6 in ~260 ms).
+ * Both must stay within backupCrypto's KDF_FILE_LIMITS (what a FILE may ask
+ * for), pinned by a test, or a phone could write a backup it cannot read.
  */
-export const MAX_CALIBRATED_MEMORY_KIB = 256 * 1024;
-const MAX_CALIBRATED_ITERATIONS = 10;
+export const MAX_CALIBRATED_MEMORY_KIB = 128 * 1024;
+export const MAX_CALIBRATED_ITERATIONS = 6;
 const BASE_ITERATIONS = 2;
 
 /**

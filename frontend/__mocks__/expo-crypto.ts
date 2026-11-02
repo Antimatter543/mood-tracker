@@ -3,7 +3,8 @@
  * CSPRNG) rather than stubs, so the encrypted-backup tests exercise genuine
  * encryption, authentication-tag checks and additional-data binding. Mirrors
  * the subset of the native API lib/backupCrypto.ts uses: base64 strings or
- * Uint8Arrays in, `combined` = iv || ciphertext || tag (12-byte IV, 16-byte tag).
+ * Uint8Arrays in, `combined` = iv || ciphertext || tag (12-byte IV unless
+ * `nonce` says otherwise, 16-byte tag).
  * Plain functions, not jest.fn, so jest.resetAllMocks() cannot wipe them.
  */
 import { CipherGCMTypes, createCipheriv, createDecipheriv, randomBytes } from 'crypto';
@@ -29,7 +30,7 @@ export class AESEncryptionKey {
 }
 
 export class AESSealedData {
-  constructor(readonly iv: Buffer, readonly ct: Buffer, readonly tagBytes: Buffer) {}
+  constructor(readonly ivBytes: Buffer, readonly ct: Buffer, readonly tagBytes: Buffer) {}
   /**
    * Faithful to ANDROID, not to the docs: the native fromCombined takes a
    * ByteArray, so a string argument arrives as its text bytes and is never
@@ -45,8 +46,11 @@ export class AESSealedData {
     const ct = toBuffer(ciphertextWithTag);
     return new AESSealedData(toBuffer(iv), ct.subarray(0, ct.length - tagLength), ct.subarray(ct.length - tagLength));
   }
+  async iv(encoding: 'bytes' | 'base64' = 'bytes'): Promise<string | Uint8Array> {
+    return encoding === 'base64' ? this.ivBytes.toString('base64') : new Uint8Array(this.ivBytes);
+  }
   async combined(encoding: 'bytes' | 'base64' = 'bytes'): Promise<string | Uint8Array> {
-    const buf = Buffer.concat([this.iv, this.ct, this.tagBytes]);
+    const buf = Buffer.concat([this.ivBytes, this.ct, this.tagBytes]);
     return encoding === 'base64' ? buf.toString('base64') : new Uint8Array(buf);
   }
 }
@@ -54,9 +58,10 @@ export class AESSealedData {
 export async function aesEncryptAsync(
   plaintext: BinaryInput,
   key: AESEncryptionKey,
-  options: { additionalData?: BinaryInput } = {}
+  options: { additionalData?: BinaryInput; nonce?: { length: number } | { bytes: BinaryInput } } = {}
 ): Promise<AESSealedData> {
-  const iv = randomBytes(12);
+  const { nonce } = options;
+  const iv = !nonce ? randomBytes(12) : 'bytes' in nonce ? toBuffer(nonce.bytes) : randomBytes(nonce.length);
   const cipher = createCipheriv(`aes-${key.size}-gcm` as CipherGCMTypes, key.bytes, iv);
   if (options.additionalData) cipher.setAAD(toBuffer(options.additionalData));
   const ct = Buffer.concat([cipher.update(toBuffer(plaintext)), cipher.final()]);
@@ -68,7 +73,7 @@ export async function aesDecryptAsync(
   key: AESEncryptionKey,
   options: { additionalData?: BinaryInput; output?: 'bytes' | 'base64' } = {}
 ): Promise<Uint8Array | string> {
-  const decipher = createDecipheriv(`aes-${key.size}-gcm` as CipherGCMTypes, key.bytes, sealed.iv);
+  const decipher = createDecipheriv(`aes-${key.size}-gcm` as CipherGCMTypes, key.bytes, sealed.ivBytes);
   if (options.additionalData) decipher.setAAD(toBuffer(options.additionalData));
   decipher.setAuthTag(sealed.tagBytes);
   const pt = Buffer.concat([decipher.update(sealed.ct), decipher.final()]);
