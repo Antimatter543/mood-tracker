@@ -198,3 +198,29 @@ describe('OverlayModal — the fullScreen opaque surface', () => {
         expect(view.queryByTestId('overlay-fullscreen-surface')).toBeNull();
     });
 });
+
+// Regression (release APK, 2026-11-01): a dialog that opened with an autoFocus
+// field from a screen with no keyboard observer running (the backup-password
+// dialog, from Settings) stayed centered BEHIND the keyboard until the field
+// was re-focused. Its own useAnimatedKeyboard observer mounted in the same
+// commit as the autoFocus and missed the opening animation. The keyboard is
+// now observed once by the always-mounted OverlayProvider.
+describe('OverlayModal: keyboard observed by the host, before any overlay opens', () => {
+    it('the provider observes the keyboard with no overlay mounted', async () => {
+        mockKeyboardHeight.mockClear();
+        await render(
+            <OverlayProvider>
+                <Text>screen</Text>
+            </OverlayProvider>
+        );
+        expect(mockKeyboardHeight).toHaveBeenCalled();
+    });
+
+    it('OverlayModal reads the host height and never mounts its own observer', () => {
+        const fs = require('fs');
+        const path = require('path');
+        const src = fs.readFileSync(path.join(__dirname, '../components/OverlayModal.tsx'), 'utf8');
+        expect(src).not.toMatch(/import[^;]*useKeyboardHeight/);
+        expect(src).toMatch(/useOverlayKeyboardHeight\(\)/);
+    });
+});

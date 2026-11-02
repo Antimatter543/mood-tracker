@@ -1,11 +1,39 @@
 // DataManagementSection.tsx
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Alert, ActivityIndicator, Switch } from 'react-native';
 import { useThemeColors } from '@/styles/global';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useDataContext } from '@/context/DataContext';
 import Feather from '@expo/vector-icons/Feather';
 import { exportDatabaseData, importDatabaseData } from '@/databases/data-export';
+import { KdfHeader } from '@/lib/backupCrypto';
+import { useBackupEncryption } from '@/hooks/useBackupEncryption';
+import { BackupPasswordDialog } from './BackupPasswordDialog';
+
+/** "Argon2id, 48 MiB × 2 passes, 4 lanes": the calibrated strength. */
+export function describeKdf(kdf: KdfHeader): string {
+  const mib = Math.round(kdf.memoryKiB / 1024);
+  return `Argon2id, ${mib} MiB × ${kdf.iterations} ${kdf.iterations === 1 ? 'pass' : 'passes'}, ${kdf.parallelism} ${kdf.parallelism === 1 ? 'lane' : 'lanes'}`;
+}
+
+/**
+ * The "Technical details" text. Kept out of the hint on purpose: most users
+ * only need to know their backups are locked; the parameters are for those
+ * who want to check them.
+ */
+export function backupTechnicalDetails(kdf: KdfHeader): string {
+  return [
+    `Password hashing: ${describeKdf(kdf)}. Tuned to this phone so that unlocking takes about half a second.`,
+    'Encryption: AES-256-GCM.',
+    'Only a key derived from your password is stored, in this phone\'s secure storage. The password itself is never stored.',
+  ].join('\n\n');
+}
+
+const ENCRYPTION_HINT = {
+  on: 'Backups are locked with your password. It cannot be shown or recovered, only changed.',
+  off: 'Lock backups with a password so nobody else can open them.',
+  unreadable: "Your backup password couldn't be read. Enter it again to keep encrypting backups.",
+} as const;
 
 export const DataManagementSection = () => {
   const colors = useThemeColors();
@@ -13,15 +41,22 @@ export const DataManagementSection = () => {
   const { refetchEntries } = useDataContext();
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  // Declared before the hook so "Back up now" (after a password change) can call it.
+  const exportRef = React.useRef<() => void>(() => {});
+  const encryption = useBackupEncryption({ onBackupNow: () => exportRef.current() });
+  const encryptionKdf = encryption.kdf;
 
   const handleExport = async () => {
     try {
       setIsExporting(true);
+      // Unreadable key or a pending "Confirm your backup password": the hook
+      // shows what is needed and says whether to go ahead.
+      if (!(await encryption.beforeExport())) return;
       const result = await exportDatabaseData(db);
 
       if (result.success) {
         Alert.alert('Backup ready', 'Choose where to save it — Google Drive, your device, or send it anywhere.');
-      } else {
+      } else if (!encryption.handleExportFailure(result)) {
         Alert.alert('Backup Failed', result.message);
       }
     } catch (error) {
@@ -31,7 +66,8 @@ export const DataManagementSection = () => {
       setIsExporting(false);
     }
   };
-  
+  exportRef.current = handleExport;
+
   const handleImport = async () => {
     // Show confirmation dialog first
     Alert.alert(
@@ -48,11 +84,22 @@ export const DataManagementSection = () => {
           onPress: async () => {
             try {
               setIsImporting(true);
-              const result = await importDatabaseData(db);
-              
+              const result = await importDatabaseData(db, {
+                requestPassword: encryption.requestPassword,
+                onPasswordAccepted: encryption.onPasswordAccepted,
+              });
+
               if (result.success) {
-                Alert.alert('Success', 'Your data has been imported successfully');
                 refetchEntries(); // Refresh the app's data
+                const keepPassword = await encryption.takeKeepPasswordOffer();
+                if (keepPassword !== null) {
+                  Alert.alert('Data restored', 'Keep encrypting new backups with this password?', [
+                    { text: 'No', style: 'cancel' },
+                    { text: 'Yes', onPress: () => encryption.keepPassword(keepPassword) },
+                  ]);
+                } else {
+                  Alert.alert('Success', 'Your data has been imported successfully');
+                }
               } else {
                 Alert.alert('Import Failed', result.message);
               }
@@ -61,6 +108,10 @@ export const DataManagementSection = () => {
               Alert.alert('Import Error', 'An unexpected error occurred during import');
             } finally {
               setIsImporting(false);
+              encryption.discardAcceptedPassword();
+              // The unlock dialog (if one was needed) stays up while the
+              // backup decrypts and imports; close it once that is over.
+              encryption.finishImport();
             }
           }
         }
@@ -137,6 +188,45 @@ export const DataManagementSection = () => {
     buttonPressed: {
       opacity: 0.8,
     },
+    encryptionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    encryptionText: {
+      flex: 1,
+    },
+    encryptionTitle: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '500',
+    },
+    encryptionHint: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      lineHeight: 18,
+      marginTop: 2,
+    },
+    encryptionLinks: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      columnGap: 20,
+      marginTop: 4,
+    },
+    encryptionSection: {
+      marginBottom: 16,
+    },
+    linkButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingVertical: 4,
+    },
+    linkText: {
+      color: colors.accent,
+      fontSize: 14,
+      fontWeight: '500',
+    },
   });
 
   return (
@@ -152,6 +242,64 @@ export const DataManagementSection = () => {
         anywhere. Restore from a backup on this or any device. No account, all local.
       </Text>
 
+      {/* Opt-in backup encryption. Off by default; the switch reflects whether a
+          key is in secure storage (lib/backupKeyStore.ts). */}
+      <View style={styles.encryptionSection}>
+        <View style={styles.encryptionRow}>
+          <View style={styles.encryptionText}>
+            <Text style={styles.encryptionTitle}>Encrypt backups</Text>
+            <Text style={styles.encryptionHint}>
+              {ENCRYPTION_HINT[encryption.status === 'loading' ? 'off' : encryption.status]}
+            </Text>
+          </View>
+          <Switch
+            value={encryption.status === 'on' || encryption.status === 'unreadable'}
+            onValueChange={encryption.handleToggle}
+            disabled={encryption.status === 'loading' || isExporting || isImporting}
+            trackColor={{ false: '#767577', true: colors.accent }}
+            thumbColor="#f4f3f4"
+            accessibilityLabel="Encrypt backups"
+          />
+        </View>
+        {encryption.status === 'unreadable' ? (
+          <View style={styles.encryptionLinks}>
+            <Pressable
+              style={styles.linkButton}
+              onPress={encryption.openReenter}
+              disabled={isExporting || isImporting}
+              accessibilityRole="button"
+              accessibilityLabel="Enter backup password"
+            >
+              <Feather name="key" color={colors.accent} size={14} />
+              <Text style={styles.linkText}>Enter password</Text>
+            </Pressable>
+          </View>
+        ) : null}
+        {encryptionKdf ? (
+          <View style={styles.encryptionLinks}>
+            <Pressable
+              style={styles.linkButton}
+              onPress={encryption.openChange}
+              disabled={isExporting || isImporting}
+              accessibilityRole="button"
+              accessibilityLabel="Change backup password"
+            >
+              <Feather name="key" color={colors.accent} size={14} />
+              <Text style={styles.linkText}>Change password</Text>
+            </Pressable>
+            <Pressable
+              style={styles.linkButton}
+              onPress={() => Alert.alert('Technical details', backupTechnicalDetails(encryptionKdf))}
+              accessibilityRole="button"
+              accessibilityLabel="Backup encryption technical details"
+            >
+              <Feather name="info" color={colors.accent} size={14} />
+              <Text style={styles.linkText}>Technical details</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
+
       <View style={styles.buttonContainer}>
         {/* Back up — hands the file to the OS share sheet (Drive / Files / send) */}
         <Pressable
@@ -159,7 +307,8 @@ export const DataManagementSection = () => {
             styles.button,
             pressed && styles.buttonPressed
           ]}
-          onPress={handleExport}
+          // Not awaited: the backup may wait on "Confirm your backup password".
+          onPress={() => { void handleExport(); }}
           disabled={isExporting || isImporting}
         >
           <Feather name="upload-cloud" color="#fff" size={18} />
@@ -187,6 +336,8 @@ export const DataManagementSection = () => {
           )}
         </Pressable>
       </View>
+
+      <BackupPasswordDialog {...encryption.dialogProps} />
     </View>
   );
 };

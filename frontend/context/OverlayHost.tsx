@@ -8,6 +8,8 @@ import React, {
 } from 'react';
 import { StyleSheet, View } from 'react-native';
 
+import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
+
 /**
  * In-tree full-window overlay host.
  *
@@ -48,6 +50,23 @@ type OverlayContextValue = {
 
 const OverlayContext = createContext<OverlayContextValue | null>(null);
 
+/**
+ * Live keyboard height for overlay content, measured HERE, in the provider,
+ * not inside each overlay.
+ *
+ * WHY: reanimated's `useAnimatedKeyboard` (behind useKeyboardHeight) only
+ * reports a keyboard whose opening animation it observed. A dialog that
+ * mounted its own observer in the same commit as an `autoFocus` TextInput
+ * missed the animation and read 0, so the card stayed centered behind the
+ * keyboard until the field was re-focused (release APK, 2026-11-01: the
+ * backup-password dialog opened from Settings; dialogs opened from the entry
+ * form were fine only because EntryForm already had an observer running).
+ * The provider is mounted for the whole tab session, so its observer always
+ * exists before any overlay opens. A separate context keeps keyboard changes
+ * from re-rendering anything but the overlays that read it.
+ */
+const OverlayKeyboardContext = createContext(0);
+
 type Entry = { id: number; node: React.ReactNode };
 
 export function OverlayProvider({ children }: { children: React.ReactNode }) {
@@ -69,25 +88,33 @@ export function OverlayProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const value = useMemo(() => ({ mount }), [mount]);
+    const keyboardHeight = useKeyboardHeight();
 
     return (
         <OverlayContext.Provider value={value}>
-            {children}
-            {/* Portal slot: each entry fills the window and stacks by mount order.
-                `pointerEvents="box-none"` on the slot lets touches pass through the
-                gaps to app content when no overlay is up; each overlay node sets
-                its own backdrop / pointer behaviour. */}
-            {entries.map((entry) => (
-                <View
-                    key={entry.id}
-                    style={StyleSheet.absoluteFill}
-                    pointerEvents="box-none"
-                >
-                    {entry.node}
-                </View>
-            ))}
+            <OverlayKeyboardContext.Provider value={keyboardHeight}>
+                {children}
+                {/* Portal slot: each entry fills the window and stacks by mount order.
+                    `pointerEvents="box-none"` on the slot lets touches pass through the
+                    gaps to app content when no overlay is up; each overlay node sets
+                    its own backdrop / pointer behaviour. */}
+                {entries.map((entry) => (
+                    <View
+                        key={entry.id}
+                        style={StyleSheet.absoluteFill}
+                        pointerEvents="box-none"
+                    >
+                        {entry.node}
+                    </View>
+                ))}
+            </OverlayKeyboardContext.Provider>
         </OverlayContext.Provider>
     );
+}
+
+/** The keyboard height (0 when hidden) as observed by the always-mounted host. */
+export function useOverlayKeyboardHeight(): number {
+    return useContext(OverlayKeyboardContext);
 }
 
 /**

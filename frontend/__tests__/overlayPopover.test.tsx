@@ -14,6 +14,9 @@ import { render, act, fireEvent, screen as rtlScreen } from '@testing-library/re
 // `Animated.View` (a plain View) and `FadeIn.duration()` (an animation-config
 // builder), so shim exactly that surface and skip the worklets import chain.
 // Scoped to this suite so other suites are unaffected.
+// OverlayProvider observes the keyboard (see context/OverlayHost.tsx); the
+// reanimated mock below has no useAnimatedKeyboard, so stub the hook.
+jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
 jest.mock('react-native-reanimated', () => {
     const React = require('react');
     const { View } = require('react-native');

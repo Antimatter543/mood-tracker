@@ -1,5 +1,22 @@
 # SoulSync — Project Lessons
 
+## 2026-11-02: Encrypted backups: expo-crypto output traps, and "unreadable" is not "off"
+
+- **expo-crypto AES-GCM natively ignores `ciphertext({ encoding })`** (Android reads the option under
+  another name) and `AESSealedData.fromCombined(string)` is broken on Android. Write the IV with
+  `sealed.iv('base64')` + `combined('base64')` (assert `combined` starts with the IV), read with
+  `fromParts(iv, ctWithTag, 16)`. The jest mock is node:crypto, so it can't catch this: the frozen
+  fixture in `__fixtures__/encryptedBackupV1.ts` (rebuilt from the spec with node:crypto, required
+  byte-identical) is the guard. Never edit that literal; bump the envelope `version` instead.
+- **A stored key that can't be read must never look like "encryption off".** That would write a PLAIN
+  backup for someone who turned encryption on. `readBackupKeyState()` returns `off | on | unreadable`
+  and never throws; export stops on unreadable and asks for the password again.
+- **RNTL v14 `fireEvent` awaits the handler's returned promise.** A press whose handler waits on a
+  dialog it opened hangs the test until timeout. Buttons that start such a flow use
+  `onPress={() => { void handler(); }}`.
+- **`jest.resetAllMocks()` does not remove a `jest.spyOn`.** The spy stays attached and answers
+  `undefined` in every later test. Suites that spy call `jest.restoreAllMocks()` first.
+
 ## 2026-09-28 (b): A new entry "with no height" was drawn one row ABOVE the viewport, and our reveal lost a native ordering race
 
 Device QA of the first FlashList build (Expo Go AND the release APK): add an entry via the FAB near

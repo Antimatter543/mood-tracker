@@ -10,6 +10,10 @@ import type { RenderResult } from '@testing-library/react-native';
 
 import { OverlayProvider, useOverlay } from '@/context/OverlayHost';
 
+// OverlayProvider observes the keyboard (see context/OverlayHost.tsx) through
+// reanimated's worklet runtime, which jest does not have: stub the hook.
+jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
+
 // Captures the overlay API so a test can drive mount/unmount imperatively.
 // A container object (not a reassigned module `let`) avoids react-hooks 7.x's
 // `globals` rule; writing `.current` from the component trips `immutability`,
