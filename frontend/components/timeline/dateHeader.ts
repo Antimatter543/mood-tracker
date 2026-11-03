@@ -53,7 +53,7 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/;
 export const formatSectionTitle = (
     dateKey: string,
     pref: DateFormatPref,
-    now: Date = new Date()
+    now: Date
 ): string => {
     if (!YMD.test(dateKey)) return dateKey;
 

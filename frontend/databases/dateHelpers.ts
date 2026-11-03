@@ -33,6 +33,8 @@
  * in the SQLite runtime.
  */
 
+import { now } from '@/lib/clock';
+
 /**
  * Returns the UTC ISO timestamp for the start of the local-timezone day
  * containing `date` (i.e. 00:00:00.000 local time).
@@ -108,7 +110,7 @@ export function daysBetween(a: string, b: string): number {
  * place to live.
  */
 export function getDefaultEntryDate(): string {
-  return new Date().toISOString();
+  return now().toISOString();
 }
 
 /**

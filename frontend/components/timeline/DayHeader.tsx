@@ -6,6 +6,7 @@ import type { DateFormatPref } from '@/lib/dateFormat';
 import { formatSectionTitle } from './dateHeader';
 import { moodColor } from './moodColor';
 import type { DaySummary } from './timelineRows';
+import { now } from '@/lib/clock';
 
 type DayHeaderProps = DaySummary & {
     dateFormatPref: DateFormatPref;
@@ -106,7 +107,7 @@ const DayHeaderImpl: React.FC<DayHeaderProps> = ({
     sticky = false,
 }) => {
     const styles = useStyles(colors);
-    const title = formatSectionTitle(dayKey, dateFormatPref);
+    const title = formatSectionTitle(dayKey, dateFormatPref, now());
     return (
         <View
             style={[styles.header, sticky && styles.stickyEdge]}

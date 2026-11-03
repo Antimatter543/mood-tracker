@@ -49,6 +49,7 @@ import {
   sleepStageMinutes,
   totalSleepMinutes,
 } from './healthConnectPure';
+import { now } from '@/lib/clock';
 
 // ─── Lazy native-module resolution ──────────────────────────────────────────
 
@@ -393,7 +394,7 @@ function toSleepSummaries(
 export async function readSleepAndHeartRate(
   sinceHours = 24
 ): Promise<HealthReadResult> {
-  const end = new Date();
+  const end = now();
   const start = new Date(end.getTime() - sinceHours * 60 * 60 * 1000);
   const windowStart = start.toISOString();
   const windowEnd = end.toISOString();

@@ -71,8 +71,8 @@ const MS_PER_DAY = 86_400_000;
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
-/** Local `YYYY-MM-DD` for "today". Extracted so callers/tests can pin it. */
-export const todayLocalDay = (now: Date = new Date()): string => localDateString(now);
+/** Local `YYYY-MM-DD` for "today". Callers pass `now()` from lib/clock; tests pass a fixed instant. */
+export const todayLocalDay = (now: Date): string => localDateString(now);
 
 /**
  * Parses a `YYYY-MM-DD` day string to a LOCAL-midnight Date. Deliberately not

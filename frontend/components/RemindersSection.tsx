@@ -42,11 +42,12 @@ import {
     sortRemindersByTime,
     updateReminder,
 } from '@/lib/reminders';
+import { now } from '@/lib/clock';
 
 /** "20:00" -> "8:00 PM" (locale-aware). Display only; storage stays 24h. */
 export function formatTimeForDisplay(time: string): string {
     const [hour, minute] = normalizeReminderTime(time).split(':').map(Number);
-    const d = new Date();
+    const d = now();
     d.setHours(hour, minute, 0, 0);
     return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
@@ -308,7 +309,7 @@ export function RemindersSection() {
 /** "HH:MM" -> a Date today at that time, for the native picker's value. */
 function timeToDate(time: string): Date {
     const [hour, minute] = normalizeReminderTime(time).split(':').map(Number);
-    const d = new Date();
+    const d = now();
     d.setHours(hour, minute, 0, 0);
     return d;
 }

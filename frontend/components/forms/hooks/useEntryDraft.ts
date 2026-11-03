@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { now } from '@/lib/clock';
 
 /**
  * Shape of an in-progress entry draft. Mirrors the persisted form payload that
@@ -47,7 +48,7 @@ function buildInitialDraft(init?: EntryDraftInit): EntryDraft {
         mood: init?.mood ?? DEFAULT_DRAFT.mood,
         activities: init?.activities ? [...init.activities] : [],
         notes: init?.notes ?? '',
-        date: init?.date ? new Date(init.date) : new Date(),
+        date: init?.date ? new Date(init.date) : now(),
         photos: init?.photos ? [...init.photos] : [],
     };
 }

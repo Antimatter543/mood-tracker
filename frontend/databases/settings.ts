@@ -69,7 +69,7 @@ export const SETTINGS_REGISTRY = {
         // users see no change. Values + the formatting policy: lib/dateFormat.ts.
         //
         // `options` here are the plain labels; the Settings card swaps in
-        // `dateFormatOptions(new Date())` so each row shows today's date as a
+        // `dateFormatOptions(now())` so each row shows today's date as a
         // live example. Seeded by migration 15.
         default: 'system' as DateFormatPref,
         type: 'select',

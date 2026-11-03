@@ -14,6 +14,7 @@ import {
   type MonthMoodRow,
   type MonthOverMonthData,
 } from './transforms/monthOverMonth';
+import { now } from '@/lib/clock';
 
 /** Material red 300 — semantic "down" signal, not a brand color. */
 const FALLING_COLOR = '#e57373';
@@ -104,9 +105,9 @@ const MonthOverMonthCard = () => {
 
   const fetchData = useCallback(async () => {
       try {
-        const now = new Date();
-        const year = now.getFullYear();
-        const month = now.getMonth(); // 0-11
+        const today = now();
+        const year = today.getFullYear();
+        const month = today.getMonth(); // 0-11
 
         // Current calendar month boundaries (local).
         const curFirst = new Date(year, month, 1);

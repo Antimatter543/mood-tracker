@@ -8,6 +8,7 @@ import DateRangePicker from '@/components/DateRangePicker';
 // The SAME "today" the provider anchors its windows on (tests pin this one
 // function), so the picker's upper bound can never disagree with the context's.
 import { todayLocalDay } from '@/components/visualisations/transforms/periodWindow';
+import { now } from '@/lib/clock';
 
 /**
  * The Stats header's period stepper: ‹ chevron — concrete date range — chevron ›.
@@ -194,7 +195,7 @@ const PeriodNavigator: React.FC = () => {
                 visible={pickerOpen}
                 onClose={closePicker}
                 onApply={setCustomRange}
-                maxDay={todayLocalDay()}
+                maxDay={todayLocalDay(now())}
                 initialStartDay={isCustom ? periodWindow.startDay : undefined}
                 initialEndDay={isCustom ? periodWindow.endDay : undefined}
                 earliestEntryDay={earliestEntryDay}

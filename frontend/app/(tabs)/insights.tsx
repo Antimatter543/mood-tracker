@@ -53,6 +53,7 @@ import {
 } from '@/components/visualisations/transforms/healthMoodCorrelation';
 import { getHealthMetricsRange } from '@/databases/health-metrics';
 import { shouldShowHealthConnect } from '@/lib/healthConnectConfig';
+import { now } from '@/lib/clock';
 
 /**
  * Insights — honest, locally-derived patterns from the user's own entries.
@@ -177,8 +178,8 @@ export default function InsightsScreen() {
                 try {
                     // All-time window: from the epoch up to the end of today (local).
                     const start = startOfLocalDay(new Date(0));
-                    const end = endOfLocalDay(new Date());
-                    const today = localDateString(new Date());
+                    const end = endOfLocalDay(now());
+                    const today = localDateString(now());
                     // Health Connect cards only exist on Android behind the flag;
                     // skip the read entirely elsewhere. Bounds are day-strings
                     // (health_metrics.date is a local 'YYYY-MM-DD'), a wide

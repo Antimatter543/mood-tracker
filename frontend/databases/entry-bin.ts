@@ -3,6 +3,7 @@ import { DatabaseResult } from '@/components/types';
 import { getMediaByEntryIds } from '@/databases/entry-media';
 import { deleteMediaFile } from '@/databases/mediaHelpers';
 import { withWriteTransaction } from '@/databases/writeTransaction';
+import { now } from '@/lib/clock';
 
 /**
  * The recycle bin: everything that operates on SOFT-DELETED entries.
@@ -217,7 +218,7 @@ export async function purgeExpiredBinEntries(
   olderThanDays: number = BIN_RETENTION_DAYS
 ): Promise<number> {
   try {
-    const cutoff = new Date(Date.now() - olderThanDays * MS_PER_DAY).toISOString();
+    const cutoff = new Date(now().getTime() - olderThanDays * MS_PER_DAY).toISOString();
 
     const rows = await db.getAllAsync<{ id: number }>(
       'SELECT id FROM entries WHERE deleted_at IS NOT NULL AND deleted_at < ?',

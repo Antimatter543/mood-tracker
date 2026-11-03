@@ -1,6 +1,7 @@
 import { unzipSync } from 'fflate';
 
 import { base64ToBytes } from '@/lib/backupCrypto';
+import { now } from '@/lib/clock';
 
 /**
  * Daylio backup (.daylio) -> SoulSync v3 backup object. Pure: no React, no DB.
@@ -475,7 +476,7 @@ export function convertDaylio({ backup, members }: Pick<DaylioArchive, 'backup' 
   return {
     backup: {
       version: 3,
-      exportDate: new Date().toISOString(),
+      exportDate: now().toISOString(),
       source: 'daylio',
       data: { entries, activities, activityGroups: groups, settings: [] },
     },

@@ -55,6 +55,7 @@ import { getEntriesWindow, updateMoodEntry, deleteMoodEntry, setEntryStarred } f
 import { getBinCount, restoreMoodEntry } from '@/databases/entry-bin';
 import { UndoSnackbar } from './UndoSnackbar';
 import { RecentlyDeletedPanel } from './timeline/RecentlyDeletedPanel';
+import { now } from '@/lib/clock';
 
 // Debounce the search text before it hits SQL so each keystroke doesn't fire a
 // paged query; the mood chips filter instantly (no debounce needed).
@@ -413,7 +414,7 @@ export function DatabaseViewer() {
 
     const handleToggleStar = useCallback(async (entry: MoodEntry) => {
         const nextStarred = entry.starred_at == null;
-        const nextStarredAt = nextStarred ? new Date().toISOString() : null;
+        const nextStarredAt = nextStarred ? now().toISOString() : null;
         const leavesList = starredOnlyRef.current && !nextStarred;
 
         // Optimistic update. Under the starred filter an UNstar means the entry

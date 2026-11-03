@@ -3,6 +3,7 @@ import { Activity, DatabaseResult } from './types';
 import { getActivities } from "@/databases/database";
 import { withWriteTransaction } from "@/databases/writeTransaction";
 import { writeBase64ToMediaDir } from "@/databases/mediaHelpers";
+import { now } from '@/lib/clock';
 
 /// GENERATE DATA (SETTINGS / ADMIN STUFF)
 //
@@ -270,7 +271,7 @@ export async function seedMoodEntries(
       };
     }
 
-    const plans = planSeedEntries(numberOfEntries, new Date());
+    const plans = planSeedEntries(numberOfEntries, now());
 
     // Photo files are written to disk BEFORE the transaction (see
     // ensureSamplePhotoFiles) — only ever 3 files regardless of how many
@@ -285,7 +286,7 @@ export async function seedMoodEntries(
       for (const plan of plans) {
         // Insert the mood entry. ~10% of seeded entries come in pre-starred,
         // so the dev seed data exercises the starred-entries UI/filters too.
-        const starredAt = plan.starred ? new Date().toISOString() : null;
+        const starredAt = plan.starred ? now().toISOString() : null;
         const result = await txn.runAsync(
           `INSERT INTO entries (mood, notes, date, starred_at) VALUES (?, ?, ?, ?)`,
           [plan.mood, plan.notes, plan.date, starredAt]

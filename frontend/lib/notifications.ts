@@ -302,7 +302,7 @@ export function formatReminderTime(hour: number, minute: number): string {
 export function nextTriggerDate(
   hour: number,
   minute: number,
-  now: Date = new Date()
+  now: Date
 ): Date {
   const trigger = new Date(now);
   trigger.setHours(hour, minute, 0, 0);
@@ -496,7 +496,7 @@ async function applyReminderSchedulePlan(plan: ReminderSchedulePlan): Promise<vo
  * Check whether the user has already logged at least one entry today
  * (local timezone).
  *
- * `todayKey`: today's YYYY-MM-DD in local time — pass localDateString(new Date()).
+ * `todayKey`: today's YYYY-MM-DD in local time — pass localDateString(now()) (lib/clock).
  * `entryDates`: the YYYY-MM-DD strings (local days) that have an entry.
  * Pure function — unit-testable.
  */
