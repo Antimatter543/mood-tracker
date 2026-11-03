@@ -1,0 +1,114 @@
+name: Future clock
+
+# Time bombs. A test that hardcodes a date while the code under test reads the real clock passes
+# until the wall clock reaches that date, then goes red on every branch at once. This workflow
+# runs the whole jest suite again with the wall clock shifted 1 year and 3 years ahead, so a bomb
+# fails here long before it would go off. (App code reads the time through `frontend/lib/clock.ts`,
+# and tests freeze it with `@/testing/clock`, so a test that pins its "now" is unaffected.)
+#
+# How: libfaketime (LD_PRELOAD) shifts the wall clock for node and every jest worker it forks.
+# FAKETIME_DONT_FAKE_MONOTONIC=1 keeps CLOCK_MONOTONIC real; faked, libfaketime 0.9.10 moves it
+# to an epoch-sized value and timers / performance.now() jump with it.
+# A shift that never reached the jest workers would pass vacuously, so FUTURE_CLOCK_NOT_BEFORE
+# (computed from the REAL clock, outside faketime: real now + offset - 1 day) is checked twice:
+# once by node in the step, and once INSIDE a worker by `__tests__/futureClock.test.ts`.
+#
+# Deliberately `pull_request`, never `pull_request_target`: fork code must not see secrets. This
+# workflow holds NO secrets and a read-only token. Every action is pinned by commit SHA (the tag
+# is in the comment), the same pins as pr-checks.yml.
+#
+# Manual run with other horizons (days, a JSON list):
+#   gh workflow run future-clock.yml -R Antimatter543/mood-tracker --ref <branch> -f days='[30, 730]'
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/components/visualisations/transforms/**'
+      - 'frontend/databases/**'
+      - 'frontend/lib/clock.ts'
+      - 'frontend/testing/clock.ts'
+      - '.github/workflows/future-clock.yml'
+  schedule:
+    - cron: '23 19 * * 6' # weekly, Sunday 05:23 Brisbane
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Clock offsets in days, as a JSON list'
+        required: false
+        default: '[365, 1095]'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: future-clock-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  jest:
+    name: jest, clock +${{ matrix.days }} days
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        days: ${{ fromJSON(inputs.days || '[365, 1095]') }}
+    env:
+      # Defence in depth only, as in pr-checks.yml: jest.globalSetup.js pins the zone itself.
+      TZ: Australia/Brisbane
+    defaults:
+      run:
+        shell: bash # `-eo pipefail`, so `jest | tee` keeps jest's exit code
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Install libfaketime
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq faketime
+          lib="$(dpkg -L libfaketime | grep '/libfaketime\.so\.1$')"
+          test -f "$lib"
+          echo "FAKETIME_LIB=$lib" >> "$GITHUB_ENV"
+          # From the REAL clock (this step is not under faketime): the shifted clock must be past it.
+          echo "FUTURE_CLOCK_NOT_BEFORE=$(date -u -d "+$(( ${{ matrix.days }} - 1 )) days" +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - name: Prove the clock is shifted
+        env:
+          LD_PRELOAD: ${{ env.FAKETIME_LIB }}
+          FAKETIME: +${{ matrix.days }}d
+          FAKETIME_DONT_FAKE_MONOTONIC: '1'
+        run: |
+          echo "real clock:    $(LD_PRELOAD='' date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "node, shifted: $(node -e 'console.log(new Date().toISOString())')"
+          echo "must be after: $FUTURE_CLOCK_NOT_BEFORE"
+          node -e 'if (Date.now() < Date.parse(process.env.FUTURE_CLOCK_NOT_BEFORE)) { console.error("::error::libfaketime did not shift the clock"); process.exit(1); }'
+
+      - name: Tests, clock +${{ matrix.days }} days
+        continue-on-error: true # REPORT ONLY for the first run; removed once its findings are fixed
+        env:
+          LD_PRELOAD: ${{ env.FAKETIME_LIB }}
+          FAKETIME: +${{ matrix.days }}d
+          FAKETIME_DONT_FAKE_MONOTONIC: '1'
+        run: npx jest --silent --ci 2>&1 | tee "$RUNNER_TEMP/jest.log"
+
+      - name: Failing suites report
+        if: always()
+        run: |
+          {
+            echo "### Future clock: +${{ matrix.days }} days"
+            grep -E '^(Tests|Test Suites):' "$RUNNER_TEMP/jest.log" || echo "No summary line (jest did not finish)."
+            echo ""
+            echo "Failing suites:"
+            grep -E '^FAIL ' "$RUNNER_TEMP/jest.log" | sed -E 's/^FAIL (.*)$/- `\1`/' | sort -u || true
+          } >> "$GITHUB_STEP_SUMMARY"
