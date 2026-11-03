@@ -349,6 +349,20 @@ jobs:
           fi
           echo "OK: Play AAB JS bundle is the '$EXPECT_NAME' variant and distinct from the APK bundle."
 
+      - name: Assert the QA seed channel is ABSENT from the APK and AAB bundles
+        # frontend/lib/qa is a test-only deep link that wipes and reseeds the
+        # database. It exists only in EXPO_PUBLIC_QA=1 builds (the CI e2e lane);
+        # this lane never sets that flag, so babel inlines it to undefined and
+        # Metro's constant folding drops the guarded require before dependency
+        # collection. This is the ARTIFACT-level proof, on the exact Hermes bundles
+        # that ship, and it runs before any upload or release step so a leak can't
+        # be published. The PR-gate twin (with the QA-build positive control) is
+        # .github/workflows/qa-seed-guard.yml.
+        run: |
+          set -euo pipefail
+          ../.github/scripts/qa-seed-bundle-check.sh "$RUNNER_TEMP/apk-index.android.bundle" absent
+          ../.github/scripts/qa-seed-bundle-check.sh "$RUNNER_TEMP/aab-index.android.bundle" absent
+
       - name: Upload AAB artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
