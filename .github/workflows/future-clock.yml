@@ -17,6 +17,9 @@ name: Future clock
 # workflow holds NO secrets and a read-only token. Every action is pinned by commit SHA (the tag
 # is in the comment), the same pins as pr-checks.yml.
 #
+# Gating. The first, report-only run (2026-11-03) passed 2840/2840 at +365 and +1095 days, so a
+# red leg here is a NEW time bomb: pin the test's "now" with `freezeNow` (@/testing/clock).
+#
 # Manual run with other horizons (days, a JSON list):
 #   gh workflow run future-clock.yml -R Antimatter543/mood-tracker --ref <branch> -f days='[30, 730]'
 on:
@@ -95,7 +98,6 @@ jobs:
           node -e 'if (Date.now() < Date.parse(process.env.FUTURE_CLOCK_NOT_BEFORE)) { console.error("::error::libfaketime did not shift the clock"); process.exit(1); }'
 
       - name: Tests, clock +${{ matrix.days }} days
-        continue-on-error: true # REPORT ONLY for the first run; removed once its findings are fixed
         env:
           LD_PRELOAD: ${{ env.FAKETIME_LIB }}
           FAKETIME: +${{ matrix.days }}d
