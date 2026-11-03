@@ -3,7 +3,7 @@ import { Linking, StyleSheet, Text, View } from 'react-native';
 import { router, useRootNavigationState } from 'expo-router';
 import { QA_SEED_MARKER } from './index';
 import { isSeedLink, parseSeedLink } from './seedLink';
-import { runSeed } from './runSeed';
+import { restoreFrozenClock, runSeed } from './runSeed';
 
 /**
  * QA builds ONLY (mounted by the guarded require in app/_layout.tsx; see
@@ -18,6 +18,9 @@ import { runSeed } from './runSeed';
  * expo-router lands it on +not-found. The host navigates home first, which also
  * mounts the (tabs) layout whose SQLiteProvider initializes the database the
  * seed waits for.
+ *
+ * On every launch it also re-applies the frozen clock an earlier seed stored
+ * (restoreFrozenClock), so a relaunched app keeps the seed's "today".
  */
 
 const OK_HIDE_MS = 6000;
@@ -114,6 +117,14 @@ export function QaSeedHost() {
     const sub = Linking.addEventListener('url', ({ url }) => enqueue(url));
     return () => sub.remove();
   }, [enqueue]);
+
+  useEffect(() => {
+    restoreFrozenClock()
+      .then((at) => {
+        if (at) log(`clock restored: ${at.toISOString()}`);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(
     () => () => {

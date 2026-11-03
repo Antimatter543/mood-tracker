@@ -12,14 +12,12 @@
  * The channel only exists in EXPO_PUBLIC_QA=1 builds, but its modules are plain
  * TS, so jest exercises them directly without the flag.
  */
-// mediaHelpers writes through expo-file-system/legacy; route it to the repo's
-// recording mock (same as encryptedBackupExportImport.test.ts).
-jest.mock('expo-file-system/legacy', () => require('../__mocks__/expo-file-system'));
-
-import { QA_MAX_LINK_LENGTH, QA_SCENARIOS, QA_SEEDED_SETTING_KEY } from '@/lib/qa';
+import { QA_FROZEN_NOW_SETTING_KEY, QA_MAX_LINK_LENGTH, QA_SCENARIOS, QA_SEEDED_SETTING_KEY } from '@/lib/qa';
 import { parseSeedLink, parseUtcInstant, isSeedLink, type SeedLinkError } from '@/lib/qa/seedLink';
 import { planScenario, seededRng, yearBoundaryAnchor, SCENARIO_SPECS } from '@/lib/qa/scenarios';
-import { runSeed, __resetRunSeedForTests } from '@/lib/qa/runSeed';
+import { restoreFrozenClock, runSeed, __resetRunSeedForTests } from '@/lib/qa/runSeed';
+import { now } from '@/lib/clock';
+import { freezeNow, unfreezeNow } from '@/testing/clock';
 import * as dataRefreshStore from '@/context/dataRefreshStore';
 import { markDatabaseInitialized, __resetDatabaseReadinessForTests } from '@/databases/readiness';
 import { __setWriteConnectionForTests } from '@/databases/writeTransaction';
@@ -27,6 +25,11 @@ import { localDateString } from '@/databases/dateHelpers';
 import * as FileSystem from 'expo-file-system/legacy';
 import { resetWriteLayer } from '@/testing/fakeDb';
 import { countRows, describeSqlite, openMigratedSqlite, type SqliteAdapter } from '@/testing/realSqlite';
+
+// mediaHelpers writes through expo-file-system/legacy; route it to the repo's
+// recording mock (same as encryptedBackupExportImport.test.ts). jest hoists it.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+jest.mock('expo-file-system/legacy', () => require('../__mocks__/expo-file-system'));
 
 const LINK = 'myapp://qa/seed';
 
@@ -286,6 +289,14 @@ describeSqlite('runSeed (real SQLite, shipped schema)', () => {
     expect(bump).not.toHaveBeenCalled();
   });
 
+  it('entries that only sit in the recycle bin count as a person\'s data too', async () => {
+    db.raw
+      .prepare('INSERT INTO entries (mood, notes, date, deleted_at) VALUES (?, ?, ?, ?)')
+      .run(4, 'binned', NOW, NOW);
+    expect(await seed('week')).toEqual({ ok: false, error: 'foreign-data' });
+    expect(countRows(db, 'entries')).toBe(1);
+  });
+
   it('a database with settings but no entries (fresh install) is seedable', async () => {
     expect(countRows(db, 'user_settings')).toBeGreaterThan(0);
     expect(await seed('empty')).toMatchObject({ ok: true });
@@ -317,6 +328,67 @@ describeSqlite('runSeed (real SQLite, shipped schema)', () => {
     expect(countRows(db, 'entries')).toBe(0);
     expect(marker()).toBeUndefined();
     expect(bump).toHaveBeenCalledTimes(1);
+  });
+
+  // ── the frozen app clock (lib/clock.ts) ──────────────────────────────────
+  const frozenRow = () =>
+    db.raw.prepare('SELECT value FROM user_settings WHERE key = ?').get(QA_FROZEN_NOW_SETTING_KEY) as
+      | { value: string }
+      | undefined;
+
+  it("freezes the app clock at the link's now, and persists it for a relaunch", async () => {
+    await seed('week');
+    expect(now().toISOString()).toBe(NOW);
+    expect(frozenRow()).toEqual({ value: NOW });
+  });
+
+  it('a link without now UNFREEZES the clock and anchors the fixture at the real present', async () => {
+    freezeNow(new Date('2030-01-01T00:00:00Z')); // an earlier seed's freeze
+    const before = Date.now();
+    const result = await runSeed({ scenario: 'week' }, { readyTimeoutMs: 50 });
+    expect(result.ok && Date.parse(result.now)).toBeGreaterThanOrEqual(before);
+    expect(Math.abs(now().getTime() - Date.now())).toBeLessThan(5_000);
+    expect(frozenRow()).toBeUndefined();
+  });
+
+  it('a refused or failed seed never freezes, and a refusal leaves an earlier freeze alone', async () => {
+    const earlier = freezeNow(new Date('2030-01-01T00:00:00Z'));
+    db.raw.prepare('INSERT INTO entries (mood, notes, date) VALUES (?, ?, ?)').run(7, 'mine', NOW);
+    await seed('week');
+    expect(now().getTime()).toBe(earlier.getTime());
+
+    db.raw.prepare('DELETE FROM entries').run();
+    (FileSystem.writeAsStringAsync as jest.Mock).mockRejectedValueOnce(new Error('disk full'));
+    expect(await seed('timeline300')).toMatchObject({ error: 'write-failed' });
+    expect(now().getTime()).not.toBe(Date.parse(NOW));
+    expect(frozenRow()).toBeUndefined();
+  });
+
+  it('restoreFrozenClock re-applies the stored instant after a relaunch, and broadcasts', async () => {
+    await seed('week');
+    unfreezeNow(); // the relaunch: in-memory freeze gone, the row survives
+    bump.mockClear();
+    expect((await restoreFrozenClock({ readyTimeoutMs: 50 }))?.toISOString()).toBe(NOW);
+    expect(now().toISOString()).toBe(NOW);
+    expect(bump).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['no stored instant', null],
+    ['a tampered row', "'; DROP TABLE entries; --"],
+    ['an out-of-range year', '1970-01-01T00:00:00Z'],
+  ])('restoreFrozenClock freezes nothing on %s', async (_, value) => {
+    if (value !== null) {
+      db.raw.prepare('INSERT INTO user_settings (key, value) VALUES (?, ?)').run(QA_FROZEN_NOW_SETTING_KEY, value);
+    }
+    expect(await restoreFrozenClock({ readyTimeoutMs: 50 })).toBeNull();
+    expect(Math.abs(now().getTime() - Date.now())).toBeLessThan(5_000);
+    expect(bump).not.toHaveBeenCalled();
+  });
+
+  it('restoreFrozenClock gives up when the database never initializes', async () => {
+    __resetDatabaseReadinessForTests();
+    expect(await restoreFrozenClock({ readyTimeoutMs: 20 })).toBeNull();
   });
 
   it('defaults now to the real clock when the link has none', async () => {

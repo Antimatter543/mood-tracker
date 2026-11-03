@@ -63,9 +63,20 @@ describe('guard shape', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('app/_layout.tsx is the only app source that reads EXPO_PUBLIC_QA', () => {
+  // The mount gate, plus lib/clock.ts, whose QA-only setter THROWS unless the
+  // flag is '1' (or under jest): a fail-closed read, folded to "always throw" in
+  // a release. Any NEW reader is a new gate and needs its own review.
+  const FLAG_READERS = [LAYOUT, 'lib/clock.ts'];
+
+  it('only the mount gate and the clock setter guard read EXPO_PUBLIC_QA', () => {
     const readers = appSource().filter((rel) => /EXPO_PUBLIC_QA\b/.test(code(rel)));
-    expect(readers).toEqual([LAYOUT]);
+    expect(readers.sort()).toEqual([...FLAG_READERS].sort());
+  });
+
+  it("lib/clock.ts's read is the fail-closed throw guard (dot access, so it inlines)", () => {
+    expect(code('lib/clock.ts')).toMatch(
+      /if \(process\.env\.EXPO_PUBLIC_QA !== '1' && process\.env\.NODE_ENV !== 'test'\) \{\s*throw new Error/
+    );
   });
 
   it('no route file under app/ is named after the seed path', () => {

@@ -47,5 +47,13 @@ export type QaScenario = (typeof QA_SCENARIOS)[number];
  */
 export const QA_SEEDED_SETTING_KEY = 'qa_seeded';
 
+/**
+ * `user_settings` key holding the seed's frozen "now" (UTC ISO), absent when the
+ * link had none. The frozen clock (lib/clock.ts) lives in memory, so a relaunch
+ * would otherwise revert "today" to the device clock while the data stays
+ * anchored at the seed's instant; QaSeedHost re-applies it on every launch.
+ */
+export const QA_FROZEN_NOW_SETTING_KEY = 'qa_frozen_now';
+
 /** Hard cap on the raw link length, checked BEFORE any decoding. */
 export const QA_MAX_LINK_LENGTH = 256;
