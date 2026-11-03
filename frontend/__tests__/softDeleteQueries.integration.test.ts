@@ -15,14 +15,7 @@
  */
 import * as queries from '@/components/visualisations/queries';
 
-let DatabaseSync: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ({ DatabaseSync } = require('node:sqlite'));
-} catch {
-  DatabaseSync = null;
-}
-const describeIfSqlite = DatabaseSync ? describe : describe.skip;
+import { describeSqlite, openSqlite } from '@/testing/realSqlite';
 
 // Wide-open bounds so the WINDOW filter can never be the reason a query returns
 // nothing — the ONLY thing that should empty these results is the bin predicate.
@@ -77,7 +70,7 @@ const SCHEMA = `
   CREATE TABLE entry_activities (id INTEGER PRIMARY KEY, entry_id INTEGER, activity_id INTEGER);
 `;
 
-describeIfSqlite('queries.ts — soft-deleted entries are invisible to every read', () => {
+describeSqlite('queries.ts — soft-deleted entries are invisible to every read', () => {
   let db: any;
 
   const sqlExports = Object.entries(queries).filter(
@@ -88,8 +81,7 @@ describeIfSqlite('queries.ts — soft-deleted entries are invisible to every rea
     db.prepare(sql).all(...(params as any[]));
 
   beforeEach(() => {
-    db = new DatabaseSync(':memory:');
-    db.exec(SCHEMA);
+    db = openSqlite({ schema: SCHEMA }).raw;
     db.exec(`INSERT INTO activity_groups (id, name) VALUES (1, 'Sports');`);
     db.exec(`INSERT INTO activities (id, name, group_id) VALUES (1, 'Running', 1), (2, 'Reading', 1);`);
     // ONE entry, LIVE for now, linked to BOTH activities (so the co-occurrence

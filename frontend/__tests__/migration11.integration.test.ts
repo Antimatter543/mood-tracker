@@ -10,7 +10,7 @@
  * right SQL strings, never that an `ALTER TABLE … ADD COLUMN` + partial
  * `CREATE INDEX` actually EXECUTE correctly on a real engine. We import the REAL
  * `migrations` array and drive version 11's `up` against our own node:sqlite
- * adapter, so a change to the migration SQL breaks this test. Skips cleanly if
+ * adapter, so a change to the migration SQL breaks this test. Skips locally (fails on CI) if
  * node:sqlite is unavailable.
  */
 
@@ -18,7 +18,6 @@
 // __tests__/migrations.test.ts) so importing the module is cheap and pulls in no
 // native modules. Migration 11 is driven against our OWN node:sqlite adapter
 // below, so the expo-sqlite mock is never actually used to run SQL.
-jest.mock('expo-sqlite');
 jest.mock('@/databases/lifecycle', () => ({
   createInitialSchema: jest.fn(),
   seedActivitiesV1: jest.fn(),
@@ -33,35 +32,15 @@ jest.mock('@/components/seedData', () => ({
 
 import { migrations } from '@/databases/migrations';
 
-// Load Node's built-in SQLite; skip the whole suite if unavailable.
-let DatabaseSync: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ({ DatabaseSync } = require('node:sqlite'));
-} catch {
-  DatabaseSync = null;
-}
-const describeIfSqlite = DatabaseSync ? describe : describe.skip;
+import { describeSqlite, openSqlite, type SqliteAdapter } from '@/testing/realSqlite';
 
-// An expo-sqlite-shaped async adapter over a synchronous node:sqlite database
-// (only the methods migration 11's `up` uses: runAsync).
-function makeAdapter(db: any) {
-  return {
-    runAsync: async (sql: string, params: any[] = []) => {
-      const r = db.prepare(sql).run(...(params ?? []));
-      return { lastInsertRowId: Number(r.lastInsertRowid), changes: Number(r.changes) };
-    },
-    execAsync: async (sql: string) => {
-      db.exec(sql);
-    },
-  };
-}
-
-describeIfSqlite('migration 11 — starred_at column + partial index (real SQLite)', () => {
+describeSqlite('migration 11 — starred_at column + partial index (real SQLite)', () => {
   let db: any;
+  let adapter: SqliteAdapter;
 
   beforeEach(() => {
-    db = new DatabaseSync(':memory:');
+    adapter = openSqlite();
+    db = adapter.raw;
     // A v10-shaped `entries` table: NO starred_at column yet — exactly what an
     // existing user's DB looks like the instant before migration 11 runs.
     db.exec(`
@@ -85,7 +64,7 @@ describeIfSqlite('migration 11 — starred_at column + partial index (real SQLit
   const runMigration11 = async () => {
     const m11 = migrations.find((m) => m.version === 11);
     expect(m11).toBeDefined();
-    await m11!.up(makeAdapter(db) as any);
+    await m11!.up(adapter as any);
   };
 
   const columns = (): string[] =>
@@ -126,7 +105,7 @@ describeIfSqlite('migration 11 — starred_at column + partial index (real SQLit
     // ALTER would throw "duplicate column", so we only re-run the index create —
     // mirroring the real guard that matters for the partial index.
     await expect(
-      makeAdapter(db).runAsync(
+      adapter.runAsync(
         `CREATE INDEX IF NOT EXISTS idx_entries_starred ON entries(starred_at) WHERE starred_at IS NOT NULL`
       )
     ).resolves.toBeDefined();

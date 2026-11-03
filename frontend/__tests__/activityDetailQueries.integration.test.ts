@@ -8,7 +8,7 @@
  * a no-op stub that never executes SQL, so a green jest proves NOTHING about
  * whether these joins actually select/aggregate the right rows — the self-join
  * `activity_id <> ...` exclusion, the co-occurrence COUNT/GROUP BY ordering, the
- * range filter's bind order. This executes them for real. Skips cleanly if the
+ * range filter's bind order. This executes them for real. Skips locally (fails on CI) if the
  * runtime lacks node:sqlite.
  */
 import {
@@ -18,28 +18,22 @@ import {
     ACTIVITY_ENTRY_COUNTS,
 } from '@/components/visualisations/queries';
 
-let DatabaseSync: any = null;
-try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    ({ DatabaseSync } = require('node:sqlite'));
-} catch {
-    DatabaseSync = null;
-}
-const describeIfSqlite = DatabaseSync ? describe : describe.skip;
+import { describeSqlite, openSqlite } from '@/testing/realSqlite';
 
-describeIfSqlite('per-activity detail queries — real SQLite execution', () => {
+describeSqlite('per-activity detail queries — real SQLite execution', () => {
     let db: any;
 
     beforeAll(() => {
-        db = new DatabaseSync(':memory:');
-        db.exec(`
+        db = openSqlite({
+            schema: `
             CREATE TABLE activities (
                 id INTEGER PRIMARY KEY, name TEXT, group_id INTEGER,
                 icon_family TEXT, icon_name TEXT, position INTEGER
             );
             CREATE TABLE entries (id INTEGER PRIMARY KEY, mood REAL, notes TEXT, date TEXT, deleted_at TEXT);
             CREATE TABLE entry_activities (id INTEGER PRIMARY KEY, entry_id INTEGER, activity_id INTEGER);
-        `);
+        `,
+        }).raw;
         db.exec(`INSERT INTO activities (id,name,group_id,icon_family,icon_name,position) VALUES
             (1,'Running',1,'Feather','activity',1),
             (2,'Work',1,'Feather','briefcase',2),

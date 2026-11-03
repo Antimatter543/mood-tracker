@@ -12,12 +12,11 @@
  * The write layer opens its connection via `openDatabaseAsync`; here we instead
  * INJECT a thin adapter over a `node:sqlite` in-memory DB as the write
  * connection (and pass it as the read `db` too), so every statement hits one
- * real engine. If the runtime lacks node:sqlite the suite skips cleanly.
+ * real engine. If the runtime lacks node:sqlite the suite skips locally (fails on CI).
  *
  * mediaHelpers file IO is mocked out (no expo-file-system): these tests exercise
  * the DB transaction semantics, not photo files.
  */
-jest.mock('expo-sqlite');
 jest.mock('@/databases/mediaHelpers', () => ({
   MEDIA_DIR: 'file:///media/',
   copyToMediaDir: jest.fn(async (uri: string) => `file:///media/${uri.split('/').pop()}`),
@@ -35,31 +34,7 @@ import {
   setEntryStarred,
 } from '@/databases/entries';
 
-// Load Node's built-in SQLite; skip the whole suite if unavailable.
-let DatabaseSync: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ({ DatabaseSync } = require('node:sqlite'));
-} catch {
-  DatabaseSync = null;
-}
-const describeIfSqlite = DatabaseSync ? describe : describe.skip;
-
-// An expo-sqlite-shaped async adapter over a synchronous node:sqlite database.
-function makeAdapter(db: any) {
-  return {
-    execAsync: async (sql: string) => {
-      db.exec(sql);
-    },
-    runAsync: async (sql: string, params: any[] = []) => {
-      const r = db.prepare(sql).run(...(params ?? []));
-      return { lastInsertRowId: Number(r.lastInsertRowid), changes: Number(r.changes) };
-    },
-    getAllAsync: async (sql: string, params: any[] = []) => db.prepare(sql).all(...(params ?? [])),
-    getFirstAsync: async (sql: string, params: any[] = []) =>
-      db.prepare(sql).get(...(params ?? [])) ?? null,
-  };
-}
+import { countRows, describeSqlite, openSqlite } from '@/testing/realSqlite';
 
 const SCHEMA = `
   CREATE TABLE activity_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
@@ -81,23 +56,20 @@ const SCHEMA = `
   );
 `;
 
-describeIfSqlite('write layer — real SQLite atomicity + FK cascade', () => {
+describeSqlite('write layer — real SQLite atomicity + FK cascade', () => {
   let db: any;
   let adapter: any;
 
-  const count = (table: string): number =>
-    (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  const count = (table: string): number => countRows(adapter, table);
 
   beforeEach(() => {
-    db = new DatabaseSync(':memory:');
-    // FK ON is what makes the cascades in these tests real — the trap that
-    // writeTransaction.ts sets on its own connection.
-    db.exec('PRAGMA foreign_keys = ON;');
-    db.exec(SCHEMA);
+    // openSqlite turns FK ON, which is what makes the cascades in these tests
+    // real — the trap that writeTransaction.ts sets on its own connection.
+    adapter = openSqlite({ schema: SCHEMA });
+    db = adapter.raw;
     db.exec(`INSERT INTO activity_groups (id, name) VALUES (1, 'Sports');`);
     db.exec(`INSERT INTO activities (id, name, group_id) VALUES (1, 'Running', 1), (2, 'Reading', 1);`);
 
-    adapter = makeAdapter(db);
     __resetWriteTransactionForTests();
     __setWriteConnectionForTests(adapter);
   });
