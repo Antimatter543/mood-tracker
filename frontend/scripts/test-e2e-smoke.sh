@@ -40,6 +40,9 @@ case "$*" in
   "exec-out screencap -p") printf 'PNG' ;;
   "shell date") echo "Tue Nov  3 10:00:00 AEST 2026" ;;
   "shell settings get secure navigation_mode") echo 2 ;;
+  "shell dumpsys window")
+    app_focus='Window{1 u0 com.raeduslabs.soulsyncapp/.MainActivity}'
+    echo "  mCurrentFocus=${SHIM_FOCUS:-$app_focus}" ;;
 esac
 exit 0
 EOF
@@ -95,9 +98,23 @@ check "Maestro targets the emulator serial" grep -q '^maestro --device emulator-
 check "installs with runtime permissions granted (-g)" grep -q '^adb install -r -t -g ' "$LOG"
 check "pins the device clock" grep -q '^adb shell date 110310002026.00' "$LOG"
 check "pins gesture navigation" grep -q 'navbar.gestural' "$LOG"
+# line_of <regex>: first call-log line number matching it (99999 if absent).
+line_of() { local n; n="$(grep -n -m1 -E "$1" "$LOG" | cut -d: -f1)"; echo "${n:-99999}"; }
+check "hides system error dialogs before the nav switch restarts the launcher" \
+  test "$(line_of 'hide_error_dialogs 1')" -lt "$(line_of 'navbar.gestural')"
+check "starts logcat only after adb root (root restarts adbd, killing the stream)" \
+  test "$(line_of '^adb root')" -lt "$(line_of '^adb logcat -v')"
+check "no system dialog seen: none recorded, nothing closed" \
+  bash -c '[[ "$(sed -n "s/^SYSTEM_DIALOGS=//p" "$1")" == 0 ]] && ! grep -q CLOSE_SYSTEM_DIALOGS "$2"' _ "$OUTDIR/result.env" "$LOG"
 check "result.env says pass with 5 passed" \
   test "$(result RESULT)/$(result FLOWS_PASSED)/$(result FLOWS_FAILED)" == "pass/5/0"
 check "summary table has one PASS row per flow" test "$(grep -c '| PASS |' "$OUTDIR/summary.md")" -eq 5
+
+echo "case: a system ANR dialog holds focus (the first CI run's failure)"
+run_case anrdialog 'SHIM_FOCUS=Window{9 u0 Application Not Responding: com.google.android.apps.nexuslauncher}' -- "$APK"
+check "closes it before every flow" test "$(grep -c 'CLOSE_SYSTEM_DIALOGS' "$LOG")" -eq "${#ALL[@]}"
+check "records each one in result.env" test "$(result SYSTEM_DIALOGS)" == "${#ALL[@]}"
+check "names the stuck package" grep -q '^SYSTEM_DIALOG_1=01-tabs-render: com.google.android.apps.nexuslauncher}$' "$OUTDIR/result.env"
 
 echo "case: one flow fails in the middle"
 run_case onefail SHIM_FAIL_FLOWS=03-timeline-delete-undo -- "$APK"

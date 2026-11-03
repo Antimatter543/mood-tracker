@@ -9,7 +9,7 @@
 # emulator and turns it into one PASS/FAIL table.
 #
 # Runs INSIDE reactivecircus/android-emulator-runner, after the emulator boots:
-#   1. waits for boot (bounded), starts a logcat capture,
+#   1. waits for boot (bounded), turns system error dialogs off, starts logcat,
 #   2. pins what the flows can see: clock, font scale, animations, status bar,
 #      and GESTURE navigation (smoke 04 taps the bottom inset strip, which only
 #      belongs to the app when no 3-button nav bar sits there),
@@ -108,17 +108,41 @@ done
 (( booted )) || fail "emulator did not finish booting after $BOOT_TRIES polls"
 kv BOOT_S $(( T_START - ${EMU_T0:-$T_START} ))
 
+# `adb root` restarts adbd, which kills every open adb stream: it must come
+# BEFORE the logcat capture, or logcat.txt ends up empty (first CI run did).
+adb root >/dev/null 2>&1 || true
+adb wait-for-device
+
+# System error dialogs off, BEFORE anything restarts the launcher. On a busy CI
+# emulator the Pixel Launcher can ANR while it relaunches for the nav-mode
+# switch below; its "isn't responding" dialog then sits over the app and every
+# flow fails its first assertion (first CI run: 5/5 flows, all on that dialog).
+# The ANR is still logged, and an app crash still fails the flow's assertions.
+adb shell settings put global hide_error_dialogs 1
+
 adb logcat -c || true
 adb logcat -v time >"$OUT/logcat.txt" 2>&1 &
 LOGCAT_PID=$!
 trap 'kill "$LOGCAT_PID" 2>/dev/null || true' EXIT
 
+# clear_system_dialogs <when>: if a system ANR/crash dialog holds focus anyway
+# (raised before the setting above took effect), record it and close it.
+SYSTEM_DIALOGS=0
+clear_system_dialogs() {
+  local focus
+  focus="$(adb shell dumpsys window 2>/dev/null | grep -m1 'mCurrentFocus' | tr -d '\r')"
+  if [[ "$focus" =~ Application\ (Not\ Responding|Error) ]]; then
+    SYSTEM_DIALOGS=$(( SYSTEM_DIALOGS + 1 ))
+    log "system dialog before $1, closing it: $focus"
+    kv "SYSTEM_DIALOG_$SYSTEM_DIALOGS" "$1: ${focus##* }"
+    adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
+  fi
+}
+
 # ── determinism ───────────────────────────────────────────────────────────────
 # Clock: Home's greeting and "today" come from the device clock. Pin it
 # (google_apis images allow `adb root`): 2026-11-03 10:00 -> "Good morning".
 # Lane G's frozen-clock seed link will make this redundant for seeded flows.
-adb root >/dev/null 2>&1 || true
-adb wait-for-device
 adb shell settings put global auto_time 0
 adb shell settings put global auto_time_zone 0
 adb shell date 110310002026.00 >/dev/null 2>&1 || log "warn: could not set the device clock"
@@ -131,7 +155,16 @@ done
 # Gesture navigation, so the bottom safe-area inset is app-owned (see header).
 adb shell cmd overlay enable-exclusive --category com.android.internal.systemui.navbar.gestural \
   >/dev/null 2>&1 || log "warn: could not switch to gesture navigation"
-kv NAV_MODE "$(adb shell settings get secure navigation_mode 2>/dev/null | tr -d '\r')"
+# The switch relaunches SystemUI and the launcher. Wait (bounded) for the mode to
+# land, then give the launcher a moment to finish relaunching before the install.
+nav=""
+for (( i = 0; i < 15; i++ )); do
+  nav="$(adb shell settings get secure navigation_mode 2>/dev/null | tr -d '\r')"
+  [[ "$nav" == "2" ]] && break
+  sleep 1
+done
+kv NAV_MODE "$nav"
+sleep 5
 # Status bar demo mode: fixed clock, full battery, no notification icons.
 adb shell settings put global sysui_demo_allowed 1
 demo() { adb shell am broadcast -a com.android.systemui.demo -e command "$@" >/dev/null 2>&1 || true; }
@@ -155,6 +188,7 @@ failed=0
 ROWS=()
 for name in "${FLOWS[@]}"; do
   log "flow $name"
+  clear_system_dialogs "$name"
   T=$(date +%s)
   maestro --device "$DEVICE" test --no-ansi \
     --test-output-dir "$OUT/maestro/$name" \
@@ -177,6 +211,7 @@ for name in "${FLOWS[@]}"; do
   fi
 done
 
+kv SYSTEM_DIALOGS "$SYSTEM_DIALOGS"
 kv FLOWS_PASSED "$passed"
 kv FLOWS_FAILED "$failed"
 kv FLOWS_S $(( $(date +%s) - T_START ))
