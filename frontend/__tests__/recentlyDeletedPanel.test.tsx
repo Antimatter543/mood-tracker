@@ -33,6 +33,8 @@ jest.mock('@/databases/entry-bin', () => ({
 import { Alert } from 'react-native';
 import { makeDb, resetWriteLayer, type MockDb } from '@/testing/fakeDb';
 import { setInsets, INSETS } from '@/testing/platform';
+import { freezeNow } from '@/testing/clock';
+import { FIXED_NOW } from '@/testing/builders';
 import { OverlayProvider } from '@/context/OverlayHost';
 import { RecentlyDeletedPanel } from '@/components/timeline/RecentlyDeletedPanel';
 
@@ -42,7 +44,7 @@ const binnedEntry = (over: Record<string, unknown> = {}) => ({
     mood: 7,
     notes: 'a bad tuesday',
     date: '2026-06-12T10:00:00.000Z',
-    deleted_at: new Date(Date.now() - 3 * DAY).toISOString(),
+    deleted_at: new Date(FIXED_NOW.getTime() - 3 * DAY).toISOString(),
     activityNames: ['Running', 'Reading'],
     ...over,
 });
@@ -62,6 +64,8 @@ beforeEach(() => {
     resetWriteLayer();
     mockDb = makeDb();
     setInsets(INSETS.THREE_BUTTON_NAV);
+    // "N days left" counts from the app clock; binnedEntry stamps from the same instant.
+    freezeNow(FIXED_NOW);
     mockGetBinnedEntries.mockResolvedValue([]);
     mockRestoreMoodEntry.mockResolvedValue({ success: true, message: 'ok' });
     mockPurgeMoodEntry.mockResolvedValue({ success: true, message: 'ok' });

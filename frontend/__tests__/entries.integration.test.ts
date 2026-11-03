@@ -35,6 +35,7 @@ import {
 } from '@/databases/entries';
 
 import { countRows, describeSqlite, openSqlite } from '@/testing/realSqlite';
+import { freezeNow } from '@/testing/clock';
 
 const SCHEMA = `
   CREATE TABLE activity_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
@@ -175,17 +176,13 @@ describeSqlite('write layer — real SQLite atomicity + FK cascade', () => {
     const entryId = (db.prepare('SELECT id FROM entries').get() as { id: number }).id;
     expect(starredAtOf(entryId)).toBeNull(); // starts unstarred
 
-    const before = Date.now();
+    const now = freezeNow();
     const result = await setEntryStarred(adapter, entryId, true);
-    const after = Date.now();
 
     expect(result.success).toBe(true);
     const stamp = starredAtOf(entryId);
     expect(stamp).not.toBeNull();
-    const t = Date.parse(stamp as string);
-    expect(Number.isNaN(t)).toBe(false);
-    expect(t).toBeGreaterThanOrEqual(before);
-    expect(t).toBeLessThanOrEqual(after);
+    expect(stamp).toBe(now.toISOString());
   });
 
   it('setEntryStarred unstars a row: resets starred_at back to NULL', async () => {
