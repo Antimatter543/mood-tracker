@@ -11,6 +11,13 @@ appId: com.raeduslabs.soulsyncapp
 - tapOn: "Add mood entry"
 - assertVisible: "How were you\\?"
 - tapOn: "Continue"
+# Notes is the last input on the details step, below every activity group: on a
+# phone-sized screen it starts off-screen (CI run 41652287864 failed 4/4 here).
+- scrollUntilVisible:
+    element:
+      id: entry-notes-input
+    direction: DOWN
+    timeout: 20000
 - tapOn:
     id: entry-notes-input
 - inputText: ${NOTE}
