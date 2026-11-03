@@ -1,86 +1,26 @@
 /**
- * CLASS-LEVEL INVARIANT: no app source imports `react-native-chart-kit`.
+ * `react-native-chart-kit` is gone and stays gone.
  *
- * Every chart in this app is now our own thin react-native-svg renderer over
- * pure, unit-tested geometry. This is not a verdict on the library: chart-kit
- * was revived in April 2026 after four dormant years (6.12.0 shipped Feb 2022,
- * 6.12.1 not until Apr 2026) and is on v7 now. Our lockfile had us on 6.12.3,
- * a May 2026 release, but still on the pre-v7 architecture: the modern charts
- * live behind v7's `/v2` subpath. We left it because we wanted to own the
- * geometry and gesture layer outright, and because that 6.x LineChart drew one
- * flat stroke whatever the value, overshot the data range with its bezier,
- * exposed only `onDataPointClick` and `decorator` rather than a touch stream a
- * hold-to-scrub can be built on, and sized itself from `Dimensions.get('window')`
- * instead of measuring. Those are the exact defects the replacement exists to fix, so a
- * `import { LineChart } from 'react-native-chart-kit'` sneaking back into a NEW
- * chart would silently reintroduce all of them — and would look perfectly fine
- * in review, because it is one familiar-looking line.
+ * Every chart in this app is our own thin react-native-svg renderer over pure,
+ * unit-tested geometry. The library was dropped on purpose, not as a verdict on
+ * it: the 6.x LineChart drew one flat stroke whatever the value, overshot the
+ * data range with its bezier, exposed no touch stream a hold-to-scrub can sit
+ * on, and sized itself from `Dimensions.get('window')`. A new chart that pulls
+ * it back in would reintroduce all of that, and look fine in review.
  *
- * The dependency itself is also gone from package.json, so such an import would
- * fail at bundle time rather than at review time — but that failure would be a
- * confusing "module not found" in Metro. This says what the rule actually is.
- *
- * Sibling of softDeleteExclusion.test.ts / pageHeaderUniformity.test.ts: the
- * defect is the DIFFERENCE between files, which only a test that enumerates
- * them all can see.
+ * Source-scan verdict (lane D): the old "no file imports it" scan was DELETED.
+ * A dependency ban is enforced by the dependency list: with the package absent,
+ * any import fails `tsc --noEmit` (TS2307) and the Metro bundle, both CI gates.
+ * What is left is the one thing those need, the package staying out of
+ * package.json.
  */
-import { readFileSync, readdirSync, statSync } from 'fs';
-import { join } from 'path';
-
-const ROOT = join(__dirname, '..');
-
-/** Everywhere a chart could plausibly live. */
-const SCANNED_DIRS = ['app', 'components', 'context', 'hooks', 'lib'];
+import { readSource } from '@/testing/sourceScan';
 
 const CHART_KIT = 'react-native-chart-kit';
-/** An IMPORT of it, not a mention of the name in a comment explaining why. */
-const IMPORTS_CHART_KIT =
-    /(?:from\s+['"]react-native-chart-kit['"]|require\(\s*['"]react-native-chart-kit['"]\s*\))/;
-
-const SOURCE_EXT = /\.tsx?$/;
-
-function sourceFiles(dir: string): string[] {
-    const out: string[] = [];
-    const walk = (d: string) => {
-        for (const name of readdirSync(d)) {
-            const full = join(d, name);
-            if (statSync(full).isDirectory()) {
-                if (name === 'node_modules' || name === '__tests__') continue;
-                walk(full);
-            } else if (SOURCE_EXT.test(name)) {
-                out.push(full);
-            }
-        }
-    };
-    walk(dir);
-    return out;
-}
-
-const allFiles = SCANNED_DIRS.flatMap((d) => sourceFiles(join(ROOT, d)));
 
 describe('react-native-chart-kit is gone and stays gone', () => {
-    it('scans a non-trivial number of files (guards against a vacuous pass)', () => {
-        // If the walker silently found nothing, every assertion below would be
-        // trivially true forever.
-        expect(allFiles.length).toBeGreaterThan(50);
-    });
-
-    it('no app source imports it', () => {
-        const offenders = allFiles.filter((f) =>
-            IMPORTS_CHART_KIT.test(readFileSync(f, 'utf8'))
-        );
-        expect(offenders.map((f) => f.replace(`${ROOT}/`, ''))).toEqual([]);
-    });
-
-    it('the regex really does catch an import (proves the check has teeth)', () => {
-        expect(IMPORTS_CHART_KIT.test(`import { LineChart } from '${CHART_KIT}';`)).toBe(true);
-        expect(IMPORTS_CHART_KIT.test(`const { BarChart } = require("${CHART_KIT}")`)).toBe(true);
-        // A comment naming it is fine — this file and several others do.
-        expect(IMPORTS_CHART_KIT.test(`// replaces ${CHART_KIT}'s LineChart`)).toBe(false);
-    });
-
     it('is not a dependency any more', () => {
-        const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+        const pkg = JSON.parse(readSource('package.json'));
         expect(pkg.dependencies?.[CHART_KIT]).toBeUndefined();
         expect(pkg.devDependencies?.[CHART_KIT]).toBeUndefined();
     });

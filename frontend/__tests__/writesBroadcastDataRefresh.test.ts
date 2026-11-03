@@ -22,11 +22,12 @@
  * functions from the database layer itself (any exported async function whose
  * body mutates), finds every screen/component that calls one, and fails unless
  * that module broadcasts. A NEW write path fails the build until it does.
+ *
+ * Source-scan verdict (lane D): KEEP. "Every caller of a write also broadcasts"
+ * is a cross-file shape no compiler or single behavioural test sees.
+ * Bug commit: 1c050b8.
  */
-import { readFileSync, readdirSync, statSync } from 'fs';
-import { join } from 'path';
-
-const ROOT = join(__dirname, '..');
+import { code, listSourceFiles, readSource } from '@/testing/sourceScan';
 
 /**
  * Modules whose writes deliberately do NOT broadcast, each with the reason.
@@ -50,29 +51,12 @@ const EXEMPT: Record<string, string> = {
  */
 const NON_DATA_DB_MODULES = ['user-settings.ts'];
 
-const listFiles = (dir: string, out: string[] = []): string[] => {
-    for (const name of readdirSync(dir)) {
-        const full = join(dir, name);
-        if (statSync(full).isDirectory()) {
-            if (name === '__tests__' || name === 'node_modules') continue;
-            listFiles(full, out);
-        } else if (/\.tsx?$/.test(name)) {
-            out.push(full);
-        }
-    }
-    return out;
-};
-
-const stripComments = (src: string) =>
-    src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-
 /** Exported async functions in databases/ whose body mutates the database. */
 const writeFunctions = (): string[] => {
     const names = new Set<string>();
-    const dbDir = join(ROOT, 'databases');
-    for (const file of listFiles(dbDir)) {
+    for (const file of listSourceFiles(['databases'])) {
         if (NON_DATA_DB_MODULES.some(m => file.endsWith(m))) continue;
-        const src = stripComments(readFileSync(file, 'utf8'));
+        const src = code(file);
         // Split on top-level `export async function` declarations and keep the
         // body up to the next one; a body containing DML (or our write
         // primitive) makes that function a write.
@@ -112,15 +96,9 @@ describe('every UI write path broadcasts the data-refresh signal', () => {
     });
 
     it('every screen/component calling a write also broadcasts', () => {
-        const uiFiles = [
-            ...listFiles(join(ROOT, 'app')),
-            ...listFiles(join(ROOT, 'components')),
-        ];
-
         const offenders: string[] = [];
-        for (const file of uiFiles) {
-            const rel = file.slice(ROOT.length + 1);
-            const src = stripComments(readFileSync(file, 'utf8'));
+        for (const rel of listSourceFiles(['app', 'components'])) {
+            const src = code(rel);
             const called = writes.filter(fn => new RegExp(`\\b${fn}\\s*\\(`).test(src));
             if (called.length === 0) continue;
             if (rel in EXEMPT) continue;
@@ -133,15 +111,12 @@ describe('every UI write path broadcasts the data-refresh signal', () => {
 
     it('each exemption still holds', () => {
         // RecentlyDeletedPanel must genuinely take and call an onChanged prop...
-        const panel = readFileSync(
-            join(ROOT, 'components/timeline/RecentlyDeletedPanel.tsx'),
-            'utf8',
-        );
+        const panel = readSource('components/timeline/RecentlyDeletedPanel.tsx');
         expect(panel).toMatch(/onChanged\s*:\s*\(\)\s*=>\s*void/);
         expect(panel).toMatch(/onChanged\(\)/);
 
         // ...and DBViewer, its only mounting point, must wire that to a broadcast.
-        const viewer = readFileSync(join(ROOT, 'components/DBViewer.tsx'), 'utf8');
+        const viewer = readSource('components/DBViewer.tsx');
         expect(viewer).toMatch(/<RecentlyDeletedPanel/);
         const onChangedProp = viewer.slice(viewer.indexOf('<RecentlyDeletedPanel'));
         expect(onChangedProp.slice(0, 600)).toMatch(BROADCAST);
@@ -151,14 +126,14 @@ describe('every UI write path broadcasts the data-refresh signal', () => {
         // above would accept a `broadcastWrite` that had been quietly turned into a
         // no-op, and every Timeline write would stop reaching the other screens with
         // the whole sweep still green.
-        const stripped = stripComments(viewer);
+        const stripped = code('components/DBViewer.tsx');
         expect(stripped).toMatch(/const\s+broadcastWrite\s*=[\s\S]{0,120}?refetchEntries/);
         expect(stripped).toMatch(/const\s*\{\s*refetchEntries\s*\}\s*=\s*useDataContext\(\)/);
 
         // Every exempt path must still exist, so a rename cannot silently
         // retire an exemption and take its write out of the sweep with it.
         for (const rel of Object.keys(EXEMPT)) {
-            expect(() => statSync(join(ROOT, rel))).not.toThrow();
+            expect(() => readSource(rel)).not.toThrow();
         }
     });
 });

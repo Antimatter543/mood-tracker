@@ -217,9 +217,10 @@ describe('OverlayModal: keyboard observed by the host, before any overlay opens'
     });
 
     it('OverlayModal reads the host height and never mounts its own observer', () => {
-        const fs = require('fs');
-        const path = require('path');
-        const src = fs.readFileSync(path.join(__dirname, '../components/OverlayModal.tsx'), 'utf8');
+        // Source-scan verdict (lane D): KEEP, a shape bug (a second observer mounting in
+        // the same commit as autoFocus). Bug commit: 1dfabee.
+        const { code } = require('@/testing/sourceScan');
+        const src = code('components/OverlayModal.tsx');
         expect(src).not.toMatch(/import[^;]*useKeyboardHeight/);
         expect(src).toMatch(/useOverlayKeyboardHeight\(\)/);
     });
