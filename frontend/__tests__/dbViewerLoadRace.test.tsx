@@ -23,6 +23,10 @@
  * run does not clobber the fast later run"); this test proves the wiring.
  */
 import React from 'react';
+import { makeDb, resetWriteLayer, type MockDb } from '@/testing/fakeDb';
+import { deferred, type Deferred } from '@/testing/async';
+import { makeEntryRow } from '@/testing/builders';
+import { setInsets } from '@/testing/platform';
 import { render, act, waitFor } from '@testing-library/react-native';
 
 // ── Mock expo-router. `useFocusEffect` models FOCUS GAIN only (mount-once) so it
@@ -46,74 +50,17 @@ jest.mock('expo-router', () => {
     };
 });
 
-// ── Deferred-promise factory: lets the test settle each getAllAsync call by hand
-//    so we can force the stale-after-fresh resolution order the bug needs. ───────
-type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void };
-const defer = <T,>(): Deferred<T> => {
-    let resolve!: (v: T) => void;
-    const promise = new Promise<T>((r) => {
-        resolve = r;
-    });
-    return { promise, resolve };
-};
-
 // FIFO queue of deferreds — each getAllAsync (page-0 read) pulls the next one, so
 // the test controls exactly which invocation resolves first/last.
 let pendingReads: Deferred<any[]>[] = [];
-const mockDb = {
-    getAllAsync: jest.fn(() => {
-        const d = defer<any[]>();
-        pendingReads.push(d);
-        return d.promise;
-    }),
-    getFirstAsync: jest.fn().mockResolvedValue(null),
-    runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 }),
-    withExclusiveTransactionAsync: jest
-        .fn()
-        .mockImplementation(async (cb: () => Promise<void>) => cb()),
-};
-// DBViewer now renders the undo snackbar + the bin panel, which import
-// reanimated (its worklets runtime is unavailable under jest).
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const anim = { duration: () => anim };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
-        },
-        FadeIn: anim,
-        FadeInDown: anim,
-        FadeOutDown: anim,
-    };
-});
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 48, left: 0, right: 0 }),
-}));
-jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
-
+// The narrow expo-sqlite factory stays: it serves useSQLiteContext from the per-test db below.
+let mockDb: MockDb;
 jest.mock('expo-sqlite', () => ({
     useSQLiteContext: () => mockDb,
 }));
 
 // ── Minimal theme so useThemeColors works without SettingsProvider ───────────
-jest.mock('@/styles/global', () => ({
-    useThemeColors: () => ({
-        background: '#000',
-        cardBackground: '#111',
-        secondaryBackground: '#222',
-        text: '#fff',
-        textSecondary: '#aaa',
-        border: '#333',
-        accent: '#4CAF50',
-        accentDark: '#388E3C',
-        accentLight: 'rgba(76,175,80,0.1)',
-        overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-        elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-        isDark: true,
-    }),
-}));
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 // ── Data context: exposes refetchEntries; DBViewer calls it after edits/deletes.
 jest.mock('@/context/DataContext', () => ({
@@ -174,17 +121,7 @@ const Timeline = () => (
     </OverlayProvider>
 );
 
-const entryRow = (id: number, notes: string) => ({
-    id,
-    mood: 7,
-    notes,
-    date: '2026-06-12T10:00:00.000Z',
-    activity_ids: null,
-    activity_names: null,
-    activity_group_ids: null,
-    activity_icon_names: null,
-    activity_icon_families: null,
-});
+const entryRow = (id: number, notes: string) => makeEntryRow({ id, notes });
 
 // Settle the Nth-oldest queued read (0 = first/oldest still pending).
 const settleRead = async (index: number, rows: any[]) => {
@@ -200,6 +137,15 @@ beforeEach(() => {
     jest.clearAllMocks();
     pendingReads = [];
     mockRefreshCount = 0;
+    resetWriteLayer();
+    mockDb = makeDb();
+    // Same insets the old local safe-area mock fixed: bottom 48 (3-button nav bar), no top inset.
+    setInsets({ top: 0, bottom: 48 });
+    mockDb.getAllAsync.mockImplementation(() => {
+        const d = deferred<any[]>();
+        pendingReads.push(d);
+        return d.promise;
+    });
 });
 
 describe('DBViewer — a stale load must not clobber/blank the list (race-latch)', () => {
