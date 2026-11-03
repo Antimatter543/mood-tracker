@@ -38,6 +38,8 @@ jest.mock('react-native-reanimated', () => ({
     runOnJS: (fn: any) => fn,
 }));
 
+// jest.setup.ts mocks this hook for every other suite; this one tests the real hook.
+jest.unmock('@/hooks/useKeyboardHeight');
 import { useKeyboardHeight } from '@/hooks/useKeyboardHeight';
 
 // Probe surfaces the hook value as readable text.
