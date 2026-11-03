@@ -1,5 +1,22 @@
 # SoulSync — Project Lessons
 
+## 2026-11-03: Shared test helpers (frontend/testing): three traps found while building them
+
+- **A global reanimated stub flips gesture-handler onto its worklet path.** gesture-handler decides
+  "reanimated is installed" by `require('react-native-reanimated')` + `useSharedValue`. The real
+  package never loads in jest, so gesture-handler always ran its plain-JS path. A stub with
+  `useSharedValue` passes the probe, and every GestureDetector then throws
+  `Reanimated.useEvent is not a function`. `jest.setup.ts` mocks gesture-handler's `reanimatedWrapper`
+  to `{ Reanimated: undefined }`. `testingHelpers.test.tsx` pins it.
+- **A node_modules stack trace that says `src/` can be lying.** gesture-handler ships source maps.
+  jest loads its `main` (`lib/commonjs/...`), but the trace prints the mapped `src/...` path. A
+  `jest.mock` of the src path mocks a file nobody loads. Before mocking a package-internal module,
+  `node -e "console.log(require.resolve('<pkg>'))"` shows which build jest really loads.
+- **seedData holds v1 seed names; a fresh install shows the migrated ones.** Migration 6 renames
+  "Event" to "Social event". `SHIPPED_SEED_RENAMES` in `testing/builders.ts` maps them, and a test
+  compares `seedActivity(i)` with every row of a freshly migrated DB. A new rename migration fails
+  that test until the map lists it.
+
 ## 2026-11-02: Encrypted backups: expo-crypto output traps, and "unreadable" is not "off"
 
 - **expo-crypto AES-GCM natively ignores `ciphertext({ encoding })`** (Android reads the option under
