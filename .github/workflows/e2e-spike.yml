@@ -14,10 +14,6 @@ name: E2E spike (emulator + Maestro)
 
 on:
   workflow_dispatch:
-  # TEMPORARY (spike only): a dispatch-only workflow is not dispatchable until it exists on the
-  # default branch. REMOVE before the PR leaves draft.
-  push:
-    branches: [ci/e2e-emulator-spike]
 
 permissions:
   contents: read
