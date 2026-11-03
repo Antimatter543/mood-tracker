@@ -1,6 +1,3 @@
-import { createMockDatabase } from 'expo-sqlite';
-
-jest.mock('expo-sqlite');
 jest.mock('@/components/IconPicker', () => ({ IconFamilyType: {} }));
 jest.mock('@/components/types', () => ({}));
 
@@ -11,22 +8,10 @@ import {
   deleteActivity,
   updateActivityPositions,
 } from '@/databases/activities';
-import {
-  __setWriteConnectionForTests,
-  __resetWriteTransactionForTests,
-} from '@/databases/writeTransaction';
-
-// Route the write transaction onto the same mock we assert on (`txn === db`), so
-// deleteActivity / updateActivityPositions writes issued via withWriteTransaction
-// land on db.runAsync. See writeTransaction's test hooks.
-const makeDb = () => {
-  const db = createMockDatabase();
-  __setWriteConnectionForTests(db as any);
-  return db;
-};
+import { makeDb, resetWriteLayer, sqlCalls } from '@/testing/fakeDb';
 
 beforeEach(() => {
-  __resetWriteTransactionForTests();
+  resetWriteLayer();
 });
 
 describe('getActivities', () => {
@@ -113,9 +98,7 @@ describe('updateActivity — additional', () => {
 
     await updateActivity(db as any, 1, '  Renamed  ', 'Feather', 'check');
     // Two getFirstAsync calls; then UPDATE
-    const updateCall = db.runAsync.mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('UPDATE activities')
-    );
+    const updateCall = sqlCalls(db, /UPDATE activities/)[0];
     expect(updateCall![1]).toContain('Renamed');
     expect(updateCall![1]).not.toContain('  Renamed  ');
   });
@@ -159,9 +142,7 @@ describe('deleteActivity — additional', () => {
     await deleteActivity(db as any, 5);
 
     // Find the UPDATE that compacts positions
-    const compactCall = db.runAsync.mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('position = position - 1')
-    );
+    const compactCall = sqlCalls(db, /position = position - 1/)[0];
     expect(compactCall).toBeDefined();
     // The WHERE clause should target the same group and positions > 2
     expect(compactCall![1]).toEqual([1, 2]);
@@ -198,9 +179,7 @@ describe('updateActivityPositions', () => {
       { id: 300, name: '', group_id: 1, position: 0 } as any,
     ]);
 
-    const updateCalls = db.runAsync.mock.calls.filter((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('UPDATE activities SET position')
-    );
+    const updateCalls = sqlCalls(db, /UPDATE activities SET position/);
     expect(updateCalls.length).toBe(3);
     expect(updateCalls[0][1]).toEqual([1, 100]);
     expect(updateCalls[1][1]).toEqual([2, 200]);

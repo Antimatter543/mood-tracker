@@ -17,12 +17,10 @@
  *  - Nothing is written when the preview is cancelled, the file is not a
  *    Daylio backup, or it has no entries. Settings are never touched.
  */
-import { createMockDatabase } from 'expo-sqlite';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { strToU8 } from 'fflate';
 
-jest.mock('expo-sqlite');
 jest.mock('expo-document-picker');
 jest.mock('expo-file-system/legacy', () => require('../__mocks__/expo-file-system'));
 jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
@@ -34,26 +32,22 @@ jest.mock('@/databases/migrations', () => ({ runMigrations: jest.fn() }));
 import { MAX_DAYLIO_FILE_BYTES, describeDaylioImport, isZipHeader } from '@/databases/daylio-import';
 import { importDatabaseData } from '@/databases/data-export';
 import { zipSync } from 'fflate';
-import { __resetWriteTransactionForTests, __setWriteConnectionForTests } from '@/databases/writeTransaction';
+import { makeDb, resetWriteLayer, sqlCalls as rawSqlCalls, type MockDb } from '@/testing/fakeDb';
 import { JPEG_BYTES, buildDaylioArchive, daylioBackupJson, daylioEntry } from '../__fixtures__/daylioBackup';
 
-type Db = ReturnType<typeof createMockDatabase>;
+// The shared helper types its rows `unknown[][]`; this suite indexes into params.
+const sqlCalls = (db: MockDb, pattern: RegExp) => rawSqlCalls(db, pattern) as any[][];
 
 /** A mock db whose inserts return increasing ids and whose duplicate check finds `existingDates`. */
-function makeDb(existingDates: string[] = []) {
-  const db = createMockDatabase();
-  let nextId = 500;
-  db.runAsync.mockImplementation(async () => ({ lastInsertRowId: nextId++, changes: 1 }));
-  db.getFirstAsync.mockImplementation(async (sql: string, params: unknown[]) => {
-    if (/FROM entries/.test(sql)) return existingDates.includes(params[0] as string) ? { id: 1 } : null;
-    if (/MAX\(sort_order\)/.test(sql)) return { maxOrder: 0 };
-    return null;
+function makeImportDb(existingDates: string[] = []) {
+  return makeDb({
+    firstInsertId: 500,
+    first: [
+      [/FROM entries/, (params) => (existingDates.includes(params[0] as string) ? { id: 1 } : null)],
+      [/MAX\(sort_order\)/, () => ({ maxOrder: 0 })],
+    ],
   });
-  __setWriteConnectionForTests(db as any);
-  return db;
 }
-
-const sqlCalls = (db: Db, pattern: RegExp) => db.runAsync.mock.calls.filter((c: any[]) => pattern.test(c[0]));
 
 function pickFile(bytes: Uint8Array, { size = bytes.length }: { size?: number } = {}) {
   (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({
@@ -77,7 +71,7 @@ const confirmYes = jest.fn(async () => true);
 
 beforeEach(() => {
   jest.resetAllMocks();
-  __resetWriteTransactionForTests();
+  resetWriteLayer();
   confirmYes.mockImplementation(async () => true);
   (FileSystem.writeAsStringAsync as jest.Mock).mockResolvedValue(undefined);
   (FileSystem.makeDirectoryAsync as jest.Mock).mockResolvedValue(undefined);
@@ -86,7 +80,7 @@ beforeEach(() => {
 });
 
 it('appends entries with fresh ids and maps their activities', async () => {
-  const db = makeDb();
+  const db = makeImportDb();
   pickFile(buildDaylioArchive(daylioBackupJson({
     dayEntries: [daylioEntry({ mood: 1, tags: [14, 16], note: 'A<br>day' }), daylioEntry({ mood: 5, day: 16 })],
   })));
@@ -118,7 +112,7 @@ it('appends entries with fresh ids and maps their activities', async () => {
 });
 
 it('skips entries that already exist without ever writing their photos', async () => {
-  const db = makeDb(['2024-03-15T20:30:00.000Z']);
+  const db = makeImportDb(['2024-03-15T20:30:00.000Z']);
   pickFile(buildDaylioArchive(
     daylioBackupJson({
       assets: [{ id: 1, type: 1, checksum: 'abc', createdAt: 0, createdAtOffset: 0, android_metadata: '{}' }],
@@ -146,7 +140,7 @@ const onePhotoBackup = (photo: Uint8Array) =>
   );
 
 it('an entry repeated within the file is imported once, and the repeat\'s photo file is deleted', async () => {
-  const db = makeDb();
+  const db = makeImportDb();
   // The pre-check sees neither copy (2 lookups); in the transaction the
   // second copy finds the first one, just inserted (4th lookup).
   let entryLookups = 0;
@@ -174,7 +168,7 @@ it('an entry repeated within the file is imported once, and the repeat\'s photo 
 });
 
 it('deletes the photos it already wrote when the import fails', async () => {
-  const db = makeDb();
+  const db = makeImportDb();
   db.runAsync.mockImplementation(async (sql: string) => {
     if (/^INSERT INTO entries/.test(sql)) throw new Error('disk full');
     return { lastInsertRowId: 1, changes: 1 };
@@ -190,7 +184,7 @@ it('deletes the photos it already wrote when the import fails', async () => {
 });
 
 it('leaves out a photo that is not an image, and says so', async () => {
-  const db = makeDb();
+  const db = makeImportDb();
   pickFile(onePhotoBackup(strToU8('this is not an image file')));
 
   const result = await importDatabaseData({} as any, { confirmDaylio: confirmYes });
@@ -204,7 +198,7 @@ it('leaves out a photo that is not an image, and says so', async () => {
 });
 
 it('refuses a file over the size cap before reading it', async () => {
-  const db = makeDb();
+  const db = makeImportDb();
   pickFile(buildDaylioArchive(daylioBackupJson()), { size: MAX_DAYLIO_FILE_BYTES + 1 });
 
   const result = await importDatabaseData({} as any, { confirmDaylio: confirmYes });
@@ -217,7 +211,7 @@ it('refuses a file over the size cap before reading it', async () => {
 });
 
 it('reads a big file in chunks, never all at once as one string', async () => {
-  makeDb();
+  makeImportDb();
   const padding = new Uint8Array(7 * 1024 * 1024).map((_, i) => (i * 2654435761) >>> 24);
   pickFile(buildDaylioArchive(daylioBackupJson(), { files: { 'padding.bin': padding }, compress: false }));
 
@@ -233,7 +227,7 @@ it('reads a big file in chunks, never all at once as one string', async () => {
 });
 
 it('imports photos for new entries', async () => {
-  const db = makeDb();
+  const db = makeImportDb();
   pickFile(buildDaylioArchive(
     daylioBackupJson({
       assets: [{ id: 1, type: 1, checksum: 'abc', createdAt: 0, createdAtOffset: 0, android_metadata: '{}' }],
@@ -250,7 +244,7 @@ it('imports photos for new entries', async () => {
 });
 
 it('shows the preview first and writes nothing when it is cancelled', async () => {
-  const db = makeDb();
+  const db = makeImportDb();
   pickFile(buildDaylioArchive(daylioBackupJson()));
   const confirmNo = jest.fn(async () => false);
 
@@ -265,7 +259,7 @@ it.each([
   ['a ZIP that is not a Daylio backup', zipSync({ 'other.json': strToU8('{}') }), /^SoulSync can't open this file\./],
   ['a Daylio backup without entries', buildDaylioArchive(daylioBackupJson({ dayEntries: [] })), /no entries/],
 ])('rejects %s without writing or asking', async (_name, bytes, message) => {
-  const db = makeDb();
+  const db = makeImportDb();
   pickFile(bytes as Uint8Array);
 
   const result = await importDatabaseData({} as any, { confirmDaylio: confirmYes });
@@ -307,7 +301,7 @@ it('leaves zero counts out of the preview', () => {
 });
 
 it('says so when everything was already imported', async () => {
-  makeDb(['2024-03-15T20:30:00.000Z']);
+  makeImportDb(['2024-03-15T20:30:00.000Z']);
   pickFile(buildDaylioArchive(daylioBackupJson()));
 
   const result = await importDatabaseData({} as any, { confirmDaylio: confirmYes });
@@ -335,7 +329,7 @@ describe('telling formats apart', () => {
     ['an image', new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])],
     ['JSON that is not a backup', strToU8('{"hello":"world"}')],
   ])('%s is "not a supported backup", before any question', async (_name, bytes) => {
-    const db = makeDb();
+    const db = makeImportDb();
     pickFile(bytes);
     const confirmRestore = jest.fn(async () => true);
 
@@ -351,7 +345,7 @@ describe('telling formats apart', () => {
   });
 
   it('a real Daylio backup that is damaged says so', async () => {
-    makeDb();
+    makeImportDb();
     pickFile(zipSync({ 'backup.daylio': strToU8('%%% not base64 %%%') }));
 
     const result = await importDatabaseData({} as any, { confirmDaylio: confirmYes });
@@ -360,7 +354,7 @@ describe('telling formats apart', () => {
   });
 
   it('a Daylio backup never triggers the "replace your data" question', async () => {
-    makeDb();
+    makeImportDb();
     pickFile(buildDaylioArchive(daylioBackupJson()));
     const confirmRestore = jest.fn(async () => true);
 
@@ -371,7 +365,7 @@ describe('telling formats apart', () => {
   });
 
   it('a SoulSync backup asks the "replace" question (not the Daylio preview), and "no" writes nothing', async () => {
-    const db = makeDb();
+    const db = makeImportDb();
     pickFile(strToU8(JSON.stringify({ version: 3, data: { activityGroups: [], activities: [], entries: [], settings: [] } })));
     const confirmRestore = jest.fn(async () => false);
 
@@ -384,7 +378,7 @@ describe('telling formats apart', () => {
   });
 
   it('accepts any file type in the picker (.daylio has no MIME type)', async () => {
-    makeDb();
+    makeImportDb();
     pickFile(buildDaylioArchive(daylioBackupJson()));
     await importDatabaseData({} as any, { confirmDaylio: confirmYes });
     expect(DocumentPicker.getDocumentAsync).toHaveBeenCalledWith(expect.objectContaining({ type: '*/*' }));

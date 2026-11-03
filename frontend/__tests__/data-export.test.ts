@@ -1,10 +1,8 @@
-import { createMockDatabase } from 'expo-sqlite';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { MEDIA_DIR } from '@/databases/mediaHelpers';
 
-jest.mock('expo-sqlite');
 jest.mock('expo-document-picker');
 // Use the hand-written FileSystem mock (it defines documentDirectory +
 // EncodingType.Base64, which the auto-mock omits — the export reads photo bytes
@@ -35,26 +33,14 @@ jest.mock('@/databases/migrations', () => ({
 }));
 
 import { importDatabaseData, exportDatabaseData } from '@/databases/data-export';
-import {
-  __setWriteConnectionForTests,
-  __resetWriteTransactionForTests,
-} from '@/databases/writeTransaction';
-
-// importDatabaseData writes via withWriteTransaction; route it onto the same mock
-// the test asserts on (`txn === db`). exportDatabaseData is read-only, so
-// injecting its mock is harmless.
-const makeDb = () => {
-  const db = createMockDatabase();
-  __setWriteConnectionForTests(db as any);
-  return db;
-};
+import { makeDb, resetWriteLayer, sqlCalls, type MockDb } from '@/testing/fakeDb';
 
 // Re-establish a clean, predictable set of mock defaults before every test so
 // queued `*Once` implementations never leak across tests. The DB mock is fresh
-// per test (createMockDatabase) so it is unaffected.
+// per test (makeDb) so it is unaffected.
 beforeEach(() => {
   jest.resetAllMocks();
-  __resetWriteTransactionForTests();
+  resetWriteLayer();
   (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true });
   (FileSystem.makeDirectoryAsync as jest.Mock).mockResolvedValue(undefined);
   (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue('');
@@ -89,8 +75,8 @@ function queuePickedFile(contents: string) {
 }
 
 /** entry_media INSERT calls issued against a mock DB during import. */
-function mediaInserts(db: ReturnType<typeof createMockDatabase>) {
-  return db.runAsync.mock.calls.filter((c: any[]) => /INSERT INTO entry_media/i.test(c[0]));
+function mediaInserts(db: MockDb) {
+  return sqlCalls(db, /INSERT INTO entry_media/i) as any[][];
 }
 
 describe('importDatabaseData', () => {
@@ -156,10 +142,7 @@ describe('importDatabaseData', () => {
 
     await importDatabaseData(db as any);
 
-    const groupInserts = db.runAsync.mock.calls.filter(
-      (call: any[]) =>
-        typeof call[0] === 'string' && call[0].includes('INSERT INTO activity_groups')
-    );
+    const groupInserts = sqlCalls(db, /INSERT INTO activity_groups/);
 
     expect(groupInserts).toHaveLength(2);
     // Every insert carries an explicit sort_order — never the bare (name) form.
@@ -252,9 +235,7 @@ describe('importDatabaseData', () => {
     // Only the photo that wrote successfully got an entry_media row.
     expect(mediaInserts(db)).toHaveLength(1);
     // The rest of the import (settings) still ran.
-    const settingInserts = db.runAsync.mock.calls.filter((c: any[]) =>
-      /INSERT OR REPLACE INTO user_settings/i.test(c[0])
-    );
+    const settingInserts = sqlCalls(db, /INSERT OR REPLACE INTO user_settings/i);
     expect(settingInserts).toHaveLength(1);
   });
 
@@ -289,9 +270,7 @@ describe('importDatabaseData', () => {
     const result = await importDatabaseData(db as any);
     expect(result.success).toBe(true);
 
-    const entryInsert = db.runAsync.mock.calls.find((c: any[]) =>
-      /INSERT OR REPLACE INTO entries/i.test(c[0])
-    );
+    const entryInsert = (sqlCalls(db, /INSERT OR REPLACE INTO entries/i) as any[][])[0];
     expect(entryInsert).toBeDefined();
     expect(entryInsert![1][4]).toBe('2026-07-20T10:00:00.000Z');
   });
@@ -324,9 +303,7 @@ describe('importDatabaseData', () => {
     const result = await importDatabaseData(db as any);
     expect(result.success).toBe(true);
 
-    const entryInsert = db.runAsync.mock.calls.find((c: any[]) =>
-      /INSERT OR REPLACE INTO entries/i.test(c[0])
-    );
+    const entryInsert = (sqlCalls(db, /INSERT OR REPLACE INTO entries/i) as any[][])[0];
     expect(entryInsert).toBeDefined();
     expect(entryInsert![1][4]).toBeNull();
   });
@@ -532,7 +509,7 @@ describe('exportDatabaseData', () => {
 describe('round-trip: export then import carries photos across installs', () => {
   it('embeds photo bytes on export and restores them to NEW local paths on import', async () => {
     // --- EXPORT (originating device) ---
-    const exportDb = createMockDatabase();
+    const exportDb = makeDb();
     exportDb.getAllAsync
       .mockResolvedValueOnce([{ id: 1, mood: 5, notes: 'a', date: '2025-01-01' }]) // entries
       .mockResolvedValueOnce([

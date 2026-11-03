@@ -1,6 +1,3 @@
-import { createMockDatabase } from 'expo-sqlite';
-
-jest.mock('expo-sqlite');
 jest.mock('@/components/IconPicker', () => ({ IconFamilyType: {} }));
 jest.mock('@/components/types', () => ({}));
 jest.mock('@/components/seedData', () => ({
@@ -18,23 +15,10 @@ import {
   createInitialSchema,
 } from '@/databases/lifecycle';
 import { runMigrations } from '@/databases/migrations';
-import {
-  __setWriteConnectionForTests,
-  __resetWriteTransactionForTests,
-} from '@/databases/writeTransaction';
-
-// resetDatabase runs on the WRITE connection (via withWriteLock); route it onto
-// the same mock the test asserts on (`conn === db`). initializeDatabase /
-// createInitialSchema run on the passed connection directly (no write lock), so
-// the injection is a harmless no-op for them.
-const makeDb = () => {
-  const db = createMockDatabase();
-  __setWriteConnectionForTests(db as any);
-  return db;
-};
+import { makeDb, resetWriteLayer, sqlCalls } from '@/testing/fakeDb';
 
 beforeEach(() => {
-  __resetWriteTransactionForTests();
+  resetWriteLayer();
   (runMigrations as jest.Mock).mockClear();
 });
 
@@ -50,9 +34,7 @@ describe('initializeDatabase', () => {
     const db = makeDb();
     await initializeDatabase(db as any);
 
-    const fkCall = db.execAsync.mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('foreign_keys = ON')
-    );
+    const fkCall = sqlCalls(db, /foreign_keys = ON/, db.execAsync)[0];
     expect(fkCall).toBeDefined();
     expect(runMigrations).toHaveBeenCalledTimes(1);
   });
@@ -110,9 +92,7 @@ describe('resetDatabase — PRAGMA outside transaction', () => {
     const result = await resetDatabase(db as any);
     expect(result.success).toBe(false);
 
-    const fkOnCall = db.execAsync.mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('foreign_keys = ON')
-    );
+    const fkOnCall = sqlCalls(db, /foreign_keys = ON/, db.execAsync)[0];
     expect(fkOnCall).toBeDefined();
   });
 
@@ -120,9 +100,7 @@ describe('resetDatabase — PRAGMA outside transaction', () => {
     const db = makeDb();
     await resetDatabase(db as any);
 
-    const resetCall = db.execAsync.mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('user_version = 0')
-    );
+    const resetCall = sqlCalls(db, /user_version = 0/, db.execAsync)[0];
     expect(resetCall).toBeDefined();
   });
 

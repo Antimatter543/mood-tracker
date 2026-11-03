@@ -1,10 +1,3 @@
-import { createMockDatabase } from 'expo-sqlite';
-import {
-  __setWriteConnectionForTests,
-  __resetWriteTransactionForTests,
-} from '@/databases/writeTransaction';
-
-jest.mock('expo-sqlite');
 jest.mock('@/components/IconPicker', () => ({ IconFamilyType: {} }));
 jest.mock('@/components/types', () => ({}));
 jest.mock('@/components/seedData', () => ({
@@ -19,19 +12,10 @@ import {
   filterValidActivityIds,
   setEntryStarred,
 } from '@/databases/entries';
-
-// Create a mock DB and route the write transaction onto it, so writes issued via
-// withWriteTransaction (databases/writeTransaction.ts) land on THIS mock —
-// `txn === db` — and the assertions below (which inspect db.runAsync etc.) see
-// them. Reads still run on the same mock. See writeTransaction's test hooks.
-const makeDb = () => {
-  const db = createMockDatabase();
-  __setWriteConnectionForTests(db as any);
-  return db;
-};
+import { makeDb, resetWriteLayer, sqlCalls, type MockDb } from '@/testing/fakeDb';
 
 beforeEach(() => {
-  __resetWriteTransactionForTests();
+  resetWriteLayer();
 });
 
 describe('addMoodEntry — additional validation', () => {
@@ -44,9 +28,7 @@ describe('addMoodEntry — additional validation', () => {
     await addMoodEntry(db as any, 7, [], 'note', customDate);
 
     // First runAsync call is the INSERT INTO entries
-    const insertCall = db.runAsync.mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('INSERT INTO entries')
-    );
+    const insertCall = (sqlCalls(db, /INSERT INTO entries/) as any[][])[0];
     expect(insertCall).toBeDefined();
     expect(insertCall![1]).toContain(customDate);
   });
@@ -58,9 +40,7 @@ describe('addMoodEntry — additional validation', () => {
 
     await addMoodEntry(db as any, 5, [], 'note');
 
-    const insertCall = db.runAsync.mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('INSERT INTO entries')
-    );
+    const insertCall = (sqlCalls(db, /INSERT INTO entries/) as any[][])[0];
     const dateArg = insertCall![1][2];
     // ISO 8601 UTC pattern
     expect(dateArg).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
@@ -92,9 +72,7 @@ describe('addMoodEntry — additional validation', () => {
 
     await addMoodEntry(db as any, 5, [1, 2], 'note');
 
-    const beganImmediate = db.execAsync.mock.calls.some(
-      (c: any[]) => typeof c[0] === 'string' && c[0].toUpperCase().includes('BEGIN IMMEDIATE')
-    );
+    const beganImmediate = sqlCalls(db, /BEGIN IMMEDIATE/i, db.execAsync).length > 0;
     expect(beganImmediate).toBe(true);
     expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
     expect(db.withTransactionAsync).not.toHaveBeenCalled();
@@ -107,9 +85,7 @@ describe('addMoodEntry — additional validation', () => {
 
     await addMoodEntry(db as any, 6, [1, 2], 'note');
 
-    const linkCalls = db.runAsync.mock.calls.filter((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('INSERT INTO entry_activities')
-    );
+    const linkCalls = sqlCalls(db, /INSERT INTO entry_activities/) as any[][];
     expect(linkCalls.length).toBe(2);
     // Each link should use the entry's lastInsertRowId
     for (const call of linkCalls) {
@@ -125,9 +101,7 @@ describe('addMoodEntry — additional validation', () => {
     const result = await addMoodEntry(db as any, 5, [], 'note');
     expect(result.success).toBe(true);
 
-    const linkCalls = db.runAsync.mock.calls.filter((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('INSERT INTO entry_activities')
-    );
+    const linkCalls = sqlCalls(db, /INSERT INTO entry_activities/) as any[][];
     expect(linkCalls.length).toBe(0);
   });
 
@@ -269,7 +243,9 @@ describe('addMoodEntry — photos', () => {
     const { addMoodEntry: addWithMockedMedia } = require('@/databases/entries');
     const freshWriteTxn = require('@/databases/writeTransaction');
 
-    const db = createMockDatabase();
+    // makeDb installs the connection on the writeTransaction this file imported
+    // before the reset; the fresh graph gets its own injection just below.
+    const db = makeDb();
     db.getAllAsync.mockResolvedValue([]);
     db.runAsync.mockResolvedValue({ lastInsertRowId: 99, changes: 1 });
     freshWriteTxn.__setWriteConnectionForTests(db);
@@ -283,9 +259,7 @@ describe('addMoodEntry — photos', () => {
       ['file:///cache/a.jpg', 'file:///cache/b.png']
     );
 
-    const mediaInserts = db.runAsync.mock.calls.filter((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('INSERT INTO entry_media')
-    );
+    const mediaInserts = sqlCalls(db, /INSERT INTO entry_media/) as any[][];
     expect(mediaInserts.length).toBe(2);
     for (const call of mediaInserts) {
       expect(call[1][0]).toBe(99); // entry_id = lastInsertRowId
@@ -303,9 +277,7 @@ describe('addMoodEntry — photos', () => {
 
     await addMoodEntry(db as any, 5, [], 'no photos');
 
-    const mediaInserts = db.runAsync.mock.calls.filter((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('INSERT INTO entry_media')
-    );
+    const mediaInserts = sqlCalls(db, /INSERT INTO entry_media/);
     expect(mediaInserts.length).toBe(0);
   });
 });
@@ -313,10 +285,7 @@ describe('addMoodEntry — photos', () => {
 describe('setEntryStarred', () => {
   // Isolate the UPDATE from the withWriteTransaction BEGIN/COMMIT (which run via
   // execAsync) — the star write is the one runAsync call.
-  const starUpdate = (db: ReturnType<typeof createMockDatabase>) =>
-    db.runAsync.mock.calls.find(
-      (c: any[]) => typeof c[0] === 'string' && /UPDATE entries SET starred_at/i.test(c[0])
-    );
+  const starUpdate = (db: MockDb) => (sqlCalls(db, /UPDATE entries SET starred_at/i) as any[][])[0];
 
   it('stars an entry: UPDATE sets starred_at to a UTC ISO instant, keyed by id', async () => {
     const db = makeDb();
