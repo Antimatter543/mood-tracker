@@ -13,6 +13,8 @@
 import React from 'react';
 import { act, render, waitFor } from '@testing-library/react-native';
 import { ScrollView, StyleSheet } from 'react-native';
+import { makeEntryRow } from '@/testing/builders';
+import { makeDb, resetWriteLayer, type MockDb } from '@/testing/fakeDb';
 
 // In 2.0.2 FlashList IS the RecyclerView (src/FlashList.ts re-exports it), so the
 // real export is used as-is. (The package's jestSetup.js maps FlashList to a
@@ -38,44 +40,9 @@ jest.mock('expo-router', () => {
         useIsFocused: () => true,
     };
 });
-const mockDb = {
-    getAllAsync: jest.fn(),
-    getFirstAsync: jest.fn().mockResolvedValue(null),
-    runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 }),
-};
+let mockDb: MockDb;
 jest.mock('expo-sqlite', () => ({ useSQLiteContext: () => mockDb }));
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 48, left: 0, right: 0 }),
-}));
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const anim = { duration: () => anim };
-    return {
-        __esModule: true,
-        default: { View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props) },
-        FadeIn: anim,
-        FadeInDown: anim,
-        FadeOutDown: anim,
-    };
-});
-jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
-jest.mock('@/styles/global', () => ({
-    useThemeColors: () => ({
-        background: '#000',
-        cardBackground: '#111',
-        secondaryBackground: '#222',
-        text: '#fff',
-        textSecondary: '#aaa',
-        border: '#333',
-        accent: '#4CAF50',
-        accentDark: '#388E3C',
-        accentLight: 'rgba(76,175,80,0.1)',
-        overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-        elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-        isDark: true,
-    }),
-}));
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 jest.mock('@/context/DataContext', () => ({ useDataContext: () => ({ refetchEntries: jest.fn() }) }));
 // Mutable so a test can announce a write (a bump re-runs the Timeline's loader).
 let mockRefreshCount = 0;
@@ -99,17 +66,16 @@ jest.mock('@/components/EmptyState', () => ({ EmptyState: () => null }));
 import { OverlayProvider } from '@/context/OverlayHost';
 import { DatabaseViewer } from '@/components/DBViewer';
 
-const row = (id: number, dayOffset: number) => ({
-    id,
-    mood: 6,
-    notes: `note-${id}`,
-    date: new Date(2026, 5, 20 - dayOffset, 12, 0, 0).toISOString(),
-    starred_at: null,
-    activity_ids: null,
-    activity_names: null,
-    activity_group_ids: null,
-    activity_icon_names: null,
-    activity_icon_families: null,
+const row = (id: number, dayOffset: number) =>
+    makeEntryRow({
+        id,
+        notes: `note-${id}`,
+        date: new Date(2026, 5, 20 - dayOffset, 12, 0, 0).toISOString(),
+    });
+
+beforeEach(() => {
+    resetWriteLayer();
+    mockDb = makeDb();
 });
 
 describe('Timeline on the real FlashList', () => {

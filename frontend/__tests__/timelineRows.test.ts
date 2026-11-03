@@ -29,21 +29,12 @@ import {
     TimelineRow,
 } from '@/components/timeline/timelineRows';
 import type { MoodEntry } from '@/components/types';
+import { addDays, localIso, makeEntry, makePhoto } from '@/testing/builders';
 
 // Local-noon timestamps so the day key never depends on the test TZ offset
 // (jest.tz.js pins a non-UTC zone on purpose).
-const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h, 0, 0).toISOString();
-
-const entry = (id: number, date: string, over: Partial<MoodEntry> = {}): MoodEntry => ({
-    id,
-    mood: 5,
-    notes: '',
-    date,
-    activities: [],
-    photos: [],
-    starred_at: null,
-    ...over,
-});
+const entry = (id: number, date: string, over: Partial<MoodEntry> = {}): MoodEntry =>
+    makeEntry({ id, date, ...over });
 
 const ids = (rows: TimelineRow[]) =>
     rows.map((r) => (r.type === 'header' ? `H${r.dayKey}` : `E${r.entry.id}`));
@@ -57,11 +48,11 @@ describe('buildTimelineRows — grouping', () => {
     it('emits a header before each local day, then that day\'s entries in order', () => {
         const rows = buildTimelineRows(
             [
-                entry(5, at(2026, 9, 28, 20)),
-                entry(4, at(2026, 9, 28, 9)),
-                entry(3, at(2026, 9, 27, 18)),
-                entry(2, at(2026, 9, 25, 8)),
-                entry(1, at(2026, 9, 25, 7)),
+                entry(5, localIso('2026-09-28', 20)),
+                entry(4, localIso('2026-09-28', 9)),
+                entry(3, localIso('2026-09-27', 18)),
+                entry(2, localIso('2026-09-25', 8)),
+                entry(1, localIso('2026-09-25', 7)),
             ],
             false
         );
@@ -76,15 +67,15 @@ describe('buildTimelineRows — grouping', () => {
         // 00:30 local is the previous day in UTC for any zone east of UTC, and
         // 23:30 local is the next day for any zone west of it; both must stay on
         // their local day.
-        const early = new Date(2026, 8, 28, 0, 30).toISOString();
-        const late = new Date(2026, 8, 28, 23, 30).toISOString();
+        const early = localIso('2026-09-28', 0, 30);
+        const late = localIso('2026-09-28', 23, 30);
         const rows = buildTimelineRows([entry(2, late), entry(1, early)], false);
         expect(ids(rows)).toEqual(['H2026-09-28', 'E2', 'E1']);
     });
 
     it('marks first/last of each day for the rail', () => {
         const rows = buildTimelineRows(
-            [entry(3, at(2026, 9, 28, 20)), entry(2, at(2026, 9, 28, 9)), entry(1, at(2026, 9, 27))],
+            [entry(3, localIso('2026-09-28', 20)), entry(2, localIso('2026-09-28', 9)), entry(1, localIso('2026-09-27'))],
             false
         );
         const flags = rows
@@ -99,7 +90,7 @@ describe('buildTimelineRows — grouping', () => {
 
     it('gives every row a unique key, even if a day reappears (corrupt ordering)', () => {
         const rows = buildTimelineRows(
-            [entry(3, at(2026, 9, 28)), entry(2, at(2026, 9, 27)), entry(1, at(2026, 9, 28, 8))],
+            [entry(3, localIso('2026-09-28')), entry(2, localIso('2026-09-27')), entry(1, localIso('2026-09-28', 8))],
             false
         );
         const keys = rows.map((r) => r.key);
@@ -111,9 +102,9 @@ describe('buildTimelineRows — grouping', () => {
     });
 
     it('keys entries by id and headers by day, so keys survive a regroup', () => {
-        const a = buildTimelineRows([entry(2, at(2026, 9, 28)), entry(1, at(2026, 9, 27))], true);
+        const a = buildTimelineRows([entry(2, localIso('2026-09-28')), entry(1, localIso('2026-09-27'))], true);
         const b = buildTimelineRows(
-            [entry(3, at(2026, 9, 29)), entry(2, at(2026, 9, 28)), entry(1, at(2026, 9, 27))],
+            [entry(3, localIso('2026-09-29')), entry(2, localIso('2026-09-28')), entry(1, localIso('2026-09-27'))],
             true
         );
         const keysA = a.map((r) => r.key);
@@ -126,7 +117,7 @@ describe('buildTimelineRows — grouping', () => {
         // 5 entries a day for a full page and a half: every header must be
         // followed by exactly that day's entries.
         const many = Array.from({ length: Math.floor(TIMELINE_PAGE_SIZE * 1.5) }, (_, i) =>
-            entry(1000 - i, at(2026, 9, 28 - Math.floor(i / 5), 20 - (i % 5)))
+            entry(1000 - i, localIso(addDays('2026-09-28', -Math.floor(i / 5)), 20 - (i % 5)))
         );
         const rows = buildTimelineRows(many, false);
         const headers = rows.filter((r) => r.type === 'header');
@@ -140,9 +131,9 @@ describe('buildTimelineRows — day summaries', () => {
     it('counts the day and averages its mood to one decimal', () => {
         const rows = buildTimelineRows(
             [
-                entry(3, at(2026, 9, 28, 20), { mood: 8 }),
-                entry(2, at(2026, 9, 28, 9), { mood: 5 }),
-                entry(1, at(2026, 9, 28, 8), { mood: 6 }),
+                entry(3, localIso('2026-09-28', 20), { mood: 8 }),
+                entry(2, localIso('2026-09-28', 9), { mood: 5 }),
+                entry(1, localIso('2026-09-28', 8), { mood: 6 }),
             ],
             false
         );
@@ -154,14 +145,14 @@ describe('buildTimelineRows — day summaries', () => {
 
     it('averageMood ignores non-finite moods and is null for none', () => {
         expect(averageMood([])).toBeNull();
-        expect(averageMood([entry(1, at(2026, 1, 1), { mood: NaN })])).toBeNull();
+        expect(averageMood([entry(1, localIso('2026-01-01'), { mood: NaN })])).toBeNull();
         expect(
-            averageMood([entry(1, at(2026, 1, 1), { mood: 7.5 }), entry(2, at(2026, 1, 1), { mood: NaN })])
+            averageMood([entry(1, localIso('2026-01-01'), { mood: 7.5 }), entry(2, localIso('2026-01-01'), { mood: NaN })])
         ).toBe(7.5);
     });
 
     it('marks ONLY the last day incomplete while more pages exist', () => {
-        const entries = [entry(3, at(2026, 9, 28)), entry(2, at(2026, 9, 27)), entry(1, at(2026, 9, 26))];
+        const entries = [entry(3, localIso('2026-09-28')), entry(2, localIso('2026-09-27')), entry(1, localIso('2026-09-26'))];
         const more = buildTimelineRows(entries, true).filter((r) => r.type === 'header') as any[];
         expect(more.map((h) => h.complete)).toEqual([true, true, false]);
         const done = buildTimelineRows(entries, false).filter((r) => r.type === 'header') as any[];
@@ -172,11 +163,11 @@ describe('buildTimelineRows — day summaries', () => {
 describe('list plumbing', () => {
     const rows = buildTimelineRows(
         [
-            entry(3, at(2026, 9, 28), {
-                photos: [{ id: 1, entry_id: 3, file_path: 'file:///a.jpg', media_type: 'image' }],
+            entry(3, localIso('2026-09-28'), {
+                photos: [makePhoto({ id: 1, entry_id: 3, file_path: 'file:///a.jpg' })],
             }),
-            entry(2, at(2026, 9, 28, 9)),
-            entry(1, at(2026, 9, 27)),
+            entry(2, localIso('2026-09-28', 9)),
+            entry(1, localIso('2026-09-27')),
         ],
         false
     );
@@ -191,22 +182,22 @@ describe('list plumbing', () => {
 });
 
 describe('appendUnique', () => {
-    const loaded = [entry(3, at(2026, 9, 28)), entry(2, at(2026, 9, 27))];
+    const loaded = [entry(3, localIso('2026-09-28')), entry(2, localIso('2026-09-27'))];
 
     it('appends new rows and drops ones already on screen', () => {
-        const next = appendUnique(loaded, [entry(2, at(2026, 9, 27)), entry(1, at(2026, 9, 26))]);
+        const next = appendUnique(loaded, [entry(2, localIso('2026-09-27')), entry(1, localIso('2026-09-26'))]);
         expect(next.map((e) => e.id)).toEqual([3, 2, 1]);
     });
 
     it('returns the SAME array when the page brought nothing new (no re-render)', () => {
-        expect(appendUnique(loaded, [entry(3, at(2026, 9, 28))])).toBe(loaded);
+        expect(appendUnique(loaded, [entry(3, localIso('2026-09-28'))])).toBe(loaded);
         expect(appendUnique(loaded, [])).toBe(loaded);
     });
 });
 
 describe('firstInsertedIndex', () => {
     const known = new Set([3, 2, 1]);
-    const list = (...idsNewestFirst: number[]) => idsNewestFirst.map((id) => entry(id, at(2026, 9, 1)));
+    const list = (...idsNewestFirst: number[]) => idsNewestFirst.map((id) => entry(id, localIso('2026-09-01')));
 
     it('finds an insertion at the top', () => {
         expect(firstInsertedIndex(known, list(9, 3, 2, 1))).toBe(0);
@@ -227,7 +218,7 @@ describe('firstInsertedIndex', () => {
 });
 
 describe('shouldRevealInsertion', () => {
-    const yesterday = [entry(2, at(2026, 9, 27, 18)), entry(1, at(2026, 9, 27, 9))];
+    const yesterday = [entry(2, localIso('2026-09-27', 18)), entry(1, localIso('2026-09-27', 9))];
     const prevIds = new Set([2, 1]);
     const prevRows = buildTimelineRows(yesterday, false);
 
@@ -244,29 +235,29 @@ describe('shouldRevealInsertion', () => {
     it('reveals a new DAY inserted above the visible header when the user is at the top', () => {
         // Content-position maintenance would hold "yesterday" still and push the
         // new "today" group above the viewport — the 2026-09-03 bug.
-        const next = [entry(3, at(2026, 9, 28, 8)), ...yesterday];
+        const next = [entry(3, localIso('2026-09-28', 8)), ...yesterday];
         expect(decide(next, prevRows[0].key, 0)).toBe(true);
     });
 
     it('reveals an insertion above the first visible ENTRY within the first screen', () => {
-        const next = [entry(3, at(2026, 9, 27, 20)), ...yesterday];
+        const next = [entry(3, localIso('2026-09-27', 20)), ...yesterday];
         // The user scrolled a little: the first visible row is entry 2.
         expect(decide(next, entryKey(2), 300)).toBe(true);
     });
 
     it('does NOT scroll for an insertion under the visible header (it shows in place)', () => {
-        const next = [entry(3, at(2026, 9, 27, 20)), ...yesterday];
+        const next = [entry(3, localIso('2026-09-27', 20)), ...yesterday];
         expect(decide(next, prevRows[0].key, 0)).toBe(false);
     });
 
     it('does NOT scroll a user who is deep in their history', () => {
-        const next = [entry(3, at(2026, 9, 28, 8)), ...yesterday];
+        const next = [entry(3, localIso('2026-09-28', 8)), ...yesterday];
         expect(decide(next, prevRows[0].key, 801)).toBe(false);
     });
 
     it('does NOT scroll for an insertion BELOW the first visible row', () => {
-        const older = [...yesterday, entry(0, at(2026, 9, 20))];
-        const next = [yesterday[0], entry(5, at(2026, 9, 27, 12)), yesterday[1], older[2]];
+        const older = [...yesterday, entry(0, localIso('2026-09-20'))];
+        const next = [yesterday[0], entry(5, localIso('2026-09-27', 12)), yesterday[1], older[2]];
         const ids0 = new Set([2, 1, 0]);
         expect(
             shouldRevealInsertion({
@@ -282,11 +273,11 @@ describe('shouldRevealInsertion', () => {
 
     it('does nothing when nothing was inserted (a plain refresh, an append)', () => {
         expect(decide([...yesterday], prevRows[0].key, 0)).toBe(false);
-        expect(decide([...yesterday, entry(0, at(2026, 9, 20))], prevRows[0].key, 0)).toBe(false);
+        expect(decide([...yesterday, entry(0, localIso('2026-09-20'))], prevRows[0].key, 0)).toBe(false);
     });
 
     it('shows the top when the anchor row is gone', () => {
-        const next = [entry(3, at(2026, 9, 28, 8)), yesterday[1]];
+        const next = [entry(3, localIso('2026-09-28', 8)), yesterday[1]];
         expect(decide(next, entryKey(2), 100)).toBe(true);
     });
 });
@@ -294,8 +285,8 @@ describe('shouldRevealInsertion', () => {
 describe('reuseUnchanged', () => {
     const act = { id: 7, group_id: 1, name: 'Walk', icon_name: 'walk', icon_family: 'MaterialCommunityIcons' as any, position: 0 };
     const prev = [
-        entry(2, at(2026, 9, 28), { notes: 'a', activities: [act] }),
-        entry(1, at(2026, 9, 27), { photos: [{ id: 4, entry_id: 1, file_path: 'file:///p.jpg', media_type: 'image' }] }),
+        entry(2, localIso('2026-09-28'), { notes: 'a', activities: [act] }),
+        entry(1, localIso('2026-09-27'), { photos: [makePhoto({ id: 4, entry_id: 1, file_path: 'file:///p.jpg' })] }),
     ];
     const fresh = () => JSON.parse(JSON.stringify(prev)) as MoodEntry[];
 
@@ -308,11 +299,11 @@ describe('reuseUnchanged', () => {
     it.each([
         ['mood', (e: MoodEntry) => ({ ...e, mood: 9 })],
         ['notes', (e: MoodEntry) => ({ ...e, notes: 'changed' })],
-        ['date', (e: MoodEntry) => ({ ...e, date: at(2026, 9, 26) })],
+        ['date', (e: MoodEntry) => ({ ...e, date: localIso('2026-09-26') })],
         ['starred_at', (e: MoodEntry) => ({ ...e, starred_at: '2026-09-28T00:00:00.000Z' })],
         ['activities', (e: MoodEntry) => ({ ...e, activities: [] })],
         ['activity rename', (e: MoodEntry) => ({ ...e, activities: [{ ...act, name: 'Run' }] })],
-        ['photos', (e: MoodEntry) => ({ ...e, photos: [{ id: 9, entry_id: 2, file_path: 'file:///q.jpg', media_type: 'image' }] })],
+        ['photos', (e: MoodEntry) => ({ ...e, photos: [makePhoto({ id: 9, entry_id: 2, file_path: 'file:///q.jpg' })] })],
     ])('hands over a NEW object when %s changed', (_label, change) => {
         const next = fresh();
         next[0] = change(next[0]);
