@@ -40,9 +40,16 @@ appId: com.raeduslabs.soulsyncapp
           visible: "Good (morning|afternoon|evening)"
           timeout: 90000
       - openLink: "myapp://qa/seed?scenario=${SCENARIO}&now=2026-11-03T10:00:00Z"
-- extendedWaitUntil:
-    visible:
-      id: qa-seed-status
-      text: "QA seed: ok.*"
-    timeout: 30000
+      - extendedWaitUntil:
+          visible:
+            id: qa-seed-status
+            text: "QA seed: ok.*"
+          timeout: 30000
+# Never wait for the ok pill again out here: it hides after 6 s, and Maestro's
+# evaluation of the skipped `when` above can outlast that (CI run 41662479999
+# failed 4/5 flows on exactly that). The error pill never hides, so its absence
+# is a stable check that the seed (first try or retry) succeeded.
+- assertNotVisible:
+    id: qa-seed-status
+    text: "QA seed: error.*"
 - assertVisible: "Good (morning|afternoon|evening)"

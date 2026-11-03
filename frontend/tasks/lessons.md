@@ -20,6 +20,12 @@
   the Timeline's bin BUTTON is labelled exactly that when the bin is empty. Identify an overlay by a
   testID it alone renders (`bin-close`). (b) Notes is below the fold on the details step: use
   `scrollUntilVisible` before tapping anything low in the entry form.
+- **OPEN BUG the smoke found (2026-11-03, expo-sqlite 56.0.5):** a cold start of a fresh install
+  can CRASH. `initializeDatabase` -> `runMigrations` fails with "NativeDatabase.prepareAsync rejected
+  ... Cannot use shared object that was already released", and the error escapes through
+  `SQLiteProvider` as a FATAL JavascriptException (CI run 41662479999, flow 01). The same error hits
+  `resetDatabase` (the QA seed's `reset-failed`, run 41659037408). It happened about 2 times in 20
+  launches on the CI emulator. It is not yet root-caused, and it is not lane F's to fix.
 - **Rule.** A cached emulator snapshot is a fixture: assert its screen is clean before saving it, and
   key the cache so a bad one can be thrown away with a one-line bump.
 
