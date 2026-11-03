@@ -4,12 +4,11 @@ appId: com.raeduslabs.soulsyncapp
 # Guards the dead-Undo class (800789a / 06df84b): a reanimated `entering`
 # animation on the snackbar left its Undo button rendered but not pressable, so
 # the tap did nothing and the entry stayed deleted.
-# TODO(lane G seed): seed scenario with one entry instead of the add-entry subflow.
-- launchApp:
-    clearState: true
-- extendedWaitUntil:
-    visible: "Good (morning|afternoon|evening)"
-    timeout: 90000
+# A seeded week sits below the entry, so the list is a real, recycling one.
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: week
 - runFlow:
     file: subflows/add-entry.yaml
     env:
@@ -17,8 +16,10 @@ appId: com.raeduslabs.soulsyncapp
 - tapOn:
     id: tab-timeline
 - assertVisible: "smoke-undo"
+# The top card is the one just added (see subflows/add-entry.yaml).
 - tapOn:
     id: entry-more
+    index: 0
 - tapOn:
     id: entry-delete
 - assertVisible:

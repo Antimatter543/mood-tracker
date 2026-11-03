@@ -4,12 +4,13 @@ appId: com.raeduslabs.soulsyncapp
 # with the older entry still below it.
 # Guards #16 (undo-top-insert): re-inserting a row at index 0 of the FlashList
 # Timeline left a blank or mis-measured row at the top.
-# TODO(lane G seed): seed scenario `week` instead of two add-entry subflows.
-- launchApp:
-    clearState: true
-- extendedWaitUntil:
-    visible: "Good (morning|afternoon|evening)"
-    timeout: 90000
+# A seeded week sits below the two named entries, so the re-insert happens at
+# the top of a full list, as in #16. Both are added at the same frozen instant,
+# so smoke-newer (higher id) is the top row.
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: week
 - runFlow:
     file: subflows/add-entry.yaml
     env:

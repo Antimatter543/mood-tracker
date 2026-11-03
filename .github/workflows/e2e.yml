@@ -98,6 +98,13 @@ jobs:
       - name: Prebuild (CNG)
         run: npx expo prebuild --platform android --no-install
 
+      # EXPO_PUBLIC_* values are NOT part of Metro's transform cache key, and the cache root
+      # outlives prebuild. A bundle transformed without EXPO_PUBLIC_QA=1 would silently ship
+      # without the seed channel (CLAUDE.md "METRO-CACHE TRAP"). Fresh runners start empty;
+      # this keeps it true if a Metro cache is ever restored. The bundle check below proves it.
+      - name: Wipe Metro caches
+        run: rm -rf "${TMPDIR:-/tmp}/metro-cache" "${TMPDIR:-/tmp}"/haste-map-* node_modules/.cache/metro
+
       - name: Generate a throwaway signing keystore (no repo secrets)
         working-directory: .
         run: |
@@ -133,6 +140,11 @@ jobs:
           echo "native lib dirs: $LIBS"
           echo "$LIBS" | grep -q 'lib/x86_64/' || { echo "::error::APK has no lib/x86_64"; exit 1; }
           if echo "$LIBS" | grep -q 'lib/arm'; then echo "::error::APK still carries arm libs"; exit 1; fi
+          # Positive control: the flows open the QA seed link, so the shipped Hermes bundle
+          # must carry the seed channel (frontend/lib/qa). Without it every flow would time
+          # out on "QA seed: ok" 20 minutes from now; fail here instead, in seconds.
+          unzip -p "$SRC" assets/index.android.bundle > "$RUNNER_TEMP/qa-index.android.bundle"
+          ../.github/scripts/qa-seed-bundle-check.sh "$RUNNER_TEMP/qa-index.android.bundle" present
           {
             echo "apk_bytes=$(stat -c%s "$SRC")"
             echo "gradle_s=$GRADLE_S"
@@ -158,7 +170,9 @@ jobs:
       MAESTRO_VERSION: '2.12.1'
       MAESTRO_SHA256: 54dbb0716425626604973cbb374c585ca30272375d9ce15177a1152765ddd9d7
       # Everything that shapes the AVD. Change any emulator input below => bump this key.
-      AVD_KEY: avd-v1-api34-x86_64-google_apis-pixel_3-c3-r4096
+      # v1 was retired: its snapshot was saved with a Pixel Launcher ANR dialog on screen
+      # (frozen into every restore). v2 snapshots come from `e2e-smoke.sh --snapshot`.
+      AVD_KEY: avd-v2-api34-x86_64-google_apis-pixel_3-c3-r4096
     steps:
       - name: Start timer
         run: echo "JOB_T0=$(date +%s)" >> "$GITHUB_ENV"
@@ -224,7 +238,9 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: false
-          script: echo "AVD snapshot generated"
+          # Settle first boot and close any system error dialog BEFORE the state is saved:
+          # whatever is on screen here is restored by every later run.
+          script: E2E_OUT=e2e-out/snapshot bash frontend/scripts/e2e-smoke.sh --snapshot
 
       - name: Save AVD snapshot
         if: steps.avd-cache.outputs.cache-hit != 'true' && env.CACHE_WRITE == 'true'
@@ -281,7 +297,7 @@ jobs:
             echo
             cat "$E2E_OUT/summary.md" 2>/dev/null || echo "(no flow table: setup failed: $(get REASON))"
             echo
-            echo "nav mode: $(get NAV_MODE) (2 = gesture) | clock: $(get CLOCK_AFTER_PIN)"
+            echo "nav mode: $(get NAV_MODE) (2 = gesture) | clock: $(get CLOCK_AFTER_PIN) | system dialogs closed: $(get SYSTEM_DIALOGS)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload screenshots, logcat, Maestro output

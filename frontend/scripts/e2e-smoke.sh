@@ -24,6 +24,7 @@
 # Never `pkill -f` here (it would match this script's own command line).
 #
 # Usage: frontend/scripts/e2e-smoke.sh <apk>
+#        frontend/scripts/e2e-smoke.sh --snapshot   (prepare the cached AVD snapshot)
 # Env:   E2E_OUT        artifact dir (default e2e-out)
 #        E2E_FLOWS      comma-separated subset of SMOKE_FLOWS (default: all)
 #        E2E_DEVICE     adb serial Maestro drives (default emulator-5554)
@@ -70,29 +71,37 @@ fail() {
 }
 
 # ── inputs (checked before touching the device) ───────────────────────────────
-[[ -n "$APK" ]] || fail "usage: e2e-smoke.sh <apk>"
-[[ -f "$APK" ]] || fail "APK not found: $APK"
-
-# Resolve the flow subset. An unknown name is an error, never a silent skip: a typo
-# in a dispatch input must not turn into a green run that tested nothing.
-FLOWS=()
-if [[ -n "${E2E_FLOWS:-}" ]]; then
-  IFS=',' read -r -a WANT <<<"$E2E_FLOWS"
-  for w in "${WANT[@]}"; do
-    w="${w// /}"
-    [[ -z "$w" ]] && continue
-    known=0
-    for f in "${SMOKE_FLOWS[@]}"; do [[ "$f" == "$w" ]] && known=1; done
-    (( known )) || fail "unknown flow in E2E_FLOWS: $w (known: ${SMOKE_FLOWS[*]})"
-    FLOWS+=("$w")
+resolve_inputs() {
+  [[ -n "$APK" ]] || fail "usage: e2e-smoke.sh <apk> | --snapshot"
+  [[ -f "$APK" ]] || fail "APK not found: $APK"
+  # Resolve the flow subset. An unknown name is an error, never a silent skip: a
+  # typo in a dispatch input must not turn into a green run that tested nothing.
+  FLOWS=()
+  if [[ -n "${E2E_FLOWS:-}" ]]; then
+    IFS=',' read -r -a WANT <<<"$E2E_FLOWS"
+    for w in "${WANT[@]}"; do
+      w="${w// /}"
+      [[ -z "$w" ]] && continue
+      known=0
+      for f in "${SMOKE_FLOWS[@]}"; do [[ "$f" == "$w" ]] && known=1; done
+      (( known )) || fail "unknown flow in E2E_FLOWS: $w (known: ${SMOKE_FLOWS[*]})"
+      FLOWS+=("$w")
+    done
+  else
+    FLOWS=("${SMOKE_FLOWS[@]}")
+  fi
+  (( ${#FLOWS[@]} > 0 )) || fail "no flows selected"
+  for f in "${FLOWS[@]}"; do
+    [[ -f "$FLOW_DIR/$f.yaml" ]] || fail "flow file missing: $FLOW_DIR/$f.yaml"
   done
-else
-  FLOWS=("${SMOKE_FLOWS[@]}")
-fi
-(( ${#FLOWS[@]} > 0 )) || fail "no flows selected"
-for f in "${FLOWS[@]}"; do
-  [[ -f "$FLOW_DIR/$f.yaml" ]] || fail "flow file missing: $FLOW_DIR/$f.yaml"
-done
+}
+
+# --snapshot: the AVD-snapshot step (e2e.yml, cache miss only). Boot, hide error
+# dialogs, let first-boot work settle, close any dialog, stop. The emulator then
+# saves its state, and every later run restores THAT: an ANR dialog left up here
+# is frozen into the cache and covers the app in every run (second CI run).
+SNAPSHOT=0
+if [[ "$APK" == "--snapshot" ]]; then SNAPSHOT=1; else resolve_inputs; fi
 
 # ── device ready (bounded: a wedged emulator must fail, not hang to the job timeout) ──
 adb wait-for-device
@@ -125,19 +134,48 @@ adb logcat -v time >"$OUT/logcat.txt" 2>&1 &
 LOGCAT_PID=$!
 trap 'kill "$LOGCAT_PID" 2>/dev/null || true' EXIT
 
-# clear_system_dialogs <when>: if a system ANR/crash dialog holds focus anyway
-# (raised before the setting above took effect), record it and close it.
+# clear_system_dialogs <when>: close a system ANR/crash dialog that exists
+# anyway, and record it. Second CI run: the dialog was already up when the AVD
+# snapshot restored (it was SAVED into the snapshot), so the setting above never
+# saw it raised. Detection lists ALL windows: that dialog did not hold
+# mCurrentFocus, which is why a focus check missed it. It is closed by tapping
+# its own "Close app" button (android:id/aerr_close, from a uiautomator dump):
+# "Wait" leaves a hung process that re-raises it, and CLOSE_SYSTEM_DIALOGS does
+# not reliably dismiss an error dialog (kept as the fallback only).
 SYSTEM_DIALOGS=0
 clear_system_dialogs() {
-  local focus
-  focus="$(adb shell dumpsys window 2>/dev/null | grep -m1 'mCurrentFocus' | tr -d '\r')"
-  if [[ "$focus" =~ Application\ (Not\ Responding|Error) ]]; then
-    SYSTEM_DIALOGS=$(( SYSTEM_DIALOGS + 1 ))
-    log "system dialog before $1, closing it: $focus"
-    kv "SYSTEM_DIALOG_$SYSTEM_DIALOGS" "$1: ${focus##* }"
+  local win bounds
+  win="$(adb shell dumpsys window windows 2>/dev/null | tr -d '\r' \
+    | grep -oE 'Application (Not Responding|Error): [A-Za-z0-9._]+' | head -1)"
+  [[ -n "$win" ]] || return 0
+  SYSTEM_DIALOGS=$(( SYSTEM_DIALOGS + 1 ))
+  log "system dialog before $1, closing it: $win"
+  kv "SYSTEM_DIALOG_$SYSTEM_DIALOGS" "$1: $win"
+  adb shell uiautomator dump /sdcard/e2e-ui.xml >/dev/null 2>&1 || true
+  # uiautomator writes bounds last on each node: [x1,y1][x2,y2] -> 4 numbers.
+  bounds="$(adb shell cat /sdcard/e2e-ui.xml 2>/dev/null | tr -d '\r' \
+    | grep -oE 'resource-id="android:id/aerr_close"[^>]*bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' \
+    | grep -oE '[0-9]+' | tail -4 | tr '\n' ' ')"
+  if [[ "$bounds" =~ ^([0-9]+)\ ([0-9]+)\ ([0-9]+)\ ([0-9]+)\ $ ]]; then
+    adb shell input tap $(( (BASH_REMATCH[1] + BASH_REMATCH[3]) / 2 )) $(( (BASH_REMATCH[2] + BASH_REMATCH[4]) / 2 ))
+  else
     adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
   fi
+  sleep 2
 }
+
+if (( SNAPSHOT )); then
+  # A fresh AVD's first boot keeps working (package scans, launcher setup, Play
+  # services) for a while after boot_completed; that is when the launcher ANRs.
+  # 60 s is the settle budget; the closing check below catches what outlasts it.
+  sleep "${SNAPSHOT_SETTLE_S:-60}"
+  clear_system_dialogs snapshot
+  clear_system_dialogs snapshot-recheck
+  kv SYSTEM_DIALOGS "$SYSTEM_DIALOGS"
+  kv RESULT snapshot-ready
+  log "snapshot ready ($SYSTEM_DIALOGS system dialog(s) closed)"
+  exit 0
+fi
 
 # ── determinism ───────────────────────────────────────────────────────────────
 # Clock: Home's greeting and "today" come from the device clock. Pin it
@@ -165,6 +203,7 @@ for (( i = 0; i < 15; i++ )); do
 done
 kv NAV_MODE "$nav"
 sleep 5
+clear_system_dialogs setup
 # Status bar demo mode: fixed clock, full battery, no notification icons.
 adb shell settings put global sysui_demo_allowed 1
 demo() { adb shell am broadcast -a com.android.systemui.demo -e command "$@" >/dev/null 2>&1 || true; }

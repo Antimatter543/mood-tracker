@@ -16,14 +16,17 @@ import { posix } from 'path';
 import { APP_ROOT, code, listAppFiles, listSourceFiles, readSource } from '@/testing/sourceScan';
 import {
     flowAppId,
+    flowEnvValues,
     flowFileRefs,
     flowIds,
+    flowOpenLinks,
     idIsKnown,
     smokeFlowList,
     sourceTestIds,
     unjustifiedPointTaps,
 } from '@/testing/maestroFlowLint';
 import { TAB_BUTTON_TEST_IDS } from '@/lib/tabTestIds';
+import { isSeedLink, parseSeedLink } from '@/lib/qa/seedLink';
 
 /** The ONE source of the package name: app.json. Never hand-typed here. */
 const APP_ID: string = JSON.parse(readSource('app.json')).expo.android.package;
@@ -34,6 +37,22 @@ const KNOWN_IDS: ReadonlySet<string> = new Set([
     ...Object.values(TAB_BUTTON_TEST_IDS),
     ...listSourceFiles(['app', 'components', 'context', 'lib']).flatMap(f => sourceTestIds(code(f))),
 ]);
+
+/** Every smoke flow's first runFlow: fresh install + QA seed + frozen clock. */
+const LAUNCH_REF = 'subflows/launch.yaml';
+const LAUNCH = `.maestro/smoke/${LAUNCH_REF}`;
+
+/**
+ * Why a flow's seed link would not do what the flow assumes, or null. The app's
+ * own parser decides (a link it rejects shows "QA seed: error ..." and the flow
+ * times out on CI, 20 minutes later); `now` must be set, or "today" is the
+ * runner's real date and the flow is not deterministic.
+ */
+function seedLinkProblem(link: string): string | null {
+    const parsed = parseSeedLink(link);
+    if (!parsed.ok) return `rejected: ${parsed.error}`;
+    return parsed.command.now ? null : 'no now= (the app clock would not be frozen)';
+}
 
 /** Every lint error for one flow. Empty = clean. */
 function lintFlow(rel: string, text: string, appId: string, known: ReadonlySet<string>): string[] {
@@ -82,6 +101,28 @@ describe('Maestro flows (.maestro/)', () => {
         );
         expect(listed.length).toBeGreaterThan(0);
         expect([...listed].sort()).toEqual(onDisk);
+    });
+
+    it('every smoke flow starts from the launch subflow (fresh state, seed, frozen clock)', () => {
+        const smoke = FLOWS.filter(f => posix.dirname(f) === '.maestro/smoke');
+        for (const rel of smoke) expect([rel, flowFileRefs(readSource(rel))[0]]).toEqual([rel, LAUNCH_REF]);
+    });
+
+    it('the seed link each flow builds parses with the app parser, with a frozen now', () => {
+        const scenarios = [...new Set(FLOWS.flatMap(f => flowEnvValues(readSource(f), 'SCENARIO')))];
+        expect(scenarios.length).toBeGreaterThan(0);
+        const templates = flowOpenLinks(readSource(LAUNCH));
+        expect(templates).toHaveLength(1);
+        expect(templates[0]).toContain('${SCENARIO}');
+        for (const scenario of scenarios) {
+            expect([scenario, seedLinkProblem(templates[0].replace('${SCENARIO}', scenario))]).toEqual([scenario, null]);
+        }
+        // Any literal seed link elsewhere obeys the same rule.
+        for (const rel of FLOWS) {
+            for (const link of flowOpenLinks(readSource(rel)).filter(l => !l.includes('${'))) {
+                if (isSeedLink(link)) expect([rel, seedLinkProblem(link)]).toEqual([rel, null]);
+            }
+        }
     });
 
     it('every tab route carries its tab-* testID in the tab layout', () => {
@@ -138,6 +179,21 @@ describe('flow lint rules (counterfactuals)', () => {
     it('reads literal, template and object-style testIDs from source', () => {
         const src = 'testID="a-b" testID={\'c\'} testID={`bin-restore-${item.id}`} { testID: "d" }';
         expect(sourceTestIds(src)).toEqual(['a-b', 'c', 'bin-restore-X', 'd']);
+    });
+
+    it('rejects a seed link the app would refuse or that leaves the clock running', () => {
+        const at = '2026-11-03T10:00:00Z';
+        expect(seedLinkProblem(`myapp://qa/seed?scenario=week&now=${at}`)).toBeNull();
+        expect(seedLinkProblem(`myapp://qa/seed?scenario=weeks&now=${at}`)).toBe('rejected: unknown-scenario');
+        // A local time (no Z) is not a strict UTC instant.
+        expect(seedLinkProblem('myapp://qa/seed?scenario=week&now=2026-11-03T10:00:00')).toBe('rejected: bad-now');
+        expect(seedLinkProblem('myapp://qa/seed?scenario=week')).toContain('no now=');
+    });
+
+    it('reads openLink targets and runFlow env values', () => {
+        const text = '- openLink: "myapp://x?a=${S}"  # why\n- runFlow:\n    file: f.yaml\n    env:\n      SCENARIO: week\n# SCENARIO: nope\n';
+        expect(flowOpenLinks(text)).toEqual(['myapp://x?a=${S}']);
+        expect(flowEnvValues(text, 'SCENARIO')).toEqual(['week']);
     });
 
     it('parses the SMOKE_FLOWS list', () => {

@@ -5,20 +5,22 @@ appId: com.raeduslabs.soulsyncapp
 # Guards 7fade96: the panel's opaque surface stopped short of the window's bottom
 # edge by the safe-area inset, leaving a strip where the screen BEHIND it (tab
 # bar, FAB, Timeline cards) stayed visible and tappable.
-# TODO(lane G seed): seed scenario with one entry instead of the add-entry subflow.
-- launchApp:
-    clearState: true
-- extendedWaitUntil:
-    visible: "Good (morning|afternoon|evening)"
-    timeout: 90000
+# A seeded week fills the Timeline behind the panel, so a leaked tap has cards to hit.
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: week
 - runFlow:
     file: subflows/add-entry.yaml
     env:
       NOTE: smoke-bin
 - tapOn:
     id: tab-timeline
+- assertVisible: "smoke-bin"
+# The top card is the one just added (see subflows/add-entry.yaml).
 - tapOn:
     id: entry-more
+    index: 0
 - tapOn:
     id: entry-delete
 - tapOn:

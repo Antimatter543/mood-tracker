@@ -1,5 +1,23 @@
 # SoulSync — Project Lessons
 
+## 2026-11-03: CI e2e: an ANR dialog saved INTO the cached AVD snapshot failed every flow
+
+- **Symptom.** The first two e2e.yml runs failed 5/5 smoke flows on timeouts. The screenshots showed
+  "Pixel Launcher isn't responding" over the app on every flow, in both runs.
+- **Root cause.** The snapshot-creation step (cache miss) booted the AVD, ran `echo`, and saved the
+  emulator state, with the launcher's first-boot ANR dialog on screen. Every later restore brings that
+  dialog back. It is a system window that does NOT hold `mCurrentFocus`, and its ANR happened before
+  the restore, so no `ANR in` line appears in this run's logcat. A focus-based dialog check saw nothing.
+- **Fix.** (1) The snapshot step runs `e2e-smoke.sh --snapshot`: settle 60 s, then close any
+  `Application Not Responding|Error` window before the state is saved. (2) The smoke run sets
+  `hide_error_dialogs 1` and checks ALL windows (`dumpsys window windows`) before install and before
+  each flow, tapping `android:id/aerr_close` from a uiautomator dump (broadcast fallback). It counts
+  them as `SYSTEM_DIALOGS`. (3) `AVD_KEY` v1 -> v2 discarded the poisoned cache.
+- **Also: `adb root` restarts adbd and kills any `adb logcat` started before it.** Run 1's logcat.txt
+  was empty for that reason. Root first, `wait-for-device`, then start logcat (the self-test pins the order).
+- **Rule.** A cached emulator snapshot is a fixture: assert its screen is clean before saving it, and
+  key the cache so a bad one can be thrown away with a one-line bump.
+
 ## 2026-11-03: The QA seed deep link (lib/qa): how a build flag really removes code
 
 - **What actually removes the module from a release bundle.** babel-preset-expo's `inline-env-vars`

@@ -63,6 +63,27 @@ export function flowFileRefs(text: string): string[] {
         .map(m => unquote(m[1]));
 }
 
+/** Every `openLink:` target in a flow (the one-line form). */
+export function flowOpenLinks(text: string): string[] {
+    return text
+        .split('\n')
+        .filter(l => !isComment(l))
+        .map(l => l.match(/^\s*(?:-\s*)?openLink:\s*(.+?)\s*(#.*)?$/))
+        .filter((m): m is RegExpMatchArray => m !== null)
+        .map(m => unquote(m[1]));
+}
+
+/** Every value a flow passes for env var `key` (`env:` blocks of its runFlow calls). */
+export function flowEnvValues(text: string, key: string): string[] {
+    const re = new RegExp(`^\\s+${key}:\\s*(.+?)\\s*(#.*)?$`);
+    return text
+        .split('\n')
+        .filter(l => !isComment(l))
+        .map(l => l.match(re))
+        .filter((m): m is RegExpMatchArray => m !== null)
+        .map(m => unquote(m[1]));
+}
+
 /**
  * The testIDs a source file can render. A literal (`testID="entry-delete"`) is
  * itself; a template (`testID={\`bin-restore-${item.id}\`}`) becomes a sample

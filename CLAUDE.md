@@ -217,6 +217,10 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   New smoke flow = add the yaml AND its name to `SMOKE_FLOWS` in the script (the lint checks they agree).
   The harness is tested device-free by `frontend/scripts/test-e2e-smoke.sh` (pr-checks). Never run
   e2e-smoke.sh locally: it drives whatever adb device is attached.
+  Every smoke flow starts with `runFlow: subflows/launch.yaml` + `env: SCENARIO: <scenario>`: clearState,
+  the QA seed link with a frozen `now`, then a wait on `qa-seed-status`. The lint checks both and parses the
+  link with the app's own parser. The cached AVD snapshot restores whatever was on screen when it was
+  saved: a poisoned cache (e.g. a baked-in ANR dialog) = bump `AVD_KEY` in e2e.yml (lessons 2026-11-03).
 - Sideload installs may hit Play Protect: `adb shell settings put global verifier_verify_adb_installs 0`,
   then `adb install -r -g <apk>`. EAS-signed release vs debug-signed dev build differ → uninstall before swapping.
 - Seed test data: Settings has `__DEV__`-only "Generate 50 Sample Entries" and "Generate 300 Timeline QA

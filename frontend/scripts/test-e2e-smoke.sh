@@ -40,9 +40,12 @@ case "$*" in
   "exec-out screencap -p") printf 'PNG' ;;
   "shell date") echo "Tue Nov  3 10:00:00 AEST 2026" ;;
   "shell settings get secure navigation_mode") echo 2 ;;
-  "shell dumpsys window")
-    app_focus='Window{1 u0 com.raeduslabs.soulsyncapp/.MainActivity}'
-    echo "  mCurrentFocus=${SHIM_FOCUS:-$app_focus}" ;;
+  # SHIM_ANR=1: a launcher ANR dialog is on screen (but not focused, as on CI).
+  "shell dumpsys window windows")
+    echo "  Window #3 Window{1 u0 com.raeduslabs.soulsyncapp/.MainActivity}:"
+    [[ -n "${SHIM_ANR:-}" ]] && echo "  Window #4 Window{9 u0 Application Not Responding: com.google.android.apps.nexuslauncher}:" ;;
+  "shell cat /sdcard/e2e-ui.xml")
+    [[ -n "${SHIM_ANR:-}" ]] && echo '<node index="1" text="Close app" resource-id="android:id/aerr_close" class="android.widget.Button" bounds="[66,940][934,1060]" />' ;;
 esac
 exit 0
 EOF
@@ -105,16 +108,32 @@ check "hides system error dialogs before the nav switch restarts the launcher" \
 check "starts logcat only after adb root (root restarts adbd, killing the stream)" \
   test "$(line_of '^adb root')" -lt "$(line_of '^adb logcat -v')"
 check "no system dialog seen: none recorded, nothing closed" \
-  bash -c '[[ "$(sed -n "s/^SYSTEM_DIALOGS=//p" "$1")" == 0 ]] && ! grep -q CLOSE_SYSTEM_DIALOGS "$2"' _ "$OUTDIR/result.env" "$LOG"
+  bash -c '[[ "$(sed -n "s/^SYSTEM_DIALOGS=//p" "$1")" == 0 ]] && ! grep -qE "CLOSE_SYSTEM_DIALOGS|input tap" "$2"' _ "$OUTDIR/result.env" "$LOG"
 check "result.env says pass with 5 passed" \
   test "$(result RESULT)/$(result FLOWS_PASSED)/$(result FLOWS_FAILED)" == "pass/5/0"
 check "summary table has one PASS row per flow" test "$(grep -c '| PASS |' "$OUTDIR/summary.md")" -eq 5
 
-echo "case: a system ANR dialog holds focus (the first CI run's failure)"
-run_case anrdialog 'SHIM_FOCUS=Window{9 u0 Application Not Responding: com.google.android.apps.nexuslauncher}' -- "$APK"
-check "closes it before every flow" test "$(grep -c 'CLOSE_SYSTEM_DIALOGS' "$LOG")" -eq "${#ALL[@]}"
-check "records each one in result.env" test "$(result SYSTEM_DIALOGS)" == "${#ALL[@]}"
-check "names the stuck package" grep -q '^SYSTEM_DIALOG_1=01-tabs-render: com.google.android.apps.nexuslauncher}$' "$OUTDIR/result.env"
+echo "case: a system ANR dialog is on screen, unfocused (the first two CI runs' failure)"
+run_case anrdialog SHIM_ANR=1 -- "$APK"
+# The shim's dialog never goes away, so it is seen at setup and before each flow.
+check "closes it at setup and before every flow" \
+  test "$(grep -c '^adb shell input tap 500 1000$' "$LOG")" -eq $(( ${#ALL[@]} + 1 ))
+check "closes it BEFORE the install and before the first flow" \
+  test "$(line_of '^adb shell input tap')" -lt "$(line_of '^adb install')"
+check "taps the dialog's own Close app button, not a broadcast" bash -c '! grep -q CLOSE_SYSTEM_DIALOGS "$1"' _ "$LOG"
+check "records each one in result.env" test "$(result SYSTEM_DIALOGS)" == $(( ${#ALL[@]} + 1 ))
+check "names the stuck package" \
+  grep -q '^SYSTEM_DIALOG_1=setup: Application Not Responding: com.google.android.apps.nexuslauncher$' "$OUTDIR/result.env"
+
+echo "case: --snapshot (the AVD-snapshot step)"
+run_case snapshot SHIM_ANR=1 -- --snapshot
+check "exits 0 with no APK" test "$RC" -eq 0
+check "never installs or runs Maestro" bash -c '! grep -qE "^(adb install|maestro)" "$1"' _ "$LOG"
+check "hides system error dialogs" grep -q 'hide_error_dialogs 1' "$LOG"
+check "closes the dialog so it is not saved into the snapshot" grep -q '^adb shell input tap 500 1000$' "$LOG"
+check "says snapshot-ready" test "$(result RESULT)" == snapshot-ready
+run_case snapshot-clean -- --snapshot
+check "no dialog: closes nothing" bash -c '! grep -q "input tap" "$1"' _ "$LOG"
 
 echo "case: one flow fails in the middle"
 run_case onefail SHIM_FAIL_FLOWS=03-timeline-delete-undo -- "$APK"

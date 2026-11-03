@@ -2,13 +2,10 @@ appId: com.raeduslabs.soulsyncapp
 ---
 # Subflow: log ONE mood entry through the real UI, starting from any tab.
 # The mood stays at the form's default (5.0, useEntryDraft); the note is ${NOTE},
-# which later steps find the entry by.
-#
-# TODO(lane G seed): once the QA seed deep link is on main, flows that only need
-# data to EXIST (03, 04, 05) should open
-#   myapp://qa/seed?scenario=<name>&now=2026-11-03T10:00:00
-# instead of typing entries here. 02 keeps this subflow: adding an entry IS what
-# it tests.
+# which later steps find the entry by. Background data comes from the QA seed
+# (subflows/launch.yaml); this subflow adds only the entries a flow must name.
+# With the app clock frozen, every entry added here lands at the same instant,
+# newest id first (ORDER BY date DESC, id DESC), above every seeded entry.
 - tapOn:
     id: tab-home
 - tapOn: "Add mood entry"

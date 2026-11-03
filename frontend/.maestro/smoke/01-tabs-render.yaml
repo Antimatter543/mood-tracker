@@ -3,11 +3,10 @@ appId: com.raeduslabs.soulsyncapp
 # Smoke 01: a brand-new install (empty DB) launches and every tab renders its
 # empty state. Guards the "screen crashes / blanks on an empty entries table"
 # class (the Statistics empty-DB crash) on a real release build.
-- launchApp:
-    clearState: true
-- extendedWaitUntil:
-    visible: "Good (morning|afternoon|evening)"
-    timeout: 90000
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: empty
 - assertVisible: "No entry yet"
 - assertVisible: "Tap the . button to log your first mood"
 - takeScreenshot: 01-home-empty
