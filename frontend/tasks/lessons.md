@@ -35,8 +35,8 @@
 - **Every "what time is it" in app code is `now()` from `@/lib/clock`.** Pure transforms take
   `now` / `today` as a REQUIRED parameter: a hidden `today = localDateString(new Date())` default
   lets a test omit it and race the real day. `__tests__/clockInjection.test.ts` fails on any
-  zero-arg `new Date()` / `Date.now()` in app source (allowlist: the clock itself, the media
-  filename stamp, and the tabs layout until lane F/G moves it).
+  zero-arg `new Date()` / `Date.now()` in app source (allowlist: the clock itself and the media
+  filename stamp).
 - **`Date.now()` stays where it is an ID, not a time.** `buildMediaFilename` stamps filenames with
   it; routing it through a FROZEN QA clock would give every photo the same name.
 - **A name clash with `now`** (`const now = now()` is a TDZ error; tsc catches it): rename the local
