@@ -6,7 +6,7 @@
 // 14-ENTRY average. Nothing about that is visible in a screenshot, which is
 // exactly why it is pinned here.
 //
-// TZ is Australia/Brisbane for the whole suite (jest.tz.js) — day keying is
+// TZ is Australia/Brisbane for the whole suite (jest.globalSetup.js) — day keying is
 // local, never UTC.
 
 import {

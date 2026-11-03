@@ -29,8 +29,9 @@ removed from `release.sh` the same day — git history has it if ever needed.)
     `pr-checks.yml` run on a commit with the IDENTICAL git tree as HEAD (a squash-merge of an up-to-date PR
     matches its PR head). No match: `gh workflow run pr-checks.yml -R Antimatter543/mood-tracker --ref main`,
     wait, rerun. `LOCAL_JEST=1` restores the old local run.
-  - **Community PRs (since 2026-11-02):** `.github/workflows/pr-checks.yml` runs tsc + full jest (TZ pinned to
-    Australia/Brisbane: ~10 suites assume it) on every PR; `CONTRIBUTING.md` + a PR template ask for
+  - **Community PRs (since 2026-11-02):** `.github/workflows/pr-checks.yml` runs tsc + full jest on every PR and every
+    push to main (TZ pinned to Australia/Brisbane by `frontend/jest.globalSetup.js`, guarded by
+    `__tests__/timezonePinned.test.ts`: ~10 suites assume it; every action is SHA-pinned); `CONTRIBUTING.md` + a PR template ask for
     screenshots. Fork runs can need approval: `gh api -X POST repos/Antimatter543/mood-tracker/actions/runs/<id>/approve`.
     Fixups go on the contributor's branch (maintainerCanModify) as new commits, never a force-push, so credit
     stays theirs. Stacked PRs conflict after the lower one is squashed: merge main into the upper branch and

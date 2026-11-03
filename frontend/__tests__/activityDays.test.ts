@@ -1,6 +1,6 @@
 import { activityDaySet } from '@/components/visualisations/transforms/activityDays';
 
-// Suite runs under the Brisbane pin (UTC+10, no DST — see jest.tz.js), so an
+// Suite runs under the Brisbane pin (UTC+10, no DST — see jest.globalSetup.js), so an
 // instant's UTC calendar day can differ from its LOCAL calendar day. The dots
 // must land on the user's LOCAL day.
 describe('activityDaySet — keys raw instants to LOCAL days (Brisbane UTC+10)', () => {
