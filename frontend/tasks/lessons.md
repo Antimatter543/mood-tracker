@@ -15,6 +15,11 @@
   them as `SYSTEM_DIALOGS`. (3) `AVD_KEY` v1 -> v2 discarded the poisoned cache.
 - **Also: `adb root` restarts adbd and kills any `adb logcat` started before it.** Run 1's logcat.txt
   was empty for that reason. Root first, `wait-for-device`, then start logcat (the self-test pins the order).
+- **Flow selectors, two more traps from the same runs.** (a) A text selector also matches
+  accessibility labels: `assertNotVisible: "Recently deleted"` failed after the panel closed because
+  the Timeline's bin BUTTON is labelled exactly that when the bin is empty. Identify an overlay by a
+  testID it alone renders (`bin-close`). (b) Notes is below the fold on the details step: use
+  `scrollUntilVisible` before tapping anything low in the entry form.
 - **Rule.** A cached emulator snapshot is a fixture: assert its screen is clean before saving it, and
   key the cache so a bad one can be thrown away with a one-line bump.
 

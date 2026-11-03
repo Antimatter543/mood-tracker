@@ -25,7 +25,12 @@ appId: com.raeduslabs.soulsyncapp
     id: entry-delete
 - tapOn:
     id: timeline-open-bin
-- assertVisible: "Recently deleted"
+# The panel is identified by its close button, never by the text "Recently
+# deleted": the Timeline's bin button carries that exact accessibility label
+# whenever the bin is empty, so the text stays "visible" after the panel closes
+# (CI run 41655548352 failed on that).
+- assertVisible:
+    id: bin-close
 - assertVisible: "smoke-bin"
 - takeScreenshot: 04-bin-open
 
@@ -41,14 +46,16 @@ appId: com.raeduslabs.soulsyncapp
     text: "Add mood entry"
     optional: true
 - assertNotVisible: "How were you\\?"
-- assertVisible: "Recently deleted"
+- assertVisible:
+    id: bin-close
 - takeScreenshot: 04-after-stray-taps
 
 - tapOn:
     id: "bin-restore-.*"
 - tapOn:
     id: bin-close
-- assertNotVisible: "Recently deleted"
+- assertNotVisible:
+    id: bin-close
 # Still on the Timeline (a leaked tap would have switched to Home), and the
 # restored entry is back in the list.
 - assertNotVisible: "Good (morning|afternoon|evening)"
