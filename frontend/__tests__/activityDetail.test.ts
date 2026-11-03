@@ -20,7 +20,7 @@ import {
 } from '@/components/visualisations/transforms/activityDetail';
 
 // A local-noon instant for a given Y-M-D, so day-keying is TZ-robust under the
-// non-UTC jest pin (jest.tz.js = Australia/Brisbane). Mirrors dailyAverages tests.
+// non-UTC jest pin (jest.globalSetup.js = Australia/Brisbane). Mirrors dailyAverages tests.
 const at = (y: number, m: number, d: number, mood: number) => ({
     date: new Date(y, m - 1, d, 12, 0, 0).toISOString(),
     mood,

@@ -14,7 +14,7 @@
  *     were selected.
  *
  * TIMEZONE: the suite runs pinned to Australia/Brisbane (UTC+10, no DST) via
- * jest.tz.js. The ISO assertions are only correct under that offset — that's the
+ * jest.globalSetup.js. The ISO assertions are only correct under that offset — that's the
  * point; a UTC-anchored implementation fails here.
  */
 import {

@@ -114,7 +114,7 @@ describe('generateDemoData — shape & curve', () => {
     for (const e of data.data.entries) {
       const d = new Date(e.date);
       // Constructed at local noon -> local hour is 12 regardless of TZ. (jest is
-      // pinned to Australia/Brisbane via jest.tz.js, a fixed UTC+10 offset.)
+      // pinned to Australia/Brisbane via jest.globalSetup.js, a fixed UTC+10 offset.)
       expect(d.getHours()).toBe(12);
     }
   });

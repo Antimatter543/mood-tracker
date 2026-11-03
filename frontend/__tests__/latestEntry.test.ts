@@ -1,6 +1,6 @@
 // latestEntry.test.ts — "what did I actually write that day", for the scrub readout.
 //
-// The whole suite runs in Australia/Brisbane (UTC+10, no DST — jest.tz.js).
+// The whole suite runs in Australia/Brisbane (UTC+10, no DST — jest.globalSetup.js).
 // That matters here: an entry stored at 2026-09-02T15:30:00Z is 2026-09-03
 // 01:30 LOCAL, and this map MUST key it to the 3rd. Keying it in UTC is the
 // exact day-shift class the visualisation layer is built to avoid.
