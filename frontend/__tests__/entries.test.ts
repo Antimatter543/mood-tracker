@@ -13,6 +13,7 @@ import {
   setEntryStarred,
 } from '@/databases/entries';
 import { makeDb, resetWriteLayer, sqlCalls, type MockDb } from '@/testing/fakeDb';
+import { freezeNow } from '@/testing/clock';
 
 beforeEach(() => {
   resetWriteLayer();
@@ -291,21 +292,16 @@ describe('setEntryStarred', () => {
     const db = makeDb();
     db.runAsync.mockResolvedValue({ changes: 1 });
 
-    const before = Date.now();
+    const now = freezeNow();
     const result = await setEntryStarred(db as any, 5, true);
-    const after = Date.now();
 
     expect(result.success).toBe(true);
     const call = starUpdate(db);
     expect(call).toBeDefined();
     const [, params] = call!;
-    // [starred_at, id] — the instant is a real ISO string (not null), id is 5.
+    // [starred_at, id] — the instant is the app clock's now as UTC ISO, id is 5.
     expect(params[1]).toBe(5);
-    expect(typeof params[0]).toBe('string');
-    const t = Date.parse(params[0] as string);
-    expect(Number.isNaN(t)).toBe(false);
-    expect(t).toBeGreaterThanOrEqual(before);
-    expect(t).toBeLessThanOrEqual(after);
+    expect(params[0]).toBe(now.toISOString());
   });
 
   it('unstars an entry: UPDATE sets starred_at to NULL', async () => {

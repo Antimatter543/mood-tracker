@@ -24,6 +24,7 @@ import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import { OverlayProvider } from '@/context/OverlayHost';
 import type { Settings } from '@/databases/settings';
 import { formatDate } from '@/lib/dateFormat';
+import { freezeNow } from '@/testing/clock';
 
 const mockSettings = jest.fn<Settings, []>();
 const mockUpdateSetting = jest.fn(async (_key: string, _value: string) => {});
@@ -72,10 +73,10 @@ describe('the Date format setting row', () => {
     });
 
     it('offers all four formats, each with today’s date as an example', async () => {
+        const today = freezeNow();
         const view = await renderSettings();
         await fireEvent.press(view.getByText(/^System default \(/));
 
-        const today = new Date();
         for (const [label, pref] of [
             ['MM/DD/YYYY', 'mdy'],
             ['DD/MM/YYYY', 'dmy'],

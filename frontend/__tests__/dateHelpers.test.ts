@@ -5,6 +5,7 @@ import {
   daysBetween,
   getDefaultEntryDate,
 } from '@/databases/dateHelpers';
+import { freezeNow } from '@/testing/clock';
 
 describe('startOfLocalDay', () => {
   it('returns 00:00:00.000 local time for the given day', () => {
@@ -114,11 +115,8 @@ describe('getDefaultEntryDate', () => {
     expect(new Date(stamp).toISOString()).toBe(stamp);
   });
 
-  it('returns a stamp within a few ms of now', () => {
-    const before = Date.now();
-    const stamp = new Date(getDefaultEntryDate()).getTime();
-    const after = Date.now();
-    expect(stamp).toBeGreaterThanOrEqual(before);
-    expect(stamp).toBeLessThanOrEqual(after);
+  it('stamps the current instant from the app clock', () => {
+    const now = freezeNow();
+    expect(getDefaultEntryDate()).toBe(now.toISOString());
   });
 });

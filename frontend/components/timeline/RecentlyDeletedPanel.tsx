@@ -25,6 +25,7 @@ import { moodColor } from './moodColor';
 import { describeBinRow } from './binCopy';
 import { formatDate, type DateFormatPref } from '@/lib/dateFormat';
 import { useDateFormat } from '@/hooks/useDateFormat';
+import { now as clockNow } from '@/lib/clock';
 
 /**
  * "Recently deleted" — the recycle-bin view, reached from the bin button in the
@@ -325,7 +326,7 @@ function RecentlyDeletedContent({
     // the same instant (rows rendering either side of a tick would otherwise
     // disagree), re-derived whenever the list reloads.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `entries` is the intended re-derive trigger, not an input to the factory
-    const now = useMemo(() => new Date(), [entries]);
+    const now = useMemo(() => clockNow(), [entries]);
 
     const renderItem = useCallback(
         ({ item }: { item: BinnedEntry }) => {

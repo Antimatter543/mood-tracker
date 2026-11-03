@@ -29,7 +29,7 @@ import { addDays, localDateString } from './dateHelpers';
  *
  * @param entryDates - Array of local-date strings ("YYYY-MM-DD"); duplicates
  *                     and unsorted input are allowed.
- * @param today - Today's local-date string. Defaults to local today.
+ * @param today - Today's local-date string. Required: callers pass `localDateString(now())` (lib/clock), tests a fixed day.
  * @returns Number of consecutive days (ending today or yesterday) with at
  *          least one entry.
  *
@@ -40,7 +40,7 @@ import { addDays, localDateString } from './dateHelpers';
  */
 export const currentStreak = (
     entryDates: string[],
-    today: string = localDateString(new Date())
+    today: string
 ): number => {
     if (entryDates.length === 0) return 0;
 
@@ -109,11 +109,11 @@ export interface StreakStats {
  * @param entryInstants - Stored instants to count; duplicates, any order. The
  *                        user's streak passes every live entry (see
  *                        `loadStreakStats`).
- * @param today - Today's local-date string. Defaults to local today.
+ * @param today - Today's local-date string. Required: callers pass `localDateString(now())` (lib/clock), tests a fixed day.
  */
 export const streakStats = (
     entryInstants: readonly string[],
-    today: string = localDateString(new Date())
+    today: string
 ): StreakStats => {
     const distinct = new Set<string>();
     for (const instant of entryInstants) {

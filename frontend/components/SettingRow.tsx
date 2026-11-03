@@ -7,6 +7,7 @@ import { useSettings } from '@/context/SettingsContext';
 import { useOverlay } from '@/context/OverlayHost';
 import { dateFormatOptions } from '@/lib/dateFormat';
 import { Ionicons } from '@expo/vector-icons';
+import { now } from '@/lib/clock';
 
 type SettingRowProps = {
   config: SettingConfig;
@@ -348,7 +349,7 @@ export function SettingsSection() {
     // and thrash the open overlay.
     const dateFormatConfig = useMemo<SettingConfig>(() => ({
       ...(SETTINGS_REGISTRY.date_format as SettingConfig),
-      options: dateFormatOptions(new Date()),
+      options: dateFormatOptions(now()),
     }), []);
     
     const styles = useMemo(() => StyleSheet.create({

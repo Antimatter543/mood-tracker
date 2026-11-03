@@ -38,6 +38,7 @@ import {
     type VariabilityKind,
     type CoOccurringRow,
 } from '@/components/visualisations/transforms/activityDetail';
+import { now } from '@/lib/clock';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
@@ -91,7 +92,7 @@ export const ActivityInsightsDetail: React.FC<{
             try {
                 // All-time bounds for the "vs usual" split (all entries).
                 const start = startOfLocalDay(new Date(0));
-                const end = endOfLocalDay(new Date());
+                const end = endOfLocalDay(now());
                 const [activityRows, allRows, coRows] = await Promise.all([
                     db.getAllAsync<EntryRow>(ENTRIES_FOR_ACTIVITY, [activity.id]),
                     db.getAllAsync<{ date: string; mood: number }>(WEEKLY_MOOD_AVERAGES, [

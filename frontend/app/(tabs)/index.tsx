@@ -21,6 +21,7 @@ import { dailyAverageMap } from '@/components/visualisations/transforms/dailyAve
 import { todaysMoodValue, monthlyOverview, formatAverageDisplay } from '@/components/visualisations/transforms/homeSummary';
 import { loadStreakStats } from '@/components/visualisations/loadStreakStats';
 import ActivityExplorer from '@/components/ActivityExplorer';
+import { now } from '@/lib/clock';
 
 // Screen-level error boundary (expo-router convention): re-exporting a symbol
 // named `ErrorBoundary` makes expo-router wrap THIS screen in
@@ -97,7 +98,7 @@ const TodaysMoodCard = memo(function TodaysMoodCard({
     return (
         <Card accentTop style={styles.heroCard}>
             <Text style={styles.heroDate}>
-                {formatDate(new Date(), 'longNoYear') || '--'}
+                {formatDate(now(), 'longNoYear') || '--'}
             </Text>
             <View style={styles.moodRow}>
                 {mood !== null ? (
@@ -140,7 +141,7 @@ const WeeklyChartCard = memo(function WeeklyChartCard({ data }: { data: (number 
     const labels = useMemo(() => {
         const out: string[] = [];
         for (let i = 6; i >= 0; i--) {
-            const d = new Date();
+            const d = now();
             d.setDate(d.getDate() - i);
             out.push(d.toLocaleDateString('en-US', { weekday: 'short' }));
         }
@@ -407,7 +408,7 @@ export default function Home() {
     const db = useSQLiteContext();
     // Read the clock once per render so the greeting and its glyph can't be
     // computed from two different hours across a boundary.
-    const hour = new Date().getHours();
+    const hour = now().getHours();
     const [todaysMood, setTodaysMood] = useState<number | null>(null);
     const [monthlyStats, setMonthlyStats] = useState<{
         average: number | null;
@@ -435,13 +436,13 @@ export default function Home() {
                 // passed to SQL as UTC ISO bounds. Storing entries as UTC ISO
                 // + comparing in UTC ISO keeps things consistent; SQLite's
                 // `date('now')` (UTC) is no longer involved.
-                const now = new Date();
+                const at = now();
                 const DAY_MS = 86_400_000;
-                const todayLocal = localDateString(now);
-                const todayStart = startOfLocalDay(now);
-                const todayEnd = endOfLocalDay(now);
-                const weekStart = startOfLocalDay(new Date(now.getTime() - 7 * DAY_MS));
-                const monthStart = startOfLocalDay(new Date(now.getTime() - 30 * DAY_MS));
+                const todayLocal = localDateString(at);
+                const todayStart = startOfLocalDay(at);
+                const todayEnd = endOfLocalDay(at);
+                const weekStart = startOfLocalDay(new Date(at.getTime() - 7 * DAY_MS));
+                const monthStart = startOfLocalDay(new Date(at.getTime() - 30 * DAY_MS));
 
                 const [
                     today,
@@ -524,7 +525,7 @@ export default function Home() {
                 const weeklyByDay = dailyAverageMap(weeklyRows);
                 const weekly: (number | null)[] = [];
                 for (let i = 6; i >= 0; i--) {
-                    const dStr = localDateString(new Date(now.getTime() - i * DAY_MS));
+                    const dStr = localDateString(new Date(at.getTime() - i * DAY_MS));
                     weekly.push(weeklyByDay.get(dStr) ?? null);
                 }
                 setWeeklyData(weekly);

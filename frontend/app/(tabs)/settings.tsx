@@ -24,6 +24,7 @@ import { DataManagementSection } from "@/components/DataManagementSection";
 import { HealthConnectSection } from "@/components/HealthConnectSection";
 import { versionLine, copyrightLine } from "@/lib/versionInfo";
 import { HEALTH_CONNECT_BUILD_VARIANT } from "@/lib/healthConnectConfig";
+import { now } from '@/lib/clock';
 
 // Support Section
 const SupportSection = () => {
@@ -224,7 +225,7 @@ function Setting() {
                 static id. */}
             <View style={styles.versionInfo} testID={HEALTH_CONNECT_BUILD_VARIANT}>
                 <Text style={styles.versionText}>{versionLine(Constants.expoConfig?.version)}</Text>
-                <Text style={styles.versionText}>{copyrightLine(new Date().getFullYear())}</Text>
+                <Text style={styles.versionText}>{copyrightLine(now().getFullYear())}</Text>
                 <Text style={styles.versionText}> Have feedback? Email us at hello@raeduslabs.com! </Text>
 
                 <Pressable

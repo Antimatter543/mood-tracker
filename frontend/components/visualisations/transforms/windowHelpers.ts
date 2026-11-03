@@ -13,7 +13,7 @@
 // the user has paged to, and one shared object means the header and the charts
 // can never describe different ranges.
 
-import { computePeriodWindow, todayLocalDay, type Timeframe } from './periodWindow';
+import { computePeriodWindow, type Timeframe } from './periodWindow';
 
 export type { Timeframe };
 
@@ -23,9 +23,10 @@ export type Window = { start: string; end: string };
  * The CURRENT period's local-time window (offset 0), as UTC ISO bounds for
  * `WHERE date BETWEEN ? AND ?`. Convenience wrapper for callers that have no
  * period navigation of their own; the Stats charts use the context window.
+ * `today` is the local day the window ends on: `todayLocalDay(now())`.
  */
-export const computeWindow = (timeframe: Timeframe): Window =>
-    computePeriodWindow(timeframe, 0, todayLocalDay());
+export const computeWindow = (timeframe: Timeframe, today: string): Window =>
+    computePeriodWindow(timeframe, 0, today);
 
 // REMOVED: `daysInTimeframe(timeframe)`.
 //

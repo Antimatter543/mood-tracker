@@ -1,5 +1,26 @@
 # SoulSync — Project Lessons
 
+## 2026-11-03: The app clock (lib/clock.ts) and the future-clock CI leg
+
+- **Every "what time is it" in app code is `now()` from `@/lib/clock`.** Pure transforms take
+  `now` / `today` as a REQUIRED parameter: a hidden `today = localDateString(new Date())` default
+  lets a test omit it and race the real day. `__tests__/clockInjection.test.ts` fails on any
+  zero-arg `new Date()` / `Date.now()` in app source (allowlist: the clock itself, the media
+  filename stamp, and the tabs layout until lane F/G moves it).
+- **`Date.now()` stays where it is an ID, not a time.** `buildMediaFilename` stamps filenames with
+  it; routing it through a FROZEN QA clock would give every photo the same name.
+- **A name clash with `now`** (`const now = now()` is a TDZ error; tsc catches it): rename the local
+  (`at`, `today`) or import `{ now as clockNow }` where `now` is already an API name (healthSync's
+  `options.now`, `markPasswordConfirmed(now)`).
+- **Tests freeze, never bracket.** `freezeNow()` returns the instant; assert equality with it. A
+  `before <= t <= after` bracket passes but races midnight for anything day-keyed.
+- **The future-clock leg (`.github/workflows/future-clock.yml`)** runs the suite under libfaketime
+  at +1y/+3y. Without `FAKETIME_DONT_FAKE_MONOTONIC=1` timers and `performance.now()` jump. A leg
+  that never reached the jest workers passes vacuously, so `__tests__/futureClock.test.ts` checks
+  the worker's clock against a floor computed from the REAL clock. Local repro without sudo:
+  `apt-get download libfaketime && dpkg-deb -x libfaketime_*.deb x`, then
+  `LD_PRELOAD=$PWD/x/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1 FAKETIME=+365d FAKETIME_DONT_FAKE_MONOTONIC=1 npx jest <file>`.
+
 ## 2026-11-03: Shared test helpers (frontend/testing): three traps found while building them
 
 - **A global reanimated stub flips gesture-handler onto its worklet path.** gesture-handler decides

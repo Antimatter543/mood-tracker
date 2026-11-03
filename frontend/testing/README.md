@@ -12,13 +12,14 @@ Import each module directly. There is no barrel, because the modules load differ
 | `theme.ts` | Real theme tokens: `THEME` (the fresh-install theme) and `themeTokens(name)`. Mock with `jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule())`. |
 | `platform.ts` | Platform mocks installed for EVERY suite by `jest.setup.ts`: reanimated, safe-area insets and `useKeyboardHeight`. Steer them with `setInsets(INSETS.THREE_BUTTON_NAV)`, `setKeyboardHeight(804)` and `animatedScroll.toEnd`. |
 | `async.ts` | `deferred<T>()`: a promise the test settles by hand. |
+| `clock.ts` | The app clock (`lib/clock.ts`) for tests: `freezeNow(at = FIXED_NOW)` pins every `now()` reader (screens, db layer, lib IO) to one instant and returns it; `unfreezeNow()` restores the wall clock. `jest.afterEnv.ts` unfreezes before every test, so freeze in `beforeEach` or in the test, never `beforeAll`. Only `now()` readers see it: a test whose timers must also move uses `jest.useFakeTimers` as well. |
 | `rntl.ts` | Render-tree helpers: `styleOf`, `walkTree`, `findNodes`, `collectByStyle`, `countByType`, `svgStrings`. |
 | `sourceScan.ts` | The shared source-scan helper, for shape bugs only. |
 
 ## Rules (see code-quality-reference §9)
 - Never redefine one of these per file. An input shape that only ONE suite uses (a transform's raw row type, say) may stay a local helper in that suite: do not invent a shared builder for it.
 - Never invent a palette, an inset or a default mood.
-- Never read the real clock in a fixture. (Clock injection is a separate change; until it lands, leave a suite's existing `jest.useFakeTimers` / `setSystemTime` / `Date.now` handling as it is.)
+- Never read the real clock in a test or fixture (`new Date()`, `Date.now()`): freeze the app clock with `freezeNow()` and assert against the instant it returns, exactly. A "between before and after" bracket races midnight, and a hardcoded date against code that reads the real clock is a time bomb (the weekly `future-clock` CI leg runs the suite a year and three years ahead to find them). Pure transforms take `now` / `today` as a REQUIRED parameter; pass a fixed day. No real sleeps: fake timers or a `deferred()`.
 
 ## Platform mocks
 - State resets before EVERY test (`jest.afterEnv.ts`). Call `setInsets` / `setKeyboardHeight` in a `beforeEach` or inside the test. A call in `beforeAll` is undone before the first test.

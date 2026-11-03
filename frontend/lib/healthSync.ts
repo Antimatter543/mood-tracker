@@ -44,6 +44,7 @@ import {
   HEALTH_CONNECT_CHUNK_DAYS,
   HEALTH_LAST_SYNCED_SETTING_KEY,
 } from '@/lib/healthConnectConfig';
+import { now as clockNow } from '@/lib/clock';
 
 /** Outcome of a sync. Carries counts + a timestamp only — never any health values. */
 export interface HealthSyncResult {
@@ -101,7 +102,7 @@ export async function syncHealthMetrics(
   db: SQLiteDatabase,
   options?: SyncOptions
 ): Promise<HealthSyncResult> {
-  const now = options?.now ?? new Date();
+  const now = options?.now ?? clockNow();
   const maxBackfillDays = options?.maxBackfillDays ?? HEALTH_CONNECT_MAX_BACKFILL_DAYS;
   const initialWindowDays = options?.initialWindowDays ?? HEALTH_CONNECT_INITIAL_WINDOW_DAYS;
   const chunkDays = options?.chunkDays ?? HEALTH_CONNECT_CHUNK_DAYS;

@@ -36,9 +36,9 @@ export const parseHexColor = (
 // which returns the UTC day and would name the wrong day for users east/west of
 // UTC near local midnight (the same day-keying bug class fixed across the
 // visualisations). Day-keying in this app always goes through localDateString.
-export const getLast7Days = () =>
+export const getLast7Days = (now: Date) =>
     [...Array(7)].map((_, i) => {
-        const d = new Date();
+        const d = new Date(now.getTime());
         d.setDate(d.getDate() - i);
         return localDateString(d);
     }).reverse();

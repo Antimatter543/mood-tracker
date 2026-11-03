@@ -20,10 +20,11 @@ import {
     BACK_TO_TOP_VIEWPORTS,
     shouldShowBackToTop,
 } from '@/components/timeline/BackToTopPill';
-import { localDayKey } from '@/components/timeline/dateHeader';
 import { moodColor } from '@/components/timeline/moodColor';
 import { THEME } from '@/testing/theme';
 import { setInsets } from '@/testing/platform';
+import { freezeNow } from '@/testing/clock';
+import { FIXED_DAY } from '@/testing/builders';
 
 beforeEach(() => {
     // Bottom inset of a 3-button nav bar, no status bar: what the pill is positioned above.
@@ -35,7 +36,12 @@ const colors = THEME;
 const flat = (node: any) => StyleSheet.flatten(node.props.style) || {};
 
 describe('DayHeader', () => {
-    const today = localDayKey(new Date());
+    // DayHeader names "Today" from the app clock: pin it, so the group key and
+    // the header can never straddle a real midnight.
+    const today = FIXED_DAY;
+    beforeEach(() => {
+        freezeNow();
+    });
 
     it("titles today's group \"Today\" and shows the day's count and average", async () => {
         const view = await render(

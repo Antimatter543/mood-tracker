@@ -9,6 +9,7 @@ import {
 import { MEDIA_DIR, copyToMediaDir, deleteMediaFile } from '@/databases/mediaHelpers';
 import { withWriteTransaction } from '@/databases/writeTransaction';
 import { buildEntryFilter, EntryFilters } from '@/components/timeline/entryFilter';
+import { now } from '@/lib/clock';
 
 /**
  * CRUD for mood entries.
@@ -473,7 +474,7 @@ export async function setEntryStarred(
     await withWriteTransaction(async (txn) => {
       await txn.runAsync(
         `UPDATE entries SET starred_at = ? WHERE id = ?`,
-        [starred ? new Date().toISOString() : null, entryId]
+        [starred ? now().toISOString() : null, entryId]
       );
     });
     return {
@@ -515,7 +516,7 @@ export async function deleteMoodEntry(
     await withWriteTransaction(async (txn) => {
       await txn.runAsync(
         `UPDATE entries SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`,
-        [new Date().toISOString(), entryId]
+        [now().toISOString(), entryId]
       );
     });
 

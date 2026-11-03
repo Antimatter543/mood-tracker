@@ -78,6 +78,10 @@ beforeEach(() => {
     mockDb = makeDb();
 });
 
+afterEach(() => {
+    jest.useRealTimers();
+});
+
 describe('Timeline on the real FlashList', () => {
     it('mounts, renders day headers and entries through the real recycler, and logs no error', async () => {
         const errors = jest.spyOn(console, 'error');
@@ -168,13 +172,18 @@ describe('Timeline on the real FlashList: an insertion near the top is revealed,
         });
     };
 
-    /** Let frame-deferred work run (the pre-fix reveal waited a requestAnimationFrame). */
+    /**
+     * Let frame-deferred work run (the pre-fix reveal waited a requestAnimationFrame).
+     * Fake timers (installed in beforeEach) also fake requestAnimationFrame, so
+     * this fires every pending frame/timeout deterministically instead of sleeping.
+     */
     const settle = () =>
         act(async () => {
-            await new Promise((resolve) => setTimeout(resolve, 50));
+            jest.advanceTimersByTime(50);
         });
 
     beforeEach(() => {
+        jest.useFakeTimers();
         mockRefreshCount = 0;
         scrollTo.mockClear();
         measure.measureParentSize.mockImplementation(() => ({ x: 0, y: 0, width: 400, height: 900 }));

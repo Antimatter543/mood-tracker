@@ -16,6 +16,7 @@ import {
   setBackupPassword,
   verifyBackupPassword,
 } from '@/lib/backupKeyStore';
+import { now } from '@/lib/clock';
 
 /**
  * Everything behind Settings > Data Management > "Encrypt backups": the key
@@ -278,7 +279,7 @@ export function useBackupEncryption({ onBackupNow }: { onBackupNow: () => void }
       return false;
     }
     if (state.status !== 'on') return true;
-    if (!isPasswordConfirmationDue(await getPasswordConfirmedAt(), Date.now())) return true;
+    if (!isPasswordConfirmationDue(await getPasswordConfirmedAt(), now().getTime())) return true;
     return new Promise(resolve => {
       confirmResolver.current = resolve;
       openDialog('confirm');

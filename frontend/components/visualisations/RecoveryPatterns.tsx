@@ -16,6 +16,7 @@ import {
   addDays,
   localDateString,
 } from './transforms/dateHelpers';
+import { now } from '@/lib/clock';
 
 const RecoveryAnalysis = () => {
     const colors = useThemeColors();
@@ -90,7 +91,7 @@ const RecoveryAnalysis = () => {
         // user's timezone) rather than SQLite's UTC date('now', '-30 days'),
         // which silently dropped late-evening entries for users east of UTC.
         const start = startOfLocalDay(
-          addDays(localDateString(new Date()), -30)
+          addDays(localDateString(now()), -30)
         );
         const entries = await db.getAllAsync<MoodActivityRow>(`
           WITH MoodActivities AS (

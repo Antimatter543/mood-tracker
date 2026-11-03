@@ -46,6 +46,7 @@ import {
   shouldShowHealthConnect,
   type HealthConnectCardPhase,
 } from '@/lib/healthConnectConfig';
+import { now } from '@/lib/clock';
 
 /**
  * UI phase. `'loading'` is the transient state shown before the first resolve;
@@ -64,7 +65,7 @@ function formatLastSynced(iso: string | null, pref: DateFormatPref): string {
   if (!iso) return 'Not synced yet';
   const then = new Date(iso);
   if (Number.isNaN(then.getTime())) return 'Not synced yet';
-  const diffMs = Date.now() - then.getTime();
+  const diffMs = now().getTime() - then.getTime();
   const mins = Math.floor(diffMs / 60_000);
   if (mins < 1) return 'Synced just now';
   if (mins < 60) return `Synced ${mins} min ago`;
