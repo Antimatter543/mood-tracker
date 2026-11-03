@@ -111,8 +111,11 @@ describe('Maestro flows (.maestro/)', () => {
     it('the seed link each flow builds parses with the app parser, with a frozen now', () => {
         const scenarios = [...new Set(FLOWS.flatMap(f => flowEnvValues(readSource(f), 'SCENARIO')))];
         expect(scenarios.length).toBeGreaterThan(0);
+        // The first attempt and its one retry open the SAME link: a retry that
+        // seeded something else would pass the flow on different data.
         const templates = flowOpenLinks(readSource(LAUNCH));
-        expect(templates).toHaveLength(1);
+        expect(templates.length).toBeGreaterThan(0);
+        expect(new Set(templates).size).toBe(1);
         expect(templates[0]).toContain('${SCENARIO}');
         for (const scenario of scenarios) {
             expect([scenario, seedLinkProblem(templates[0].replace('${SCENARIO}', scenario))]).toEqual([scenario, null]);

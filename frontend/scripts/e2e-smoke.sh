@@ -225,6 +225,11 @@ log "installed $APK"
 passed=0
 failed=0
 ROWS=()
+# subflows/launch.yaml retries the QA seed once when it reports an error, and
+# takes this screenshot when it does. A retry still passes the flow, so count it
+# here: a pass that needed a retry must stay visible, never silently green.
+SEED_RETRY_STEP='Take screenshot seed-retry'
+SEED_RETRIES=0
 for name in "${FLOWS[@]}"; do
   log "flow $name"
   clear_system_dialogs "$name"
@@ -237,20 +242,27 @@ for name in "${FLOWS[@]}"; do
   secs=$(( $(date +%s) - T ))
   cat "$OUT/maestro/$name.log"
   kv "FLOW_${name}_S" "$secs"
+  retried="$(grep -c "$SEED_RETRY_STEP" "$OUT/maestro/$name.log" || true)"
+  note=""
+  if (( retried > 0 )); then
+    SEED_RETRIES=$(( SEED_RETRIES + retried ))
+    note=" (seed retried)"
+  fi
   if (( rc == 0 )); then
     passed=$(( passed + 1 ))
     kv "FLOW_${name}" pass
-    ROWS+=("| $name | PASS | ${secs}s |")
+    ROWS+=("| $name | PASS | ${secs}s${note} |")
   else
     failed=$(( failed + 1 ))
     kv "FLOW_${name}" fail
-    ROWS+=("| $name | **FAIL** (rc=$rc) | ${secs}s |")
+    ROWS+=("| $name | **FAIL** (rc=$rc) | ${secs}s${note} |")
     adb exec-out screencap -p >"$OUT/screens/$name-fail.png" 2>/dev/null || true
     log "flow $name FAILED (rc=$rc)"
   fi
 done
 
 kv SYSTEM_DIALOGS "$SYSTEM_DIALOGS"
+kv SEED_RETRIES "$SEED_RETRIES"
 kv FLOWS_PASSED "$passed"
 kv FLOWS_FAILED "$failed"
 kv FLOWS_S $(( $(date +%s) - T_START ))

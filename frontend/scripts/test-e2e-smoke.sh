@@ -55,6 +55,8 @@ cat >"$SHIM/maestro" <<'EOF'
 echo "maestro $*" >>"$SHIM_LOG"
 flow="${*: -1}"
 name="$(basename "$flow" .yaml)"
+# SHIM_SEED_RETRY_FLOWS: these flows print launch.yaml's retry screenshot step.
+case ",${SHIM_SEED_RETRY_FLOWS:-}," in *",$name,"*) echo "    Take screenshot seed-retry... COMPLETED" ;; esac
 case ",${SHIM_FAIL_FLOWS:-}," in *",$name,"*) echo "flow $name failed"; exit 1 ;; esac
 echo "flow $name passed"
 exit 0
@@ -112,6 +114,14 @@ check "no system dialog seen: none recorded, nothing closed" \
 check "result.env says pass with 5 passed" \
   test "$(result RESULT)/$(result FLOWS_PASSED)/$(result FLOWS_FAILED)" == "pass/5/0"
 check "summary table has one PASS row per flow" test "$(grep -c '| PASS |' "$OUTDIR/summary.md")" -eq 5
+check "no seed retry: SEED_RETRIES=0" test "$(result SEED_RETRIES)" == 0
+
+echo "case: a flow passes only after launch.yaml retried the QA seed"
+run_case seedretry SHIM_SEED_RETRY_FLOWS=02-add-entry-home -- "$APK"
+check "still a pass (the retry succeeded)" test "$RC" -eq 0
+check "counts the retry in result.env" test "$(result SEED_RETRIES)" == 1
+check "names it on the flow's row in the summary" \
+  grep -q '| 02-add-entry-home | PASS | .*seed retried' "$OUTDIR/summary.md"
 
 echo "case: a system ANR dialog is on screen, unfocused (the first two CI runs' failure)"
 run_case anrdialog SHIM_ANR=1 -- "$APK"

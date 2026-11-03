@@ -297,7 +297,7 @@ jobs:
             echo
             cat "$E2E_OUT/summary.md" 2>/dev/null || echo "(no flow table: setup failed: $(get REASON))"
             echo
-            echo "nav mode: $(get NAV_MODE) (2 = gesture) | clock: $(get CLOCK_AFTER_PIN) | system dialogs closed: $(get SYSTEM_DIALOGS)"
+            echo "nav mode: $(get NAV_MODE) (2 = gesture) | clock: $(get CLOCK_AFTER_PIN) | system dialogs closed: $(get SYSTEM_DIALOGS) | seed retries: $(get SEED_RETRIES)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload screenshots, logcat, Maestro output
