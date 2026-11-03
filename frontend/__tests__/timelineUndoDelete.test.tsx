@@ -30,50 +30,12 @@ jest.mock('expo-router', () => {
     };
 });
 
-const mockDb = {
-    getAllAsync: jest.fn(),
-    getFirstAsync: jest.fn().mockResolvedValue(null),
-    runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 }),
-};
+let mockDb: MockDb;
 jest.mock('expo-sqlite', () => ({
     useSQLiteContext: () => mockDb,
 }));
 
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 48, left: 0, right: 0 }),
-}));
-
-// The snackbar + overlay panel import reanimated (no worklets runtime in jest).
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const anim = { duration: () => anim };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
-        },
-        FadeIn: anim,
-        FadeInDown: anim,
-        FadeOutDown: anim,
-    };
-});
-
-const THEME = {
-    background: '#000',
-    cardBackground: '#111',
-    secondaryBackground: '#222',
-    text: '#fff',
-    textSecondary: '#aaa',
-    border: '#333',
-    accent: '#4CAF50',
-    accentDark: '#388E3C',
-    accentLight: 'rgba(76,175,80,0.1)',
-    overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-    elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-    isDark: true,
-};
-jest.mock('@/styles/global', () => ({ useThemeColors: () => THEME }));
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 const mockRefetchEntries = jest.fn();
 jest.mock('@/context/DataContext', () => ({
@@ -91,9 +53,6 @@ jest.mock('@/databases/mediaHelpers', () => ({
     copyToMediaDir: jest.fn(),
     deleteMediaFile: jest.fn(),
 }));
-// OverlayModal's keyboard inset uses reanimated's worklet-backed
-// useAnimatedKeyboard, which the mock above doesn't provide.
-jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
 jest.mock('@/components/forms/EntryForm', () => ({ EntryFormModal: () => null }));
 jest.mock('@/components/EmptyState', () => ({ EmptyState: () => null }));
 
@@ -118,6 +77,8 @@ jest.mock('@/databases/entry-bin', () => ({
 }));
 
 import { Alert, StyleSheet } from 'react-native';
+import { makeEntryRow } from '@/testing/builders';
+import { makeDb, resetWriteLayer, type MockDb } from '@/testing/fakeDb';
 import { OverlayProvider } from '@/context/OverlayHost';
 import { UNDO_SNACKBAR_DURATION_MS } from '@/components/UndoSnackbar';
 import { DatabaseViewer } from '@/components/DBViewer';
@@ -136,17 +97,8 @@ const { flashListProbe } = require('@shopify/flash-list') as {
     };
 };
 
-const entryRow = (id: number, notes: string) => ({
-    id,
-    mood: 7,
-    notes,
-    date: '2026-06-12T10:00:00.000Z',
-    activity_ids: null,
-    activity_names: null,
-    activity_group_ids: null,
-    activity_icon_names: null,
-    activity_icon_families: null,
-});
+const entryRow = (id: number, notes: string) =>
+    makeEntryRow({ id, notes, date: '2026-06-12T10:00:00.000Z' });
 
 /** The Timeline needs the OverlayProvider — that's where the snackbar mounts. */
 const renderTimeline = () =>
@@ -172,7 +124,8 @@ beforeEach(() => {
     jest.clearAllMocks();
     flashListProbe.reset();
     mockRefreshCount = 0;
-    mockDb.getFirstAsync.mockResolvedValue(null);
+    resetWriteLayer();
+    mockDb = makeDb();
     mockGetBinCount.mockResolvedValue(0);
     mockDeleteMoodEntry.mockResolvedValue({ success: true, message: 'ok' });
     mockRestoreMoodEntry.mockResolvedValue({ success: true, message: 'ok' });

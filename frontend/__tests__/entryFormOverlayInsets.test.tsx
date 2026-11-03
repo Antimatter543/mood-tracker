@@ -15,50 +15,13 @@
  */
 import { render, act } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
+import { setInsets, setKeyboardHeight } from '@/testing/platform';
+import { THEME } from '@/testing/theme';
 
 const TOP = 30;
 const BOTTOM = 48;
 
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 30, bottom: 48, left: 0, right: 0 }),
-}));
-
-const mockKeyboardHeight = jest.fn(() => 0);
-jest.mock('@/hooks/useKeyboardHeight', () => ({
-    useKeyboardHeight: () => mockKeyboardHeight(),
-}));
-
-jest.mock('react-native-reanimated', () => {
-    const ReactActual = require('react');
-    const RN = require('react-native');
-    const entering = { duration: () => entering };
-    return {
-        __esModule: true,
-        default: {
-            ScrollView: ReactActual.forwardRef((props: any, ref: any) => {
-                ReactActual.useImperativeHandle(ref, () => ({ scrollToEnd: jest.fn() }));
-                return ReactActual.createElement(RN.ScrollView, props);
-            }),
-            View: (p: any) => ReactActual.createElement(RN.View, p),
-        },
-        FadeIn: entering,
-        useAnimatedRef: () => ReactActual.useRef(null),
-    };
-});
-
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return {
-        ...actual,
-        useThemeColors: () => ({
-            background: '#000', cardBackground: '#111', secondaryBackground: '#222',
-            text: '#fff', textSecondary: '#aaa', border: '#333', accent: '#4CAF50',
-            overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa', textOnAccent: '#fff' },
-            elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 6 },
-            isDark: true,
-        }),
-    };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 jest.mock('@/context/SettingsContext', () => ({
     useSettings: () => ({
         settings: { mood_precision: 'integer', show_mood_benchmarks: false, fab_position: 'right' },
@@ -103,7 +66,9 @@ function formScroll(view: any) {
     return StyleSheet.flatten(matches[0].props.contentContainerStyle) || {};
 }
 
-beforeEach(() => mockKeyboardHeight.mockReturnValue(0));
+// The status-bar inset is deliberately not Pixel's 24dp (INSETS.THREE_BUTTON_NAV): a distinct
+// value makes the "applied exactly once" carrier query unambiguous. Bottom is the 3-button nav bar.
+beforeEach(() => setInsets({ top: TOP, bottom: BOTTOM }));
 
 describe('EntryForm overlay: safe-area insets applied once', () => {
     it('applies the top inset on exactly one node, the overlay container', async () => {
@@ -135,7 +100,7 @@ describe('EntryForm overlay: safe-area insets applied once', () => {
         // background. It must add no gutter of its own.
         const roots = view.container.queryAll((n: any) => {
             const s = flat(n);
-            return typeof n.type === 'string' && s.position === 'absolute' && s.backgroundColor === '#000';
+            return typeof n.type === 'string' && s.position === 'absolute' && s.backgroundColor === THEME.background;
         });
         expect(roots).toHaveLength(1);
         const root = flat(roots[0]);
@@ -150,7 +115,7 @@ describe('EntryForm overlay: safe-area insets applied once', () => {
     });
 
     it('adds the keyboard height on top of the bottom inset', async () => {
-        mockKeyboardHeight.mockReturnValue(804);
+        setKeyboardHeight(804);
         const view = await renderOverlay();
         expect(formScroll(view).paddingBottom).toBe(24 + BOTTOM + 804);
     });

@@ -1,6 +1,3 @@
-import { createMockDatabase } from 'expo-sqlite';
-
-jest.mock('expo-sqlite');
 jest.mock('@/components/IconPicker', () => ({ IconFamilyType: {} }));
 jest.mock('@/components/types', () => ({}));
 
@@ -12,20 +9,10 @@ import {
   reorderActivityGroups,
   getGroupDeletionImpact,
 } from '@/databases/groups';
-import {
-  __setWriteConnectionForTests,
-  __resetWriteTransactionForTests,
-} from '@/databases/writeTransaction';
-
-// Route the write transaction onto the same mock we assert on (`txn === db`).
-const makeDb = () => {
-  const db = createMockDatabase();
-  __setWriteConnectionForTests(db as any);
-  return db;
-};
+import { makeDb, resetWriteLayer } from '@/testing/fakeDb';
 
 beforeEach(() => {
-  __resetWriteTransactionForTests();
+  resetWriteLayer();
 });
 
 describe('GROUP_ORDER_BY', () => {

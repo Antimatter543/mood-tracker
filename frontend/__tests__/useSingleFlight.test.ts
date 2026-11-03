@@ -10,16 +10,7 @@
  */
 import { act, renderHook } from '@testing-library/react-native';
 
-function deferred<T = void>() {
-    let resolve!: (value: T) => void;
-    let reject!: (reason?: unknown) => void;
-    const promise = new Promise<T>((res, rej) => {
-        resolve = res;
-        reject = rej;
-    });
-    return { promise, resolve, reject };
-}
-
+import { deferred } from '@/testing/async';
 import { useSingleFlight } from '@/hooks/useSingleFlight';
 
 describe('useSingleFlight', () => {

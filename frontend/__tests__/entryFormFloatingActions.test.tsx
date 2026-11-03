@@ -14,6 +14,8 @@
 import { render, fireEvent, act } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
+import { deferred } from '@/testing/async';
+
 import {
     FLOATING_ACTION_EDGE_GAP,
     FLOATING_ACTION_SIZE,
@@ -23,39 +25,7 @@ import {
     isRowFullyVisible,
 } from '@/components/forms/floatingActions';
 
-jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
-
-jest.mock('react-native-reanimated', () => {
-    const ReactActual = require('react');
-    const RN = require('react-native');
-    const entering = { duration: () => entering };
-    return {
-        __esModule: true,
-        default: {
-            ScrollView: ReactActual.forwardRef((props: any, ref: any) => {
-                ReactActual.useImperativeHandle(ref, () => ({ scrollToEnd: jest.fn() }));
-                return ReactActual.createElement(RN.ScrollView, props);
-            }),
-            View: (p: any) => ReactActual.createElement(RN.View, p),
-        },
-        FadeIn: entering,
-        useAnimatedRef: () => ReactActual.useRef(null),
-    };
-});
-
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return {
-        ...actual,
-        useThemeColors: () => ({
-            background: '#000', cardBackground: '#111', secondaryBackground: '#222',
-            text: '#fff', textSecondary: '#aaa', border: '#333', accent: '#4CAF50',
-            overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa', textOnAccent: '#fff' },
-            elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 6 },
-            isDark: true,
-        }),
-    };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 const mockFabPosition = jest.fn(() => 'right');
 jest.mock('@/context/SettingsContext', () => ({
     useSettings: () => ({
@@ -88,14 +58,6 @@ import { EntryForm } from '@/components/forms/EntryForm';
 
 const VIEWPORT = 600;
 const ROW = { y: 900, height: 50 }; // below a 600dp viewport until scrolled ~350
-
-function deferred<T = void>() {
-    let resolve!: (value: T) => void;
-    const promise = new Promise<T>((res) => {
-        resolve = res;
-    });
-    return { promise, resolve };
-}
 
 function scrollNode(view: any) {
     const matches = view.container.queryAll(

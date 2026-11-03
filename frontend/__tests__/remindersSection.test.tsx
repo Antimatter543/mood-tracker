@@ -55,6 +55,7 @@ import {
     serializeReminders,
 } from '@/lib/reminders';
 import type { Settings } from '@/databases/settings';
+import { makeReminder as makeBaseReminder } from '@/testing/builders';
 
 // ── @/context/SettingsContext: the component's ONLY data source ────────────
 // Mocking the whole module also drives the REAL `useThemeColors` (styles/global
@@ -81,28 +82,6 @@ jest.mock('@react-native-community/datetimepicker', () => ({
     default: 'DateTimePicker',
 }));
 
-// ── OverlayModal's dependencies that don't work under jest ──────────────────
-// Mirrors the proven pattern in __tests__/overlayKeyboardSafeArea.test.tsx:
-// reanimated's worklet runtime isn't available under jest, and
-// useSafeAreaInsets needs a provider we don't have here.
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
-}));
-jest.mock('@/hooks/useKeyboardHeight', () => ({
-    useKeyboardHeight: () => 0,
-}));
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const entering = { duration: () => entering };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
-        },
-        FadeIn: entering,
-    };
-});
 // @expo/vector-icons renders fine under jest-expo without a mock (see
 // __tests__/activityReorder.test.tsx) — deliberately not mocked here.
 
@@ -119,8 +98,10 @@ const baseSettings: Settings = {
     reminders: '[]',
 };
 
+// The shared builder's defaults are a fresh reminder (empty label, 20:00); this
+// suite's rows default to the named morning one most assertions read.
 function makeReminder(overrides: Partial<Reminder> = {}): Reminder {
-    return { id: 'reminder-1', label: 'Morning check-in', time: '08:00', enabled: true, ...overrides };
+    return makeBaseReminder({ label: 'Morning check-in', time: '08:00', ...overrides });
 }
 
 function renderSection() {

@@ -29,7 +29,8 @@ export type EntryDraftValidation = {
     errors: Partial<Record<keyof EntryDraft, string>>;
 };
 
-const DEFAULT_DRAFT: EntryDraft = {
+/** Exported so test builders (`@/testing/builders`) derive their defaults from here. */
+export const DEFAULT_DRAFT: EntryDraft = {
     mood: 5.0,
     activities: [],
     notes: '',

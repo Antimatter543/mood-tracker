@@ -33,34 +33,10 @@ jest.mock('@/components/timeline/ActivityRow', () => ({
 jest.mock('@/components/timeline/EntryPhotos', () => ({ EntryPhotos: () => null }));
 
 import { EntryCard } from '@/components/timeline/EntryCard';
-import { MoodEntry } from '@/components/types';
-import { ThemeColors } from '@/styles/global';
+import { makeEntry } from '@/testing/builders';
+import { THEME } from '@/testing/theme';
 
-const COLORS = {
-    background: '#000',
-    cardBackground: '#111',
-    secondaryBackground: '#222',
-    text: '#fff',
-    textSecondary: '#aaa',
-    border: '#333',
-    accent: '#4CAF50',
-    accentDark: '#388E3C',
-    accentLight: 'rgba(76,175,80,0.1)',
-    overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-    elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-    isDark: true,
-} as unknown as ThemeColors;
-
-const entry = (over: Partial<MoodEntry> = {}): MoodEntry => ({
-    id: 1,
-    mood: 7,
-    notes: 'a note',
-    date: '2026-09-12T10:00:00.000Z',
-    starred_at: null,
-    activities: [],
-    photos: [],
-    ...over,
-});
+const COLORS = THEME;
 
 const noop = () => {};
 
@@ -71,7 +47,7 @@ describe('EntryCard — memoized so a parent re-render is not a whole-list re-re
 
     it('does NOT re-render when handed identical props again', async () => {
         const props = {
-            entry: entry(),
+            entry: makeEntry(),
             onEdit: noop,
             onDelete: noop,
             onToggleStar: noop,
@@ -90,7 +66,7 @@ describe('EntryCard — memoized so a parent re-render is not a whole-list re-re
 
     it('DOES re-render when its own entry changes', async () => {
         const shared = { onEdit: noop, onDelete: noop, onToggleStar: noop, colors: COLORS };
-        const view = await render(<EntryCard entry={entry({ mood: 7 })} {...shared} />);
+        const view = await render(<EntryCard entry={makeEntry({ mood: 7 })} {...shared} />);
         expect(mockCardBodyRenders).toBe(1);
 
         await act(async () => {
@@ -99,7 +75,7 @@ describe('EntryCard — memoized so a parent re-render is not a whole-list re-re
             // place — see the note on EntryCard.
             view.rerender(
                 <EntryCard
-                    entry={entry({ mood: 3, starred_at: '2026-09-12T11:00:00.000Z' })}
+                    entry={makeEntry({ mood: 3, starred_at: '2026-09-12T11:00:00.000Z' })}
                     {...shared}
                 />
             );
@@ -108,7 +84,7 @@ describe('EntryCard — memoized so a parent re-render is not a whole-list re-re
     });
 
     it('re-renders if a callback identity changes — which is why the Timeline memoizes them', async () => {
-        const base = { entry: entry(), onDelete: noop, onToggleStar: noop, colors: COLORS };
+        const base = { entry: makeEntry(), onDelete: noop, onToggleStar: noop, colors: COLORS };
         const view = await render(<EntryCard {...base} onEdit={() => {}} />);
         expect(mockCardBodyRenders).toBe(1);
         await act(async () => {

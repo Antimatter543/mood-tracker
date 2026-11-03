@@ -12,32 +12,9 @@
  * so no SettingsProvider is needed.
  */
 import { render, fireEvent, act } from '@testing-library/react-native';
+import { dayKeys, makeHealthDay } from '@/testing/builders';
 
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return {
-        ...actual,
-        useThemeColors: () => ({
-            background: '#141418',
-            cardBackground: '#1E1F24',
-            secondaryBackground: '#26272C',
-            text: '#FFFFFF',
-            textSecondary: '#AAAAAA',
-            border: 'rgba(255,255,255,0.1)',
-            accent: '#4CAF50',
-            accentDark: '#3d8b40',
-            accentLight: 'rgba(76,175,80,0.1)',
-            overlays: {
-                tag: '#222222',
-                tagBorder: '#333333',
-                border: '#333333',
-                textSecondary: '#888888',
-            },
-            elevation: { shadowColor: '#000000', shadowOpacity: 0.3, elevation: 4 },
-            isDark: true,
-        }),
-    };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 import MetricMoodCard, {
     type MetricMoodCardConfig,
@@ -48,17 +25,10 @@ import {
     type HealthMetricDay,
 } from '@/components/visualisations/transforms/healthMoodCorrelation';
 
-const days = (n: number): string[] =>
-    Array.from({ length: n }, (_, i) => `2026-06-${String(i + 1).padStart(2, '0')}`);
+const days = (n: number): string[] => dayKeys(n, '2026-06-01');
 
-const hRow = (date: string, sleep: number): HealthMetricDay => ({
-    date,
-    sleepTotalMinutes: sleep,
-    avgHeartRate: null,
-    minHeartRate: null,
-    restingHeartRate: null,
-    avgHrvMillis: null,
-});
+const hRow = (date: string, sleep: number): HealthMetricDay =>
+    makeHealthDay({ date, sleepTotalMinutes: sleep });
 
 /** Strong positive: more sleep → better mood, 8 days → ok directional. */
 const directional = (): MetricMoodCorrelation => {

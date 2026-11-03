@@ -11,11 +11,10 @@
  * can only prove these functions ISSUE the right SQL, never that the SQL
  * actually produces the right rows, that the migration's ALTER + backfill is
  * correct, or that ON DELETE CASCADE really removes what
- * getGroupDeletionImpact predicted. Skips cleanly if node:sqlite is
+ * getGroupDeletionImpact predicted. Skips locally (fails on CI) if node:sqlite is
  * unavailable.
  */
 
-jest.mock('expo-sqlite');
 jest.mock('@/databases/lifecycle', () => ({
   createInitialSchema: jest.fn(),
   seedActivitiesV1: jest.fn(),
@@ -43,35 +42,7 @@ import {
   __resetWriteTransactionForTests,
 } from '@/databases/writeTransaction';
 
-// Load Node's built-in SQLite; skip the whole suite if unavailable.
-let DatabaseSync: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ({ DatabaseSync } = require('node:sqlite'));
-} catch {
-  DatabaseSync = null;
-}
-const describeIfSqlite = DatabaseSync ? describe : describe.skip;
-
-// An expo-sqlite-shaped async adapter over a synchronous node:sqlite database —
-// exposes exactly the surface withWriteTransaction / groups.ts / activities.ts
-// need (runAsync, getFirstAsync, getAllAsync, execAsync). `execAsync` also
-// carries the BEGIN IMMEDIATE / COMMIT / ROLLBACK that withWriteTransaction
-// issues on the injected write connection (databases/writeTransaction.ts).
-function makeAdapter(db: any) {
-  return {
-    execAsync: async (sql: string) => {
-      db.exec(sql);
-    },
-    runAsync: async (sql: string, params: any[] = []) => {
-      const r = db.prepare(sql).run(...(params ?? []));
-      return { lastInsertRowId: Number(r.lastInsertRowid), changes: Number(r.changes) };
-    },
-    getAllAsync: async (sql: string, params: any[] = []) => db.prepare(sql).all(...(params ?? [])),
-    getFirstAsync: async (sql: string, params: any[] = []) =>
-      db.prepare(sql).get(...(params ?? [])) ?? null,
-  };
-}
+import { describeSqlite, openSqlite, type SqliteAdapter } from '@/testing/realSqlite';
 
 // A v12-shaped schema: activity_groups has NO sort_order column yet — exactly
 // what an existing user's DB looks like the instant before migration 13 runs.
@@ -93,9 +64,9 @@ const SCHEMA_V12 = `
   );
 `;
 
-describeIfSqlite('migration 13 + group ordering/move/delete — real SQLite', () => {
+describeSqlite('migration 13 + group ordering/move/delete — real SQLite', () => {
   let db: any;
-  let adapter: ReturnType<typeof makeAdapter>;
+  let adapter: SqliteAdapter;
 
   const columns = (table: string): { name: string; notnull: number }[] =>
     db.prepare(`PRAGMA table_info(${table})`).all();
@@ -107,9 +78,8 @@ describeIfSqlite('migration 13 + group ordering/move/delete — real SQLite', ()
   };
 
   beforeEach(() => {
-    db = new DatabaseSync(':memory:');
-    db.exec('PRAGMA foreign_keys = ON;');
-    db.exec(SCHEMA_V12);
+    adapter = openSqlite({ schema: SCHEMA_V12 });
+    db = adapter.raw;
     db.exec(`PRAGMA user_version = 12;`);
 
     // Seed 3 groups, inserted in id order — this IS the pre-migration display
@@ -133,8 +103,6 @@ describeIfSqlite('migration 13 + group ordering/move/delete — real SQLite', ()
       INSERT INTO entry_activities (entry_id, activity_id) VALUES (1, 1);
       INSERT INTO entry_activities (entry_id, activity_id) VALUES (2, 2);
     `);
-
-    adapter = makeAdapter(db);
   });
 
   afterEach(() => {

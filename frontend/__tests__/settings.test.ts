@@ -1,9 +1,7 @@
 import { SETTINGS_REGISTRY } from '@/databases/settings';
 import { DATE_FORMAT_PREFS, DEFAULT_DATE_FORMAT } from '@/lib/dateFormat';
 import { getSetting } from '@/databases/database';
-import { createMockDatabase } from 'expo-sqlite';
-
-jest.mock('expo-sqlite');
+import { makeDb, resetWriteLayer } from '@/testing/fakeDb';
 
 // Mock the types import chain to avoid native module issues
 jest.mock('@/components/types', () => ({
@@ -20,6 +18,10 @@ jest.mock('@/components/seedData', () => ({
 jest.mock('@/databases/migrations', () => ({
   runMigrations: jest.fn(),
 }));
+
+beforeEach(() => {
+  resetWriteLayer();
+});
 
 describe('SETTINGS_REGISTRY', () => {
   const registryEntries = Object.entries(SETTINGS_REGISTRY);
@@ -69,7 +71,7 @@ describe('SETTINGS_REGISTRY', () => {
 
 describe('getSetting', () => {
   it('returns stored value when it exists', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue({ value: 'left' });
 
     const result = await getSetting(db as any, 'fab_position');
@@ -77,7 +79,7 @@ describe('getSetting', () => {
   });
 
   it('returns registry default for theme_mode when key is missing (not hardcoded "right")', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue(null);
 
     const result = await getSetting(db as any, 'theme_mode');
@@ -86,7 +88,7 @@ describe('getSetting', () => {
   });
 
   it('returns registry default for mood_precision when key is missing (not hardcoded "right")', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue(null);
 
     const result = await getSetting(db as any, 'mood_precision');

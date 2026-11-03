@@ -17,6 +17,7 @@ import {
 } from '@/components/visualisations/transforms/moodMetricOverlay';
 import type { HealthMetricDay } from '@/components/visualisations/transforms/healthMoodCorrelation';
 import type { DateFormatPref } from '@/lib/dateFormat';
+import { dayKeys } from '@/testing/builders';
 
 const cfg = (key: OverlayMetricKey): OverlayMetricConfig =>
   OVERLAY_METRICS.find((m) => m.key === key)!;
@@ -41,11 +42,9 @@ const hRow = (
 
 const dm = (day: string, avg: number) => ({ day, avg });
 
-/** Sequential 'YYYY-06-DD' days. */
+/** Sequential '2026-06-DD' days. */
 const days = (n: number, startDay = 1): string[] =>
-  Array.from({ length: n }, (_, i) =>
-    `2026-06-${String(startDay + i).padStart(2, '0')}`
-  );
+  dayKeys(n, `2026-06-${String(startDay).padStart(2, '0')}`);
 
 describe('OVERLAY_METRICS config', () => {
   it('exposes the four metrics in toggle order with distinct keys', () => {
@@ -158,11 +157,7 @@ describe('buildMoodMetricOverlay — window selection', () => {
   it('a long history is clipped to the last `windowDays`, ending at the latest day', () => {
     // Data spans 2026-05-01 .. 2026-06-30 (metric only), window 30.
     const rows: HealthMetricDay[] = [];
-    for (let i = 0; i < 61; i++) {
-      const day = new Date(2026, 4, 1 + i); // local May 1 + i
-      const ymd = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
-      rows.push(hRow(ymd, { sleep: 400 }));
-    }
+    for (const ymd of dayKeys(61, '2026-05-01')) rows.push(hRow(ymd, { sleep: 400 }));
     const o = buildMoodMetricOverlay(rows, [], cfg('sleep'), 30);
     expect(o.days).toHaveLength(30);
     expect(o.days[o.days.length - 1].date).toBe('2026-06-30');
@@ -213,16 +208,8 @@ describe('overlayDayLabel', () => {
     return `${d ?? ''} ${month}`.trim();
   };
 
-  const pad = (n: number) => String(n).padStart(2, '0');
   /** Every calendar day of a leap year, as local day keys. */
-  const everyDay = (): string[] => {
-    const out: string[] = [];
-    for (let m = 1; m <= 12; m++) {
-      const last = new Date(2024, m, 0).getDate();
-      for (let d = 1; d <= last; d++) out.push(`2024-${pad(m)}-${pad(d)}`);
-    }
-    return out;
-  };
+  const everyDay = (): string[] => dayKeys(366, '2024-01-01');
 
   it.each([
     ['system', '1 Jul'],

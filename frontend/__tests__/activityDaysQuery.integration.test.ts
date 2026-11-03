@@ -15,33 +15,26 @@
  * outside the grid edge are excluded.
  *
  * Uses Node's built-in `node:sqlite` (Node ≥ 22.5) — no new dependency; skips
- * cleanly if the runtime lacks it.
+ * locally (fails on CI) if the runtime lacks it.
  */
 import { ENTRIES_FOR_ACTIVITY_IN_RANGE } from '@/components/visualisations/queries';
 import { gridWindowBounds } from '@/components/visualisations/transforms/monthWindow';
 import { activityDaySet } from '@/components/visualisations/transforms/activityDays';
-
-let DatabaseSync: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  ({ DatabaseSync } = require('node:sqlite'));
-} catch {
-  DatabaseSync = null;
-}
-const describeIfSqlite = DatabaseSync ? describe : describe.skip;
+import { describeSqlite, openSqlite } from '@/testing/realSqlite';
 
 // July 2026's rendered grid (Monday-first) spans local Jun 29 .. Aug 2 — its
 // first row leads with Jun 29/30, its last row trails into Aug 1/2.
-describeIfSqlite('ENTRIES_FOR_ACTIVITY_IN_RANGE + activityDaySet (real SQLite, Brisbane)', () => {
+describeSqlite('ENTRIES_FOR_ACTIVITY_IN_RANGE + activityDaySet (real SQLite, Brisbane)', () => {
   let db: any;
 
   beforeAll(() => {
-    db = new DatabaseSync(':memory:');
-    db.exec(`
+    db = openSqlite({
+      schema: `
       CREATE TABLE activities (id INTEGER PRIMARY KEY, name TEXT, group_id INTEGER);
       CREATE TABLE entries (id INTEGER PRIMARY KEY, mood REAL, notes TEXT, date TEXT, deleted_at TEXT);
       CREATE TABLE entry_activities (id INTEGER PRIMARY KEY, entry_id INTEGER, activity_id INTEGER);
-    `);
+    `,
+    }).raw;
     db.exec(`INSERT INTO activities (id,name,group_id) VALUES (3,'Running',1),(5,'Coffee',1);`);
     // [entryId, mood, dateUTC, activityId]
     const seed: [number, number, string, number][] = [

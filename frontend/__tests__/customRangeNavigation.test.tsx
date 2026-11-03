@@ -23,6 +23,7 @@
 import React from 'react';
 import { Text, Pressable, View } from 'react-native';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
+import { INSETS, setInsets } from '@/testing/platform';
 
 // ── "Today" is pinned so every window/label below is stable forever. ──────────
 const TODAY = '2026-08-29';
@@ -108,48 +109,7 @@ jest.mock('expo-router', () => {
 
 jest.mock('@/context/dataRefreshStore', () => ({ useDataVersion: () => 0 }));
 
-// jest-expo does not auto-mock safe-area-context, and OverlayModal reads
-// useSafeAreaInsets (it consumes the IME/nav-bar inset in JS under edge-to-edge).
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 24, bottom: 48, left: 0, right: 0 }),
-}));
-jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
-
-
-// OverlayModal (which DateRangePicker renders through) imports reanimated, and
-// both the real module and reanimated's own mock.js initialise the native
-// worklets runtime at import time - unavailable under jest. Shim exactly the
-// surface OverlayModal uses. Same scoped shim as overlayPopover.test.tsx.
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const entering = { duration: () => entering };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
-        },
-        FadeIn: entering,
-    };
-});
-
-
-jest.mock('@/styles/global', () => ({
-    useThemeColors: () => ({
-        background: '#000',
-        cardBackground: '#111',
-        secondaryBackground: '#222',
-        text: '#fff',
-        textSecondary: '#aaa',
-        border: '#333',
-        accent: '#4CAF50',
-        accentDark: '#388E3C',
-        accentLight: 'rgba(76,175,80,0.1)',
-        overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-        elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-        isDark: true,
-    }),
-}));
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 import PeriodNavigator from '@/components/PeriodNavigator';
 import { OverlayProvider } from '@/context/OverlayHost';
@@ -222,6 +182,8 @@ const pickRange = async (
 
 beforeEach(() => {
     jest.clearAllMocks();
+    // OverlayModal consumes the nav-bar inset in JS under edge-to-edge.
+    setInsets(INSETS.THREE_BUTTON_NAV);
     earliestEntryIso = '2024-01-01T00:00:00.000Z';
 });
 

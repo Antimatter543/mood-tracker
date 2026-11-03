@@ -15,7 +15,6 @@
 // __tests__/migrations.test.ts) so importing the module is cheap and pulls in no
 // native modules. Migration 12 is driven against our OWN node:sqlite adapter
 // below, so the expo-sqlite mock is never actually used to run SQL.
-jest.mock('expo-sqlite');
 jest.mock('@/databases/lifecycle', () => ({
   createInitialSchema: jest.fn(),
   seedActivitiesV1: jest.fn(),
@@ -30,33 +29,15 @@ jest.mock('@/components/seedData', () => ({
 
 import { migrations } from '@/databases/migrations';
 
-// Load Node's built-in SQLite; skip the whole suite if unavailable.
-let DatabaseSync: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ({ DatabaseSync } = require('node:sqlite'));
-} catch {
-  DatabaseSync = null;
-}
-const describeIfSqlite = DatabaseSync ? describe : describe.skip;
+import { describeSqlite, openSqlite, type SqliteAdapter } from '@/testing/realSqlite';
 
-function makeAdapter(db: any) {
-  return {
-    runAsync: async (sql: string, params: any[] = []) => {
-      const r = db.prepare(sql).run(...(params ?? []));
-      return { lastInsertRowId: Number(r.lastInsertRowid), changes: Number(r.changes) };
-    },
-    execAsync: async (sql: string) => {
-      db.exec(sql);
-    },
-  };
-}
-
-describeIfSqlite('migration 12 — deleted_at column + partial index (real SQLite)', () => {
+describeSqlite('migration 12 — deleted_at column + partial index (real SQLite)', () => {
   let db: any;
+  let adapter: SqliteAdapter;
 
   beforeEach(() => {
-    db = new DatabaseSync(':memory:');
+    adapter = openSqlite();
+    db = adapter.raw;
     // A v11-shaped `entries` table: starred_at is there, deleted_at is NOT —
     // exactly what an existing user's DB looks like the instant before this runs.
     db.exec(`
@@ -81,7 +62,7 @@ describeIfSqlite('migration 12 — deleted_at column + partial index (real SQLit
   const runMigration12 = async () => {
     const m12 = migrations.find((m) => m.version === 12);
     expect(m12).toBeDefined();
-    await m12!.up(makeAdapter(db) as any);
+    await m12!.up(adapter as any);
   };
 
   const columns = (): string[] =>
@@ -137,7 +118,7 @@ describeIfSqlite('migration 12 — deleted_at column + partial index (real SQLit
     // The ALTER would throw "duplicate column", so we only re-run the index
     // create — the guard that actually matters for the partial index.
     await expect(
-      makeAdapter(db).runAsync(
+      adapter.runAsync(
         `CREATE INDEX IF NOT EXISTS idx_entries_deleted ON entries(deleted_at) WHERE deleted_at IS NOT NULL`
       )
     ).resolves.toBeDefined();

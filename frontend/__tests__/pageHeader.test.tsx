@@ -16,26 +16,10 @@
 import React from 'react';
 import { render } from '@testing-library/react-native';
 import { Text, StyleSheet } from 'react-native';
+import { styleOf } from '@/testing/rntl';
+import { THEME } from '@/testing/theme';
 
-const THEME = {
-    background: '#000',
-    cardBackground: '#111',
-    secondaryBackground: '#222',
-    text: '#fff',
-    textSecondary: '#aaa',
-    border: '#333',
-    accent: '#4CAF50',
-    accentDark: '#388E3C',
-    accentLight: 'rgba(76,175,80,0.1)',
-    overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-    elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-    isDark: true,
-};
-
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return { ...actual, useThemeColors: () => THEME };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 import {
     PageHeader,
@@ -43,9 +27,6 @@ import {
     pageHeaderFullHeightInset,
 } from '@/components/PageHeader';
 import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
-
-const styleOf = (node: any) =>
-    node?.props ? StyleSheet.flatten(node.props.style) || {} : {};
 
 describe('PageHeader', () => {
     it('renders the title', async () => {

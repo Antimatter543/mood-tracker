@@ -5,10 +5,6 @@
  * against the jest-mock database (the project's DB-test idiom) — the real SQLite
  * runs on-device.
  */
-import { createMockDatabase } from 'expo-sqlite';
-
-jest.mock('expo-sqlite');
-
 import {
   upsertHealthMetrics,
   getHealthMetricsRange,
@@ -16,23 +12,14 @@ import {
   getEarliestHealthMetricDate,
   clearAllHealthMetrics,
 } from '@/databases/health-metrics';
-import {
-  __setWriteConnectionForTests,
-  __resetWriteTransactionForTests,
-} from '@/databases/writeTransaction';
-
-// Route the write transaction onto the same mock we assert on (`txn === db`).
-const makeDb = () => {
-  const db = createMockDatabase();
-  __setWriteConnectionForTests(db as any);
-  return db;
-};
+import { makeDb, resetWriteLayer, sqlCalls } from '@/testing/fakeDb';
+import { makeHealthDay } from '@/testing/builders';
 
 beforeEach(() => {
-  __resetWriteTransactionForTests();
+  resetWriteLayer();
 });
 
-const rowA = {
+const rowA = makeHealthDay({
   date: '2026-07-07',
   sleepTotalMinutes: 480,
   sleepStages: { 5: 60 },
@@ -40,16 +27,9 @@ const rowA = {
   minHeartRate: 60,
   restingHeartRate: 58,
   avgHrvMillis: 42,
-};
-const rowB = {
-  date: '2026-07-08',
-  sleepTotalMinutes: null,
-  sleepStages: {},
-  avgHeartRate: null,
-  minHeartRate: null,
-  restingHeartRate: null,
-  avgHrvMillis: null,
-};
+});
+// An empty day: every metric null, no stages.
+const rowB = makeHealthDay({ date: '2026-07-08' });
 
 describe('upsertHealthMetrics', () => {
   it('is a no-op for an empty list (no transaction, no writes)', async () => {
@@ -66,9 +46,7 @@ describe('upsertHealthMetrics', () => {
 
     // A real transaction on the write connection (BEGIN IMMEDIATE), not expo's
     // withExclusiveTransactionAsync/withTransactionAsync.
-    const beganImmediate = db.execAsync.mock.calls.some(
-      (c: any[]) => typeof c[0] === 'string' && c[0].toUpperCase().includes('BEGIN IMMEDIATE')
-    );
+    const beganImmediate = sqlCalls(db, /BEGIN IMMEDIATE/i, db.execAsync).length > 0;
     expect(beganImmediate).toBe(true);
     expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
     expect(db.withTransactionAsync).not.toHaveBeenCalled();

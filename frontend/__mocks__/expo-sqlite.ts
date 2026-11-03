@@ -1,15 +1,6 @@
-const createMockDatabase = () => ({
-  execAsync: jest.fn().mockResolvedValue(undefined),
-  runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 }),
-  getAllAsync: jest.fn().mockResolvedValue([]),
-  getFirstAsync: jest.fn().mockResolvedValue(null),
-  withTransactionAsync: jest.fn().mockImplementation(async (callback: () => Promise<void>) => {
-    await callback();
-  }),
-  withExclusiveTransactionAsync: jest.fn().mockImplementation(async (callback: () => Promise<void>) => {
-    await callback();
-  }),
-});
+// The mock database object lives in testing/mockSqliteDb.ts so testing/fakeDb
+// can build one even when a suite replaces this module with its own factory.
+import { createMockDatabase } from '../testing/mockSqliteDb';
 
 export function openDatabaseSync() {
   return createMockDatabase();

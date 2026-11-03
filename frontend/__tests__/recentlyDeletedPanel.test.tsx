@@ -15,42 +15,10 @@
 import React from 'react';
 import { render, act, waitFor, fireEvent } from '@testing-library/react-native';
 
-const mockDb = { getAllAsync: jest.fn(), getFirstAsync: jest.fn() };
+let mockDb: MockDb;
 jest.mock('expo-sqlite', () => ({ useSQLiteContext: () => mockDb }));
 
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 24, bottom: 48, left: 0, right: 0 }),
-}));
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const anim = { duration: () => anim };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
-        },
-        FadeIn: anim,
-    };
-});
-jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
-
-jest.mock('@/styles/global', () => ({
-    useThemeColors: () => ({
-        background: '#000',
-        cardBackground: '#111',
-        secondaryBackground: '#222',
-        text: '#fff',
-        textSecondary: '#aaa',
-        border: '#333',
-        accent: '#4CAF50',
-        accentDark: '#388E3C',
-        accentLight: 'rgba(76,175,80,0.1)',
-        overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-        elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-        isDark: true,
-    }),
-}));
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 const mockGetBinnedEntries = jest.fn();
 const mockRestoreMoodEntry = jest.fn();
@@ -63,6 +31,8 @@ jest.mock('@/databases/entry-bin', () => ({
 }));
 
 import { Alert } from 'react-native';
+import { makeDb, resetWriteLayer, type MockDb } from '@/testing/fakeDb';
+import { setInsets, INSETS } from '@/testing/platform';
 import { OverlayProvider } from '@/context/OverlayHost';
 import { RecentlyDeletedPanel } from '@/components/timeline/RecentlyDeletedPanel';
 
@@ -89,6 +59,9 @@ const renderPanel = (visible = true) =>
 
 beforeEach(() => {
     jest.clearAllMocks();
+    resetWriteLayer();
+    mockDb = makeDb();
+    setInsets(INSETS.THREE_BUTTON_NAV);
     mockGetBinnedEntries.mockResolvedValue([]);
     mockRestoreMoodEntry.mockResolvedValue({ success: true, message: 'ok' });
     mockPurgeMoodEntry.mockResolvedValue({ success: true, message: 'ok' });

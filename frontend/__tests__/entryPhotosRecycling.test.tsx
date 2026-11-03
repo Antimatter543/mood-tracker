@@ -23,21 +23,10 @@ jest.mock('@/components/OverlayModal', () => ({
 
 import { EntryPhotos, ThumbImage, PHOTO_THUMB_SIZE } from '@/components/timeline/EntryPhotos';
 import type { EntryPhoto } from '@/components/types';
+import { THEME } from '@/testing/theme';
 
-const colors: any = {
-    background: '#000',
-    cardBackground: '#111',
-    secondaryBackground: '#222',
-    text: '#fff',
-    textSecondary: '#aaa',
-    border: '#333',
-    accent: '#4CAF50',
-    accentDark: '#388E3C',
-    accentLight: 'rgba(76,175,80,0.1)',
-    overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-    elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-    isDark: true,
-};
+// The real fresh-install theme, never an invented palette.
+const colors = THEME;
 
 const photo = (id: number, entryId: number): EntryPhoto => ({
     id,

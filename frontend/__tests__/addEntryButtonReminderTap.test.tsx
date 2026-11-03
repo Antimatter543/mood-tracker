@@ -5,29 +5,7 @@
  */
 import { render, act } from '@testing-library/react-native';
 
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
-}));
-jest.mock('react-native-reanimated', () => ({
-    __esModule: true,
-    default: { createAnimatedComponent: (Comp: any) => Comp },
-    useAnimatedStyle: (fn: () => any) => fn(),
-    useSharedValue: (v: any) => ({ value: v }),
-    withSpring: (v: any) => v,
-}));
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return {
-        ...actual,
-        useThemeColors: () => ({
-            background: '#000', cardBackground: '#111', secondaryBackground: '#222',
-            text: '#fff', textSecondary: '#aaa', border: '#333', accent: '#4CAF50',
-            overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-            elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 6 },
-            isDark: true,
-        }),
-    };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 jest.mock('expo-sqlite', () => ({ useSQLiteContext: () => ({}) }));
 jest.mock('@/context/DataContext', () => ({ useDataContext: () => ({ refetchEntries: jest.fn() }) }));
 jest.mock('@/context/SettingsContext', () => ({

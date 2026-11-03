@@ -10,8 +10,8 @@
  * param-bind order when the filter params precede LIMIT/OFFSET, `LIKE ? ESCAPE`
  * for literal `%`, `mood BETWEEN`, NULL-notes matching via activity, and
  * newest-first ordering. Uses Node's built-in `node:sqlite` (Node ≥ 22.5) — no
- * new dependency. If the runtime lacks it, the suite skips cleanly rather than
- * failing CI.
+ * new dependency. If the runtime lacks it, the suite skips locally and fails on CI
+ * (describeSqlite), so a runner without sqlite cannot skip it silently.
  *
  * INVARIANT: the `pageQuery` below MUST mirror `getEntriesWindow`'s CTE (same
  * FROM/JOINs, the base `WHERE e.deleted_at IS NULL` + ` AND (${where})` splice
@@ -23,15 +23,7 @@
  */
 import { buildEntryFilter, moodPresetToRange, EntryFilters, MoodRange } from '@/components/timeline/entryFilter';
 
-// Load Node's built-in SQLite; skip the whole suite if unavailable (e.g. Node < 22.5).
-let DatabaseSync: any = null;
-try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    ({ DatabaseSync } = require('node:sqlite'));
-} catch {
-    DatabaseSync = null;
-}
-const describeIfSqlite = DatabaseSync ? describe : describe.skip;
+import { describeSqlite, openSqlite } from '@/testing/realSqlite';
 
 const ITEMS_PER_PAGE = 20;
 
@@ -57,7 +49,7 @@ const F = (query = '', moodRange: MoodRange | null = null, starredOnly = false):
     starredOnly,
 });
 
-describeIfSqlite('entryFilter — real SQLite execution', () => {
+describeSqlite('entryFilter — real SQLite execution', () => {
     let db: any;
     const idsFor = (filters: EntryFilters, page = 0): number[] => {
         const { where, params } = buildEntryFilter(filters);
@@ -68,12 +60,13 @@ describeIfSqlite('entryFilter — real SQLite execution', () => {
     };
 
     beforeAll(() => {
-        db = new DatabaseSync(':memory:');
-        db.exec(`
+        db = openSqlite({
+            schema: `
             CREATE TABLE activities (id INTEGER PRIMARY KEY, name TEXT, group_id INTEGER);
             CREATE TABLE entries (id INTEGER PRIMARY KEY, mood REAL, notes TEXT, date TEXT, starred_at TEXT, deleted_at TEXT);
             CREATE TABLE entry_activities (id INTEGER PRIMARY KEY, entry_id INTEGER, activity_id INTEGER);
-        `);
+        `,
+        }).raw;
         db.exec(`INSERT INTO activities (id,name,group_id) VALUES
             (1,'Running',1),(2,'Work',1),(3,'Gym',1),(4,'Reading',1),(5,'50% Sale',1);`);
         // [id, mood, notes, date, activityIds, starredAt]. Star flag lives on

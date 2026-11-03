@@ -7,15 +7,13 @@ import {
   aggregateDowRows,
   buildDowPatternData,
 } from '@/components/visualisations/transforms/dayOfWeekPattern';
-
-const localMidnight = (y: number, m0: number, d: number) =>
-  new Date(y, m0, d, 0, 0, 0).toISOString();
+import { localIso } from '@/testing/builders';
 
 describe('aggregateDowRows', () => {
   it('keys each entry to its LOCAL weekday (0=Sun..6=Sat)', () => {
     // 2026-06-11 is a Thursday (getDay() === 4). The instant is Wednesday in
     // UTC, so strftime would have said Wednesday (3) — this proves we use local.
-    const rows = aggregateDowRows([{ date: localMidnight(2026, 5, 11), mood: 7 }]);
+    const rows = aggregateDowRows([{ date: localIso('2026-06-11', 0), mood: 7 }]);
     expect(rows).toHaveLength(1);
     expect(rows[0].day_of_week).toBe(4); // Thursday, not 3 (Wednesday)
     expect(rows[0].avg_mood).toBe(7);
@@ -26,9 +24,9 @@ describe('aggregateDowRows', () => {
 
   it('aggregates multiple entries on the same weekday (avg/min/max/count)', () => {
     const rows = aggregateDowRows([
-      { date: localMidnight(2026, 5, 11), mood: 4 }, // Thu
-      { date: localMidnight(2026, 5, 18), mood: 8 }, // Thu (next week)
-      { date: localMidnight(2026, 5, 12), mood: 6 }, // Fri
+      { date: localIso('2026-06-11', 0), mood: 4 }, // Thu
+      { date: localIso('2026-06-18', 0), mood: 8 }, // Thu (next week)
+      { date: localIso('2026-06-12', 0), mood: 6 }, // Fri
     ]);
     const thu = rows.find((r) => r.day_of_week === 4)!;
     expect(thu.entry_count).toBe(2);
@@ -41,7 +39,7 @@ describe('aggregateDowRows', () => {
 
   it('feeds buildDowPatternData correctly (Monday-first labels)', () => {
     const rows = aggregateDowRows([
-      { date: localMidnight(2026, 5, 11), mood: 9 }, // Thu
+      { date: localIso('2026-06-11', 0), mood: 9 }, // Thu
     ]);
     const pattern = buildDowPatternData(rows, 1);
     // Mon-first labels: index 3 == Thursday.
@@ -57,7 +55,7 @@ describe('aggregateDowRows', () => {
     expect(
       aggregateDowRows([
         { date: 'garbage', mood: 5 } as any,
-        { date: localMidnight(2026, 5, 11), mood: NaN as any },
+        { date: localIso('2026-06-11', 0), mood: NaN as any },
       ]),
     ).toEqual([]);
   });

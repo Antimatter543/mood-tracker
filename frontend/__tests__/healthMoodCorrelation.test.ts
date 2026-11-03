@@ -19,6 +19,7 @@ import {
   type MetricMoodCorrelation,
   type MetricMoodResult,
 } from '@/components/visualisations/transforms/healthMoodCorrelation';
+import { dayKeys } from '@/testing/builders';
 
 // ── builders ────────────────────────────────────────────────────────────────
 
@@ -42,9 +43,8 @@ const hRow = (
 
 const dm = (day: string, avg: number) => ({ day, avg });
 
-/** Sequential local days 'YYYY-06-01', '...-02', ... for N entries. */
-const days = (n: number): string[] =>
-  Array.from({ length: n }, (_, i) => `2026-06-${String(i + 1).padStart(2, '0')}`);
+/** Sequential local days '2026-06-01', '...-02', ... for N entries. */
+const days = (n: number): string[] => dayKeys(n, '2026-06-01');
 
 /** Narrow to the `ok` branch (throws with a clear message if not). */
 function ok(c: MetricMoodCorrelation): MetricMoodResult {

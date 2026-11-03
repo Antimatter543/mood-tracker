@@ -21,6 +21,9 @@
     "setupFiles": [
       "<rootDir>/jest.setup.ts"
     ],
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.afterEnv.ts"
+    ],
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/$1",
       "^expo-file-system/legacy$": "expo-file-system"

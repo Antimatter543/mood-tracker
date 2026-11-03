@@ -8,28 +8,6 @@ import React from 'react';
 import { Text } from 'react-native';
 import { render, act, fireEvent, screen as rtlScreen } from '@testing-library/react-native';
 
-// OverlayPopover imports react-native-reanimated (FadeIn / Animated.View). The
-// real module — and reanimated's own mock.js — initialize the native worklets
-// runtime at import time, which isn't available under jest. We only use
-// `Animated.View` (a plain View) and `FadeIn.duration()` (an animation-config
-// builder), so shim exactly that surface and skip the worklets import chain.
-// Scoped to this suite so other suites are unaffected.
-// OverlayProvider observes the keyboard (see context/OverlayHost.tsx); the
-// reanimated mock below has no useAnimatedKeyboard, so stub the hook.
-jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
-jest.mock('react-native-reanimated', () => {
-    const React = require('react');
-    const { View } = require('react-native');
-    const entering = { duration: () => entering };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => React.createElement(View, props),
-        },
-        FadeIn: entering,
-    };
-});
-
 import { OverlayProvider } from '@/context/OverlayHost';
 import {
     OverlayPopover,

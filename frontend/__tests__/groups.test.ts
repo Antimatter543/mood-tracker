@@ -1,6 +1,3 @@
-import { createMockDatabase } from 'expo-sqlite';
-
-jest.mock('expo-sqlite');
 jest.mock('@/components/IconPicker', () => ({ IconFamilyType: {} }));
 jest.mock('@/components/types', () => ({}));
 
@@ -8,20 +5,10 @@ import {
   addActivityGroup,
   deleteActivityGroup,
 } from '@/databases/groups';
-import {
-  __setWriteConnectionForTests,
-  __resetWriteTransactionForTests,
-} from '@/databases/writeTransaction';
-
-// Route the write transaction onto the same mock we assert on (`txn === db`).
-const makeDb = () => {
-  const db = createMockDatabase();
-  __setWriteConnectionForTests(db as any);
-  return db;
-};
+import { makeDb, resetWriteLayer, sqlCalls } from '@/testing/fakeDb';
 
 beforeEach(() => {
-  __resetWriteTransactionForTests();
+  resetWriteLayer();
 });
 
 describe('addActivityGroup — error paths', () => {
@@ -82,9 +69,7 @@ describe('deleteActivityGroup', () => {
     await deleteActivityGroup(db as any, 1);
 
     // Only one delete should be issued; CASCADE handles the rest.
-    const deleteCalls = db.runAsync.mock.calls.filter((c: any[]) =>
-      typeof c[0] === 'string' && c[0].toUpperCase().includes('DELETE FROM')
-    );
+    const deleteCalls = sqlCalls(db, /DELETE FROM/i);
     expect(deleteCalls.length).toBe(1);
     expect(deleteCalls[0][0]).toContain('activity_groups');
   });

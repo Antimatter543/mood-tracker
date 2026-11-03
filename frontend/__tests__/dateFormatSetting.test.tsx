@@ -31,25 +31,6 @@ jest.mock('@/context/SettingsContext', () => ({
     useSettings: () => ({ settings: mockSettings(), updateSetting: mockUpdateSetting }),
 }));
 
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
-}));
-jest.mock('@/hooks/useKeyboardHeight', () => ({
-    useKeyboardHeight: () => 0,
-}));
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const entering = { duration: () => entering };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
-        },
-        FadeIn: entering,
-    };
-});
-
 import { SettingsSection } from '@/components/SettingRow';
 
 const baseSettings: Settings = {

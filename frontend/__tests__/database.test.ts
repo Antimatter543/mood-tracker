@@ -1,7 +1,3 @@
-import { createMockDatabase } from 'expo-sqlite';
-
-jest.mock('expo-sqlite');
-
 // Mock the IconPicker to avoid native module issues
 jest.mock('@/components/IconPicker', () => ({
   IconFamilyType: {},
@@ -30,20 +26,10 @@ import {
   addActivityGroup,
   updateActivity,
 } from '@/databases/database';
-import {
-  __setWriteConnectionForTests,
-  __resetWriteTransactionForTests,
-} from '@/databases/writeTransaction';
-
-// Route the write transaction onto the same mock we assert on (`txn === db`).
-const makeDb = () => {
-  const db = createMockDatabase();
-  __setWriteConnectionForTests(db as any);
-  return db;
-};
+import { makeDb, resetWriteLayer, sqlCalls } from '@/testing/fakeDb';
 
 beforeEach(() => {
-  __resetWriteTransactionForTests();
+  resetWriteLayer();
 });
 
 describe('addMoodEntry', () => {
@@ -78,9 +64,7 @@ describe('addMoodEntry', () => {
     // Real transaction on the write connection (BEGIN IMMEDIATE), not expo's
     // transaction API (whose statements this codebase used to run outside any
     // transaction — see databases/writeTransaction.ts).
-    const beganImmediate = db.execAsync.mock.calls.some(
-      (c: any[]) => typeof c[0] === 'string' && c[0].toUpperCase().includes('BEGIN IMMEDIATE')
-    );
+    const beganImmediate = sqlCalls(db, /BEGIN IMMEDIATE/i, db.execAsync).length > 0;
     expect(beganImmediate).toBe(true);
     expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
     expect(db.withTransactionAsync).not.toHaveBeenCalled();
@@ -151,9 +135,7 @@ describe('deleteActivity', () => {
     db.getFirstAsync.mockResolvedValue({ group_id: 1, position: 2 });
 
     await deleteActivity(db as any, 1);
-    const beganImmediate = db.execAsync.mock.calls.some(
-      (c: any[]) => typeof c[0] === 'string' && c[0].toUpperCase().includes('BEGIN IMMEDIATE')
-    );
+    const beganImmediate = sqlCalls(db, /BEGIN IMMEDIATE/i, db.execAsync).length > 0;
     expect(beganImmediate).toBe(true);
     expect(db.withExclusiveTransactionAsync).not.toHaveBeenCalled();
     expect(db.withTransactionAsync).not.toHaveBeenCalled();

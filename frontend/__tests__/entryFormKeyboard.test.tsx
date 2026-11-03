@@ -14,53 +14,10 @@
  * Notes calls scrollToEnd on the ScrollView ref.
  */
 import { render, fireEvent, act } from '@testing-library/react-native';
-
-// ── keyboard height: mockable so we can assert the padding math ──────────────
-const mockKeyboardHeight = jest.fn(() => 0);
-jest.mock('@/hooks/useKeyboardHeight', () => ({
-    useKeyboardHeight: () => mockKeyboardHeight(),
-}));
-
-// ── reanimated: Animated.ScrollView -> a real RN ScrollView (so the ref exposes
-//    scrollToEnd, which we spy on), FadeIn/useAnimatedRef stubbed. The spy lives
-//    on a `mock`-prefixed holder so the (hoisted) jest.mock factory may close
-//    over it (jest only allows out-of-scope refs named /^mock/). ──────────────
-const mockScroll = { toEnd: jest.fn() };
-jest.mock('react-native-reanimated', () => {
-    const ReactActual = require('react');
-    const RN = require('react-native');
-    const entering = { duration: () => entering };
-    return {
-        __esModule: true,
-        default: {
-            // Forward the ref; expose our spy scrollToEnd on the instance.
-            ScrollView: ReactActual.forwardRef((props: any, ref: any) => {
-                ReactActual.useImperativeHandle(ref, () => ({
-                    scrollToEnd: (...args: any[]) => mockScroll.toEnd(...args),
-                }));
-                return ReactActual.createElement(RN.ScrollView, props);
-            }),
-            View: (p: any) => ReactActual.createElement(RN.View, p),
-        },
-        FadeIn: entering,
-        useAnimatedRef: () => ReactActual.useRef(null),
-    };
-});
+import { setKeyboardHeight, animatedScroll } from '@/testing/platform';
 
 // ── theme + settings + heavy form children stubbed to keep the render light ──
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return {
-        ...actual,
-        useThemeColors: () => ({
-            background: '#000', cardBackground: '#111', secondaryBackground: '#222',
-            text: '#fff', textSecondary: '#aaa', border: '#333', accent: '#4CAF50',
-            overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa', textOnAccent: '#fff' },
-            elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 6 },
-            isDark: true,
-        }),
-    };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 jest.mock('@/context/SettingsContext', () => ({
     useSettings: () => ({ settings: { mood_precision: 'integer', show_mood_benchmarks: false } }),
 }));
@@ -95,8 +52,6 @@ async function advanceToDetails(view: any) {
 }
 
 beforeEach(() => {
-    mockScroll.toEnd.mockClear();
-    mockKeyboardHeight.mockReturnValue(0);
     jest.spyOn(global, 'requestAnimationFrame').mockImplementation((cb: any) => {
         cb();
         return 0 as any;
@@ -115,19 +70,18 @@ describe('EntryForm — keyboard handling (deterministic)', () => {
         await act(async () => {
             fireEvent(notes, 'focus');
         });
-        expect(mockScroll.toEnd).toHaveBeenCalled();
+        expect(animatedScroll.toEnd).toHaveBeenCalled();
     });
 
     it('pads the scroll content by the keyboard height (gives scroll range)', async () => {
         // Base padding (keyboard hidden).
-        mockKeyboardHeight.mockReturnValue(0);
         const base = await render(
             <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
         );
         const basePad = scrollPadding(base);
 
         // Keyboard up -> padding grows by exactly the keyboard height.
-        mockKeyboardHeight.mockReturnValue(804);
+        setKeyboardHeight(804);
         const withKb = await render(
             <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
         );
@@ -140,14 +94,14 @@ describe('EntryForm — keyboard handling (deterministic)', () => {
             <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
         );
         await advanceToDetails(view);
-        mockScroll.toEnd.mockClear();
+        animatedScroll.toEnd.mockClear();
 
         // Keyboard opens (re-render with a height) -> the effect scrolls to end.
-        mockKeyboardHeight.mockReturnValue(804);
+        setKeyboardHeight(804);
         await act(async () => {
             await view.rerender(<EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />);
         });
-        expect(mockScroll.toEnd).toHaveBeenCalled();
+        expect(animatedScroll.toEnd).toHaveBeenCalled();
     });
 });
 

@@ -22,6 +22,7 @@
 import { aggregateDailyAverages } from '@/components/visualisations/transforms/dailyAverages';
 import { localDateString } from '@/databases/dateHelpers';
 import { currentStreak, streakStats } from '@/components/visualisations/transforms/streak';
+import { localIso } from '@/testing/builders';
 
 // What SQLite's `date(date)` produced: the UTC calendar day of the instant.
 const utcDayKey = (iso: string) => new Date(iso).toISOString().slice(0, 10);
@@ -51,8 +52,8 @@ describe('backdated entry lands on the correct LOCAL day (the reported chart bug
 
   it('multiple entries on the same local Thursday average together (not split across days)', () => {
     const daily = aggregateDailyAverages([
-      { date: new Date(2026, 5, 11, 0, 0, 0).toISOString(), mood: 6 }, // backdated midnight
-      { date: new Date(2026, 5, 11, 21, 30, 0).toISOString(), mood: 8 }, // same day, evening
+      { date: localIso('2026-06-11', 0), mood: 6 }, // backdated midnight
+      { date: localIso('2026-06-11', 21, 30), mood: 8 }, // same day, evening
     ]);
     expect(daily).toHaveLength(1);
     expect(daily[0].day).toBe('2026-06-11');
@@ -68,8 +69,8 @@ describe('streak counts the backdated day (the reported "1 instead of 2" bug)', 
   const todayLocal = '2026-06-12'; // Friday
   // Friday AFTERNOON (2pm Brisbane = 04:00 UTC) so today's entry is Friday in
   // BOTH local and UTC — it's the backdated Thursday entry alone that mis-keys.
-  const todayInstant = new Date(2026, 5, 12, 14, 0, 0).toISOString();
-  const yesterdayBackdated = new Date(2026, 5, 11, 0, 0, 0).toISOString(); // Thu local midnight
+  const todayInstant = localIso('2026-06-12', 14);
+  const yesterdayBackdated = localIso('2026-06-11', 0); // Thu local midnight
 
   it('streak is 2 when entries are today + yesterday-backdated-at-local-midnight', () => {
     const s = streakStats([todayInstant, yesterdayBackdated], todayLocal);
@@ -94,7 +95,7 @@ describe('streak counts the backdated day (the reported "1 instead of 2" bug)', 
       [
         todayInstant,
         yesterdayBackdated,
-        new Date(2026, 5, 11, 20, 0, 0).toISOString(), // 2nd Thu entry
+        localIso('2026-06-11', 20), // 2nd Thu entry
       ],
       todayLocal
     );

@@ -21,7 +21,6 @@
  * then a table of nothing but one timestamp) because a partial order can happen to
  * behave on mild data and fail on a real user's.
  */
-jest.mock('expo-sqlite');
 jest.mock('@/databases/mediaHelpers', () => ({
   MEDIA_DIR: 'file:///media/',
   copyToMediaDir: jest.fn(),
@@ -31,23 +30,7 @@ jest.mock('@/databases/mediaHelpers', () => ({
 import { getEntriesWindow, getEntriesPage } from '@/databases/entries';
 import { EntryFilters } from '@/components/timeline/entryFilter';
 
-let DatabaseSync: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ({ DatabaseSync } = require('node:sqlite'));
-} catch {
-  DatabaseSync = null;
-}
-const describeIfSqlite = DatabaseSync ? describe : describe.skip;
-
-/** An expo-sqlite-shaped async adapter over a synchronous node:sqlite database. */
-function makeAdapter(db: any) {
-  return {
-    getAllAsync: async (sql: string, params: any[] = []) => db.prepare(sql).all(...(params ?? [])),
-    getFirstAsync: async (sql: string, params: any[] = []) =>
-      db.prepare(sql).get(...(params ?? [])) ?? null,
-  } as any;
-}
+import { describeSqlite, openSqlite } from '@/testing/realSqlite';
 
 const SCHEMA = `
   CREATE TABLE activity_groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE);
@@ -69,7 +52,7 @@ const NO_FILTER: EntryFilters = { query: '', moodRange: null, starredOnly: false
 const PAGE = 20;
 const DAY_MS = 86_400_000;
 
-describeIfSqlite('Timeline pagination — every entry exactly once, at any depth', () => {
+describeSqlite('Timeline pagination — every entry exactly once, at any depth', () => {
   let db: any;
   let adapter: any;
 
@@ -105,11 +88,10 @@ describeIfSqlite('Timeline pagination — every entry exactly once, at any depth
     (await walkRowsByOffset(pageSize)).map((r) => r.id);
 
   beforeEach(() => {
-    db = new DatabaseSync(':memory:');
-    db.exec(SCHEMA);
+    adapter = openSqlite({ schema: SCHEMA });
+    db = adapter.raw;
     db.exec(`INSERT INTO activity_groups (id, name) VALUES (1, 'Life');`);
     db.exec(`INSERT INTO activities (id, name, group_id) VALUES (1, 'Gym', 1), (2, 'Read', 1);`);
-    adapter = makeAdapter(db);
   });
 
   afterEach(() => {
