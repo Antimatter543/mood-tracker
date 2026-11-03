@@ -1,0 +1,105 @@
+name: QA seed guard
+
+# Proves the QA seed channel (frontend/lib/qa: a deep link that WIPES and reseeds the
+# on-device database) can never reach a release bundle, on every PR.
+#
+# Two bundles of the same commit, built the way the release lane's gradle step builds them
+# (`expo export:embed`, production, minified):
+#   1. EXPO_PUBLIC_QA unset (= every release build)  -> 0 hits for the marker AND `qa/seed`
+#   2. EXPO_PUBLIC_QA=1      (= the CI e2e QA build)  -> >=1 hit for each (positive control:
+#      proves the grep can see the strings, so result 1 means something)
+# release-apk.yml runs the same check on the Hermes bundle inside the real signed APK/AAB.
+#
+# EXPO_PUBLIC_* values are NOT part of Metro's transform cache key, so a second bundle in the
+# same job would silently reuse the first one's transformed modules. Every Metro cache is
+# wiped before EACH pass (and --reset-cache is passed too). See CLAUDE.md "METRO-CACHE TRAP".
+#
+# Deliberately `pull_request`, never `pull_request_target`: fork code must not see secrets.
+# No secrets, read-only token, every action pinned by commit SHA (tag in the comment).
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/qa-seed-guard.yml'
+      - '.github/scripts/qa-seed-bundle-check.sh'
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/qa-seed-guard.yml'
+      - '.github/scripts/qa-seed-bundle-check.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-seed-guard-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  bundle-grep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Wipe Metro caches (before the release pass)
+        run: rm -rf "${TMPDIR:-/tmp}"/metro-* "$RUNNER_TEMP"/metro-* node_modules/.cache
+
+      - name: Bundle with EXPO_PUBLIC_QA unset (the release configuration)
+        run: |
+          # `env -u` so a value leaking in from the runner can't fake a pass.
+          env -u EXPO_PUBLIC_QA npx expo export:embed \
+            --platform android --dev false --minify true --reset-cache \
+            --entry-file node_modules/expo-router/entry.js \
+            --bundle-output "$RUNNER_TEMP/release.android.bundle" \
+            --assets-dest "$RUNNER_TEMP/release-assets"
+
+      - name: Assert the QA seed channel is ABSENT from the release bundle
+        run: ../.github/scripts/qa-seed-bundle-check.sh "$RUNNER_TEMP/release.android.bundle" absent
+
+      - name: Wipe Metro caches (before the QA pass)
+        run: rm -rf "${TMPDIR:-/tmp}"/metro-* "$RUNNER_TEMP"/metro-* node_modules/.cache
+
+      - name: Bundle with EXPO_PUBLIC_QA=1 (the QA configuration)
+        env:
+          EXPO_PUBLIC_QA: '1'
+        run: |
+          npx expo export:embed \
+            --platform android --dev false --minify true --reset-cache \
+            --entry-file node_modules/expo-router/entry.js \
+            --bundle-output "$RUNNER_TEMP/qa.android.bundle" \
+            --assets-dest "$RUNNER_TEMP/qa-assets"
+
+      - name: Assert the QA seed channel is PRESENT in the QA bundle (positive control)
+        run: ../.github/scripts/qa-seed-bundle-check.sh "$RUNNER_TEMP/qa.android.bundle" present
+
+      - name: Bundle sizes
+        if: always()
+        run: |
+          {
+            echo "### QA seed guard"
+            echo ""
+            echo "| Bundle | Bytes |"
+            echo "|---|---|"
+            for b in release qa; do
+              f="$RUNNER_TEMP/$b.android.bundle"
+              echo "| $b | $( [ -f "$f" ] && wc -c < "$f" || echo missing ) |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"

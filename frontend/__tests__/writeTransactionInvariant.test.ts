@@ -33,6 +33,7 @@ const NO_EXPO_TXN_FILES = [
   'databases/lifecycle.ts',
   'components/generateData.ts',
   'components/DBViewer.tsx',
+  'lib/qa/runSeed.ts',
 ] as const;
 
 // Modules that open write transactions — each must import from writeTransaction.
@@ -44,6 +45,7 @@ const WRITE_MODULES = [
   'databases/health-metrics.ts',
   'databases/lifecycle.ts',
   'components/generateData.ts',
+  'lib/qa/runSeed.ts',
 ] as const;
 
 // `code()` strips comments, so a doc-comment that NAMES a banned symbol (to

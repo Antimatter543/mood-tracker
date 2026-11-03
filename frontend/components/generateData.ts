@@ -235,6 +235,15 @@ const SAMPLE_PHOTO_PNGS_BASE64: readonly string[] = [
 let cachedSamplePhotoPaths: string[] | null = null;
 
 /**
+ * Write a FRESH copy of the 3 sample photo PNGs into MEDIA_DIR and return their
+ * on-disk paths (no caching). The QA seed channel (lib/qa) calls this directly:
+ * a seed there follows a database reset, so it never leans on a cached path.
+ */
+export async function writeSamplePhotoFiles(): Promise<string[]> {
+  return Promise.all(SAMPLE_PHOTO_PNGS_BASE64.map((b64) => writeBase64ToMediaDir(b64, 'png')));
+}
+
+/**
  * Write the sample photo PNGs into MEDIA_DIR (idempotent per process — see
  * `cachedSamplePhotoPaths`) and return their on-disk paths. Must run BEFORE
  * `withWriteTransaction`: file IO doesn't belong inside a DB transaction, and
@@ -242,15 +251,66 @@ let cachedSamplePhotoPaths: string[] | null = null;
  */
 async function ensureSamplePhotoFiles(): Promise<string[]> {
   if (cachedSamplePhotoPaths) return cachedSamplePhotoPaths;
-  cachedSamplePhotoPaths = await Promise.all(
-    SAMPLE_PHOTO_PNGS_BASE64.map((b64) => writeBase64ToMediaDir(b64, 'png'))
-  );
+  cachedSamplePhotoPaths = await writeSamplePhotoFiles();
   return cachedSamplePhotoPaths;
 }
 
 // Random activities for an entry: the shared `shuffled` helper, then a prefix.
-function getRandomActivities(activities: Activity[], count: number) {
-  return shuffled(activities, Math.random).slice(0, Math.min(count, activities.length));
+function getRandomActivities(activities: readonly Activity[], count: number, rng: () => number) {
+  return shuffled(activities, rng).slice(0, Math.min(count, activities.length));
+}
+
+/**
+ * Insert `plans` as real rows on `txn` (the caller's OPEN write transaction):
+ * one `entries` row per plan, `activityCount` activities picked with `rng`, and
+ * `photoCount` `entry_media` rows pointing at `photoPaths`. Pre-starred entries
+ * get `starredAt`. Shared by the dev buttons and the QA seed channel
+ * (lib/qa/runSeed.ts), so both write exactly the same shape.
+ */
+export async function insertSeedPlans(
+  txn: SQLiteDatabase,
+  plans: readonly SeedPlanEntry[],
+  activities: readonly Activity[],
+  photoPaths: readonly string[],
+  rng: () => number,
+  starredAt: string
+): Promise<void> {
+  if (photoPaths.length === 0 && plans.some((p) => p.photoCount > 0)) {
+    throw new Error('insertSeedPlans: the plan wants photos but no sample photo paths were given');
+  }
+  for (const plan of plans) {
+    // ~10% of seeded entries come in pre-starred, so the seed data exercises
+    // the starred-entries UI/filters too.
+    const result = await txn.runAsync(
+      `INSERT INTO entries (mood, notes, date, starred_at) VALUES (?, ?, ?, ?)`,
+      [plan.mood, plan.notes, plan.date, plan.starred ? starredAt : null]
+    );
+
+    const entryId = result.lastInsertRowId;
+
+    // Add 0-4 random activities for this entry
+    for (const activity of getRandomActivities(activities, plan.activityCount, rng)) {
+      await txn.runAsync(
+        `INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?)`,
+        [entryId, activity.id]
+      );
+    }
+
+    // Add 0-3 sample photos for this entry, cycling through the sample files.
+    for (let i = 0; i < plan.photoCount; i++) {
+      const filePath = photoPaths[(entryId + i) % photoPaths.length];
+      await txn.runAsync(
+        `INSERT INTO entry_media (entry_id, file_path, media_type) VALUES (?, ?, 'image')`,
+        [entryId, filePath]
+      );
+    }
+  }
+}
+
+/** Injectable clock + RNG for `seedMoodEntries` (defaults: the real clock, Math.random). */
+export interface SeedOptions {
+  now?: Date;
+  rng?: () => number;
 }
 
 // Main seeding function. Used both by the Settings "Generate 50 Sample
@@ -258,9 +318,13 @@ function getRandomActivities(activities: Activity[], count: number) {
 // realistic day-clustered/note-length/photo/starred mix applies at any count.
 export async function seedMoodEntries(
   db: SQLiteDatabase,
-  numberOfEntries: number = 11
+  numberOfEntries: number = 11,
+  options: SeedOptions = {}
 ): Promise<DatabaseResult> {
   try {
+    const seedNow = options.now ?? now();
+    const rng = options.rng ?? Math.random;
+
     // First, get all available activities
     const activities = await getActivities(db);
 
@@ -271,7 +335,7 @@ export async function seedMoodEntries(
       };
     }
 
-    const plans = planSeedEntries(numberOfEntries, now());
+    const plans = planSeedEntries(numberOfEntries, seedNow, rng);
 
     // Photo files are written to disk BEFORE the transaction (see
     // ensureSamplePhotoFiles) — only ever 3 files regardless of how many
@@ -282,38 +346,9 @@ export async function seedMoodEntries(
 
     // Real write transaction (statements on `txn`; dev-only seed path). See
     // databases/writeTransaction.ts.
-    await withWriteTransaction(async (txn) => {
-      for (const plan of plans) {
-        // Insert the mood entry. ~10% of seeded entries come in pre-starred,
-        // so the dev seed data exercises the starred-entries UI/filters too.
-        const starredAt = plan.starred ? now().toISOString() : null;
-        const result = await txn.runAsync(
-          `INSERT INTO entries (mood, notes, date, starred_at) VALUES (?, ?, ?, ?)`,
-          [plan.mood, plan.notes, plan.date, starredAt]
-        );
-
-        const entryId = result.lastInsertRowId;
-
-        // Add 0-4 random activities for this entry
-        const selectedActivities = getRandomActivities(activities, plan.activityCount);
-
-        for (const activity of selectedActivities) {
-          await txn.runAsync(
-            `INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?)`,
-            [entryId, activity.id]
-          );
-        }
-
-        // Add 0-3 sample photos for this entry, cycling through the 3 sample files.
-        for (let i = 0; i < plan.photoCount; i++) {
-          const filePath = samplePhotoPaths[(entryId + i) % samplePhotoPaths.length];
-          await txn.runAsync(
-            `INSERT INTO entry_media (entry_id, file_path, media_type) VALUES (?, ?, 'image')`,
-            [entryId, filePath]
-          );
-        }
-      }
-    });
+    await withWriteTransaction((txn) =>
+      insertSeedPlans(txn, plans, activities, samplePhotoPaths, rng, seedNow.toISOString())
+    );
 
     return {
       success: true,

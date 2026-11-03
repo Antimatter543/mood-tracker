@@ -15,6 +15,12 @@ import {
   createInitialSchema,
 } from '@/databases/lifecycle';
 import { runMigrations } from '@/databases/migrations';
+import {
+  __resetDatabaseReadinessForTests,
+  isDatabaseInitialized,
+  markDatabaseInitialized,
+  whenDatabaseInitialized,
+} from '@/databases/readiness';
 import { makeDb, resetWriteLayer, sqlCalls } from '@/testing/fakeDb';
 
 beforeEach(() => {
@@ -44,6 +50,46 @@ describe('initializeDatabase', () => {
     (runMigrations as jest.Mock).mockRejectedValueOnce(new Error('migration broke'));
 
     await expect(initializeDatabase(db as any)).rejects.toThrow('migration broke');
+  });
+
+  // The readiness signal (databases/readiness.ts) is what code OUTSIDE the
+  // SQLiteProvider (the QA seed channel) waits on before opening the write
+  // connection; it must fire only once WAL + migrations are really done.
+  it('marks the database ready only after a successful init', async () => {
+    __resetDatabaseReadinessForTests();
+    let migrated = false;
+    (runMigrations as jest.Mock).mockImplementationOnce(async () => {
+      expect(isDatabaseInitialized()).toBe(false); // not before migrations finish
+      migrated = true;
+    });
+    const waiter = whenDatabaseInitialized();
+    await initializeDatabase(makeDb() as any);
+    await waiter;
+    expect(migrated).toBe(true);
+    expect(isDatabaseInitialized()).toBe(true);
+  });
+
+  it('a failed init never marks the database ready', async () => {
+    __resetDatabaseReadinessForTests();
+    (runMigrations as jest.Mock).mockRejectedValueOnce(new Error('migration broke'));
+    await expect(initializeDatabase(makeDb() as any)).rejects.toThrow();
+    expect(isDatabaseInitialized()).toBe(false);
+  });
+});
+
+describe('readiness signal', () => {
+  beforeEach(() => __resetDatabaseReadinessForTests());
+
+  it('resolves every waiter registered before the mark, and later waiters at once', async () => {
+    const order: string[] = [];
+    const a = whenDatabaseInitialized().then(() => order.push('a'));
+    const b = whenDatabaseInitialized().then(() => order.push('b'));
+    await Promise.resolve();
+    expect(order).toEqual([]);
+    markDatabaseInitialized();
+    await Promise.all([a, b]);
+    await whenDatabaseInitialized();
+    expect(order).toEqual(['a', 'b']);
   });
 });
 

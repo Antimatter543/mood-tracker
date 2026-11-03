@@ -4,6 +4,7 @@ import { DatabaseResult } from '@/components/types';
 import { runMigrations } from '@/databases/migrations';
 import { purgeExpiredBinEntries } from '@/databases/entry-bin';
 import { withWriteLock } from '@/databases/writeTransaction';
+import { markDatabaseInitialized } from '@/databases/readiness';
 
 /**
  * Database schema lifecycle: version, initial schema, V1 seed, and the
@@ -70,6 +71,10 @@ export async function initializeDatabase(db: SQLiteDatabase): Promise<void> {
   // Retention sweep for the recycle bin (30 days). Awaited so a test can observe
   // it deterministically; never throws (see the function's contract).
   await purgeExpiredBinEntries(db);
+
+  // Only now may code outside the SQLiteProvider open the write connection
+  // (see databases/readiness.ts). Never reached if init threw above.
+  markDatabaseInitialized();
 }
 
 /**
@@ -191,7 +196,9 @@ export async function seedActivitiesV1(db: SQLiteDatabase): Promise<DatabaseResu
  * `foreign_keys = ON` is restored in a `finally` so a failure never leaves the
  * write connection with referential integrity silently disabled.
  */
-export async function resetDatabase(_db: SQLiteDatabase): Promise<DatabaseResult> {
+// `_db` is unused (everything runs on the write connection). It is optional so
+// a caller with no read handle (the QA seed channel, lib/qa) can reset too.
+export async function resetDatabase(_db?: SQLiteDatabase): Promise<DatabaseResult> {
   try {
     await withWriteLock(async (conn) => {
       // Phase 1: FK OFF, outside any transaction.

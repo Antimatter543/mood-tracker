@@ -1,5 +1,35 @@
 # SoulSync — Project Lessons
 
+## 2026-11-03: The QA seed deep link (lib/qa): how a build flag really removes code
+
+- **What actually removes the module from a release bundle.** babel-preset-expo's `inline-env-vars`
+  plugin (prod caller, `isDev: false`) replaces `process.env.EXPO_PUBLIC_X` with its build-time value
+  (`undefined` when unset). Then `@expo/metro-config`'s transform worker runs Metro's constant-folding
+  pass BEFORE `collect-dependencies`, so `if (undefined === '1') { require(...) }` is deleted before
+  anyone records the `require`. Hiding the UI is not enough; the `require` must be inside the folded
+  block. The pipeline is reproduced in-process by `__tests__/qaSeedGuard.test.ts` (`productionDependencies`).
+- **Which guard shapes fold (measured, not assumed):** dot access `process.env.EXPO_PUBLIC_QA`,
+  string-literal bracket access, AND `const { EXPO_PUBLIC_QA } = process.env` all inline. Aliasing
+  the object (`const env = process.env; env.EXPO_PUBLIC_QA`), a computed key (`process.env[k]`) and a
+  helper function do NOT, and would ship the module. The guard test pins the exact `if` shape and
+  runs those three as counterfactuals (each keeps the dependency with the flag unset).
+- **EXPO_PUBLIC values are not in Metro's cache key** (the 2026-09-11 trap again): the bundle-grep
+  workflow wipes `$TMPDIR/metro-*` and `node_modules/.cache` before EACH of its two passes.
+- **Grep two strings, with a positive control.** CI greps the release bundle for the marker AND
+  `qa/seed` (0 hits) and the QA bundle for both (>=1). A grep that "passes" on a QA bundle proves the
+  strings were minified away and the absent check means nothing. The parser uses `startsWith`
+  (not a regex) so `qa/seed` stays a literal.
+- **Cold start from a deep link lands on `+not-found`**, so `(tabs)/_layout.tsx` (SQLiteProvider ->
+  `initializeDatabase`) never mounts. The host navigates home first and the seed awaits
+  `whenDatabaseInitialized()` (databases/readiness.ts) instead of polling or opening the write
+  connection before WAL + migrations.
+- **A frozen clock is in-memory.** The seed persists its `now` (`qa_frozen_now`) and the host
+  re-applies it on every launch, else a relaunch reverts "today" while the data stays anchored.
+- **A seed must not wipe a person's data:** it refuses when entries exist (bin included: a reset
+  destroys those too) without the `qa_seeded` marker.
+- **The shared planner skips ~20% of days**, so "N entries in the last week" needs a window filter,
+  not a lucky seed (`withinDays` in lib/qa/scenarios.ts, fail-loud when they don't fit).
+
 ## 2026-11-03: The app clock (lib/clock.ts) and the future-clock CI leg
 
 - **Every "what time is it" in app code is `now()` from `@/lib/clock`.** Pure transforms take
