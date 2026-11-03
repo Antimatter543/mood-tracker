@@ -12,6 +12,8 @@ import React from 'react';
 import { render, renderHook } from '@testing-library/react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated from 'react-native-reanimated';
+import { View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import {
     FIXED_DAY,
@@ -301,6 +303,19 @@ describe('shared platform mocks are live in every suite', () => {
         );
         ref.current!.scrollToEnd({ animated: true });
         expect(animatedScroll.toEnd).toHaveBeenCalledWith({ animated: true });
+    });
+
+    it('gesture-handler keeps its plain-JS path: the reanimated stub never passes for real reanimated', async () => {
+        // The stub has useSharedValue (gesture-handler's probe for reanimated)
+        // but no useEvent. Without the reanimatedWrapper mock in jest.setup.ts a
+        // GestureDetector throws "Reanimated.useEvent is not a function" (CI run
+        // 41634176527, periodSwipeGesture).
+        const view = await render(
+            <GestureDetector gesture={Gesture.Pan()}>
+                <View testID="pan-target" />
+            </GestureDetector>
+        );
+        expect(view.getByTestId('pan-target')).toBeTruthy();
     });
 });
 
