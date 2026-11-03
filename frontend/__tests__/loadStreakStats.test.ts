@@ -5,9 +5,11 @@
  * the user's streak, and it takes no window. Two layers: the loader (mock db) and
  * a source scan that keeps the screens on it (a class-level invariant, like
  * queriesNoDateBucketing).
+ *
+ * Source-scan verdict (lane D): KEEP the scan half (the call graph "only the loader
+ * calls the transform" is a cross-file shape). Bug commit: 1a9009c.
  */
-import { readFileSync, readdirSync, statSync } from 'fs';
-import { join, relative } from 'path';
+import { code, listSourceFiles } from '@/testing/sourceScan';
 import { createMockDatabase } from 'expo-sqlite';
 import { loadStreakStats } from '@/components/visualisations/loadStreakStats';
 import { ALL_ENTRY_INSTANTS } from '@/components/visualisations/queries';
@@ -50,31 +52,17 @@ describe('loadStreakStats', () => {
 });
 
 describe('every surface gets its streak from loadStreakStats', () => {
-  const ROOT = join(__dirname, '..');
   const SCAN_DIRS = ['app', 'components', 'context', 'databases', 'hooks', 'lib'];
 
-  const walk = (dir: string): string[] =>
-    readdirSync(dir).flatMap((name) => {
-      const p = join(dir, name);
-      if (statSync(p).isDirectory()) return walk(p);
-      return /\.tsx?$/.test(name) ? [p] : [];
-    });
-
-  const stripComments = (src: string): string =>
-    src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
-
-  const sources = SCAN_DIRS.flatMap((d) => walk(join(ROOT, d))).map((file) => ({
-    file: relative(ROOT, file),
-    code: stripComments(readFileSync(file, 'utf8')),
-  }));
+  const sources = listSourceFiles(SCAN_DIRS).map((file) => ({ file, code: code(file) }));
 
   // Who may call what. The day-string primitives are private to the transform.
   // `streakStats` is reached through the loader (all history), with ONE sanctioned
   // exception: Statistics' past-period "Best streak" is a statistic OF the viewed
   // period, so it feeds `streakStats` that period's own rows on purpose.
-  const STREAK = join('components', 'visualisations', 'transforms', 'streak.ts');
-  const LOADER = join('components', 'visualisations', 'loadStreakStats.ts');
-  const STATS_CARD = join('components', 'visualisations', 'StatSummaryCard.tsx');
+  const STREAK = 'components/visualisations/transforms/streak.ts';
+  const LOADER = 'components/visualisations/loadStreakStats.ts';
+  const STATS_CARD = 'components/visualisations/StatSummaryCard.tsx';
 
   const filesCalling = (call: RegExp, allowed: string[]): string[] =>
     sources
@@ -94,10 +82,10 @@ describe('every surface gets its streak from loadStreakStats', () => {
   });
 
   it.each([
-    join('app', '(tabs)', 'index.tsx'),
-    join('app', '(tabs)', 'insights.tsx'),
-    join('app', '(tabs)', '_layout.tsx'),
-    join('components', 'visualisations', 'StatSummaryCard.tsx'),
+    'app/(tabs)/index.tsx',
+    'app/(tabs)/insights.tsx',
+    'app/(tabs)/_layout.tsx',
+    'components/visualisations/StatSummaryCard.tsx',
   ])('%s reads its streak through loadStreakStats', (file) => {
     const entry = sources.find((s) => s.file === file);
     expect(entry?.code).toMatch(/\bloadStreakStats\s*\(/);

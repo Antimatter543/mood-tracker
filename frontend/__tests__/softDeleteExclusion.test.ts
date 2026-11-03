@@ -20,11 +20,11 @@
  * DROP) are out of scope: they act on rows by id or on the whole table by
  * design.
  */
-import { readFileSync, readdirSync, statSync } from 'fs';
-import { join } from 'path';
+import { listSourceFiles, readSource } from '@/testing/sourceScan';
 import * as queries from '@/components/visualisations/queries';
 
-const ROOT = join(__dirname, '..');
+// Source-scan verdict (lane D): KEEP the inline-literal scan (a miss is invisible to
+// tsc and jest). The exported-constant half above is behavioural. Bug commit: 25f3e6b.
 
 // Directories that hold runtime SQL. `__tests__` is deliberately excluded — a
 // test's SQL is the thing doing the asserting.
@@ -47,26 +47,7 @@ const LITERALS = /`[^`]*`|'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"/g;
 const READS_ENTRIES = /\bSELECT\b[\s\S]*\b(?:FROM|JOIN)\s+entries\b/i;
 const HAS_DELETED_PREDICATE = /deleted_at\s+IS\s+(?:NOT\s+)?NULL/i;
 
-function sourceFiles(dir: string): string[] {
-  const out: string[] = [];
-  const walk = (d: string) => {
-    for (const name of readdirSync(d)) {
-      const full = join(d, name);
-      if (statSync(full).isDirectory()) {
-        if (name === 'node_modules' || name === '__tests__') continue;
-        walk(full);
-      } else if (/\.tsx?$/.test(name)) {
-        out.push(full);
-      }
-    }
-  };
-  walk(dir);
-  return out;
-}
-
-const FILES = SCANNED_DIRS.flatMap((d) => sourceFiles(join(ROOT, d))).filter(
-  (f) => !EXEMPT_FILES.has(f)
-);
+const FILES = listSourceFiles(SCANNED_DIRS).filter((f) => !EXEMPT_FILES.has(f));
 
 describe('every exported SQL constant that reads entries excludes the bin', () => {
   const sqlExports = Object.entries(queries).filter(
@@ -95,7 +76,7 @@ describe('no source file carries an inline SELECT over entries without the bin p
   });
 
   it.each(FILES)('%s', (file) => {
-    const src = readFileSync(file, 'utf8');
+    const src = readSource(file);
     const offenders = (src.match(LITERALS) ?? []).filter(
       (lit) => READS_ENTRIES.test(lit) && !HAS_DELETED_PREDICATE.test(lit)
     );

@@ -40,11 +40,12 @@
  * dateFormatSiblingSites.test.tsx (and each transform's own file) are what pin
  * the OUTPUT of a site. This test pins that no site opts out of the authority.
  */
-import { readdirSync, readFileSync } from 'fs';
-import { join, relative, sep } from 'path';
 import * as ts from 'typescript';
+import { listSourceFiles, readSource } from '@/testing/sourceScan';
 
-const root = join(__dirname, '..');
+// Source-scan verdict (lane D): KEEP. AST-based, so comments and strings never trip it;
+// the bug class is "a chart spells its own date", invisible to behavioural tests until
+// a user picks another format. Bug commit: b6929ea (and #14).
 const SCAN_ROOTS = ['components/visualisations'] as const;
 
 type Rule = 'locale-date-call' | 'month-name-table' | 'hardcoded-pref';
@@ -205,21 +206,6 @@ function scanSource(file: string, source: string): ScanResult {
   return { violations, authorityCalls };
 }
 
-function sourceFilesUnder(dir: string): string[] {
-  const out: string[] = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name !== '__tests__' && entry.name !== 'node_modules') out.push(...sourceFilesUnder(full));
-    } else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
-      out.push(full);
-    }
-  }
-  return out;
-}
-
-const posix = (abs: string): string => relative(root, abs).split(sep).join('/');
-
 /**
  * Documented exceptions. Each must say WHY and is checked for staleness below,
  * so the list can only shrink or be re-justified, never silently rot.
@@ -235,9 +221,9 @@ const ALLOWED: ReadonlyArray<{ file: string; rule: Rule; why: string }> = [
   },
 ];
 
-const scanned = SCAN_ROOTS.flatMap((dir) => sourceFilesUnder(join(root, dir))).map((abs) => ({
-  file: posix(abs),
-  ...scanSource(posix(abs), readFileSync(abs, 'utf8')),
+const scanned = listSourceFiles(SCAN_ROOTS).map((file) => ({
+  file,
+  ...scanSource(file, readSource(file)),
 }));
 const allViolations = scanned.flatMap((s) => s.violations);
 const isAllowed = (v: Violation) => ALLOWED.some((a) => a.file === v.file && a.rule === v.rule);
