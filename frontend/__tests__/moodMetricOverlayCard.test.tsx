@@ -12,61 +12,28 @@
  * type name from the JSON tree.
  */
 import { render, fireEvent, act } from '@testing-library/react-native';
+import { dayKeys, makeHealthDay } from '@/testing/builders';
+import { countByType } from '@/testing/rntl';
 
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return {
-        ...actual,
-        useThemeColors: () => ({
-            background: '#141418',
-            cardBackground: '#1E1F24',
-            secondaryBackground: '#26272C',
-            text: '#FFFFFF',
-            textSecondary: '#AAAAAA',
-            border: 'rgba(255,255,255,0.1)',
-            accent: '#4CAF50',
-            accentDark: '#3d8b40',
-            accentLight: 'rgba(76,175,80,0.1)',
-            overlays: {
-                tag: '#222222',
-                tagBorder: '#333333',
-                border: '#333333',
-                textSecondary: '#888888',
-            },
-            elevation: { shadowColor: '#000000', shadowOpacity: 0.3, elevation: 4 },
-            isDark: true,
-        }),
-    };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 import MoodMetricOverlayCard from '@/components/visualisations/MoodMetricOverlayCard';
 import type { HealthMetricDay } from '@/components/visualisations/transforms/healthMoodCorrelation';
 
-const countByType = (json: any, typeSubstr: string): number => {
-    let n = 0;
-    const walk = (node: any) => {
-        if (!node || typeof node !== 'object') return;
-        if (typeof node.type === 'string' && node.type.includes(typeSubstr)) n += 1;
-        const kids = node.children;
-        if (Array.isArray(kids)) kids.forEach(walk);
-    };
-    walk(json);
-    return n;
-};
-
-const days = (n: number): string[] =>
-    Array.from({ length: n }, (_, i) => `2026-06-${String(i + 1).padStart(2, '0')}`);
+const days = (n: number): string[] => dayKeys(n, '2026-06-01');
 
 /** 8 days with sleep + resting/avg HR (no HRV) + a mood each. */
 const richRows = (): HealthMetricDay[] =>
-    days(8).map((date, i) => ({
-        date,
-        sleepTotalMinutes: 360 + i * 20,
-        avgHeartRate: 68 + i,
-        minHeartRate: 52 + i,
-        restingHeartRate: null, // no dedicated resting reading → restingHr uses the min proxy
-        avgHrvMillis: null, // no HRV source
-    }));
+    days(8).map((date, i) =>
+        // restingHeartRate / avgHrvMillis stay null: no dedicated resting reading
+        // (restingHr uses the min proxy) and no HRV source.
+        makeHealthDay({
+            date,
+            sleepTotalMinutes: 360 + i * 20,
+            avgHeartRate: 68 + i,
+            minHeartRate: 52 + i,
+        })
+    );
 const richMoods = () => days(8).map((day, i) => ({ day, avg: 4 + (i % 4) }));
 
 const renderMeasured = async (
@@ -123,7 +90,7 @@ describe('MoodMetricOverlayCard', () => {
     it('too little data → calm keep-logging state, no chart', async () => {
         // One day only → no metric reaches OVERLAY_MIN_POINTS.
         const view = await renderMeasured(
-            [{ date: '2026-06-01', sleepTotalMinutes: 420, avgHeartRate: 70, minHeartRate: 55, restingHeartRate: null, avgHrvMillis: null }],
+            [makeHealthDay({ date: '2026-06-01', sleepTotalMinutes: 420, avgHeartRate: 70, minHeartRate: 55 })],
             [{ day: '2026-06-01', avg: 6 }]
         );
         expect(view.getByText(/Keep logging/i)).toBeTruthy();

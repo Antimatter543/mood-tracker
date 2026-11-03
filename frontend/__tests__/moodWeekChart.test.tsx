@@ -12,38 +12,13 @@
  * per real point" without depending on svg internals.
  */
 import { render, fireEvent, act } from '@testing-library/react-native';
+import { countByType } from '@/testing/rntl';
 
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return {
-        ...actual,
-        useThemeColors: () => ({
-            accent: '#4CAF50',
-            cardBackground: '#111',
-            text: '#fff',
-            textSecondary: '#aaa',
-            overlays: { tag: '#222' },
-            isDark: true,
-        }),
-    };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 import { MoodWeekChart } from '@/components/visualisations/MoodWeekChart';
 
 const LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-/** Count JSON nodes whose `type` (string component name) matches a substring. */
-const countByType = (json: any, typeSubstr: string): number => {
-    let n = 0;
-    const walk = (node: any) => {
-        if (!node || typeof node !== 'object') return;
-        if (typeof node.type === 'string' && node.type.includes(typeSubstr)) n += 1;
-        const kids = node.children;
-        if (Array.isArray(kids)) kids.forEach(walk);
-    };
-    walk(json);
-    return n;
-};
 
 /** Render then fire a layout event so the chart has a measured width. */
 const renderMeasured = async (data: (number | null)[], width = 300) => {

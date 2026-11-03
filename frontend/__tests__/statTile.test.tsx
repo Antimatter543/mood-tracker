@@ -14,39 +14,12 @@
  */
 import React from 'react';
 import { render } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
+import { styleOf, collectByStyle } from '@/testing/rntl';
+import { THEME } from '@/testing/theme';
 
-const THEME = {
-    background: '#000',
-    cardBackground: '#111',
-    secondaryBackground: '#222',
-    text: '#fff',
-    textSecondary: '#aaa',
-    border: '#333',
-    accent: '#4CAF50',
-    accentDark: '#388E3C',
-    accentLight: 'rgba(76,175,80,0.1)',
-    overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-    elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-    isDark: true,
-};
-
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return { ...actual, useThemeColors: () => THEME };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 import { StatTile } from '@/components/StatTile';
-
-const styleOf = (node: any) => (node?.props ? StyleSheet.flatten(node.props.style) || {} : {});
-
-const collectByStyle = (json: any, pred: (s: any) => boolean, out: any[] = []): any[] => {
-    if (!json || typeof json !== 'object') return out;
-    if (pred(styleOf(json))) out.push(json);
-    const kids = json.children;
-    if (Array.isArray(kids)) for (const k of kids) collectByStyle(k, pred, out);
-    return out;
-};
 
 describe('StatTile — structure', () => {
     it('renders the value and label text', async () => {

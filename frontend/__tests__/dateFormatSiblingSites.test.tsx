@@ -30,6 +30,7 @@
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react-native';
 
+import { dayKeys, localIso, localMidnight, makeHealthDay } from '@/testing/builders';
 import type { Settings } from '@/databases/settings';
 import { formatMonth, type DateFormatPref } from '@/lib/dateFormat';
 import { buildHeatmapGrid } from '@/components/visualisations/transforms/heatmap';
@@ -60,9 +61,9 @@ jest.mock('@/context/SettingsContext', () => ({
 const mockDb = {
     getFirstAsync: jest.fn(async () => ({ avg_mood: 7, entry_count: 10 })),
     getAllAsync: jest.fn(async () => [
-        { date: new Date(2025, 11, 15, 12).toISOString(), mood: 5 },
-        { date: new Date(2026, 0, 15, 12).toISOString(), mood: 6 },
-        { date: new Date(2026, 1, 15, 12).toISOString(), mood: 7 },
+        { date: localIso('2025-12-15'), mood: 5 },
+        { date: localIso('2026-01-15'), mood: 6 },
+        { date: localIso('2026-02-15'), mood: 7 },
     ]),
 };
 jest.mock('expo-sqlite', () => ({ useSQLiteContext: () => mockDb }));
@@ -81,24 +82,7 @@ jest.mock('expo-router', () => {
 });
 jest.mock('@/context/dataRefreshStore', () => ({ useDataVersion: () => 0 }));
 
-jest.mock('@/styles/global', () => ({
-    // The cards pull shared pieces (Card, InfoBubble) that read other exports too.
-    ...jest.requireActual('@/styles/global'),
-    useThemeColors: () => ({
-        background: '#000',
-        cardBackground: '#111',
-        secondaryBackground: '#222',
-        text: '#fff',
-        textSecondary: '#aaa',
-        border: '#333',
-        accent: '#4CAF50',
-        accentDark: '#388E3C',
-        accentLight: 'rgba(76,175,80,0.1)',
-        overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-        elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-        isDark: true,
-    }),
-}));
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 import MonthOverMonthCard from '@/components/visualisations/MonthOverMonthCard';
 import CustomHeatMap from '@/components/visualisations/CustomHeatMap';
@@ -302,16 +286,15 @@ describe('CustomHeatMap month columns follow the date_format setting', () => {
 // 3. Mood x metric overlay day labels
 // ─────────────────────────────────────────────────────────────────────────────
 describe('MoodMetricOverlayCard day labels follow the date_format setting', () => {
-    const days = (n: number): string[] =>
-        Array.from({ length: n }, (_, i) => `2026-06-${String(i + 1).padStart(2, '0')}`);
-    const HEALTH: HealthMetricDay[] = days(8).map((date, i) => ({
-        date,
-        sleepTotalMinutes: 360 + i * 20,
-        avgHeartRate: 68 + i,
-        minHeartRate: 52 + i,
-        restingHeartRate: null,
-        avgHrvMillis: null,
-    }));
+    const days = (n: number): string[] => dayKeys(n, '2026-06-01');
+    const HEALTH: HealthMetricDay[] = days(8).map((date, i) =>
+        makeHealthDay({
+            date,
+            sleepTotalMinutes: 360 + i * 20,
+            avgHeartRate: 68 + i,
+            minHeartRate: 52 + i,
+        })
+    );
     const MOODS = days(8).map((day, i) => ({ day, avg: 4 + (i % 4) }));
 
     const ui = () => <MoodMetricOverlayCard healthRows={HEALTH} dailyMoods={MOODS} />;
@@ -369,7 +352,7 @@ describe('MoodMetricOverlayCard day labels follow the date_format setting', () =
 // 4. `system` on a device that is NOT English
 // ─────────────────────────────────────────────────────────────────────────────
 describe('on a French device', () => {
-    const SUNDAY = new Date(2025, 5, 15); // 2025-06-15
+    const SUNDAY = localMidnight('2025-06-15');
     const frenchWeekday = realToLocaleDateString.call(SUNDAY, 'fr-FR', { weekday: 'short' });
     const frenchMonth = realToLocaleDateString.call(SUNDAY, 'fr-FR', { month: 'short' });
 
@@ -407,8 +390,8 @@ describe('on a French device', () => {
     // what it read yesterday.
     describe('the hardcoded-English sites keep English under `system`', () => {
         it('Month over Month headings', () => {
-            const JUNE = new Date(2026, 5, 1);
-            const MAY = new Date(2026, 4, 1);
+            const JUNE = localMidnight('2026-06-01');
+            const MAY = localMidnight('2026-05-01');
             expect(monthOverMonthLabels(JUNE, MAY, 'system')).toEqual({
                 current: 'June',
                 previous: 'May',
