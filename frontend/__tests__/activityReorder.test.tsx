@@ -13,30 +13,13 @@
 import React from 'react';
 import { render, act, fireEvent } from '@testing-library/react-native';
 
-// ActivityReorder pulls IconPicker -> OverlayModal -> react-native-reanimated,
-// which initializes the native worklets runtime at import (unavailable under
-// jest). We only exercise Feather/MaterialIcons rendering + presses, never a
-// real animation, so shim exactly the surface OverlayModal uses (Animated.View
-// + FadeIn.duration). Same pattern as overlayPopover.test.tsx, scoped here.
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const entering = { duration: () => entering };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
-        },
-        FadeIn: entering,
-    };
-});
-
 import ActivityReorder from '@/components/forms/ActivityReorder';
 import type { Activity } from '@/components/types';
+import { makeActivity } from '@/testing/builders';
 
-const act1: Activity = { id: 1, name: 'Running', group_id: 1, position: 1, icon_family: 'Feather', icon_name: 'activity' } as Activity;
-const act2: Activity = { id: 2, name: 'Reading', group_id: 1, position: 2, icon_family: 'Feather', icon_name: 'book' } as Activity;
-const act3: Activity = { id: 3, name: 'Coding', group_id: 1, position: 3, icon_family: 'Feather', icon_name: 'code' } as Activity;
+const act1: Activity = makeActivity({ id: 1, name: 'Running', group_id: 1, position: 1, icon_family: 'Feather', icon_name: 'activity' });
+const act2: Activity = makeActivity({ id: 2, name: 'Reading', group_id: 1, position: 2, icon_family: 'Feather', icon_name: 'book' });
+const act3: Activity = makeActivity({ id: 3, name: 'Coding', group_id: 1, position: 3, icon_family: 'Feather', icon_name: 'code' });
 
 // render() is async in this project's jest-expo / concurrent-React setup (same
 // reason overlayPopover.test.tsx awaits render + act), so the helper is async

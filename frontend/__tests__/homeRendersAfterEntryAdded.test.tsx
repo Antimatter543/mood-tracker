@@ -27,31 +27,6 @@ import { render, screen, waitFor, act } from '@testing-library/react-native';
 import { bumpDataVersion } from '@/context/dataRefreshStore';
 import { localDateString } from '@/databases/dateHelpers';
 
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
-}));
-
-// reanimated's worklet runtime is unavailable under jest. Layout itself no longer
-// touches reanimated (that is the fix), but Home's ActivityExplorer reaches
-// OverlayModal, which does.
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const passthrough = (props: Record<string, unknown>) => ReactLocal.createElement(View, props);
-    return {
-        __esModule: true,
-        default: { View: passthrough, ScrollView: passthrough },
-        View: passthrough,
-        useSharedValue: (v: unknown) => ({ value: v }),
-        useAnimatedStyle: (fn: () => unknown) => fn(),
-        withTiming: (v: unknown) => v,
-        withSpring: (v: unknown) => v,
-        FadeIn: { duration: () => ({}) },
-        FadeOut: { duration: () => ({}) },
-        Easing: { out: (e: unknown) => e, cubic: (x: unknown) => x },
-    };
-});
-
 // The per-activity insights overlay only mounts once an activity is TAPPED; this
 // scenario never opens it, and its real implementation needs the OverlayHost
 // provider that lives in the (tabs) layout.
@@ -65,10 +40,7 @@ jest.mock('expo-router', () => {
     return { useFocusEffect: (cb: () => void) => ReactLocal.useEffect(cb, [cb]) };
 });
 
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return { ...actual, useThemeColors: () => actual.themeColors.dark };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule('dark'));
 
 // The FAB owns the entry form (sqlite + overlay host). It is chrome OUTSIDE the
 // wrapper that blanked, so it is not what this test is about.
