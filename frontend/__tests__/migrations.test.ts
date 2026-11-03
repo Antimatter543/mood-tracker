@@ -89,7 +89,7 @@ describe('runMigrations', () => {
     // Inside the transaction, runAsync should be called to set PRAGMA user_version
     // for each pending migration (v2..vN). Derive the expected count from the
     // array so adding migrations doesn't require touching this number.
-    const pragmaCalls = sqlCalls(db, /PRAGMA user_version/) as any[][];
+    const pragmaCalls = sqlCalls(db, /PRAGMA user_version/);
     const pendingFromV1 = migrations.filter(m => m.version > 1).length;
     expect(pragmaCalls.length).toBe(pendingFromV1);
   });
@@ -100,7 +100,7 @@ describe('runMigrations', () => {
 
     await runMigrations(db as any);
 
-    const pragmaCalls = sqlCalls(db, /PRAGMA user_version/) as any[][];
+    const pragmaCalls = sqlCalls(db, /PRAGMA user_version/);
     expect(pragmaCalls.length).toBe(migrations.length);
     // Verify version numbers are correct
     for (let i = 0; i < migrations.length; i++) {
@@ -161,7 +161,7 @@ describe('Migration V3', () => {
 
     await v3.up(db as any);
 
-    const seedCall = (sqlCalls(db, /show_mood_benchmarks/) as any[][])[0];
+    const seedCall = sqlCalls(db, /show_mood_benchmarks/)[0];
     expect(seedCall).toBeDefined();
     expect((seedCall![0] as string).toUpperCase()).toContain('INSERT OR IGNORE');
   });
@@ -253,7 +253,7 @@ describe('Migration V7 (Health Connect)', () => {
 
     await v7.up(db as any);
 
-    const seed = (sqlCalls(db, /health_connect_opt_in/) as any[][])[0];
+    const seed = sqlCalls(db, /health_connect_opt_in/)[0];
     expect(seed).toBeDefined();
     expect((seed![0] as string).toUpperCase()).toContain('INSERT OR IGNORE');
     expect(seed![0] as string).toContain("'false'");
@@ -268,7 +268,7 @@ describe('Migration V10 (Activity Carryover)', () => {
 
     await v10.up(db as any);
 
-    const seed = (sqlCalls(db, /activity_carryover/) as any[][])[0];
+    const seed = sqlCalls(db, /activity_carryover/)[0];
     expect(seed).toBeDefined();
     expect((seed![0] as string).toUpperCase()).toContain('INSERT OR IGNORE');
     expect(seed![0] as string).toContain("'false'");

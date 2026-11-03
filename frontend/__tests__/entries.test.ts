@@ -28,7 +28,7 @@ describe('addMoodEntry — additional validation', () => {
     await addMoodEntry(db as any, 7, [], 'note', customDate);
 
     // First runAsync call is the INSERT INTO entries
-    const insertCall = (sqlCalls(db, /INSERT INTO entries/) as any[][])[0];
+    const insertCall = sqlCalls(db, /INSERT INTO entries/)[0];
     expect(insertCall).toBeDefined();
     expect(insertCall![1]).toContain(customDate);
   });
@@ -40,7 +40,7 @@ describe('addMoodEntry — additional validation', () => {
 
     await addMoodEntry(db as any, 5, [], 'note');
 
-    const insertCall = (sqlCalls(db, /INSERT INTO entries/) as any[][])[0];
+    const insertCall = sqlCalls(db, /INSERT INTO entries/)[0];
     const dateArg = insertCall![1][2];
     // ISO 8601 UTC pattern
     expect(dateArg).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
@@ -85,7 +85,7 @@ describe('addMoodEntry — additional validation', () => {
 
     await addMoodEntry(db as any, 6, [1, 2], 'note');
 
-    const linkCalls = sqlCalls(db, /INSERT INTO entry_activities/) as any[][];
+    const linkCalls = sqlCalls(db, /INSERT INTO entry_activities/);
     expect(linkCalls.length).toBe(2);
     // Each link should use the entry's lastInsertRowId
     for (const call of linkCalls) {
@@ -101,7 +101,7 @@ describe('addMoodEntry — additional validation', () => {
     const result = await addMoodEntry(db as any, 5, [], 'note');
     expect(result.success).toBe(true);
 
-    const linkCalls = sqlCalls(db, /INSERT INTO entry_activities/) as any[][];
+    const linkCalls = sqlCalls(db, /INSERT INTO entry_activities/);
     expect(linkCalls.length).toBe(0);
   });
 
@@ -259,7 +259,7 @@ describe('addMoodEntry — photos', () => {
       ['file:///cache/a.jpg', 'file:///cache/b.png']
     );
 
-    const mediaInserts = sqlCalls(db, /INSERT INTO entry_media/) as any[][];
+    const mediaInserts = sqlCalls(db, /INSERT INTO entry_media/);
     expect(mediaInserts.length).toBe(2);
     for (const call of mediaInserts) {
       expect(call[1][0]).toBe(99); // entry_id = lastInsertRowId
@@ -285,7 +285,7 @@ describe('addMoodEntry — photos', () => {
 describe('setEntryStarred', () => {
   // Isolate the UPDATE from the withWriteTransaction BEGIN/COMMIT (which run via
   // execAsync) — the star write is the one runAsync call.
-  const starUpdate = (db: MockDb) => (sqlCalls(db, /UPDATE entries SET starred_at/i) as any[][])[0];
+  const starUpdate = (db: MockDb) => sqlCalls(db, /UPDATE entries SET starred_at/i)[0];
 
   it('stars an entry: UPDATE sets starred_at to a UTC ISO instant, keyed by id', async () => {
     const db = makeDb();

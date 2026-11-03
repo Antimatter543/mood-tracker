@@ -76,7 +76,7 @@ function queuePickedFile(contents: string) {
 
 /** entry_media INSERT calls issued against a mock DB during import. */
 function mediaInserts(db: MockDb) {
-  return sqlCalls(db, /INSERT INTO entry_media/i) as any[][];
+  return sqlCalls(db, /INSERT INTO entry_media/i);
 }
 
 describe('importDatabaseData', () => {
@@ -270,7 +270,7 @@ describe('importDatabaseData', () => {
     const result = await importDatabaseData(db as any);
     expect(result.success).toBe(true);
 
-    const entryInsert = (sqlCalls(db, /INSERT OR REPLACE INTO entries/i) as any[][])[0];
+    const entryInsert = sqlCalls(db, /INSERT OR REPLACE INTO entries/i)[0];
     expect(entryInsert).toBeDefined();
     expect(entryInsert![1][4]).toBe('2026-07-20T10:00:00.000Z');
   });
@@ -303,7 +303,7 @@ describe('importDatabaseData', () => {
     const result = await importDatabaseData(db as any);
     expect(result.success).toBe(true);
 
-    const entryInsert = (sqlCalls(db, /INSERT OR REPLACE INTO entries/i) as any[][])[0];
+    const entryInsert = sqlCalls(db, /INSERT OR REPLACE INTO entries/i)[0];
     expect(entryInsert).toBeDefined();
     expect(entryInsert![1][4]).toBeNull();
   });

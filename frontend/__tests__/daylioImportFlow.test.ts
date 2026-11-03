@@ -32,11 +32,8 @@ jest.mock('@/databases/migrations', () => ({ runMigrations: jest.fn() }));
 import { MAX_DAYLIO_FILE_BYTES, describeDaylioImport, isZipHeader } from '@/databases/daylio-import';
 import { importDatabaseData } from '@/databases/data-export';
 import { zipSync } from 'fflate';
-import { makeDb, resetWriteLayer, sqlCalls as rawSqlCalls, type MockDb } from '@/testing/fakeDb';
+import { makeDb, resetWriteLayer, sqlCalls } from '@/testing/fakeDb';
 import { JPEG_BYTES, buildDaylioArchive, daylioBackupJson, daylioEntry } from '../__fixtures__/daylioBackup';
-
-// The shared helper types its rows `unknown[][]`; this suite indexes into params.
-const sqlCalls = (db: MockDb, pattern: RegExp) => rawSqlCalls(db, pattern) as any[][];
 
 /** A mock db whose inserts return increasing ids and whose duplicate check finds `existingDates`. */
 function makeImportDb(existingDates: string[] = []) {

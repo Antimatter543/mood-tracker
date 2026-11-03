@@ -74,8 +74,13 @@ export function resetWriteLayer(): void {
 
 type CallLog = { mock: { calls: unknown[][] } };
 
-/** Every call of `fn` (default db.runAsync) whose SQL matches `pattern`. */
-export function sqlCalls(db: MockDb, pattern: RegExp, fn: CallLog = db.runAsync): unknown[][] {
+/**
+ * Every call of `fn` (default db.runAsync) whose SQL matches `pattern`.
+ * Typed `any[][]` like jest's own `mock.calls`, so a test can index the bound
+ * params (`calls[0][1][2]`) without a cast at every site.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function sqlCalls(db: MockDb, pattern: RegExp, fn: CallLog = db.runAsync): any[][] {
     return fn.mock.calls.filter((c) => typeof c[0] === 'string' && pattern.test(c[0]));
 }
 
