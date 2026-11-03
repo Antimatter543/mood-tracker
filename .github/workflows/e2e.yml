@@ -20,7 +20,7 @@ name: E2E smoke (emulator + Maestro)
 
 on:
   push:
-    branches: [main, worktree-agent-a168ba643adac757c] # TEMP-LANE-TRIGGER: remove before the PR
+    branches: [main]
     paths:
       - 'frontend/**'
       - '.github/workflows/e2e.yml'
