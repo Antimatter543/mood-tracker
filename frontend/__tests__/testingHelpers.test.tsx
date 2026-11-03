@@ -18,6 +18,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import {
     FIXED_DAY,
     FIXED_NOW,
+    FIXED_NOW_ISO,
     addDays,
     dayKey,
     dayKeys,
@@ -125,6 +126,22 @@ describe('builders derive their defaults from production', () => {
 
     it('makeHealthDay carries the Health Connect sync source', () => {
         expect(makeHealthDay().source).toBe(HEALTH_CONNECT_SOURCE);
+    });
+
+    it('makeHealthDay is a day with NO data: every metric null, no sleep stages', () => {
+        // Suites lean on this (an upsert that "passes nulls through"); a default
+        // that grew a value would silently turn their empty day into a real one.
+        const { date, source, syncedAt, sleepStages, ...metrics } = makeHealthDay();
+        expect({ date, source, syncedAt, sleepStages }).toEqual({
+            date: FIXED_DAY,
+            source: HEALTH_CONNECT_SOURCE,
+            syncedAt: FIXED_NOW_ISO,
+            sleepStages: {},
+        });
+        expect(Object.keys(metrics).length).toBeGreaterThan(0);
+        for (const [key, value] of Object.entries(metrics)) {
+            expect([key, value]).toEqual([key, null]);
+        }
     });
 
     it('makeEntryRow mirrors makeEntry', () => {
