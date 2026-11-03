@@ -52,7 +52,7 @@ export function sqliteSuiteMode(
 }
 
 export const SQLITE_MISSING_MESSAGE =
-    'node:sqlite is unavailable (needs Node >= 22.5). Integration suites must not skip on CI: ' +
+    'node:sqlite is unavailable (needs Node >= 22.13, or 22.5+ with --experimental-sqlite). Integration suites must not skip on CI: ' +
     'fix the runner Node version.';
 
 /** describe() for suites that need the real engine. See the file header for the CI rule. */
@@ -66,22 +66,55 @@ export function describeSqlite(name: string, fn: () => void): void {
     describe(name, fn);
 }
 
-/** Wrap a node:sqlite database in the expo-sqlite async surface the app uses. */
+type BindValue = string | number | bigint | null | Uint8Array;
+
+/**
+ * expo-sqlite's bind forms -> node:sqlite's: an array, variadic values, or one
+ * named-params object. Booleans bind as 1/0 (expo does; node:sqlite throws).
+ */
+function bindArgs(args: unknown[]): unknown[] {
+    const bind = (v: unknown) => (typeof v === 'boolean' ? (v ? 1 : 0) : v);
+    if (args.length === 1 && args[0] === undefined) return [];
+    if (args.length === 1 && Array.isArray(args[0])) return (args[0] as unknown[]).map(bind);
+    if (
+        args.length === 1 &&
+        args[0] !== null &&
+        typeof args[0] === 'object' &&
+        !(args[0] instanceof Uint8Array)
+    ) {
+        const named = args[0] as Record<string, unknown>;
+        return [Object.fromEntries(Object.entries(named).map(([k, v]) => [k, bind(v)]))];
+    }
+    return args.map(bind);
+}
+
+/**
+ * Wrap a node:sqlite database in the expo-sqlite async surface the app uses.
+ * Rows come back as node:sqlite returns them (null-prototype objects), so
+ * compare them with toEqual, not toStrictEqual against an object literal.
+ */
 export function sqliteAdapter(db: SyncDatabase) {
+    const stmt = (sql: string, args: unknown[]) =>
+        [db.prepare(sql), bindArgs(args) as BindValue[]] as const;
     const adapter = {
         /** The underlying synchronous handle, for direct seeding/inspection. */
         raw: db,
         execAsync: async (sql: string): Promise<void> => {
             db.exec(sql);
         },
-        runAsync: async (sql: string, params: unknown[] = []) => {
-            const r = db.prepare(sql).run(...(params ?? []));
+        runAsync: async (sql: string, ...params: unknown[]) => {
+            const [s, a] = stmt(sql, params);
+            const r = s.run(...a);
             return { lastInsertRowId: Number(r.lastInsertRowid), changes: Number(r.changes) };
         },
-        getAllAsync: async <T = any>(sql: string, params: unknown[] = []): Promise<T[]> =>
-            db.prepare(sql).all(...(params ?? [])) as T[],
-        getFirstAsync: async <T = any>(sql: string, params: unknown[] = []): Promise<T | null> =>
-            (db.prepare(sql).get(...(params ?? [])) as T | undefined) ?? null,
+        getAllAsync: async <T = any>(sql: string, ...params: unknown[]): Promise<T[]> => {
+            const [s, a] = stmt(sql, params);
+            return s.all(...a) as T[];
+        },
+        getFirstAsync: async <T = any>(sql: string, ...params: unknown[]): Promise<T | null> => {
+            const [s, a] = stmt(sql, params);
+            return (s.get(...a) as T | undefined) ?? null;
+        },
         withTransactionAsync: async (task: () => Promise<void>): Promise<void> => {
             db.exec('BEGIN');
             try {

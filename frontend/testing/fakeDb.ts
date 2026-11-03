@@ -9,11 +9,12 @@
  * Call `resetWriteLayer()` in a beforeEach (the write layer keeps a singleton
  * lock/connection between tests).
  */
-import { createMockDatabase } from 'expo-sqlite';
-import {
-    __setWriteConnectionForTests,
-    __resetWriteTransactionForTests,
-} from '@/databases/writeTransaction';
+// Imported directly, never through 'expo-sqlite': 49 suites replace that module
+// with a narrow factory that has no createMockDatabase.
+import { createMockDatabase } from './mockSqliteDb';
+// Static import on purpose: a lazy requireActual would install the connection
+// into a post-jest.resetModules module graph the suite's own imports never see.
+import * as writeTransaction from '@/databases/writeTransaction';
 
 export type MockDb = ReturnType<typeof createMockDatabase>;
 
@@ -51,7 +52,11 @@ export function makeDb(script: ScriptedDbOptions = {}): MockDb {
             answer(routes, sql, params, [])
         );
     }
-    __setWriteConnectionForTests(db as never);
+    // A suite that mocks writeTransaction itself has no injection point; its
+    // mock decides where writes go.
+    if (typeof writeTransaction.__setWriteConnectionForTests === 'function') {
+        writeTransaction.__setWriteConnectionForTests(db as never);
+    }
     return db;
 }
 
@@ -62,7 +67,9 @@ function answer(routes: Route[], sql: string, params: unknown[], fallback: unkno
 
 /** Reset the write layer's singleton connection + lock; call in beforeEach. */
 export function resetWriteLayer(): void {
-    __resetWriteTransactionForTests();
+    if (typeof writeTransaction.__resetWriteTransactionForTests === 'function') {
+        writeTransaction.__resetWriteTransactionForTests();
+    }
 }
 
 type CallLog = { mock: { calls: unknown[][] } };

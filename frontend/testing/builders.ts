@@ -3,15 +3,20 @@
  * production source of that value (never invented here).
  *
  *   makeEntry      mood/notes from the entry form's DEFAULT_DRAFT
+ *   makeEntries    n of them, ids 1..n, one day apart ending FIXED_DAY
+ *   seedActivity   a fresh install's activity row (seed order, shipped name)
  *   makeActivity   the first shipped seed activity, positioned like seedActivitiesV1
+ *   seedGroup      a fresh install's group row
  *   makeGroup      the first shipped seed group
- *   makePhoto      a file under the real MEDIA_DIR
+ *   makePhoto      a file under the MEDIA_DIR the app under test compares against
  *   makeReminder   whatever addReminder([]) creates
  *   makeHealthDay  an empty day (what the sync writes when Health Connect has nothing)
  *   makeEntryRow   the raw row getEntriesWindow selects (GROUP_CONCAT columns null)
  *
- * Production modules are loaded with jest.requireActual, so a test that mocks
- * seedData / mediaHelpers / useEntryDraft still gets real defaults here.
+ * Shipped VALUES (seed data, DEFAULT_DRAFT, addReminder) are loaded with
+ * jest.requireActual, so a test that mocks seedData / useEntryDraft still gets
+ * real defaults. Constants the app COMPARES against (MEDIA_DIR) come from the
+ * module the app sees, mocked or not, so a fixture takes the same code path.
  * Override only the fields your test is ABOUT: `makeEntry({ mood: 9 })`.
  *
  * Dates: TZ is pinned to Australia/Brisbane (jest.globalSetup.js, no DST), so
@@ -36,10 +41,18 @@ export const FIXED_DAY = '2026-06-15';
 
 const DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+/** [year, 0-based month, day]; throws on a malformed OR impossible day ('2026-02-30'). */
 function parseDay(day: string): [number, number, number] {
     const m = DAY_RE.exec(day);
     if (!m) throw new Error(`testing/builders: expected a 'YYYY-MM-DD' day, got '${day}'`);
-    return [Number(m[1]), Number(m[2]) - 1, Number(m[3])];
+    const parts: [number, number, number] = [Number(m[1]), Number(m[2]) - 1, Number(m[3])];
+    // Date silently rolls '2026-02-30' to Mar 2 and month 00 to December: a
+    // month off-by-one in a converted fixture would shift the input and the
+    // expectation together and still pass. Round-trip instead.
+    if (dayKey(new Date(parts[0], parts[1], parts[2], 12)) !== day) {
+        throw new Error(`testing/builders: '${day}' is not a real calendar day`);
+    }
+    return parts;
 }
 
 /** Local time on a 'YYYY-MM-DD' day (default local noon). */
@@ -70,8 +83,8 @@ export function addDays(day: string, delta: number): string {
     return dayKey(new Date(y, m0, d + delta, 12));
 }
 
-/** `n` consecutive day keys starting at `from` (inclusive). */
-export function dayKeys(n: number, from = '2026-06-01'): string[] {
+/** `n` consecutive day keys starting at `from` (inclusive; default: the n days ending FIXED_DAY). */
+export function dayKeys(n: number, from = addDays(FIXED_DAY, 1 - n)): string[] {
     return Array.from({ length: n }, (_, i) => addDays(from, i));
 }
 
@@ -99,18 +112,41 @@ export function makeEntry(over: Partial<MoodEntry> = {}): MoodEntry {
 }
 
 /**
- * The activity a fresh install has at `seedIndex` in initialActivities, with
+ * `n` entries with ids 1..n, the last on FIXED_DAY and each earlier one a day
+ * before (local noon). `over(i)` customises entry i (0-based).
+ */
+export function makeEntries(
+    n: number,
+    over: (i: number) => Partial<MoodEntry> = () => ({})
+): MoodEntry[] {
+    const days = dayKeys(n);
+    return days.map((day, i) => makeEntry({ id: i + 1, date: localIso(day), ...over(i) }));
+}
+
+/**
+ * Seed names a fresh install renames during its migrations (seedData keeps the
+ * v1 names). Migration 6: "Event" -> "Social event". testingHelpers.test.tsx
+ * pins seedActivity() to every row of a freshly migrated database, so a new
+ * rename fails there until it is listed here.
+ */
+export const SHIPPED_SEED_RENAMES: Readonly<Record<string, string>> = { Event: 'Social event' };
+
+const shippedName = (v1Name: string) => SHIPPED_SEED_RENAMES[v1Name] ?? v1Name;
+
+/**
+ * The activity row a fresh install has at `nameOrIndex` (an index into
+ * initialActivities, or a name: the shipped name or seedData's v1 name), with
  * the id/position seedActivitiesV1 gives it (ids in seed order, position i+1
- * within its group). Names are seedData's v1 names: a fresh install's
- * migration 6 later renames "Event" to "Social event" (pinned in
- * __tests__/testingHelpers.test.tsx).
+ * within its group) and the name the user actually sees.
  */
 export function seedActivity(nameOrIndex: string | number = 0): Activity {
     const { initialActivities } = seed();
     const index =
         typeof nameOrIndex === 'number'
             ? nameOrIndex
-            : initialActivities.findIndex((a) => a.name === nameOrIndex);
+            : initialActivities.findIndex(
+                  (a) => a.name === nameOrIndex || shippedName(a.name) === nameOrIndex
+              );
     const a = initialActivities[index];
     if (!a) throw new Error(`testing/builders: no seed activity '${nameOrIndex}'`);
     const position =
@@ -118,7 +154,7 @@ export function seedActivity(nameOrIndex: string | number = 0): Activity {
     return {
         id: index + 1,
         group_id: a.group_id,
-        name: a.name,
+        name: shippedName(a.name),
         icon_name: a.icon_name,
         icon_family: a.icon_family as Activity['icon_family'],
         position,
@@ -130,15 +166,31 @@ export function makeActivity(over: Partial<Activity> = {}): Activity {
     return { ...seedActivity(0), ...over };
 }
 
-/** An activity group: the first shipped seed group (sort_order backfilled = id, migration 10). */
-export function makeGroup(over: Partial<ActivityGroup> = {}): ActivityGroup {
-    const { initialActivityGroups } = seed();
-    return { id: 1, name: initialActivityGroups[0].name, sort_order: 1, ...over };
+/** The group row a fresh install has at `index` in initialActivityGroups (id index+1, sort_order = id: migration 13's backfill). */
+export function seedGroup(index = 0): ActivityGroup {
+    const g = seed().initialActivityGroups[index];
+    if (!g) throw new Error(`testing/builders: no seed group ${index}`);
+    return { id: index + 1, name: g.name, sort_order: index + 1 };
 }
 
-/** A photo attachment stored under the real media dir. */
+/** An activity group: the first shipped seed group; sort_order follows an overridden id, as the backfill does. */
+export function makeGroup(over: Partial<ActivityGroup> = {}): ActivityGroup {
+    const id = over.id ?? 1;
+    return { ...seedGroup(0), id, sort_order: id, ...over };
+}
+
+/**
+ * A photo attachment already stored under MEDIA_DIR. The dir is read from the
+ * mediaHelpers module the app under test sees (a suite's mock included), so
+ * updateMoodEntry classifies the path as KEPT, not as a fresh pick to copy.
+ * Under jest-expo's expo-file-system mock documentDirectory is undefined, so
+ * the unmocked value is 'undefinedentry_media/': odd-looking, but it is the
+ * same string the app compares against.
+ */
 export function makePhoto(over: Partial<EntryPhoto> = {}): EntryPhoto {
-    const { MEDIA_DIR } = jest.requireActual<MediaModule>('@/databases/mediaHelpers');
+    const MEDIA_DIR =
+        (require('@/databases/mediaHelpers') as Partial<MediaModule>).MEDIA_DIR ??
+        jest.requireActual<MediaModule>('@/databases/mediaHelpers').MEDIA_DIR;
     const id = over.id ?? 1;
     return {
         id,

@@ -15,9 +15,17 @@
  *   setKeyboardHeight(804);
  *   expect(animatedScroll.toEnd).toHaveBeenCalled();
  *
- * State resets before every test (jest.afterEnv.ts calls resetPlatform).
- * A suite that needs the REAL module opts out with jest.unmock(...).
- * After jest.resetModules() re-import this module: the mocks read the fresh instance.
+ * State resets before EVERY test (jest.afterEnv.ts calls resetPlatform), so set
+ * it in a beforeEach or inside the test: a setInsets in beforeAll is undone
+ * before the first test runs.
+ *
+ * The state lives on globalThis, not in this module, so it survives
+ * jest.resetModules()/isolateModules(): a mock factory re-run after a reset
+ * reads the same state the test's static import sets.
+ *
+ * A suite's own jest.mock of one of these modules silently replaces the global
+ * mock (setInsets then does nothing); delete the local mock instead. A suite
+ * that needs the REAL module opts out with jest.unmock(...).
  */
 import type { EdgeInsets } from 'react-native-safe-area-context';
 
@@ -33,15 +41,31 @@ export const INSETS = {
     THREE_BUTTON_NAV: { top: 24, bottom: 48, left: 0, right: 0 },
 } as const satisfies Record<string, EdgeInsets>;
 
-let insets: EdgeInsets = { ...INSETS.NONE };
+type PlatformState = {
+    insets: EdgeInsets;
+    keyboardHeight: number;
+    animatedScroll: { toEnd: jest.Mock; to: jest.Mock };
+};
+
+const STATE_KEY = Symbol.for('soulsync.testing.platform');
+
+/** One state per test file (each file gets its own global), shared by every module instance. */
+function state(): PlatformState {
+    const g = globalThis as unknown as Record<symbol, PlatformState | undefined>;
+    return (g[STATE_KEY] ??= {
+        insets: { ...INSETS.NONE },
+        keyboardHeight: 0,
+        animatedScroll: { toEnd: jest.fn(), to: jest.fn() },
+    });
+}
 
 /** Set the insets useSafeAreaInsets() returns; unspecified edges are 0. */
 export function setInsets(next: Partial<EdgeInsets>): void {
-    insets = { ...INSETS.NONE, ...next };
+    state().insets = { ...INSETS.NONE, ...next };
 }
 
 export function currentInsets(): EdgeInsets {
-    return insets;
+    return state().insets;
 }
 
 export function safeAreaMock() {
@@ -50,11 +74,13 @@ export function safeAreaMock() {
     const passthrough = ({ children }: { children?: unknown }) => children ?? null;
     return {
         __esModule: true,
-        useSafeAreaInsets: () => insets,
+        useSafeAreaInsets: () => state().insets,
         useSafeAreaFrame: () => ({ x: 0, y: 0, width: 393, height: 786 }),
         SafeAreaProvider: passthrough,
         SafeAreaView: (props: Record<string, unknown>) => React.createElement(View, props),
-        SafeAreaInsetsContext: React.createContext(insets),
+        // Library internals (expo-router's navigators) read these; app code uses
+        // only useSafeAreaInsets. The context default is NONE, not the live insets.
+        SafeAreaInsetsContext: React.createContext(INSETS.NONE),
         initialWindowMetrics: {
             insets: INSETS.NONE,
             frame: { x: 0, y: 0, width: 393, height: 786 },
@@ -64,24 +90,19 @@ export function safeAreaMock() {
 
 // ── keyboard ────────────────────────────────────────────────────────────────
 
-let keyboardHeight = 0;
-
 /** Set the height useKeyboardHeight() returns (0 = keyboard closed). */
 export function setKeyboardHeight(h: number): void {
-    keyboardHeight = h;
+    state().keyboardHeight = h;
 }
 
 export function keyboardHeightMock() {
-    return { __esModule: true, useKeyboardHeight: () => keyboardHeight };
+    return { __esModule: true, useKeyboardHeight: () => state().keyboardHeight };
 }
 
 // ── reanimated ──────────────────────────────────────────────────────────────
 
 /** Spies behind Animated.ScrollView's imperative handle. */
-export const animatedScroll = {
-    toEnd: jest.fn(),
-    to: jest.fn(),
-};
+export const animatedScroll = state().animatedScroll;
 
 /** A layout-animation builder (FadeIn.duration(200).delay(50) ...): every modifier returns itself. */
 function layoutAnimation(): Record<string, unknown> {
@@ -99,8 +120,8 @@ export function reanimatedMock() {
         React.createElement(Comp, props);
     const ScrollView = React.forwardRef((props: Record<string, unknown>, ref: unknown) => {
         React.useImperativeHandle(ref, () => ({
-            scrollToEnd: (...args: unknown[]) => animatedScroll.toEnd(...args),
-            scrollTo: (...args: unknown[]) => animatedScroll.to(...args),
+            scrollToEnd: (...args: unknown[]) => state().animatedScroll.toEnd(...args),
+            scrollTo: (...args: unknown[]) => state().animatedScroll.to(...args),
         }));
         return React.createElement(RN.ScrollView, props);
     });
@@ -123,7 +144,7 @@ export function reanimatedMock() {
         useDerivedValue: <T,>(fn: () => T) => ({ value: fn() }),
         useAnimatedRef: () => React.useRef(null),
         useAnimatedReaction: () => {},
-        useAnimatedKeyboard: () => ({ height: { value: keyboardHeight }, state: { value: 0 } }),
+        useAnimatedKeyboard: () => ({ height: { value: state().keyboardHeight }, state: { value: 0 } }),
         useAnimatedScrollHandler: () => () => {},
         withTiming: identity,
         withSpring: identity,
@@ -152,8 +173,9 @@ export function reanimatedMock() {
 
 /** Back to defaults: no insets, keyboard closed, scroll spies cleared. Runs before every test. */
 export function resetPlatform(): void {
-    insets = { ...INSETS.NONE };
-    keyboardHeight = 0;
-    animatedScroll.toEnd.mockReset();
-    animatedScroll.to.mockReset();
+    const s = state();
+    s.insets = { ...INSETS.NONE };
+    s.keyboardHeight = 0;
+    s.animatedScroll.toEnd.mockReset();
+    s.animatedScroll.to.mockReset();
 }
