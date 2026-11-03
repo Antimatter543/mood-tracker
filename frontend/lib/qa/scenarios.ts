@@ -28,6 +28,12 @@ interface ScenarioSpec {
   seed: number;
   /** Where the plan's "today" sits, given the command's `now`. */
   anchor: (now: Date) => Date;
+  /**
+   * Keep only entries on the last N local days ending at the anchor. The shared
+   * planner randomly SKIPS days (~20%), so `count` entries alone can reach back
+   * further than N days; the plan is over-generated, then trimmed to the window.
+   */
+  withinDays?: number;
 }
 
 const AT_NOW = (now: Date) => now;
@@ -46,7 +52,7 @@ export function yearBoundaryAnchor(now: Date): Date {
 export const SCENARIO_SPECS: Readonly<Record<QaScenario, ScenarioSpec>> = {
   empty: { count: 0, seed: 1, anchor: AT_NOW },
   // A fresh week: every entry on one of the 7 local days ending today.
-  week: { count: 12, seed: 7, anchor: AT_NOW },
+  week: { count: 10, seed: 7, anchor: AT_NOW, withinDays: 7 },
   // The Timeline scroll/fling load (same size as the dev "300" button).
   timeline300: { count: 300, seed: 300, anchor: AT_NOW },
   // Entries on both sides of a New Year (heatmap/year-label edge cases).
@@ -62,6 +68,21 @@ export interface ScenarioPlan {
 export function planScenario(name: QaScenario, now: Date): ScenarioPlan {
   const spec = SCENARIO_SPECS[name];
   const rng = seededRng(spec.seed);
-  const plans = planSeedEntries(spec.count, spec.anchor(now), rng);
+  const anchor = spec.anchor(now);
+  if (spec.withinDays === undefined) {
+    return { plans: planSeedEntries(spec.count, anchor, rng), rng };
+  }
+  // Over-generate (the planner walks back from the anchor, newest first), keep
+  // the window, take the first `count`. Fail loud rather than seed a short week:
+  // a golden built on 9 entries labelled "12" is worse than a red seed.
+  const windowStart = new Date(anchor);
+  windowStart.setHours(0, 0, 0, 0);
+  windowStart.setDate(windowStart.getDate() - (spec.withinDays - 1));
+  const plans = planSeedEntries(spec.count * 4, anchor, rng)
+    .filter((p) => Date.parse(p.date) >= windowStart.getTime())
+    .slice(0, spec.count);
+  if (plans.length < spec.count) {
+    throw new Error(`QA scenario ${name}: only ${plans.length}/${spec.count} entries fit ${spec.withinDays} days`);
+  }
   return { plans, rng };
 }
