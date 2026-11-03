@@ -21,6 +21,7 @@ import { enabledReminders, parseReminders } from "@/lib/reminders";
 import { OverlayProvider } from "@/context/OverlayHost";
 import { buildTabBarStyle } from "@/lib/tabBarStyle";
 import { TAB_BUTTON_TEST_IDS } from "@/lib/tabTestIds";
+import { now } from "@/lib/clock";
 
 export default function RootLayout() {
     // The app-wide "a write happened → reload" trigger. It bumps the external
@@ -71,7 +72,7 @@ function NotificationReArm() {
     const reArm = useCallback(async () => {
         try {
             const reminders = parseReminders(settings.reminders);
-            const todayKey = localDateString(new Date());
+            const todayKey = localDateString(now());
 
             // Nothing to arm: reconcile anyway (it cancels anything stale the OS
             // still holds) but skip the streak query — the copy it feeds is only
