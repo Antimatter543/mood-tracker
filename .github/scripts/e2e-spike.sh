@@ -129,7 +129,9 @@ if [[ -n "$HOME_A" ]]; then
   # Every image written after the asserts began, anywhere Maestro might put one.
   find . "$HOME/.maestro" "${TMPDIR:-/tmp}" -type f \( -name '*.png' -o -name '*.jpg' \) \
     -newer "$OUT/.before-assert" 2>/dev/null | grep -v '/screens/' | sort >"$OUT/images-after-assert.txt"
-  grep -i 'diff' "$OUT/images-after-assert.txt" >"$OUT/diff-images.txt" || true
+  # Match the FILE name: the flow is called assert-screenshot-diff, so a path-wide grep would also
+  # count its plain screenshots. Maestro 2.12 names the diff step-NNN-assertScreenshot-diff.png.
+  grep -E -- '-diff\.png$' "$OUT/images-after-assert.txt" | grep -v '/takeScreenshot/' >"$OUT/diff-images.txt" || true
   kv DIFF_IMAGES "$(wc -l <"$OUT/diff-images.txt" | tr -d ' ')"
   mkdir -p "$OUT/diff-images"
   while IFS= read -r f; do cp "$f" "$OUT/diff-images/" 2>/dev/null || true; done <"$OUT/diff-images.txt"
