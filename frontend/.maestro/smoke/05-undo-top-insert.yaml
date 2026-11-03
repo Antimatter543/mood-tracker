@@ -1,0 +1,41 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Smoke 05: delete the TOP Timeline entry, Undo, and it comes back at the top
+# with the older entry still below it.
+# Guards #16 (undo-top-insert): re-inserting a row at index 0 of the FlashList
+# Timeline left a blank or mis-measured row at the top.
+# TODO(lane G seed): seed scenario `week` instead of two add-entry subflows.
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Good (morning|afternoon|evening)"
+    timeout: 90000
+- runFlow:
+    file: subflows/add-entry.yaml
+    env:
+      NOTE: smoke-older
+- runFlow:
+    file: subflows/add-entry.yaml
+    env:
+      NOTE: smoke-newer
+- tapOn:
+    id: tab-timeline
+- assertVisible:
+    text: "smoke-older"
+    below:
+      text: "smoke-newer"
+- takeScreenshot: 05-before
+- tapOn:
+    id: entry-more
+    index: 0
+- tapOn:
+    id: entry-delete
+- assertNotVisible: "smoke-newer"
+- assertVisible: "smoke-older"
+- tapOn:
+    id: undo-snackbar-action
+- assertVisible:
+    text: "smoke-older"
+    below:
+      text: "smoke-newer"
+- takeScreenshot: 05-after-undo

@@ -1,0 +1,23 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Smoke 02: add an entry through the form; Home shows it.
+# Guards the a0fd503 class: a write that Home never re-reads, leaving it blank
+# or still on "No entry yet" after a successful save.
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Good (morning|afternoon|evening)"
+    timeout: 90000
+- assertVisible: "No entry yet"
+- runFlow:
+    file: subflows/add-entry.yaml
+    env:
+      NOTE: smoke-home
+- assertVisible: "Good (morning|afternoon|evening)"
+- assertVisible: "5\\.0"
+- assertNotVisible: "No entry yet"
+- takeScreenshot: 02-home-after-add
+- tapOn:
+    id: tab-timeline
+- assertVisible: "smoke-home"
+- takeScreenshot: 02-timeline-after-add

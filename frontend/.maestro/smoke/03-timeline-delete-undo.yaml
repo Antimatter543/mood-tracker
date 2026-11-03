@@ -1,0 +1,31 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Smoke 03: Timeline delete -> Undo restores the entry.
+# Guards the dead-Undo class (800789a / 06df84b): a reanimated `entering`
+# animation on the snackbar left its Undo button rendered but not pressable, so
+# the tap did nothing and the entry stayed deleted.
+# TODO(lane G seed): seed scenario with one entry instead of the add-entry subflow.
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Good (morning|afternoon|evening)"
+    timeout: 90000
+- runFlow:
+    file: subflows/add-entry.yaml
+    env:
+      NOTE: smoke-undo
+- tapOn:
+    id: tab-timeline
+- assertVisible: "smoke-undo"
+- tapOn:
+    id: entry-more
+- tapOn:
+    id: entry-delete
+- assertVisible:
+    id: undo-snackbar
+- assertNotVisible: "smoke-undo"
+- takeScreenshot: 03-deleted
+- tapOn:
+    id: undo-snackbar-action
+- assertVisible: "smoke-undo"
+- takeScreenshot: 03-restored

@@ -12,8 +12,7 @@ appId: com.raeduslabs.soulsyncapp
 # The screenshots after each burst are the evidence: the date in the pinned
 # day header must be OLDER in each successive shot.
 #
-# Tab-bar labels aren't exposed to Maestro, so the Timeline tab is tapped by
-# point (5 tabs at x = 10/30/50/70/90%, y = 89%). Run from
+# The Timeline tab is tapped by its testID (`id: tab-timeline`). Run from
 # ~/Pictures/screenshots so the PNGs land there.
 
 - launchApp
@@ -22,7 +21,7 @@ appId: com.raeduslabs.soulsyncapp
     optional: true
 
 - tapOn:
-    point: 50%, 89%
+    id: tab-timeline
 - assertVisible:
     text: "Timeline"
 - takeScreenshot: timeline-fling-0-top
