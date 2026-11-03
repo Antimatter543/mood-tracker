@@ -257,6 +257,16 @@ describe('Timeline list scroll anchoring', () => {
     // the correction won and hid the new row. The real-list half of this
     // contract is in timelineRealFlashList.test.tsx.
 
+    /**
+     * Fire every pending frame/timeout. Needs jest.useFakeTimers() BEFORE the work
+     * under test is scheduled (modern fake timers also fake requestAnimationFrame),
+     * so a late reveal cannot hide behind a real-time sleep.
+     */
+    const flushPendingFrames = () =>
+        act(async () => {
+            jest.advanceTimersByTime(100);
+        });
+
     const restoreAtTop = async (view: any) => {
         await pressDelete(view);
         await waitFor(() => expect(view.queryByTestId('undo-snackbar')).not.toBeNull());
@@ -362,6 +372,7 @@ describe('Timeline list scroll anchoring', () => {
     });
 
     it('a user deep in their history keeps their place (no reveal)', async () => {
+        jest.useFakeTimers();
         mockDb.getAllAsync.mockResolvedValue([entryRow(1, 'delete-me'), entryRow(2, 'older sibling')]);
         const view = await renderTimeline();
         await waitFor(() => expect(view.queryByText('delete-me')).not.toBeNull());
@@ -371,14 +382,13 @@ describe('Timeline list scroll anchoring', () => {
         await restoreAtTop(view);
 
         // Give a pending frame every chance to fire before asserting silence.
-        await act(async () => {
-            await new Promise((resolve) => setTimeout(resolve, 50));
-        });
+        await flushPendingFrames();
         expect(flashListProbe.scrollToIndex).not.toHaveBeenCalled();
         expect(flashListProbe.scrollToOffset).not.toHaveBeenCalled();
     });
 
     it('an entry added to the day ALREADY at the top does not scroll (it is visible in place)', async () => {
+        jest.useFakeTimers();
         mockDb.getAllAsync.mockResolvedValue([entryRow(2, 'older sibling')]);
         const view = await renderTimeline();
         await waitFor(() => expect(view.queryByText('older sibling')).not.toBeNull());
@@ -400,9 +410,7 @@ describe('Timeline list scroll anchoring', () => {
             );
         });
         await waitFor(() => expect(view.queryByText('brand new')).not.toBeNull());
-        await act(async () => {
-            await new Promise((resolve) => setTimeout(resolve, 50));
-        });
+        await flushPendingFrames();
         expect(flashListProbe.scrollToIndex).not.toHaveBeenCalled();
         expect(flashListProbe.scrollToOffset).not.toHaveBeenCalled();
     });
