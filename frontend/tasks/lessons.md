@@ -1,5 +1,56 @@
 # SoulSync — Project Lessons
 
+## 2026-11-04: "Cannot use shared object that was already released" on a LIVE statement (expo-modules-core race)
+
+- **Symptom.** `NativeDatabase.prepareAsync` rejects: `The 2nd argument cannot be cast to type
+  expo.modules.sqlite.NativeStatement (received Integer)` -> `Cannot use shared object that was already
+  released`. Out of `SQLiteProvider` it is a FATAL JavascriptException; through `resetDatabase` it is
+  QA seed `reset-failed`. About 2 in 20 launches on the CI emulator.
+- **Root cause: a data race inside expo-modules-core, not our handle lifetime.** `SharedObjectRegistry.pairs`
+  is a plain `LinkedHashMap`. `add()` writes under `synchronized(this)` on the JS thread, but `toNativeObject`
+  (and `ensureWasNotRelease`) reads it WITHOUT the lock while `runOnQueue` converts arguments on
+  `Dispatchers.IO`. During a `HashMap.resize()` the new empty table is published before entries move, so an
+  unlocked lookup of a live object misses and the miss is reported as "released". Upstream:
+  https://github.com/expo/expo/issues/50855 and the fix https://github.com/expo/expo/pull/50939 (open when
+  written). Applies to expo-modules-core 56.0.16 (ours), identical through the latest SDK 56 release 56.0.27;
+  a comment on #50855 reports it still on 57.0.22. **So a version bump does not fix it.**
+- **Not the look-alike.** https://github.com/expo/expo/issues/49799 (fixed by PR #50513) is the JS object being
+  GC'd during an async call. In `prepareAsync` the statement is read again after the await, so it stays
+  reachable. We also never close a connection and make a fresh statement per call.
+- **Why fresh install and reset.** Only a version-0 run hits it: migration 1's sequential seed fills the
+  registry, then migration 2's `Promise.all` fires one overlapping `runAsync` per activity, each one an `add()`
+  on the JS thread racing a conversion on IO, right across a resize threshold (12/24/48/96). That burst was
+  ours and is gone, but other reads overlap at startup, so the map race itself had to be fixed.
+- **The canonical fix we carry.** PR #50939's two locked reads, as `patches/expo-modules-core+56.0.16.patch`
+  applied by `postinstall: patch-package --error-on-fail`. expo-modules-core Android compiles from source in
+  CI (`:expo-modules-core:compileReleaseKotlin` in the build log), so the patch takes effect. CI's Gradle build
+  cache keys on source, so it cannot serve the unpatched class. `__tests__/expoModulesCorePatch.test.ts` pins
+  the compiled Kotlin and fails on a version bump: **then re-check #50939 and delete the patch if it shipped.**
+- **A second bug the race exposed.** `seedActivitiesV1` is frozen and returns `{success:false}` instead of
+  throwing, and migration 1 ignored it. A statement failing during the seed COMMITTED an install with a partial
+  activity list, stamped as migrated, never repaired. Migration 1 now throws on it.
+- **No retry, on purpose.** A retry would hide the signal we need if the race ever returns, and the failure is
+  already safe: all pending migrations and their `PRAGMA user_version` stamps (transactional in SQLite) run in
+  ONE transaction, so a failure rolls back to the previous version with no data touched and the next launch
+  starts over. `__tests__/migrationAtomicity.integration.test.ts` proves it by failing every statement in turn
+  on real SQLite, fresh and from older versions. A cold-start failure stays a crash, never an empty database.
+- **Known and left alone:** migration 2 drops `activities` with foreign keys ON, and the cascade clears
+  `entry_activities` for a v1 user. V1 predates every tagged release (first tag v1.2.0), so nobody is on it.
+- **The same race has a second message.** `Cannot convert provided JavaScriptObject to the SharedObject, because
+  it doesn't contain valid id` is the other unlocked read (`toNativeObjectOrNull`) missing, and it hits
+  `NativeDatabase` as well as `NativeStatement` (`The 1st argument cannot be cast...`). Search for both strings.
+- **Measuring it.** Cold-launch soak on the CI emulator (`pm clear`, then the `empty` QA seed deep link, which runs
+  all migrations twice): the unfixed build failed 25 of 605 launches (18 with the exact signature), the fixed
+  build 0 of 1347. e2e alone had too little power: at 1 red in 3, three green runs still pass 30% of the time.
+- **A different crash, not fixed here: SIGSEGV in GWP-ASan's stack walk.** About 0.5% of launches on the x86_64 emulator,
+  fixed and unfixed alike, die under 300 ms after the first `JSI interop was installed`: `android_unsafe_frame_pointer_chase`
+  <- `gwp_asan::GuardedPoolAllocator::deallocate` <- `libhermesvm.so`. It looks like a flow that times out on the
+  home screen, with no JS error, so search logcat for `Fatal signal 11`. Android 14+ turns on recoverable GWP-ASan
+  for about 1% of launches of an app with no `gwpAsanMode` (https://developer.android.com/ndk/guides/gwp-asan), and
+  that walker gives no guarantees on frames built without frame pointers. Likely x86_64 only, because Android's
+  arm64 ABI keeps frame pointers. That is reasoning, not a measurement. Not seen on arm64, and Play vitals show 0
+  crashes. If it ever shows on arm64, the switch is `android:gwpAsanMode="never"`.
+
 ## 2026-11-04: Encrypted backup tests: what a test of old files has to be
 
 - **A compatibility fixture comes from the released code.** `__fixtures__/encryptedBackupV1.ts` is rebuilt
