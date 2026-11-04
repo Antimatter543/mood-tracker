@@ -37,6 +37,51 @@
 - **Known and left alone:** migration 2 drops `activities` with foreign keys ON, and the cascade clears
   `entry_activities` for a v1 user. V1 predates every tagged release (first tag v1.2.0), so nobody is on it.
 
+## 2026-11-04: Encrypted backup tests: what a test of old files has to be
+
+- **A compatibility fixture comes from the released code.** `__fixtures__/encryptedBackupV1.ts` is rebuilt
+  from the format's description, which proves the spec, not what users hold. `encryptedBackupV2_16_0.ts`
+  came from `git archive v2.16.0` running that tree's own export (a stored key too). Next format change:
+  add one per released writer the same way, and never edit an old one.
+- **A test prompt must give up.** Restore re-asks until `requestPassword` returns null, so
+  `async () => 'the password'` turns broken crypto into an endless loop: a hung run, not a failed test.
+  Use `mockResolvedValueOnce(pw).mockResolvedValue(null)`. Found only by breaking the AAD on purpose.
+- **Pin limits with one thing wrong at a time.** `{ parallelism: 9 }` at 64 KiB passed for the wrong reason
+  (the 8 KiB per lane rule refused it), and raising the lane limit went unnoticed. Break each limit once
+  and watch its test fail. These tests use literal numbers: the worst a crafted file can make a phone do.
+- **A long native derive holds up other native calls.** Expo `AsyncFunction`s share one background thread
+  (`modulesQueue`): off the JS and UI threads, but other module calls wait behind a derive. Argon2 has no
+  cancel. Above Compatibility, the warning before deriving is what protects the user.
+
+## 2026-11-03: CI e2e: an ANR dialog saved INTO the cached AVD snapshot failed every flow
+
+- **Symptom.** The first two e2e.yml runs failed 5/5 smoke flows on timeouts. The screenshots showed
+  "Pixel Launcher isn't responding" over the app on every flow, in both runs.
+- **Root cause.** The snapshot-creation step (cache miss) booted the AVD, ran `echo`, and saved the
+  emulator state, with the launcher's first-boot ANR dialog on screen. Every later restore brings that
+  dialog back. It is a system window that does NOT hold `mCurrentFocus`, and its ANR happened before
+  the restore, so no `ANR in` line appears in this run's logcat. A focus-based dialog check saw nothing.
+- **Fix.** (1) The snapshot step runs `e2e-smoke.sh --snapshot`: settle 60 s, then close any
+  `Application Not Responding|Error` window before the state is saved. (2) The smoke run sets
+  `hide_error_dialogs 1` and checks ALL windows (`dumpsys window windows`) before install and before
+  each flow, tapping `android:id/aerr_close` from a uiautomator dump (broadcast fallback). It counts
+  them as `SYSTEM_DIALOGS`. (3) `AVD_KEY` v1 -> v2 discarded the poisoned cache.
+- **Also: `adb root` restarts adbd and kills any `adb logcat` started before it.** Run 1's logcat.txt
+  was empty for that reason. Root first, `wait-for-device`, then start logcat (the self-test pins the order).
+- **Flow selectors, two more traps from the same runs.** (a) A text selector also matches
+  accessibility labels: `assertNotVisible: "Recently deleted"` failed after the panel closed because
+  the Timeline's bin BUTTON is labelled exactly that when the bin is empty. Identify an overlay by a
+  testID it alone renders (`bin-close`). (b) Notes is below the fold on the details step: use
+  `scrollUntilVisible` before tapping anything low in the entry form.
+- **OPEN BUG the smoke found (2026-11-03, expo-sqlite 56.0.5):** a cold start of a fresh install
+  can CRASH. `initializeDatabase` -> `runMigrations` fails with "NativeDatabase.prepareAsync rejected
+  ... Cannot use shared object that was already released", and the error escapes through
+  `SQLiteProvider` as a FATAL JavascriptException (CI run 41662479999, flow 01). The same error hits
+  `resetDatabase` (the QA seed's `reset-failed`, run 41659037408). It happened about 2 times in 20
+  launches on the CI emulator. It is not yet root-caused, and it is not lane F's to fix.
+- **Rule.** A cached emulator snapshot is a fixture: assert its screen is clean before saving it, and
+  key the cache so a bad one can be thrown away with a one-line bump.
+
 ## 2026-11-03: The QA seed deep link (lib/qa): how a build flag really removes code
 
 - **What actually removes the module from a release bundle.** babel-preset-expo's `inline-env-vars`
@@ -72,8 +117,8 @@
 - **Every "what time is it" in app code is `now()` from `@/lib/clock`.** Pure transforms take
   `now` / `today` as a REQUIRED parameter: a hidden `today = localDateString(new Date())` default
   lets a test omit it and race the real day. `__tests__/clockInjection.test.ts` fails on any
-  zero-arg `new Date()` / `Date.now()` in app source (allowlist: the clock itself, the media
-  filename stamp, and the tabs layout until lane F/G moves it).
+  zero-arg `new Date()` / `Date.now()` in app source (allowlist: the clock itself and the media
+  filename stamp).
 - **`Date.now()` stays where it is an ID, not a time.** `buildMediaFilename` stamps filenames with
   it; routing it through a FROZEN QA clock would give every photo the same name.
 - **A name clash with `now`** (`const now = now()` is a TDZ error; tsc catches it): rename the local

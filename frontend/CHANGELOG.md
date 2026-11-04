@@ -5,6 +5,9 @@ All notable changes to SoulSync are documented here. Versions follow
 
 ## [Unreleased]
 
+### Added
+- **Encrypted backups:** choose the password hashing strength (Compatibility, Security or Manual) under Technical details. Thanks to JamesCullum!
+
 ### Fixed
 - **Crash on first launch:** a new install could rarely crash while setting up its database. Resetting the database could fail the same way.
 

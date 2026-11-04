@@ -74,17 +74,19 @@ export interface KdfHeader extends KdfParams {
 
 /**
  * Upper bounds for params read from a FILE. A crafted backup must not be able
- * to make the app allocate gigabytes or spin for minutes before it even asks
- * for a password. They must ALSO accept everything the writer can produce
- * (calibration ceiling and OWASP floor in lib/backupKdfCalibration.ts; pinned
- * by a test), or a phone would write backups it cannot read back.
+ * to make the app allocate more than 1 GiB or spin for minutes (a flagship
+ * needs ~7 s for 1 GiB x 20 passes) once a password is typed. They must ALSO
+ * accept everything the writer can produce: the ceilings of every mode in
+ * lib/backupKdfProfiles.ts, the manual limits there and the OWASP floor
+ * (pinned by a test), or a phone would write backups it cannot read back.
  *
- * 128 MiB: a backup made on a flagship has to open on a 2-3 GB phone, where
- * a 256 MiB allocation on top of the app can be killed by the OS.
+ * Opening a backup on a phone with less RAM than the one that made it is the
+ * user's trade-off: the default "Compatibility" mode stays at 128 MiB, which
+ * a 2-3 GB phone can allocate; "Security" and "Manual" can go higher.
  */
 export const KDF_FILE_LIMITS = {
-  maxMemoryKiB: 128 * 1024,
-  maxIterations: 10,
+  maxMemoryKiB: 1024 * 1024,
+  maxIterations: 20,
   maxParallelism: 8,
 } as const;
 
