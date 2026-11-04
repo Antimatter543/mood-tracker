@@ -9,10 +9,8 @@
  * The write layer opens its connection via `openDatabaseAsync`; here we INJECT a
  * thin adapter over an in-memory node:sqlite DB as the write connection (and pass
  * it as the read `db` too), so every statement hits one real engine. Skips
- * cleanly if the runtime lacks node:sqlite.
+ * locally (fails on CI) if the runtime lacks node:sqlite.
  */
-jest.mock('expo-sqlite');
-
 import {
   __setWriteConnectionForTests,
   __resetWriteTransactionForTests,
@@ -24,30 +22,7 @@ import {
 } from '@/databases/health-metrics';
 import { migrations } from '@/databases/migrations';
 
-let DatabaseSync: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ({ DatabaseSync } = require('node:sqlite'));
-} catch {
-  DatabaseSync = null;
-}
-const describeIfSqlite = DatabaseSync ? describe : describe.skip;
-
-/** An expo-sqlite-shaped async adapter over a synchronous node:sqlite database. */
-function makeAdapter(db: any) {
-  return {
-    execAsync: async (sql: string) => {
-      db.exec(sql);
-    },
-    runAsync: async (sql: string, params: any[] = []) => {
-      const r = db.prepare(sql).run(...(params ?? []));
-      return { lastInsertRowId: Number(r.lastInsertRowid), changes: Number(r.changes) };
-    },
-    getAllAsync: async (sql: string, params: any[] = []) => db.prepare(sql).all(...(params ?? [])),
-    getFirstAsync: async (sql: string, params: any[] = []) =>
-      db.prepare(sql).get(...(params ?? [])) ?? null,
-  };
-}
+import { describeSqlite, openSqlite } from '@/testing/realSqlite';
 
 // Migration-7-shaped health_metrics (WITHOUT avg_hrv_millis / resting_heart_rate)
 // — what an existing user / a fresh install has BEFORE migrations 8 + 9 run.
@@ -92,13 +67,13 @@ async function migrateV7ToCurrent(adapter: any): Promise<void> {
   }
 }
 
-describeIfSqlite('health_metrics — real SQLite migration + HRV round-trip', () => {
+describeSqlite('health_metrics — real SQLite migration + HRV round-trip', () => {
   let db: any;
   let adapter: any;
 
   beforeEach(() => {
-    db = new DatabaseSync(':memory:');
-    adapter = makeAdapter(db);
+    adapter = openSqlite();
+    db = adapter.raw;
     __resetWriteTransactionForTests();
     __setWriteConnectionForTests(adapter);
   });

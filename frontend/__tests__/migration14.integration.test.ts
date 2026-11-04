@@ -13,7 +13,7 @@
  * REAL `migrations` array and drive version 14's `up` against our own
  * node:sqlite adapter (pattern copied from migration11.integration.test.ts,
  * extended with `getFirstAsync` since migration 14 reads before it writes).
- * Skips cleanly if node:sqlite is unavailable.
+ * Skips locally (fails on CI) if node:sqlite is unavailable.
  */
 
 // migrations.ts imports these at module-eval; mock them (mirrors
@@ -21,7 +21,6 @@
 // importing the module is cheap and pulls in no native modules. Migration 14
 // is driven against our OWN node:sqlite adapter below, so the expo-sqlite
 // mock is never actually used to run SQL.
-jest.mock('expo-sqlite');
 jest.mock('@/databases/lifecycle', () => ({
   createInitialSchema: jest.fn(),
   seedActivitiesV1: jest.fn(),
@@ -37,41 +36,15 @@ jest.mock('@/components/seedData', () => ({
 import { migrations } from '@/databases/migrations';
 import { parseReminders, LEGACY_REMINDER_LABEL, DEFAULT_REMINDER_TIME, serializeReminders, Reminder } from '@/lib/reminders';
 
-// Load Node's built-in SQLite; skip the whole suite if unavailable.
-let DatabaseSync: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ({ DatabaseSync } = require('node:sqlite'));
-} catch {
-  DatabaseSync = null;
-}
-const describeIfSqlite = DatabaseSync ? describe : describe.skip;
+import { describeSqlite, openSqlite, type SqliteAdapter } from '@/testing/realSqlite';
 
-// An expo-sqlite-shaped async adapter over a synchronous node:sqlite database.
-// Migration 14's `up` uses BOTH getFirstAsync (to read the legacy rows) and
-// runAsync (to write the reminders row), so this extends migration 11's
-// adapter (which only needed runAsync/execAsync) with getFirstAsync.
-function makeAdapter(db: any) {
-  return {
-    runAsync: async (sql: string, params: any[] = []) => {
-      const r = db.prepare(sql).run(...(params ?? []));
-      return { lastInsertRowId: Number(r.lastInsertRowid), changes: Number(r.changes) };
-    },
-    execAsync: async (sql: string) => {
-      db.exec(sql);
-    },
-    getFirstAsync: async (sql: string, params: any[] = []) => {
-      const row = db.prepare(sql).get(...(params ?? []));
-      return row ?? null;
-    },
-  };
-}
-
-describeIfSqlite('migration 14 — legacy reminder folded into reminders list (real SQLite)', () => {
+describeSqlite('migration 14 — legacy reminder folded into reminders list (real SQLite)', () => {
   let db: any;
+  let adapter: SqliteAdapter;
 
   beforeEach(() => {
-    db = new DatabaseSync(':memory:');
+    adapter = openSqlite();
+    db = adapter.raw;
     // The user_settings KV shape used by every version since migration 1 —
     // exactly what an existing user's DB looks like the instant before
     // migration 14 runs.
@@ -89,7 +62,7 @@ describeIfSqlite('migration 14 — legacy reminder folded into reminders list (r
   const runMigration14 = async () => {
     const m14 = migrations.find((m) => m.version === 14)!;
     expect(m14).toBeDefined();
-    await m14.up(makeAdapter(db) as any);
+    await m14.up(adapter as any);
   };
 
   const setLegacy = (enabled: string, time: string) => {

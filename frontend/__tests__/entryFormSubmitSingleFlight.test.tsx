@@ -13,43 +13,10 @@
  * exactly like the real gesture. Without the ref gate the write runs twice.
  */
 import { render, fireEvent, act } from '@testing-library/react-native';
-
-// ── keyboard height (EntryForm reads it for scroll padding) ──────────────────
-jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
-
-// ── reanimated: Animated.ScrollView -> a real RN ScrollView ──────────────────
-jest.mock('react-native-reanimated', () => {
-    const ReactActual = require('react');
-    const RN = require('react-native');
-    const entering = { duration: () => entering };
-    return {
-        __esModule: true,
-        default: {
-            ScrollView: ReactActual.forwardRef((props: any, ref: any) => {
-                ReactActual.useImperativeHandle(ref, () => ({ scrollToEnd: jest.fn() }));
-                return ReactActual.createElement(RN.ScrollView, props);
-            }),
-            View: (p: any) => ReactActual.createElement(RN.View, p),
-        },
-        FadeIn: entering,
-        useAnimatedRef: () => ReactActual.useRef(null),
-    };
-});
+import { deferred } from '@/testing/async';
 
 // ── theme + settings + heavy children stubbed to keep the render light ───────
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return {
-        ...actual,
-        useThemeColors: () => ({
-            background: '#000', cardBackground: '#111', secondaryBackground: '#222',
-            text: '#fff', textSecondary: '#aaa', border: '#333', accent: '#4CAF50',
-            overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa', textOnAccent: '#fff' },
-            elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 6 },
-            isDark: true,
-        }),
-    };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 jest.mock('@/context/SettingsContext', () => ({
     useSettings: () => ({ settings: { mood_precision: 'integer', show_mood_benchmarks: false } }),
 }));
@@ -75,16 +42,6 @@ jest.mock('../components/InfoBubble', () => {
 });
 
 import { EntryForm } from '@/components/forms/EntryForm';
-
-function deferred<T = void>() {
-    let resolve!: (value: T) => void;
-    let reject!: (reason?: unknown) => void;
-    const promise = new Promise<T>((res, rej) => {
-        resolve = res;
-        reject = rej;
-    });
-    return { promise, resolve, reject };
-}
 
 async function renderOnDetailsStep(onSubmit: (data: any) => Promise<void>) {
     // RNTL 14: render/fireEvent are ASYNC. An un-awaited press silently does

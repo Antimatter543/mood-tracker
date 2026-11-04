@@ -9,10 +9,6 @@ import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
 
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 48, left: 0, right: 0 }),
-}));
-
 import { DayHeader, dayHeaderA11yLabel, entryCountLabel } from '@/components/timeline/DayHeader';
 import {
     TimelineFooter,
@@ -24,28 +20,28 @@ import {
     BACK_TO_TOP_VIEWPORTS,
     shouldShowBackToTop,
 } from '@/components/timeline/BackToTopPill';
-import { localDayKey } from '@/components/timeline/dateHeader';
 import { moodColor } from '@/components/timeline/moodColor';
+import { THEME } from '@/testing/theme';
+import { setInsets } from '@/testing/platform';
+import { freezeNow } from '@/testing/clock';
+import { FIXED_DAY } from '@/testing/builders';
 
-const colors: any = {
-    background: '#000',
-    cardBackground: '#111',
-    secondaryBackground: '#222',
-    text: '#fff',
-    textSecondary: '#aaa',
-    border: '#333',
-    accent: '#4CAF50',
-    accentDark: '#388E3C',
-    accentLight: 'rgba(76,175,80,0.1)',
-    overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-    elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-    isDark: true,
-};
+beforeEach(() => {
+    // Bottom inset of a 3-button nav bar, no status bar: what the pill is positioned above.
+    setInsets({ top: 0, bottom: 48 });
+});
+
+const colors = THEME;
 
 const flat = (node: any) => StyleSheet.flatten(node.props.style) || {};
 
 describe('DayHeader', () => {
-    const today = localDayKey(new Date());
+    // DayHeader names "Today" from the app clock: pin it, so the group key and
+    // the header can never straddle a real midnight.
+    const today = FIXED_DAY;
+    beforeEach(() => {
+        freezeNow();
+    });
 
     it("titles today's group \"Today\" and shows the day's count and average", async () => {
         const view = await render(

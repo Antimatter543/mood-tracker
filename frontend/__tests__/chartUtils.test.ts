@@ -1,4 +1,5 @@
 import { interpolateData, isWeekEmpty, getLast7Days, formatDayLabel } from '@/components/visualisations/chartUtils';
+import { localAt } from '@/testing/builders';
 
 describe('isWeekEmpty', () => {
   it('is true for an all-null week (fresh install)', () => {
@@ -87,29 +88,23 @@ describe('interpolateData', () => {
 });
 
 describe('getLast7Days', () => {
-  beforeEach(() => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date('2025-06-15T12:00:00Z'));
-  });
-
-  afterEach(() => {
-    jest.useRealTimers();
-  });
+  // The caller passes "now"; a fixed local noon keeps the answer one day.
+  const NOW = localAt('2025-06-15');
 
   it('returns 7 dates', () => {
-    const days = getLast7Days();
+    const days = getLast7Days(NOW);
     expect(days).toHaveLength(7);
   });
 
   it('returns dates in ascending order', () => {
-    const days = getLast7Days();
+    const days = getLast7Days(NOW);
     for (let i = 1; i < days.length; i++) {
       expect(days[i] > days[i - 1]).toBe(true);
     }
   });
 
   it('returns dates in ISO format (YYYY-MM-DD)', () => {
-    const days = getLast7Days();
+    const days = getLast7Days(NOW);
     const isoRegex = /^\d{4}-\d{2}-\d{2}$/;
     for (const day of days) {
       expect(day).toMatch(isoRegex);
@@ -117,7 +112,7 @@ describe('getLast7Days', () => {
   });
 
   it('has the last date as today', () => {
-    const days = getLast7Days();
+    const days = getLast7Days(NOW);
     expect(days[days.length - 1]).toBe('2025-06-15');
   });
 });

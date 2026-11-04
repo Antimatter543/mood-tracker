@@ -47,6 +47,7 @@ import {
   FIXTURE_PLAINTEXT,
   buildFixtureEnvelope,
 } from '@/__fixtures__/encryptedBackupV1';
+import { freezeNow } from '@/testing/clock';
 
 const SecureStoreMock = SecureStore as unknown as typeof SecureStore & {
   __reset: () => void;
@@ -339,9 +340,9 @@ describe('password confirmation timer', () => {
 
   it('setting a password counts as a confirmation; turning off clears it', async () => {
     expect(await getPasswordConfirmedAt()).toBeNull();
-    const before = Date.now();
+    const now = freezeNow();
     await setBackupPassword('my secret passphrase', FAST_KDF);
-    expect(await getPasswordConfirmedAt()).toBeGreaterThanOrEqual(before);
+    expect(await getPasswordConfirmedAt()).toBe(now.getTime());
     await clearBackupPassword();
     expect(await getPasswordConfirmedAt()).toBeNull();
     expect(SecureStoreMock.__dump()).toEqual({});

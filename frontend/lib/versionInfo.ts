@@ -20,7 +20,7 @@ export function versionLine(version: string | undefined | null): string {
 
 /**
  * Build the copyright line with a runtime-derived year so it never goes stale.
- * Pass `new Date().getFullYear()` at the call site (keeps this pure/testable).
+ * Pass `now().getFullYear()` (lib/clock) at the call site (keeps this pure/testable).
  */
 export function copyrightLine(year: number): string {
   return `© ${year} Raedus Labs. All rights reserved.`;

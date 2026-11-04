@@ -16,6 +16,8 @@ import { render, act, waitFor } from '@testing-library/react-native';
 import { TIMELINE_PAGE_SIZE } from '@/components/timeline/timelineRows';
 import { TIMELINE_FOOTER_HEIGHT } from '@/components/timeline/TimelineFooter';
 import { StyleSheet } from 'react-native';
+import { makeEntryRow } from '@/testing/builders';
+import { makeDb, resetWriteLayer, type MockDb } from '@/testing/fakeDb';
 
 let mockDataVersion = 0;
 jest.mock('expo-router', () => {
@@ -30,63 +32,26 @@ jest.mock('expo-router', () => {
 
 // Two full pages, so the first read is a FULL window (hasMore) and an append
 // really happens.
-const ROWS = Array.from({ length: 2 * TIMELINE_PAGE_SIZE }, (_, i) => ({
-    id: i + 1,
-    mood: 6,
-    notes: `entry-${i + 1}`,
-    // 5 per local day, so a page append also rebuilds several date sections.
-    date: new Date(Date.UTC(2026, 8, 12) - Math.floor(i / 5) * 86_400_000).toISOString(),
-    starred_at: null,
-    activity_ids: null,
-    activity_names: null,
-    activity_group_ids: null,
-    activity_icon_names: null,
-    activity_icon_families: null,
-}));
+const ROWS = Array.from({ length: 2 * TIMELINE_PAGE_SIZE }, (_, i) =>
+    makeEntryRow({
+        id: i + 1,
+        notes: `entry-${i + 1}`,
+        // 5 per local day, so a page append also rebuilds several date sections.
+        date: new Date(Date.UTC(2026, 8, 12) - Math.floor(i / 5) * 86_400_000).toISOString(),
+    })
+);
 
-const mockDb = {
-    getAllAsync: jest.fn(async (_sql: string, params: any[] = []) => {
-        const limit = Number(params[params.length - 2]);
-        const offset = Number(params[params.length - 1]);
-        return ROWS.slice(offset, offset + limit);
-    }),
-    getFirstAsync: jest.fn().mockResolvedValue(null),
-    runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 }),
+// A window read answers with the slice its LIMIT/OFFSET params ask for.
+const windowRead = (params: unknown[]) => {
+    const limit = Number(params[params.length - 2]);
+    const offset = Number(params[params.length - 1]);
+    return ROWS.slice(offset, offset + limit);
 };
+let mockDb: MockDb;
 jest.mock('expo-sqlite', () => ({ useSQLiteContext: () => mockDb }));
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 48, left: 0, right: 0 }),
-}));
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const anim = { duration: () => anim };
-    return {
-        __esModule: true,
-        default: { View: (props: any) => ReactLocal.createElement(View, props) },
-        FadeIn: anim,
-        FadeInDown: anim,
-        FadeOutDown: anim,
-    };
-});
-jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
 // The real hook returns a module-level constant per theme, which is WHY `colors` can
-// be compared by identity; the mock keeps that property.
-const mockTheme = {
-    background: '#000',
-    cardBackground: '#111',
-    secondaryBackground: '#222',
-    text: '#fff',
-    textSecondary: '#aaa',
-    border: '#333',
-    accent: '#4CAF50',
-    accentDark: '#388E3C',
-    accentLight: 'rgba(76,175,80,0.1)',
-    overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-    elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-    isDark: true,
-};
-jest.mock('@/styles/global', () => ({ useThemeColors: () => mockTheme }));
+// be compared by identity; the shared mock keeps that property.
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 jest.mock('@/context/DataContext', () => ({
     useDataContext: () => ({ refetchEntries: jest.fn() }),
 }));
@@ -134,12 +99,8 @@ beforeEach(() => {
     jest.clearAllMocks();
     mockHanded.length = 0;
     mockDataVersion = 0;
-    mockDb.getAllAsync.mockImplementation(async (_sql: string, params: any[] = []) => {
-        const limit = Number(params[params.length - 2]);
-        const offset = Number(params[params.length - 1]);
-        return ROWS.slice(offset, offset + limit);
-    });
-    mockDb.getFirstAsync.mockResolvedValue(null);
+    resetWriteLayer();
+    mockDb = makeDb({ all: [[/./, windowRead]] });
 });
 
 describe('Timeline — the props it hands each card are stable', () => {

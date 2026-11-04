@@ -19,6 +19,7 @@ import { dailyAverageRows, aggregateDailyAverages } from './transforms/dailyAver
 import { WEEKLY_MOOD_AVERAGES } from './queries';
 import { buildStatSummary, type StatSummaryData } from './transforms/statSummary';
 import { buildMoodState, type MoodState } from './transforms/moodState';
+import { now } from '@/lib/clock';
 
 /**
  * Whether the streak tile is reporting the live "days up to today" streak, or
@@ -85,7 +86,7 @@ const StatSummaryCard: React.FC = () => {
                     // a custom range can sit entirely in the past at offset 0, so
                     // `offset === 0` would have shown a live streak next to
                     // last March's data. `isCurrentPeriod` asks the real question.
-                    const today = localDateString(new Date());
+                    const today = localDateString(now());
 
                     const [windowRow, streak, rawDailyRows] = await Promise.all([
                         db.getFirstAsync<{ avg_mood: number | null; entry_count: number }>(
@@ -107,7 +108,8 @@ const StatSummaryCard: React.FC = () => {
                     // window, the honest basis there. Free, since rawDailyRows is
                     // already fetched for the moving average.
                     const bestStreakInPeriod = streakStats(
-                        rawDailyRows.map((r) => r.date)
+                        rawDailyRows.map((r) => r.date),
+                        today
                     ).longest;
 
                     // Moving-average slope over the window's gap-filled daily avgs.

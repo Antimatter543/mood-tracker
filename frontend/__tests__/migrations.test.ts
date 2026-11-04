@@ -1,7 +1,5 @@
 import { migrations, runMigrations } from '@/databases/migrations';
-import { createMockDatabase } from 'expo-sqlite';
-
-jest.mock('expo-sqlite');
+import { makeDb, resetWriteLayer, sqlCalls } from '@/testing/fakeDb';
 
 // Mock IconPicker
 jest.mock('@/components/IconPicker', () => ({
@@ -32,6 +30,10 @@ jest.mock('@/databases/database', () => ({
   initializeSettingsTable: jest.fn().mockResolvedValue(undefined),
   seedActivitiesV1: jest.fn().mockResolvedValue({ success: true }),
 }));
+
+beforeEach(() => {
+  resetWriteLayer();
+});
 
 describe('migrations array', () => {
   it('has versions starting from 1', () => {
@@ -66,7 +68,7 @@ describe('migrations array', () => {
 
 describe('runMigrations', () => {
   it('skips when database is up-to-date', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const latestVersion = migrations[migrations.length - 1].version;
     db.getFirstAsync.mockResolvedValue({ user_version: latestVersion });
 
@@ -77,7 +79,7 @@ describe('runMigrations', () => {
   });
 
   it('runs only pending migrations', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     // Pretend we're at version 1, so only v2 and v3 should run
     db.getFirstAsync.mockResolvedValue({ user_version: 1 });
 
@@ -87,22 +89,18 @@ describe('runMigrations', () => {
     // Inside the transaction, runAsync should be called to set PRAGMA user_version
     // for each pending migration (v2..vN). Derive the expected count from the
     // array so adding migrations doesn't require touching this number.
-    const pragmaCalls = db.runAsync.mock.calls.filter(
-      (call: any[]) => typeof call[0] === 'string' && call[0].includes('PRAGMA user_version')
-    );
+    const pragmaCalls = sqlCalls(db, /PRAGMA user_version/);
     const pendingFromV1 = migrations.filter(m => m.version > 1).length;
     expect(pragmaCalls.length).toBe(pendingFromV1);
   });
 
   it('updates pragma user_version after each migration', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue({ user_version: 0 });
 
     await runMigrations(db as any);
 
-    const pragmaCalls = db.runAsync.mock.calls.filter(
-      (call: any[]) => typeof call[0] === 'string' && call[0].includes('PRAGMA user_version')
-    );
+    const pragmaCalls = sqlCalls(db, /PRAGMA user_version/);
     expect(pragmaCalls.length).toBe(migrations.length);
     // Verify version numbers are correct
     for (let i = 0; i < migrations.length; i++) {
@@ -111,7 +109,7 @@ describe('runMigrations', () => {
   });
 
   it('wraps in transaction', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue({ user_version: 0 });
 
     await runMigrations(db as any);
@@ -122,7 +120,7 @@ describe('runMigrations', () => {
 
 describe('Migration V2 SQL', () => {
   it('does NOT contain DROP COLUMN (unsupported in older SQLite)', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
 
     // Run V2's up function
     const v2 = migrations.find(m => m.version === 2);
@@ -138,7 +136,7 @@ describe('Migration V2 SQL', () => {
   });
 
   it('preserves entry data via copy-into-new-table pattern (no DROP TABLE entries)', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const v2 = migrations.find(m => m.version === 2)!;
     await v2.up(db as any);
 
@@ -157,15 +155,13 @@ describe('Migration V2 SQL', () => {
 
 describe('Migration V3', () => {
   it('adds show_mood_benchmarks setting with INSERT OR IGNORE', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const v3 = migrations.find(m => m.version === 3)!;
     expect(v3).toBeDefined();
 
     await v3.up(db as any);
 
-    const seedCall = db.runAsync.mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('show_mood_benchmarks')
-    );
+    const seedCall = sqlCalls(db, /show_mood_benchmarks/)[0];
     expect(seedCall).toBeDefined();
     expect((seedCall![0] as string).toUpperCase()).toContain('INSERT OR IGNORE');
   });
@@ -173,7 +169,7 @@ describe('Migration V3', () => {
 
 describe('Migration V4', () => {
   it('seeds reminder_enabled and reminder_time with INSERT OR IGNORE', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const v4 = migrations.find(m => m.version === 4)!;
     expect(v4).toBeDefined();
 
@@ -190,7 +186,7 @@ describe('Migration V4', () => {
 
 describe('Migration V5', () => {
   it('rebuilds entry_media without dropping entries, adds created_at + index', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const v5 = migrations.find(m => m.version === 5)!;
     expect(v5).toBeDefined();
 
@@ -213,7 +209,7 @@ describe('Migration V5', () => {
 
 describe('Migration V6', () => {
   it('renames the vague default Event activity without clobbering custom duplicates', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const v6 = migrations.find(m => m.version === 6)!;
     expect(v6).toBeDefined();
 
@@ -229,7 +225,7 @@ describe('Migration V6', () => {
 
 describe('Migration V7 (Health Connect)', () => {
   it('creates the health_metrics table keyed by local calendar date', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const v7 = migrations.find(m => m.version === 7)!;
     expect(v7).toBeDefined();
 
@@ -252,14 +248,12 @@ describe('Migration V7 (Health Connect)', () => {
   });
 
   it('seeds the Health Connect opt-in flag OFF with INSERT OR IGNORE', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const v7 = migrations.find(m => m.version === 7)!;
 
     await v7.up(db as any);
 
-    const seed = db.runAsync.mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('health_connect_opt_in')
-    );
+    const seed = sqlCalls(db, /health_connect_opt_in/)[0];
     expect(seed).toBeDefined();
     expect((seed![0] as string).toUpperCase()).toContain('INSERT OR IGNORE');
     expect(seed![0] as string).toContain("'false'");
@@ -268,15 +262,13 @@ describe('Migration V7 (Health Connect)', () => {
 
 describe('Migration V10 (Activity Carryover)', () => {
   it('seeds activity_carryover OFF with INSERT OR IGNORE', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     const v10 = migrations.find(m => m.version === 10)!;
     expect(v10).toBeDefined();
 
     await v10.up(db as any);
 
-    const seed = db.runAsync.mock.calls.find((c: any[]) =>
-      typeof c[0] === 'string' && c[0].includes('activity_carryover')
-    );
+    const seed = sqlCalls(db, /activity_carryover/)[0];
     expect(seed).toBeDefined();
     expect((seed![0] as string).toUpperCase()).toContain('INSERT OR IGNORE');
     expect(seed![0] as string).toContain("'false'");

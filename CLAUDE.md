@@ -29,8 +29,9 @@ removed from `release.sh` the same day — git history has it if ever needed.)
     `pr-checks.yml` run on a commit with the IDENTICAL git tree as HEAD (a squash-merge of an up-to-date PR
     matches its PR head). No match: `gh workflow run pr-checks.yml -R Antimatter543/mood-tracker --ref main`,
     wait, rerun. `LOCAL_JEST=1` restores the old local run.
-  - **Community PRs (since 2026-11-02):** `.github/workflows/pr-checks.yml` runs tsc + full jest (TZ pinned to
-    Australia/Brisbane: ~10 suites assume it) on every PR; `CONTRIBUTING.md` + a PR template ask for
+  - **Community PRs (since 2026-11-02):** `.github/workflows/pr-checks.yml` runs tsc + full jest on every PR and every
+    push to main (TZ pinned to Australia/Brisbane by `frontend/jest.globalSetup.js`, guarded by
+    `__tests__/timezonePinned.test.ts`: ~10 suites assume it; every action is SHA-pinned); `CONTRIBUTING.md` + a PR template ask for
     screenshots. Fork runs can need approval: `gh api -X POST repos/Antimatter543/mood-tracker/actions/runs/<id>/approve`.
     Fixups go on the contributor's branch (maintainerCanModify) as new commits, never a force-push, so credit
     stays theirs. Stacked PRs conflict after the lower one is squashed: merge main into the upper branch and
@@ -210,6 +211,18 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
 - Seed test data: Settings has `__DEV__`-only "Generate 50 Sample Entries" and "Generate 300 Timeline QA
   Entries" buttons (dev build / Expo Go only). The 300 seed clusters entries by day with mixed note lengths,
   photos and stars: use it for any Timeline scroll/fling QA (`.maestro/timeline-fling.yaml`).
+  **Scripted/CI seeding = the QA deep link** (QA builds ONLY, `EXPO_PUBLIC_QA=1`, e.g. the e2e emulator
+  workflow): `adb shell am start -a android.intent.action.VIEW -d 'myapp://qa/seed?scenario=week&now=2026-06-15T12:00:00Z'`
+  (Maestro: `openLink`). Scenarios `empty | week | timeline300 | yearBoundary`; optional `now` (strict UTC,
+  `YYYY-MM-DDTHH:MM:SS(.sss)Z`) freezes the app clock (`lib/clock.ts`) and anchors the data, and survives a
+  relaunch. It WIPES the DB first, and refuses (`error foreign-data`) when the DB holds entries no seed wrote.
+  Wait on testID `qa-seed-status` = `QA seed: ok <scenario> (<n>)`. Settings loads once per launch, so relaunch
+  after seeding for settings-sensitive screens. **Release builds do not contain it**: the module
+  (`frontend/lib/qa/`) is dead-code-eliminated when the flag is unset (guard in `app/_layout.tsx`, keep its exact
+  shape). Proof: `__tests__/qaSeedGuard.test.ts` (PR gate), `.github/workflows/qa-seed-guard.yml` (release vs QA
+  bundle grep per PR) and the `release-apk.yml` step that greps the real APK/AAB bundles before upload.
+  Build a QA APK: set `EXPO_PUBLIC_QA: '1'` in a NON-release workflow's env (only `qa-seed-guard.yml` / `e2e*.yml`
+  may set it; the guard test enforces that), never in `release-apk.yml`, `eas.json`, `app.json` or a tracked `.env`.
 
 ## Hard-won gotchas (see frontend/tasks/lessons.md for detail)
 - **NEVER use `react-native` `<Modal>` here (removed v1.2.3).** It opens a second native window with broken

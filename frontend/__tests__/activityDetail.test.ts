@@ -18,13 +18,11 @@ import {
     LOW_MEAN,
     type CoOccurringRow,
 } from '@/components/visualisations/transforms/activityDetail';
+import { localIso } from '@/testing/builders';
 
-// A local-noon instant for a given Y-M-D, so day-keying is TZ-robust under the
-// non-UTC jest pin (jest.tz.js = Australia/Brisbane). Mirrors dailyAverages tests.
-const at = (y: number, m: number, d: number, mood: number) => ({
-    date: new Date(y, m - 1, d, 12, 0, 0).toISOString(),
-    mood,
-});
+// A local-noon instant for a given 'YYYY-MM-DD', so day-keying is TZ-robust under the
+// non-UTC jest pin (jest.globalSetup.js = Australia/Brisbane). Mirrors dailyAverages tests.
+const at = (day: string, mood: number) => ({ date: localIso(day), mood });
 
 describe('activityMoodStats', () => {
     it('is all-zeros (never NaN) on empty input', () => {
@@ -167,20 +165,20 @@ describe('activityMoodImpact', () => {
     it('splits with-vs-without by local day and gates on sample size', () => {
         // 12 days total. Activity logged on 6 of them, all high (8); the other 6 low (2).
         const activityEntries = [
-            at(2026, 1, 1, 8),
-            at(2026, 1, 2, 8),
-            at(2026, 1, 3, 8),
-            at(2026, 1, 4, 8),
-            at(2026, 1, 5, 8),
-            at(2026, 1, 6, 8),
+            at('2026-01-01', 8),
+            at('2026-01-02', 8),
+            at('2026-01-03', 8),
+            at('2026-01-04', 8),
+            at('2026-01-05', 8),
+            at('2026-01-06', 8),
         ];
         const otherEntries = [
-            at(2026, 1, 7, 2),
-            at(2026, 1, 8, 2),
-            at(2026, 1, 9, 2),
-            at(2026, 1, 10, 2),
-            at(2026, 1, 11, 2),
-            at(2026, 1, 12, 2),
+            at('2026-01-07', 2),
+            at('2026-01-08', 2),
+            at('2026-01-09', 2),
+            at('2026-01-10', 2),
+            at('2026-01-11', 2),
+            at('2026-01-12', 2),
         ];
         const all = [...activityEntries, ...otherEntries];
         const r = activityMoodImpact(all, activityEntries);
@@ -194,8 +192,8 @@ describe('activityMoodImpact', () => {
 
     it('averages the per-DAY averages (a busy day counts once)', () => {
         // Day 1 has two "other" entries (mood 2 and 4 → day avg 3); day 2 is the activity (mood 9).
-        const activityEntries = [at(2026, 2, 2, 9)];
-        const all = [at(2026, 2, 1, 2), at(2026, 2, 1, 4), at(2026, 2, 2, 9)];
+        const activityEntries = [at('2026-02-02', 9)];
+        const all = [at('2026-02-01', 2), at('2026-02-01', 4), at('2026-02-02', 9)];
         const r = activityMoodImpact(all, activityEntries);
         expect(r.withAvg).toBe(9);
         expect(r.withoutAvg).toBe(3); // (2+4)/2, one day
@@ -205,7 +203,7 @@ describe('activityMoodImpact', () => {
     });
 
     it('is null-safe when a side is empty', () => {
-        const only = [at(2026, 3, 1, 7)];
+        const only = [at('2026-03-01', 7)];
         const r = activityMoodImpact(only, only); // every day is a "with" day
         expect(r.withAvg).toBe(7);
         expect(r.withoutAvg).toBeNull();
@@ -222,9 +220,9 @@ describe('activityMoodImpact', () => {
 describe('moodTrendForActivity', () => {
     it('returns per-local-day averages oldest→newest', () => {
         const rows = [
-            at(2026, 4, 2, 6),
-            at(2026, 4, 1, 4),
-            at(2026, 4, 1, 8), // day 1 avg = 6
+            at('2026-04-02', 6),
+            at('2026-04-01', 4),
+            at('2026-04-01', 8), // day 1 avg = 6
         ];
         expect(moodTrendForActivity(rows)).toEqual([
             { day: '2026-04-01', avg: 6 },

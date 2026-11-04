@@ -8,8 +8,9 @@
  * critical one: an instant at local 02:00 is the PREVIOUS day in UTC, which is
  * exactly what would mis-bucket if the hour were extracted in SQL/UTC.
  */
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import React from 'react';
+import { render, waitFor } from '@testing-library/react-native';
+import TimeOfDayChart from '@/components/visualisations/TimeOfDayChart';
 import {
   aggregateTimeOfDay,
   computeIntradaySwing,
@@ -18,6 +19,21 @@ import {
   TIME_OF_DAY_BUCKETS,
   type TimeOfDayRow,
 } from '@/components/visualisations/transforms/timeOfDay';
+
+// Harness for the card test at the bottom: the card reads rows from the db and
+// reloads through useDataRefresh (focus + store plumbing); feed it rows directly.
+let mockRows: TimeOfDayRow[] = [];
+// One stable db object: a fresh one per render would change fetchData's identity and loop.
+const mockDb = { getAllAsync: async () => mockRows };
+jest.mock('expo-sqlite', () => ({ useSQLiteContext: () => mockDb }));
+jest.mock('@/hooks/useDataRefresh', () => ({
+  useDataRefresh: (load: () => void) => {
+    const { useEffect: effect } = require('react');
+    effect(() => {
+      load();
+    }, [load]);
+  },
+}));
 
 // A local wall-clock instant: year, 0-based month, day, hour[, minute].
 const at = (
@@ -378,23 +394,34 @@ describe('timeOfDayCallout', () => {
 });
 
 /**
- * SOURCE-LEVEL GUARD. The decision above is only worth anything if the card
- * asks it. The old sentence was assembled inline from `data.bestBucket` /
- * `data.worstBucket` behind a "both are non-empty" gate, which is exactly the
- * condition that was wrong, so the card must not carry that gate any more.
+ * Source-scan verdict (lane D): CONVERTED. The old scan grepped TimeOfDayChart.tsx
+ * for `timeOfDayCallout` and against a `bestBucket !== ''` gate. Now the real card
+ * is rendered with entries in ONE part of the day, and the sentence on screen must
+ * not contrast the bucket with itself ("best in the Afternoon and toughest at
+ * Afternoon", bug commit bd4d82d).
  */
-describe('the Time of Day card asks the transform which sentence is true', () => {
-  const source = readFileSync(
-    join(__dirname, '..', 'components', 'visualisations', 'TimeOfDayChart.tsx'),
-    'utf8',
-  );
+describe('the Time of Day card shows the sentence the transform says is true', () => {
+  const afternoonRows = (n: number): TimeOfDayRow[] =>
+    Array.from({ length: n }, (_, i) => row(at(2026, 0, 1 + i, 14), 3 + (i % 3)));
 
-  it('renders its callout through timeOfDayCallout', () => {
-    expect(source).toContain('timeOfDayCallout');
+  const renderCard = async (rows: TimeOfDayRow[]) => {
+    mockRows = rows;
+    return render(React.createElement(TimeOfDayChart));
+  };
+
+  it('one logged part of the day: "All your entries are in the Afternoon", no contrast', async () => {
+    const view = await renderCard(afternoonRows(20));
+    await waitFor(() => expect(view.getByText(/All your entries so far are in the/)).toBeTruthy());
+    expect(view.queryByText(/You tend to feel best/)).toBeNull();
   });
 
-  it('no longer gates the sentence on "a best and a worst both exist"', () => {
-    expect(source).not.toMatch(/data\.bestBucket\s*!==\s*''/);
-    expect(source).not.toMatch(/data\.worstBucket\s*!==\s*''/);
+  it('two parts of the day with different moods: the best/toughest contrast', async () => {
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) => row(at(2026, 0, 1 + i, 8), 5)),
+      ...Array.from({ length: 10 }, (_, i) => row(at(2026, 0, 1 + i, 20), 2)),
+    ];
+    const view = await renderCard(rows);
+    await waitFor(() => expect(view.getByText(/You tend to feel best in the/)).toBeTruthy());
+    expect(view.queryByText(/All your entries so far/)).toBeNull();
   });
 });

@@ -1,5 +1,73 @@
 # SoulSync — Project Lessons
 
+## 2026-11-03: The QA seed deep link (lib/qa): how a build flag really removes code
+
+- **What actually removes the module from a release bundle.** babel-preset-expo's `inline-env-vars`
+  plugin (prod caller, `isDev: false`) replaces `process.env.EXPO_PUBLIC_X` with its build-time value
+  (`undefined` when unset). Then `@expo/metro-config`'s transform worker runs Metro's constant-folding
+  pass BEFORE `collect-dependencies`, so `if (undefined === '1') { require(...) }` is deleted before
+  anyone records the `require`. Hiding the UI is not enough; the `require` must be inside the folded
+  block. The pipeline is reproduced in-process by `__tests__/qaSeedGuard.test.ts` (`productionDependencies`).
+- **Which guard shapes fold (measured, not assumed):** dot access `process.env.EXPO_PUBLIC_QA`,
+  string-literal bracket access, AND `const { EXPO_PUBLIC_QA } = process.env` all inline. Aliasing
+  the object (`const env = process.env; env.EXPO_PUBLIC_QA`), a computed key (`process.env[k]`) and a
+  helper function do NOT, and would ship the module. The guard test pins the exact `if` shape and
+  runs those three as counterfactuals (each keeps the dependency with the flag unset).
+- **EXPO_PUBLIC values are not in Metro's cache key** (the 2026-09-11 trap again): the bundle-grep
+  workflow wipes `$TMPDIR/metro-*` and `node_modules/.cache` before EACH of its two passes.
+- **Grep two strings, with a positive control.** CI greps the release bundle for the marker AND
+  `qa/seed` (0 hits) and the QA bundle for both (>=1). A grep that "passes" on a QA bundle proves the
+  strings were minified away and the absent check means nothing. The parser uses `startsWith`
+  (not a regex) so `qa/seed` stays a literal.
+- **Cold start from a deep link lands on `+not-found`**, so `(tabs)/_layout.tsx` (SQLiteProvider ->
+  `initializeDatabase`) never mounts. The host navigates home first and the seed awaits
+  `whenDatabaseInitialized()` (databases/readiness.ts) instead of polling or opening the write
+  connection before WAL + migrations.
+- **A frozen clock is in-memory.** The seed persists its `now` (`qa_frozen_now`) and the host
+  re-applies it on every launch, else a relaunch reverts "today" while the data stays anchored.
+- **A seed must not wipe a person's data:** it refuses when entries exist (bin included: a reset
+  destroys those too) without the `qa_seeded` marker.
+- **The shared planner skips ~20% of days**, so "N entries in the last week" needs a window filter,
+  not a lucky seed (`withinDays` in lib/qa/scenarios.ts, fail-loud when they don't fit).
+
+## 2026-11-03: The app clock (lib/clock.ts) and the future-clock CI leg
+
+- **Every "what time is it" in app code is `now()` from `@/lib/clock`.** Pure transforms take
+  `now` / `today` as a REQUIRED parameter: a hidden `today = localDateString(new Date())` default
+  lets a test omit it and race the real day. `__tests__/clockInjection.test.ts` fails on any
+  zero-arg `new Date()` / `Date.now()` in app source (allowlist: the clock itself, the media
+  filename stamp, and the tabs layout until lane F/G moves it).
+- **`Date.now()` stays where it is an ID, not a time.** `buildMediaFilename` stamps filenames with
+  it; routing it through a FROZEN QA clock would give every photo the same name.
+- **A name clash with `now`** (`const now = now()` is a TDZ error; tsc catches it): rename the local
+  (`at`, `today`) or import `{ now as clockNow }` where `now` is already an API name (healthSync's
+  `options.now`, `markPasswordConfirmed(now)`).
+- **Tests freeze, never bracket.** `freezeNow()` returns the instant; assert equality with it. A
+  `before <= t <= after` bracket passes but races midnight for anything day-keyed.
+- **The future-clock leg (`.github/workflows/future-clock.yml`)** runs the suite under libfaketime
+  at +1y/+3y. Without `FAKETIME_DONT_FAKE_MONOTONIC=1` timers and `performance.now()` jump. A leg
+  that never reached the jest workers passes vacuously, so `__tests__/futureClock.test.ts` checks
+  the worker's clock against a floor computed from the REAL clock. Local repro without sudo:
+  `apt-get download libfaketime && dpkg-deb -x libfaketime_*.deb x`, then
+  `LD_PRELOAD=$PWD/x/usr/lib/x86_64-linux-gnu/faketime/libfaketime.so.1 FAKETIME=+365d FAKETIME_DONT_FAKE_MONOTONIC=1 npx jest <file>`.
+
+## 2026-11-03: Shared test helpers (frontend/testing): three traps found while building them
+
+- **A global reanimated stub flips gesture-handler onto its worklet path.** gesture-handler decides
+  "reanimated is installed" by `require('react-native-reanimated')` + `useSharedValue`. The real
+  package never loads in jest, so gesture-handler always ran its plain-JS path. A stub with
+  `useSharedValue` passes the probe, and every GestureDetector then throws
+  `Reanimated.useEvent is not a function`. `jest.setup.ts` mocks gesture-handler's `reanimatedWrapper`
+  to `{ Reanimated: undefined }`. `testingHelpers.test.tsx` pins it.
+- **A node_modules stack trace that says `src/` can be lying.** gesture-handler ships source maps.
+  jest loads its `main` (`lib/commonjs/...`), but the trace prints the mapped `src/...` path. A
+  `jest.mock` of the src path mocks a file nobody loads. Before mocking a package-internal module,
+  `node -e "console.log(require.resolve('<pkg>'))"` shows which build jest really loads.
+- **seedData holds v1 seed names; a fresh install shows the migrated ones.** Migration 6 renames
+  "Event" to "Social event". `SHIPPED_SEED_RENAMES` in `testing/builders.ts` maps them, and a test
+  compares `seedActivity(i)` with every row of a freshly migrated DB. A new rename migration fails
+  that test until the map lists it.
+
 ## 2026-11-02: Encrypted backups: expo-crypto output traps, and "unreadable" is not "off"
 
 - **expo-crypto AES-GCM natively ignores `ciphertext({ encoding })`** (Android reads the option under

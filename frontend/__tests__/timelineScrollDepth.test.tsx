@@ -37,6 +37,8 @@
 import React from 'react';
 import { render, act, waitFor, fireEvent } from '@testing-library/react-native';
 import { TIMELINE_PAGE_SIZE } from '@/components/timeline/timelineRows';
+import { makeEntryRow } from '@/testing/builders';
+import { makeDb, resetWriteLayer, type MockDb } from '@/testing/fakeDb';
 
 // ── expo-router: `useFocusEffect` models a focus gain that re-runs when the
 //    callback identity changes (production behaviour — react-navigation re-runs
@@ -61,72 +63,24 @@ type Window = { limit: number; offset: number };
 const windows: Window[] = [];
 
 const DAY_MS = 86_400_000;
-const entryRow = (id: number) => ({
-    id,
-    mood: 7,
-    notes: `entry-${id}`,
-    // 5 entries per local day, so the list has ~20 date sections at full depth
-    // (section identity across the per-page regroup is part of what we exercise).
-    date: new Date(Date.UTC(2026, 5, 12) - Math.floor((id - 1) / 5) * DAY_MS).toISOString(),
-    starred_at: null,
-    activity_ids: null,
-    activity_names: null,
-    activity_group_ids: null,
-    activity_icon_names: null,
-    activity_icon_families: null,
-});
+const entryRow = (id: number) =>
+    makeEntryRow({
+        id,
+        notes: `entry-${id}`,
+        // 5 entries per local day, so the list has ~20 date sections at full depth
+        // (section identity across the per-page regroup is part of what we exercise).
+        date: new Date(Date.UTC(2026, 5, 12) - Math.floor((id - 1) / 5) * DAY_MS).toISOString(),
+    });
 const TOTAL_ENTRIES = 5 * TIMELINE_PAGE_SIZE;
 /** Rows still live in the fake DB, newest first. Deletes remove from here too. */
 let table = Array.from({ length: TOTAL_ENTRIES }, (_, i) => entryRow(i + 1));
 
-const mockDb = {
-    getAllAsync: jest.fn(async (_sql: string, params: any[] = []) => {
-        const limit = Number(params[params.length - 2]);
-        const offset = Number(params[params.length - 1]);
-        windows.push({ limit, offset });
-        return table.slice(offset, offset + limit);
-    }),
-    getFirstAsync: jest.fn().mockResolvedValue(null),
-    runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 }),
-};
+let mockDb: MockDb;
 jest.mock('expo-sqlite', () => ({
     useSQLiteContext: () => mockDb,
 }));
 
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 48, left: 0, right: 0 }),
-}));
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const anim = { duration: () => anim };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
-        },
-        FadeIn: anim,
-        FadeInDown: anim,
-        FadeOutDown: anim,
-    };
-});
-jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
-
-const THEME = {
-    background: '#000',
-    cardBackground: '#111',
-    secondaryBackground: '#222',
-    text: '#fff',
-    textSecondary: '#aaa',
-    border: '#333',
-    accent: '#4CAF50',
-    accentDark: '#388E3C',
-    accentLight: 'rgba(76,175,80,0.1)',
-    overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-    elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-    isDark: true,
-};
-jest.mock('@/styles/global', () => ({ useThemeColors: () => THEME }));
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 jest.mock('@/context/DataContext', () => ({
     useDataContext: () => ({ refetchEntries: jest.fn() }),
 }));
@@ -231,13 +185,20 @@ beforeEach(() => {
     mockDataVersion = 0;
     windows.length = 0;
     table = Array.from({ length: TOTAL_ENTRIES }, (_, i) => entryRow(i + 1));
-    mockDb.getAllAsync.mockImplementation(async (_sql: string, params: any[] = []) => {
-        const limit = Number(params[params.length - 2]);
-        const offset = Number(params[params.length - 1]);
-        windows.push({ limit, offset });
-        return table.slice(offset, offset + limit);
+    resetWriteLayer();
+    mockDb = makeDb({
+        all: [
+            [
+                /./,
+                (params) => {
+                    const limit = Number(params[params.length - 2]);
+                    const offset = Number(params[params.length - 1]);
+                    windows.push({ limit, offset });
+                    return table.slice(offset, offset + limit);
+                },
+            ],
+        ],
     });
-    mockDb.getFirstAsync.mockResolvedValue(null);
 });
 
 /** Mount and paginate to `pages` pages loaded. Returns the rendered view. */

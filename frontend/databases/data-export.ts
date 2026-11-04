@@ -26,6 +26,7 @@ import { exceedsCompatibility } from '@/lib/backupKdfProfiles';
 import { readBackupKeyState } from '@/lib/backupKeyStore';
 import { daylioImportMessage, isZipHeader, readDaylioFile } from '@/databases/daylio-import';
 import { DaylioFormatError, DaylioImportSummary } from '@/lib/daylioImport';
+import { now } from '@/lib/clock';
 
 /**
  * Asks the user for an encrypted backup's password. Resolves to the typed
@@ -257,7 +258,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
       // Create an export object
       const exportData = {
         version: 3,
-        exportDate: new Date().toISOString(),
+        exportDate: now().toISOString(),
         // v3 backups EMBED each photo's bytes (base64) directly in this JSON, so
         // importing on a different device/install restores the images into the
         // new app's media directory — the backup is fully portable. (v1/v2
@@ -280,7 +281,7 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
       const fileContents = backupKey ? await encryptBackup(jsonData, backupKey) : jsonData;
 
       // Create a temporary file
-      const fileDate = new Date().toISOString().split('T')[0];
+      const fileDate = now().toISOString().split('T')[0];
       const fileName = backupKey
         ? `mood_tracker_export_${fileDate}_encrypted.json`
         : `mood_tracker_export_${fileDate}.json`;

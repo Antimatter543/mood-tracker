@@ -26,31 +26,8 @@ import { render, screen, waitFor, act } from '@testing-library/react-native';
 
 import { bumpDataVersion } from '@/context/dataRefreshStore';
 import { localDateString } from '@/databases/dateHelpers';
-
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
-}));
-
-// reanimated's worklet runtime is unavailable under jest. Layout itself no longer
-// touches reanimated (that is the fix), but Home's ActivityExplorer reaches
-// OverlayModal, which does.
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const passthrough = (props: Record<string, unknown>) => ReactLocal.createElement(View, props);
-    return {
-        __esModule: true,
-        default: { View: passthrough, ScrollView: passthrough },
-        View: passthrough,
-        useSharedValue: (v: unknown) => ({ value: v }),
-        useAnimatedStyle: (fn: () => unknown) => fn(),
-        withTiming: (v: unknown) => v,
-        withSpring: (v: unknown) => v,
-        FadeIn: { duration: () => ({}) },
-        FadeOut: { duration: () => ({}) },
-        Easing: { out: (e: unknown) => e, cubic: (x: unknown) => x },
-    };
-});
+import { freezeNow } from '@/testing/clock';
+import { FIXED_DAY, FIXED_NOW, addDays, localIso } from '@/testing/builders';
 
 // The per-activity insights overlay only mounts once an activity is TAPPED; this
 // scenario never opens it, and its real implementation needs the OverlayHost
@@ -65,10 +42,7 @@ jest.mock('expo-router', () => {
     return { useFocusEffect: (cb: () => void) => ReactLocal.useEffect(cb, [cb]) };
 });
 
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return { ...actual, useThemeColors: () => actual.themeColors.dark };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule('dark'));
 
 // The FAB owns the entry form (sqlite + overlay host). It is chrome OUTSIDE the
 // wrapper that blanked, so it is not what this test is about.
@@ -80,13 +54,9 @@ jest.mock('@/components/AddEntryButton', () => ({ AddEntryButton: () => null }))
  * submit, then `bumpDataVersion()` fires the same signal `addMoodEntry` does.
  */
 type FakeEntry = { date: string; mood: number };
-const today = new Date();
-const iso = (daysAgo: number, hour = 12) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - daysAgo);
-    d.setHours(hour, 0, 0, 0);
-    return d.toISOString();
-};
+// Days count back from the frozen app clock (FIXED_DAY), so "today" here and
+// "today" on the screen are the same day, whatever the real time is.
+const iso = (daysAgo: number, hour = 12) => localIso(addDays(FIXED_DAY, -daysAgo), hour);
 
 let entries: FakeEntry[] = [];
 
@@ -96,7 +66,7 @@ const mockDb = {
         // Today's average mood. Keyed with the app's own LOCAL-day helper, an
         // ISO string's own date part is UTC and drifts a day either side of
         // midnight, which would make this fake disagree with the screen.
-        const todayKey = localDateString(new Date());
+        const todayKey = FIXED_DAY;
         const todays = entries.filter(e => localDateString(e.date) === todayKey);
         if (todays.length === 0) return { mood: null };
         return { mood: todays.reduce((a, e) => a + e.mood, 0) / todays.length };
@@ -137,6 +107,7 @@ const HOME_LANDMARKS = ["Today's Mood", 'Past 7 days', 'Last 30 days', 'Explore 
 
 describe('Home survives the post-write refresh that used to blank it', () => {
     beforeEach(() => {
+        freezeNow(FIXED_NOW);
         // Three days of history, none of them today, so "Today's Mood" starts empty
         // and the submitted entry visibly changes it.
         entries = [
@@ -149,7 +120,7 @@ describe('Home survives the post-write refresh that used to blank it', () => {
     it('renders the header and every card after the entry count goes 3 -> 4', async () => {
         render(<Home />);
 
-        const greeting = greetingForHour(new Date().getHours());
+        const greeting = greetingForHour(FIXED_NOW.getHours());
 
         // Baseline: Home is fully rendered against 3 entries.
         await waitFor(() => expect(screen.getByText('3')).toBeTruthy());

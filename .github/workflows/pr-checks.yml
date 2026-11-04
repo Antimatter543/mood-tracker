@@ -1,9 +1,20 @@
 name: PR checks
 
-# Runs the same gates as a release (tsc + jest) on every pull request.
+# Runs the same gates as a release (tsc + jest) on every pull request and on every push to main.
+# The main-push run guarantees a release commit always has a green run on the identical tree,
+# which `scripts/release.sh` requires.
+#
 # Deliberately `pull_request`, never `pull_request_target`: fork code must not see secrets.
+# This workflow holds NO secrets and a read-only token; keep it that way. Every action is
+# pinned by commit SHA (the tag is in the comment) so a moved tag cannot change what runs.
 on:
   pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/pr-checks.yml'
+  # Lane branches get their run through their PR; only main needs a push run.
+  push:
     branches: [main]
     paths:
       - 'frontend/**'
@@ -16,22 +27,29 @@ permissions:
 
 concurrency:
   group: pr-checks-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Supersede stale PR pushes, but never cancel a main run: each main commit needs its own result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # Several tests assert local-day behaviour for Brisbane (UTC+10); GitHub runners default to UTC.
+      # Defence in depth only. The suite must NOT depend on this: `frontend/jest.globalSetup.js`
+      # pins Australia/Brisbane itself and `__tests__/timezonePinned.test.ts` guards it.
+      # (Several tests assert local-day behaviour for Brisbane, UTC+10; runners default to UTC.)
       TZ: Australia/Brisbane
     defaults:
       run:
+        shell: bash # explicit shell => `-eo pipefail`, so `jest | tee` keeps jest's exit code
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # No later step pushes, so don't leave the token in .git/config for test code to read.
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -43,4 +61,38 @@ jobs:
         run: npx tsc --noEmit
 
       - name: Tests
-        run: npx jest --silent --ci
+        run: npx jest --silent --ci 2>&1 | tee "$RUNNER_TEMP/jest.log"
+
+      # jest prints "(N s)" only for suites over its 5 s slow-test threshold, so this is the
+      # slow-suite list with no extra tooling. `always()` so a failing run still reports.
+      - name: Slow suites report
+        if: always()
+        run: |
+          {
+            echo "### Jest timing"
+            grep -E '^Time:' "$RUNNER_TEMP/jest.log" || echo "No timing line (jest did not finish)."
+            echo ""
+            echo "| Suite (slower than 5 s) | Seconds |"
+            echo "|---|---|"
+            grep -E '^(PASS|FAIL) .*\([0-9.]+ s\)$' "$RUNNER_TEMP/jest.log" \
+              | sed -E 's/^(PASS|FAIL) (.*) \(([0-9.]+) s\)$/\3 \2/' \
+              | sort -rn | head -15 \
+              | sed -E 's/^([0-9.]+) (.*)$/| `\2` | \1 |/' || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Report only (never gates): how many console.error calls the suite makes when
+      # jest.setup.ts stops muting them. Runs on main pushes and manual runs, not on every PR,
+      # to keep the PR loop fast.
+      - name: Console error audit (report only)
+        if: github.event_name != 'pull_request'
+        continue-on-error: true
+        env:
+          DEBUG_TESTS: '1'
+        run: |
+          npx jest --ci > "$RUNNER_TEMP/jest-console.log" 2>&1 || true
+          COUNT=$(grep -c 'console\.error' "$RUNNER_TEMP/jest-console.log" || true)
+          {
+            echo "### console.error audit (report only)"
+            echo ""
+            echo "console.error calls with DEBUG_TESTS=1: **${COUNT:-0}**"
+          } >> "$GITHUB_STEP_SUMMARY"

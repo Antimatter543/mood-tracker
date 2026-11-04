@@ -24,31 +24,13 @@ import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import { OverlayProvider } from '@/context/OverlayHost';
 import type { Settings } from '@/databases/settings';
 import { formatDate } from '@/lib/dateFormat';
+import { freezeNow } from '@/testing/clock';
 
 const mockSettings = jest.fn<Settings, []>();
 const mockUpdateSetting = jest.fn(async (_key: string, _value: string) => {});
 jest.mock('@/context/SettingsContext', () => ({
     useSettings: () => ({ settings: mockSettings(), updateSetting: mockUpdateSetting }),
 }));
-
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
-}));
-jest.mock('@/hooks/useKeyboardHeight', () => ({
-    useKeyboardHeight: () => 0,
-}));
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const entering = { duration: () => entering };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
-        },
-        FadeIn: entering,
-    };
-});
 
 import { SettingsSection } from '@/components/SettingRow';
 
@@ -91,10 +73,10 @@ describe('the Date format setting row', () => {
     });
 
     it('offers all four formats, each with today’s date as an example', async () => {
+        const today = freezeNow();
         const view = await renderSettings();
         await fireEvent.press(view.getByText(/^System default \(/));
 
-        const today = new Date();
         for (const [label, pref] of [
             ['MM/DD/YYYY', 'mdy'],
             ['DD/MM/YYYY', 'dmy'],

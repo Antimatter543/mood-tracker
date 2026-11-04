@@ -33,8 +33,7 @@
  */
 import { render } from '@testing-library/react-native';
 import { StyleSheet, Text } from 'react-native';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { code } from '@/testing/sourceScan';
 
 const THEME = { background: '#000', isDark: true };
 
@@ -124,15 +123,10 @@ describe('Layout, neither content branch is reanimated-animated', () => {
      * import outright and keep the rung deterministic.
      */
     it('components/PageContainer.tsx imports nothing from react-native-reanimated', () => {
-        const src = readFileSync(
-            join(__dirname, '..', 'components', 'PageContainer.tsx'),
-            'utf8',
-        );
-        const code = src
-            // Strip comments, the file DOCUMENTS the banned import at length.
-            .replace(/\/\*[\s\S]*?\*\//g, '')
-            .replace(/^\s*\/\/.*$/gm, '');
-        expect(code).not.toMatch(/react-native-reanimated/);
-        expect(code).not.toMatch(/\bAnimated\./);
+        // Comments are stripped: the file DOCUMENTS the banned import at length.
+        // Source-scan verdict (lane D): KEEP. Bug commit a0fd503 (+ 2026-07-13 Stats).
+        const src = code('components/PageContainer.tsx');
+        expect(src).not.toMatch(/react-native-reanimated/);
+        expect(src).not.toMatch(/\bAnimated\./);
     });
 });

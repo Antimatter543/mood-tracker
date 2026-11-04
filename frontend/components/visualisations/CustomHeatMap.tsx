@@ -15,6 +15,7 @@ import {
 import { aggregateDailyAverages } from './transforms/dailyAverages';
 import { localDateString } from './transforms/dateHelpers';
 import { moodColor } from '@/components/timeline/moodColor';
+import { now } from '@/lib/clock';
 
 interface DayData {
     date: string;
@@ -71,7 +72,7 @@ const CustomHeatmap: React.FC = () => {
     const fetchData = useCallback(async () => {
             try {
                 // End date is the user's LOCAL today (YYYY-MM-DD).
-                const endDate = localDateString(new Date());
+                const endDate = localDateString(now());
 
                 // Fetch ALL raw entries (heatmap is all-time) as {date: instant,
                 // mood}. Day-keying happens in JS via aggregateDailyAverages —

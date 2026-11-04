@@ -31,6 +31,7 @@ import {
   type PeriodWindow,
   type Timeframe,
 } from '@/components/visualisations/transforms/periodWindow';
+import { now } from '@/lib/clock';
 
 export type { Timeframe, DayRange };
 
@@ -152,11 +153,11 @@ const TimeframeContext = createContext<TimeframeContextType>({
   resetOffset: () => {},
   canGoBack: false,
   canGoForward: false,
-  periodWindow: computePeriodWindow(DEFAULT_TIMEFRAME, 0, todayLocalDay()),
+  periodWindow: computePeriodWindow(DEFAULT_TIMEFRAME, 0, todayLocalDay(now())),
   // Provider-less fallback, so it gets the setting's own default rather than a
   // guess — a consumer rendered outside TimeframeProvider is a bug, not a user
   // whose date preference we should be inventing.
-  periodLabel: formatPeriodLabel(DEFAULT_TIMEFRAME, 0, todayLocalDay(), DEFAULT_DATE_FORMAT),
+  periodLabel: formatPeriodLabel(DEFAULT_TIMEFRAME, 0, todayLocalDay(now()), DEFAULT_DATE_FORMAT),
   earliestEntryDay: null,
   customRange: null,
   isCustom: false,
@@ -188,7 +189,7 @@ export const TimeframeProvider: React.FC<{ children: ReactNode }> = ({ children 
   // across local midnight should re-anchor "now" on its next render, not keep
   // paging relative to yesterday. It's a value-equal string, so the memos below
   // still only recompute when the day actually rolls over.
-  const today = todayLocalDay();
+  const today = todayLocalDay(now());
 
   // The back-bound. One cheap indexed MIN over `entries`, refreshed on the same
   // focus/data-version signal as the charts so an import or a backdated entry

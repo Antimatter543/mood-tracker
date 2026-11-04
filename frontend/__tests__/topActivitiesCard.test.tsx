@@ -10,31 +10,7 @@
  */
 import { render } from '@testing-library/react-native';
 
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return {
-        ...actual,
-        useThemeColors: () => ({
-            background: '#141418',
-            cardBackground: '#1E1F24',
-            secondaryBackground: '#26272C',
-            text: '#FFFFFF',
-            textSecondary: '#AAAAAA',
-            border: 'rgba(255,255,255,0.1)',
-            accent: '#4CAF50',
-            accentDark: '#3d8b40',
-            accentLight: 'rgba(76,175,80,0.1)',
-            overlays: {
-                tag: '#222222',
-                tagBorder: '#333333',
-                border: '#333333',
-                textSecondary: '#888888',
-            },
-            elevation: { shadowColor: '#000000', shadowOpacity: 0.3, elevation: 4 },
-            isDark: true,
-        }),
-    };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 import TopActivitiesCard, { type TopActivity } from '@/components/visualisations/TopActivitiesCard';
 

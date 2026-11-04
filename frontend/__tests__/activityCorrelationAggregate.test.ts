@@ -8,9 +8,7 @@ import {
   computeActivityCorrelation,
   type ActivityCorrelationRawRow,
 } from '@/components/visualisations/transforms/activityCorrelation';
-
-const localMidnight = (y: number, m0: number, d: number) =>
-  new Date(y, m0, d, 0, 0, 0).toISOString();
+import { addDays, localIso } from '@/testing/builders';
 
 // Helper: an entry row joined to one activity (or none).
 let nextId = 1;
@@ -49,9 +47,9 @@ describe('aggregateActivityCorrelation', () => {
     // "Yoga" on the 11th (mood 9) and 12th (mood 7); a no-activity entry on the
     // 13th (mood 3). Yoga: with = days {11,12} avg (9,7)=8; without = {13} = 3.
     const rows = [
-      row(localMidnight(2026, 5, 11), 9, 'Yoga'),
-      row(localMidnight(2026, 5, 12), 7, 'Yoga'),
-      row(localMidnight(2026, 5, 13), 3, null),
+      row(localIso('2026-06-11', 0), 9, 'Yoga'),
+      row(localIso('2026-06-12', 0), 7, 'Yoga'),
+      row(localIso('2026-06-13', 0), 3, null),
     ];
     const out = aggregateActivityCorrelation(rows);
     const yoga = out.find((r) => r.activity_name === 'Yoga')!;
@@ -65,8 +63,8 @@ describe('aggregateActivityCorrelation', () => {
     // Backdated Thursday-local-midnight entry (Wed in UTC) with an activity.
     // The activity-day set must contain 2026-06-11 (Thu), not 2026-06-10 (Wed).
     const rows = [
-      row(localMidnight(2026, 5, 11), 10, 'Run'), // Thu local / Wed UTC
-      row(localMidnight(2026, 5, 12), 4, null), // Fri, no activity
+      row(localIso('2026-06-11', 0), 10, 'Run'), // Thu local / Wed UTC
+      row(localIso('2026-06-12', 0), 4, null), // Fri, no activity
     ];
     const out = aggregateActivityCorrelation(rows);
     const run = out.find((r) => r.activity_name === 'Run')!;
@@ -81,9 +79,9 @@ describe('aggregateActivityCorrelation', () => {
     // One entry on the 11th (mood 8) with BOTH Yoga and Run; one no-activity
     // entry on the 12th (mood 2). day_avg for the 11th must be 8 (not 16/2).
     const rows = [
-      rowMulti(100, localMidnight(2026, 5, 11), 8, 1, 'Yoga'),
-      rowMulti(100, localMidnight(2026, 5, 11), 8, 2, 'Run'),
-      row(localMidnight(2026, 5, 12), 2, null),
+      rowMulti(100, localIso('2026-06-11', 0), 8, 1, 'Yoga'),
+      rowMulti(100, localIso('2026-06-11', 0), 8, 2, 'Run'),
+      row(localIso('2026-06-12', 0), 2, null),
     ];
     const out = aggregateActivityCorrelation(rows);
     const yoga = out.find((r) => r.activity_name === 'Yoga')!;
@@ -99,8 +97,8 @@ describe('aggregateActivityCorrelation', () => {
   it('flows through computeActivityCorrelation gate end-to-end', () => {
     // Build 6 with-days and 6 without-days for "Walk" so it clears MIN_SAMPLES.
     const rows: ActivityCorrelationRawRow[] = [];
-    for (let d = 1; d <= 6; d++) rows.push(row(localMidnight(2026, 5, d), 8, 'Walk'));
-    for (let d = 7; d <= 12; d++) rows.push(row(localMidnight(2026, 5, d), 4, null));
+    for (let d = 1; d <= 6; d++) rows.push(row(localIso(addDays('2026-06-01', d - 1), 0), 8, 'Walk'));
+    for (let d = 7; d <= 12; d++) rows.push(row(localIso(addDays('2026-06-01', d - 1), 0), 4, null));
     const { meaningful } = computeActivityCorrelation(aggregateActivityCorrelation(rows));
     const walk = meaningful.find((r) => r.activity_name === 'Walk');
     expect(walk).toBeDefined();

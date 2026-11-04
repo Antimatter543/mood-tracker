@@ -6,11 +6,10 @@
  * native module can't be exercised in jest, so we go straight at the
  * `getSetting` / `updateSetting` API which is exactly what the context calls.
  */
-import { createMockDatabase } from 'expo-sqlite';
 import { getSetting, updateSetting } from '@/databases/database';
 import { SETTINGS_REGISTRY } from '@/databases/settings';
+import { makeDb, resetWriteLayer } from '@/testing/fakeDb';
 
-jest.mock('expo-sqlite');
 jest.mock('@/components/types', () => ({}));
 jest.mock('@/components/seedData', () => ({
     initialActivities: [],
@@ -20,9 +19,13 @@ jest.mock('@/databases/migrations', () => ({
     runMigrations: jest.fn(),
 }));
 
+beforeEach(() => {
+  resetWriteLayer();
+});
+
 describe('SettingsContext persistence (via DB layer)', () => {
     it('updateSetting -> getSetting round-trips a value', async () => {
-        const db = createMockDatabase();
+        const db = makeDb();
         // Simulate persistence: getFirstAsync returns the last value we
         // wrote via runAsync. We capture writes in a local map.
         const store: Record<string, string> = {};
@@ -42,7 +45,7 @@ describe('SettingsContext persistence (via DB layer)', () => {
     });
 
     it('getSetting returns the registry default when the key has never been written', async () => {
-        const db = createMockDatabase();
+        const db = makeDb();
         db.getFirstAsync.mockResolvedValue(null);
 
         const value = await getSetting(db as any, 'fab_position');
@@ -50,7 +53,7 @@ describe('SettingsContext persistence (via DB layer)', () => {
     });
 
     it('updates a setting twice and reads the latest value', async () => {
-        const db = createMockDatabase();
+        const db = makeDb();
         const store: Record<string, string> = {};
         db.runAsync.mockImplementation(async (_sql: string, params: any[]) => {
             store[params[0]] = params[1];
@@ -71,7 +74,7 @@ describe('SettingsContext persistence (via DB layer)', () => {
         // This emulates the theme-switch-persists-across-remounts requirement.
         // The DB is the source of truth; SettingsContext just reads from it on
         // mount. So we write, then *re-read* with a fresh getSetting call.
-        const db = createMockDatabase();
+        const db = makeDb();
         const store: Record<string, string> = {};
         db.runAsync.mockImplementation(async (_sql: string, params: any[]) => {
             store[params[0]] = params[1];

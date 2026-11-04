@@ -17,7 +17,6 @@
  * mediaHelpers file IO is mocked (no expo-file-system) so we can assert exactly
  * which files would have been unlinked. Mirrors entries.integration.test.ts.
  */
-jest.mock('expo-sqlite');
 jest.mock('@/databases/mediaHelpers', () => ({
   MEDIA_DIR: 'file:///media/',
   copyToMediaDir: jest.fn(async (uri: string) => `file:///media/${uri.split('/').pop()}`),
@@ -45,30 +44,9 @@ import {
 } from '@/databases/entry-bin';
 import { deleteMediaFile } from '@/databases/mediaHelpers';
 
-// Load Node's built-in SQLite; skip the whole suite if unavailable.
-let DatabaseSync: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ({ DatabaseSync } = require('node:sqlite'));
-} catch {
-  DatabaseSync = null;
-}
-const describeIfSqlite = DatabaseSync ? describe : describe.skip;
-
-function makeAdapter(db: any) {
-  return {
-    execAsync: async (sql: string) => {
-      db.exec(sql);
-    },
-    runAsync: async (sql: string, params: any[] = []) => {
-      const r = db.prepare(sql).run(...(params ?? []));
-      return { lastInsertRowId: Number(r.lastInsertRowid), changes: Number(r.changes) };
-    },
-    getAllAsync: async (sql: string, params: any[] = []) => db.prepare(sql).all(...(params ?? [])),
-    getFirstAsync: async (sql: string, params: any[] = []) =>
-      db.prepare(sql).get(...(params ?? [])) ?? null,
-  };
-}
+import { countRows, describeSqlite, openSqlite } from '@/testing/realSqlite';
+import { freezeNow } from '@/testing/clock';
+import { FIXED_NOW } from '@/testing/builders';
 
 // Post-migration-12 shape.
 const SCHEMA = `
@@ -96,36 +74,35 @@ const SCHEMA = `
 
 const DAY = 86_400_000;
 
-describeIfSqlite('recycle bin — real SQLite lifecycle', () => {
+describeSqlite('recycle bin — real SQLite lifecycle', () => {
   let db: any;
   let adapter: any;
 
-  const count = (table: string): number =>
-    (db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  const count = (table: string): number => countRows(adapter, table);
   const deletedAtOf = (id: number): string | null =>
     (db.prepare('SELECT deleted_at FROM entries WHERE id = ?').get(id) as {
       deleted_at: string | null;
     }).deleted_at;
-  /** Stamp `deleted_at` to exactly `daysAgo` days before now. */
+  /** Stamp `deleted_at` to exactly `daysAgo` days before the frozen app clock. */
   const binAt = (id: number, daysAgo: number) =>
     db
       .prepare('UPDATE entries SET deleted_at = ? WHERE id = ?')
-      .run(new Date(Date.now() - daysAgo * DAY).toISOString(), id);
+      .run(new Date(FIXED_NOW.getTime() - daysAgo * DAY).toISOString(), id);
   const addPhoto = (entryId: number, path: string) =>
     db
       .prepare(`INSERT INTO entry_media (entry_id, file_path, media_type) VALUES (?, ?, 'image')`)
       .run(entryId, path);
 
   beforeEach(() => {
-    db = new DatabaseSync(':memory:');
-    // FK ON is what makes the purge cascade real — the per-connection PRAGMA
-    // trap that motivated writeTransaction.ts.
-    db.exec('PRAGMA foreign_keys = ON;');
-    db.exec(SCHEMA);
+    // The purge cutoff reads the app clock: pin it to the instant binAt counts from.
+    freezeNow(FIXED_NOW);
+    // openSqlite turns FK ON, which is what makes the purge cascade real — the
+    // per-connection PRAGMA trap that motivated writeTransaction.ts.
+    adapter = openSqlite({ schema: SCHEMA });
+    db = adapter.raw;
     db.exec(`INSERT INTO activity_groups (id, name) VALUES (1, 'Sports');`);
     db.exec(`INSERT INTO activities (id, name, group_id) VALUES (1, 'Running', 1), (2, 'Reading', 1);`);
 
-    adapter = makeAdapter(db);
     __resetWriteTransactionForTests();
     __setWriteConnectionForTests(adapter);
     (deleteMediaFile as jest.Mock).mockClear();

@@ -53,17 +53,7 @@ jest.mock('expo-sqlite', () => {
   return { useSQLiteContext: () => db };
 });
 jest.mock('@expo/vector-icons/Feather', () => 'Feather');
-jest.mock('@/styles/global', () => ({
-  useThemeColors: () => ({
-    text: '#fff',
-    textSecondary: '#aaa',
-    accent: '#66aaaa',
-    accentLight: '#112233',
-    cardBackground: '#111',
-    border: '#333',
-    overlays: { tag: '#222', tagBorder: '#444' },
-  }),
-}));
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 // Faithful useFocusEffect stand-in: runs the memoized callback on mount so the
 // resolveState guard actually executes (and we can prove it never calls getStatus).
 jest.mock('expo-router', () => {

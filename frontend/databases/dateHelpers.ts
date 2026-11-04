@@ -22,7 +22,7 @@
  * Thursday 00:00 in AEST/UTC+10 = Wednesday 14:00 UTC). SQLite's `date()` would
  * bucket it onto WEDNESDAY; `localDateString` correctly keys it to THURSDAY.
  * The same backdated-entry case is what made the bug invisible in tests until
- * the suite was pinned to a non-UTC timezone (see jest.tz.js).
+ * the suite was pinned to a non-UTC timezone (see jest.globalSetup.js).
  *
  * Example: an entry at 2025-05-19T01:30:00Z is on May 19th in UTC but on
  * May 18th in PST (UTC-8). `startOfLocalDay` / `endOfLocalDay` give you the
@@ -32,6 +32,8 @@
  * imported into any worker (e.g. the visualisation worker) without pulling
  * in the SQLite runtime.
  */
+
+import { now } from '@/lib/clock';
 
 /**
  * Returns the UTC ISO timestamp for the start of the local-timezone day
@@ -108,7 +110,7 @@ export function daysBetween(a: string, b: string): number {
  * place to live.
  */
 export function getDefaultEntryDate(): string {
-  return new Date().toISOString();
+  return now().toISOString();
 }
 
 /**

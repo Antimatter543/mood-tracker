@@ -51,7 +51,7 @@ jobs:
       RUN_URL: ${{ github.event.workflow_run.html_url }}
     steps:
       - name: Checkout the classifier
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # `workflow_run` always runs the workflow + code from the DEFAULT branch,
           # never from the head of the run that failed — so this is main's classifier

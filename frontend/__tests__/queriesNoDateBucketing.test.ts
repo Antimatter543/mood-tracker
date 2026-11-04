@@ -20,9 +20,12 @@
  * named exports (MONTHLY_DAILY_AVERAGES / ALL_ENTRY_INSTANTS) precisely so this
  * invariant covers it too. A grep guard below also fails if those screens grow
  * a new inline `date(date)` / `strftime` over a stored timestamp.
+ *
+ * Source-scan verdict (lane D): KEEP the inline-SQL scan (a shape bug no
+ * behavioural test can see: SQL typed straight into a screen). The exported
+ * constant half is behavioural, not a scan. Bug commit: 066728b.
  */
-import { readFileSync, readdirSync } from 'fs';
-import { join } from 'path';
+import { code, listSourceFiles } from '@/testing/sourceScan';
 import * as queries from '@/components/visualisations/queries';
 
 // Matches SQLite day-bucketing of the stored `date` column:
@@ -35,15 +38,6 @@ import * as queries from '@/components/visualisations/queries';
 // `(?<![A-Za-z])` also rules out `update(` / identifiers ending in `date`. It
 // does NOT match the legitimate `WHERE date BETWEEN ? AND ?` range filter.
 const BANNED = /(?<![A-Za-z])date\s*\(\s*(?:[a-z_]+\.)?date\s*[),]|strftime\s*\([^)]*\bdate\b/;
-
-// Strip JS/SQL comments so a doc-comment EXPLAINING the old buggy SQL (which we
-// keep, for the "why") doesn't read as a live offender. Removes // line, /* */
-// block, and -- SQL line comments. Crude but sufficient for source scanning.
-const stripComments = (src: string): string =>
-  src
-    .replace(/\/\*[\s\S]*?\*\//g, ' ') // block comments
-    .replace(/\/\/[^\n]*/g, ' ') // JS line comments
-    .replace(/--[^\n]*/g, ' '); // SQL line comments
 
 describe('queries.ts SQL never day-buckets a stored timestamp', () => {
   const sqlExports = Object.entries(queries).filter(
@@ -68,18 +62,15 @@ describe('no source file carries inline SQL day-bucketing (comments excluded)', 
   // These screens + the visualisation components previously held inline SQL
   // that day-bucketed in UTC. Re-scan their (comment-stripped) source so a
   // future inline query can't dodge the queries.ts string-export invariant.
-  const FILES: string[] = [
-    join(__dirname, '..', 'app', '(tabs)', 'index.tsx'),
-    join(__dirname, '..', 'app', '(tabs)', '_layout.tsx'),
+  // Comments are stripped: a doc-comment EXPLAINING the old buggy SQL is not an offender.
+  const FILES = [
+    'app/(tabs)/index.tsx',
+    'app/(tabs)/_layout.tsx',
+    ...listSourceFiles(['components/visualisations']),
   ];
-  const visDir = join(__dirname, '..', 'components', 'visualisations');
-  for (const f of readdirSync(visDir)) {
-    if (f.endsWith('.tsx') || f.endsWith('.ts')) FILES.push(join(visDir, f));
-  }
 
   it.each(FILES)('%s has no inline date()/strftime over a stored timestamp', (file) => {
-    const src = stripComments(readFileSync(file, 'utf8'));
-    const match = src.match(BANNED);
+    const match = code(file).match(BANNED);
     expect(
       match ? `${file} contains inline banned SQL day-bucketing: "${match[0]}"` : null,
     ).toBeNull();

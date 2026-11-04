@@ -6,9 +6,6 @@
  * marker. The native read + DB layers are mocked; healthConnectPure (window +
  * aggregation math) runs for real so the day counts + chunking are deterministic.
  */
-import { createMockDatabase } from 'expo-sqlite';
-
-jest.mock('expo-sqlite');
 jest.mock('@/lib/healthConnect', () => ({
   readHealthForRange: jest.fn(),
 }));
@@ -32,6 +29,7 @@ import {
 } from '@/databases/health-metrics';
 import { getEarliestEntryInstant } from '@/databases/entries';
 import { getSetting, updateSetting } from '@/databases/user-settings';
+import { makeDb, resetWriteLayer } from '@/testing/fakeDb';
 import {
   HEALTH_CONNECT_SOURCE,
   HEALTH_LAST_SYNCED_SETTING_KEY,
@@ -76,6 +74,7 @@ const TWO_DAY_PAYLOAD = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  resetWriteLayer();
   mockUpdateSetting.mockResolvedValue(undefined);
   mockUpsert.mockResolvedValue(undefined);
 });
@@ -87,7 +86,7 @@ describe('syncHealthMetrics — first sync (empty DB, no mood, nothing stored)',
     mockEarliestStored.mockResolvedValue(null); // nothing stored
     mockRead.mockResolvedValue(TWO_DAY_PAYLOAD);
 
-    const result = await syncHealthMetrics(createMockDatabase() as any, { now: NOW });
+    const result = await syncHealthMetrics(makeDb() as any, { now: NOW });
 
     // Reads the marker + earliest mood + earliest stored to resolve the window.
     expect(mockGetSetting).toHaveBeenCalledWith(expect.anything(), HEALTH_LAST_SYNCED_SETTING_KEY);
@@ -133,7 +132,7 @@ describe('syncHealthMetrics — historical backfill (mood history spans months)'
       ],
     });
 
-    const result = await syncHealthMetrics(createMockDatabase() as any, { now: NOW });
+    const result = await syncHealthMetrics(makeDb() as any, { now: NOW });
 
     // Chunked: >1 read, and one upsert PER read (per-chunk upsert bounds memory).
     expect(mockRead.mock.calls.length).toBeGreaterThan(1);
@@ -164,7 +163,7 @@ describe('syncHealthMetrics — steady-state incremental', () => {
     mockEarliestStored.mockResolvedValue('2026-05-31');
     mockRead.mockResolvedValue(emptyPayload());
 
-    const result = await syncHealthMetrics(createMockDatabase() as any, { now: NOW });
+    const result = await syncHealthMetrics(makeDb() as any, { now: NOW });
 
     // ONE read; Brisbane start-of-local-day for 2026-07-07T00:00Z is 2026-07-06T14:00Z.
     expect(mockRead).toHaveBeenCalledTimes(1);
@@ -182,7 +181,7 @@ describe('syncHealthMetrics — failure', () => {
     mockEarliestStored.mockResolvedValue(null);
     mockRead.mockRejectedValue(new Error('read blew up'));
 
-    const result = await syncHealthMetrics(createMockDatabase() as any, { now: NOW });
+    const result = await syncHealthMetrics(makeDb() as any, { now: NOW });
 
     expect(mockUpdateSetting).not.toHaveBeenCalled(); // marker NOT advanced → next sync re-covers the gap
     expect(result).toEqual({ success: false, daysWritten: 0, syncedAt: null });
@@ -193,7 +192,7 @@ describe('syncHealthMetrics — failure', () => {
     mockEarliestMood.mockRejectedValue(new Error('db gone'));
     mockEarliestStored.mockResolvedValue(null);
 
-    const result = await syncHealthMetrics(createMockDatabase() as any, { now: NOW });
+    const result = await syncHealthMetrics(makeDb() as any, { now: NOW });
 
     expect(mockRead).not.toHaveBeenCalled();
     expect(mockUpdateSetting).not.toHaveBeenCalled();

@@ -24,27 +24,17 @@
 import React, { Component, type ComponentType } from 'react';
 import { Text, StyleSheet } from 'react-native';
 import { render, act, fireEvent, screen } from '@testing-library/react-native';
+import { INSETS, setInsets } from '@/testing/platform';
 
-// Mock the theme so the fallback's useThemeColors() doesn't require a
-// SettingsProvider (we're testing boundary behavior, not theming). Only the
-// tokens the fallback actually reads are returned.
-jest.mock('@/styles/global', () => ({
-  useThemeColors: () => ({
-    background: '#141418',
-    text: '#FFFFFF',
-    textSecondary: 'rgba(211,212,213,1)',
-    accent: '#4CAF50',
-  }),
-}));
+// Real theme tokens so the fallback's useThemeColors() doesn't require a
+// SettingsProvider (we're testing boundary behavior, not theming).
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 // The fallback REPLACES the screen's content, so it renders outside `Layout`
 // and claims the top safe-area itself (it used to inherit that clearance from
 // the navigator header bar, which no longer exists — see components/PageHeader).
-// jest-expo does NOT auto-mock safe-area-context and useSafeAreaInsets needs a
-// provider, so stub it with a realistic status-bar inset.
-jest.mock('react-native-safe-area-context', () => ({
-  useSafeAreaInsets: () => ({ top: 24, bottom: 0, left: 0, right: 0 }),
-}));
+// Give it a realistic status-bar inset (gesture nav: status bar only).
+beforeEach(() => setInsets(INSETS.GESTURE_NAV));
 
 import {
   ScreenErrorBoundary,
@@ -116,7 +106,7 @@ describe('ScreenErrorFallback (direct render)', () => {
       <ScreenErrorFallback error={new Error('boom')} retry={() => {}} />,
     );
     const root = view.toJSON() as any;
-    expect(StyleSheet.flatten(root.props.style).paddingTop).toBe(24);
+    expect(StyleSheet.flatten(root.props.style).paddingTop).toBe(INSETS.GESTURE_NAV.top);
   });
 });
 

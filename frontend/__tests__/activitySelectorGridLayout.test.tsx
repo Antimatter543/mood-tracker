@@ -26,7 +26,8 @@
  */
 import React from 'react';
 import { Dimensions, StyleSheet } from 'react-native';
-import { render, waitFor } from '@testing-library/react-native';
+import { act, render, waitFor } from '@testing-library/react-native';
+import { deferred } from '@/testing/async';
 
 // ── Sortable.Grid passthrough; records every grid render in order ─────────────
 type GridProps = {
@@ -209,11 +210,16 @@ describe('a group is never rendered before its activities', () => {
      * together makes the gap unobservable no matter which read wins.
      */
     it('never mounts a grid for a populated group with no data in it', async () => {
-        mockGetActivities.mockImplementation(
-            () => new Promise((resolve) => setTimeout(() => resolve(ACTIVITIES), 10))
-        );
+        const activitiesLoad = deferred<Activity[]>();
+        mockGetActivities.mockReturnValue(activitiesLoad.promise);
 
-        await renderSelector();
+        const view = await render(
+            <ActivitySelector onSelectActivity={jest.fn()} selectedActivities={[]} />
+        );
+        // The groups read has settled; the activities read is still in flight.
+        await act(async () => {});
+        await act(async () => activitiesLoad.resolve(ACTIVITIES));
+        await waitFor(() => expect(view.getByText('Emotions')).toBeTruthy());
 
         expect(mockGetActivityGroups).toHaveBeenCalledTimes(1);
         expect(mockGetActivities).toHaveBeenCalledTimes(1);

@@ -6,6 +6,7 @@
  * Runs under the Brisbane pin (UTC+10).
  */
 import { aggregateDailyAverages } from '@/components/visualisations/transforms/dailyAverages';
+import { localIso } from '@/testing/builders';
 import { buildHeatmapGrid, type HeatmapInput } from '@/components/visualisations/transforms/heatmap';
 import {
   buildCalendarMarkers,
@@ -21,9 +22,6 @@ const MARKER_COLORS: CalendarMarkerColors = {
   onLight: '#1A1A1A',
 };
 
-const localMidnight = (y: number, m0: number, d: number) =>
-  new Date(y, m0, d, 0, 0, 0).toISOString();
-
 // Reproduce the component's transform: raw instants -> {date: localDay, mood}.
 const toDayRows = (rows: { date: string; mood: number }[]): HeatmapInput[] =>
   aggregateDailyAverages(rows).map((d) => ({ date: d.day, mood: d.avg }));
@@ -31,7 +29,7 @@ const toDayRows = (rows: { date: string; mood: number }[]): HeatmapInput[] =>
 describe('heatmap places a backdated entry on its LOCAL day', () => {
   it('the cell for the backdated Thursday entry is dated 2026-06-11, not 2026-06-10', () => {
     const dayRows = toDayRows([
-      { date: localMidnight(2026, 5, 11), mood: 9 }, // Thu local / Wed UTC
+      { date: localIso('2026-06-11', 0), mood: 9 }, // Thu local / Wed UTC
     ]);
     const grid = buildHeatmapGrid(dayRows, 'system');
     const cell = grid.cells.find((c) => c.mood === 9);
@@ -54,7 +52,7 @@ describe('heatmap places a backdated entry on its LOCAL day', () => {
 describe('calendar marks a backdated entry on its LOCAL day', () => {
   it('the marker key is the local Thursday 2026-06-11', () => {
     const markerRows = aggregateDailyAverages([
-      { date: localMidnight(2026, 5, 11), mood: 9 }, // Thu local / Wed UTC
+      { date: localIso('2026-06-11', 0), mood: 9 }, // Thu local / Wed UTC
     ]).map((d) => ({ date: d.day, avgMood: d.avg }));
     const markers = buildCalendarMarkers(markerRows, MARKER_COLORS);
     expect(Object.keys(markers)).toEqual(['2026-06-11']);

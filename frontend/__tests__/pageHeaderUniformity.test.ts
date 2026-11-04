@@ -18,19 +18,20 @@
  *
  * A NEW tab screen fails this suite until it adopts the convention.
  */
-import fs from 'fs';
-import path from 'path';
+import { listSourceFiles, readSource } from '@/testing/sourceScan';
 
-const TABS_DIR = path.join(__dirname, '..', 'app', '(tabs)');
-const LAYOUT_FILE = path.join(TABS_DIR, '_layout.tsx');
+// Source-scan verdict (lane D): KEEP for now. It is a layout invariant that lane E's
+// golden screenshots will cover; delete this scan once those goldens land.
+// Bug commit: 55a0ad2.
+const TABS_DIR = 'app/(tabs)';
+const LAYOUT_FILE = `${TABS_DIR}/_layout.tsx`;
 
-const read = (file: string) => fs.readFileSync(file, 'utf8');
+
 
 /** Every screen file under app/(tabs)/ — i.e. everything but the layout. */
-const screenFiles = fs
-    .readdirSync(TABS_DIR)
-    .filter(f => f.endsWith('.tsx') && !f.startsWith('_'))
-    .sort();
+const screenFiles = listSourceFiles([TABS_DIR])
+    .map(f => f.slice(TABS_DIR.length + 1))
+    .filter(f => f.endsWith('.tsx') && !f.startsWith('_'));
 
 describe('tab screens — uniform page header', () => {
     it('finds all five tab screens (guards against a silently renamed file)', () => {
@@ -44,7 +45,7 @@ describe('tab screens — uniform page header', () => {
     });
 
     describe.each(screenFiles)('%s', file => {
-        const source = read(path.join(TABS_DIR, file));
+        const source = readSource(`${TABS_DIR}/${file}`);
 
         it('imports the shared PageHeader', () => {
             expect(source).toMatch(
@@ -98,7 +99,7 @@ describe('tab screens, page titles start on the same vertical line', () => {
     });
 
     describe.each(screenFiles)('%s', file => {
-        const source = read(path.join(TABS_DIR, file));
+        const source = readSource(`${TABS_DIR}/${file}`);
         const isFullHeight = /useScrollView=\{false\}/.test(source);
 
         it(
@@ -123,7 +124,7 @@ describe('tab screens, page titles start on the same vertical line', () => {
 
 
 describe('(tabs)/_layout.tsx — navigator header', () => {
-    const layout = read(LAYOUT_FILE);
+    const layout = readSource(LAYOUT_FILE);
 
     it('turns the navigator header OFF for every tab, in shared screenOptions', () => {
         // Must live in the shared screenOptions object so it applies to all five
@@ -161,7 +162,7 @@ describe('(tabs)/_layout.tsx — navigator header', () => {
 
 describe('styles/global.ts — no competing page-title style', () => {
     it('no longer exports the old header / headerText pair', () => {
-        const global = read(path.join(__dirname, '..', 'styles', 'global.ts'));
+        const global = readSource('styles/global.ts');
         // Match the style KEYS at object level, not the word inside a comment.
         expect(global).not.toMatch(/^\s*header:\s*\{/m);
         expect(global).not.toMatch(/^\s*headerText:\s*\{/m);

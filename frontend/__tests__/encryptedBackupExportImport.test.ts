@@ -14,13 +14,11 @@
  * Crypto is real (node:crypto AES-GCM via __mocks__/expo-crypto.ts, @noble
  * Argon2id) with cheap KDF params; see backupCrypto.test.ts.
  */
-import { createMockDatabase } from 'expo-sqlite';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as SecureStore from 'expo-secure-store';
 import * as Sharing from 'expo-sharing';
 
-jest.mock('expo-sqlite');
 jest.mock('expo-document-picker');
 jest.mock('expo-file-system/legacy', () => require('../__mocks__/expo-file-system'));
 jest.mock('expo-sharing');
@@ -35,18 +33,9 @@ jest.mock('@/databases/migrations', () => ({ runMigrations: jest.fn() }));
 import { BACKUP_KEY_UNREADABLE, exportDatabaseData, importDatabaseData } from '@/databases/data-export';
 import { createBackupKey, encryptBackup, KdfParams } from '@/lib/backupCrypto';
 import { setBackupPassword } from '@/lib/backupKeyStore';
-import {
-  __setWriteConnectionForTests,
-  __resetWriteTransactionForTests,
-} from '@/databases/writeTransaction';
+import { makeDb, resetWriteLayer, sqlCalls, type MockDb } from '@/testing/fakeDb';
 
 const FAST_KDF: KdfParams = { name: 'argon2id', memoryKiB: 256, iterations: 1, parallelism: 1 };
-
-const makeDb = () => {
-  const db = createMockDatabase();
-  __setWriteConnectionForTests(db as any);
-  return db;
-};
 
 const PLAIN_BACKUP = {
   version: 3,
@@ -64,7 +53,7 @@ beforeEach(() => {
   // attached after resetAllMocks, answering undefined in later tests.
   jest.restoreAllMocks();
   jest.resetAllMocks();
-  __resetWriteTransactionForTests();
+  resetWriteLayer();
   (SecureStore as any).__reset();
   (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true });
   (FileSystem.writeAsStringAsync as jest.Mock).mockResolvedValue(undefined);
@@ -84,8 +73,7 @@ const writtenFiles = (): [string, string][] =>
 const pickFileWithContents = (contents: string) =>
   (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValueOnce('eyJk').mockResolvedValueOnce(contents);
 
-const entryInserts = (db: ReturnType<typeof createMockDatabase>) =>
-  db.runAsync.mock.calls.filter((c: any[]) => /INSERT OR REPLACE INTO entries/i.test(c[0]));
+const entryInserts = (db: MockDb) => sqlCalls(db, /INSERT OR REPLACE INTO entries/i);
 
 /** A db whose export queries return one entry with a private note. */
 const exportingDb = () => {

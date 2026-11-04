@@ -16,10 +16,11 @@
  *      on the callback's connection (`txn`/`conn`) — NEVER on the outer `db`
  *      (which would put the write outside the transaction: the original bug).
  */
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { code, readSource } from '@/testing/sourceScan';
 
-const root = join(__dirname, '..');
+// Source-scan verdict (lane D): KEEP. Fake transactions are a shape bug (statements
+// on the outer `db` inside a txn callback) that type-checks and passes behaviour
+// tests. Bug commit: aa4732f.
 
 // Runtime modules reachable while writing. migrations.ts is EXCLUDED from rule 1
 // (documented above); DBViewer.tsx is a component that must be SQL/txn-free.
@@ -32,6 +33,7 @@ const NO_EXPO_TXN_FILES = [
   'databases/lifecycle.ts',
   'components/generateData.ts',
   'components/DBViewer.tsx',
+  'lib/qa/runSeed.ts',
 ] as const;
 
 // Modules that open write transactions — each must import from writeTransaction.
@@ -43,21 +45,15 @@ const WRITE_MODULES = [
   'databases/health-metrics.ts',
   'databases/lifecycle.ts',
   'components/generateData.ts',
+  'lib/qa/runSeed.ts',
 ] as const;
 
-const read = (rel: string) => readFileSync(join(root, rel), 'utf8');
-
-// Strip JS/SQL comments so a doc-comment that NAMES a banned symbol (to explain
-// the rule / the incident) doesn't read as a live offender.
-const stripComments = (src: string): string =>
-  src
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/\/\/[^\n]*/g, ' ')
-    .replace(/--[^\n]*/g, ' ');
+// `code()` strips comments, so a doc-comment that NAMES a banned symbol (to
+// explain the rule / the incident) doesn't read as a live offender.
 
 describe('rule 1 — runtime modules never call expo transaction APIs', () => {
   it.each(NO_EXPO_TXN_FILES)('%s uses no withExclusive/withTransactionAsync', (file) => {
-    const src = stripComments(read(file));
+    const src = code(file);
     expect(src).not.toMatch(/\.withExclusiveTransactionAsync\s*\(/);
     expect(src).not.toMatch(/\.withTransactionAsync\s*\(/);
   });
@@ -65,14 +61,14 @@ describe('rule 1 — runtime modules never call expo transaction APIs', () => {
   it('migrations.ts is the ONLY runtime module allowed expo withTransactionAsync', () => {
     // Documents the exception AND proves it still exists (so the exclusion above
     // isn't silently pointing at a file that stopped using it).
-    const src = stripComments(read('databases/migrations.ts'));
+    const src = code('databases/migrations.ts');
     expect(src).toMatch(/\.withTransactionAsync\s*\(/);
   });
 });
 
 describe('rule 2 — write modules import the write primitive', () => {
   it.each(WRITE_MODULES)('%s imports from databases/writeTransaction', (file) => {
-    const src = read(file);
+    const src = readSource(file);
     expect(src).toMatch(/from ['"]@\/databases\/writeTransaction['"]/);
     expect(src).toMatch(/withWriteTransaction|withWriteLock/);
   });
@@ -107,7 +103,7 @@ const DB_DML = /\bdb\.(runAsync|execAsync|getAllAsync|getFirstAsync)\s*\(/;
 
 describe('rule 3 — statements inside a write callback run on txn/conn, never the outer db', () => {
   it.each(WRITE_MODULES)('%s issues no db.<dml>() inside a write callback', (file) => {
-    const src = stripComments(read(file));
+    const src = code(file);
     const bodies = [
       ...callbackBodies(src, 'withWriteTransaction'),
       ...callbackBodies(src, 'withWriteLock'),

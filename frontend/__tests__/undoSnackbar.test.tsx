@@ -178,12 +178,9 @@ describe('UndoSnackbar — overlay structure', () => {
         // Jest is structurally blind to native hit-testing, so the device-proven
         // bug class is banned at the import layer: nothing in UndoSnackbar may
         // come from reanimated. The fade-in must stay RN core `Animated`.
-        const fs = require('fs');
-        const path = require('path');
-        const src = fs.readFileSync(
-            path.join(__dirname, '..', 'components', 'UndoSnackbar.tsx'),
-            'utf8'
-        );
+        // Source-scan verdict (lane D): KEEP. Bug commits 06df84b, 800789a (dead Undo).
+        const { code } = require('@/testing/sourceScan');
+        const src = code('components/UndoSnackbar.tsx');
         expect(src).not.toMatch(/react-native-reanimated/);
         expect(src).not.toMatch(/\bentering\s*=/);
         expect(src).not.toMatch(/\bexiting\s*=/);

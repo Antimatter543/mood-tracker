@@ -6,6 +6,7 @@ import { useThemeColors } from '@/styles/global';
 import Feather from '@expo/vector-icons/Feather';
 import { isSameLocalDay } from './dateHelpersStub';
 import { useDateFormat } from '@/hooks/useDateFormat';
+import { now } from '@/lib/clock';
 
 type DatePickerProps = {
     date: Date;
@@ -157,7 +158,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({ date, onDateChange }) =>
                     // Only the DATE picker is bounded to "today" (no future
                     // entries); the time picker is unrestricted so editing a past
                     // day's time isn't clamped to before the current clock time.
-                    maximumDate={mode === 'date' ? new Date() : undefined}
+                    maximumDate={mode === 'date' ? now() : undefined}
                 />
             )}
         </View>

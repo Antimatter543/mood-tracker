@@ -56,17 +56,7 @@ jest.mock('expo-sqlite', () => {
   return { useSQLiteContext: () => db };
 });
 jest.mock('@expo/vector-icons/Feather', () => 'Feather');
-jest.mock('@/styles/global', () => ({
-  useThemeColors: () => ({
-    text: '#fff',
-    textSecondary: '#aaa',
-    accent: '#66aaaa',
-    accentLight: '#112233',
-    cardBackground: '#111',
-    border: '#333',
-    overlays: { tag: '#222', tagBorder: '#444' },
-  }),
-}));
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 // ── expo-router useFocusEffect: faithful stand-in + a manual "refocus" handle ──
 // Mirrors the real hook's contract (run the memoized callback on focus, forward a

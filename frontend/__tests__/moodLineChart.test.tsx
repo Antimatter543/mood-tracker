@@ -17,48 +17,9 @@
  * SettingsProvider is needed.
  */
 import { fireEvent, render } from '@testing-library/react-native';
+import { addDays } from '@/testing/builders';
 
-// reanimated's worklets runtime is unavailable under jest. The chart only uses
-// it for the tooltip's fade-in leaf, so shim exactly that surface (same pattern
-// as recentlyDeletedPanel.test.tsx).
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const anim = { duration: () => anim };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
-        },
-        FadeIn: anim,
-    };
-});
-
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return {
-        ...actual,
-        useThemeColors: () => ({
-            background: '#141418',
-            cardBackground: '#1E1F24',
-            secondaryBackground: '#26272C',
-            text: '#FFFFFF',
-            textSecondary: '#AAAAAA',
-            border: 'rgba(255,255,255,0.1)',
-            accent: '#4CAF50',
-            accentDark: '#3d8b40',
-            accentLight: 'rgba(76,175,80,0.1)',
-            overlays: {
-                tag: '#222222',
-                tagBorder: '#333333',
-                border: '#333333',
-                textSecondary: '#888888',
-            },
-            elevation: { shadowColor: '#000000', shadowOpacity: 0.3, elevation: 4 },
-            isDark: true,
-        }),
-    };
-});
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 import MoodLineChart, {
     type MoodLinePoint,
@@ -66,7 +27,7 @@ import MoodLineChart, {
 
 const CHART_WIDTH = 320;
 
-const day = (n: number): string => `2026-09-${String(n).padStart(2, '0')}`;
+const day = (n: number): string => addDays('2026-09-01', n - 1);
 
 /** Mixed series: real / real / GAP / real / real. */
 const mixed: MoodLinePoint[] = [

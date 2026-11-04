@@ -42,6 +42,7 @@ import {
   type CorrelationRow,
   type DaySummary,
 } from './transforms/daySummary';
+import { now } from '@/lib/clock';
 
 // Semantic day-number colors used ON a mood marker (like the calendar's own
 // selectedDayTextColor / the heatmap's on-square text). NOT a mood palette —
@@ -79,7 +80,7 @@ const MoodCalendar = () => {
 
   const [activities, setActivities] = useState<Activity[]>([]);
   const [selectedActivityId, setSelectedActivityId] = useState<number | null>(null);
-  const [visibleMonth, setVisibleMonth] = useState<VisibleMonth>(() => visibleMonthOf());
+  const [visibleMonth, setVisibleMonth] = useState<VisibleMonth>(() => visibleMonthOf(now()));
 
   // Per-month RAW rows (theme-independent), so a theme switch re-styles markers
   // WITHOUT re-querying, and navigating back to a visited month is instant.

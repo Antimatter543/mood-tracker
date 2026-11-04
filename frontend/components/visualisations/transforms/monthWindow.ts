@@ -81,8 +81,8 @@ export const gridWindowBounds = (
   return { start: startOfLocalDay(gridStart), end: endOfLocalDay(gridEnd) };
 };
 
-/** The visible month that contains `date` (defaults to now). */
-export const visibleMonthOf = (date: Date = new Date()): VisibleMonth => ({
+/** The visible month that contains `date` (callers pass `now()` from lib/clock for the current month). */
+export const visibleMonthOf = (date: Date): VisibleMonth => ({
   year: date.getFullYear(),
   month: date.getMonth() + 1,
 });

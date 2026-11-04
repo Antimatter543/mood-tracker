@@ -28,12 +28,11 @@
  * (the parse below is deliberately dependency-free so a transitive js-yaml bump can
  * never silently disable this guard).
  */
-import fs from 'fs';
-import path from 'path';
+import { readRepoFile, readSource } from '@/testing/sourceScan';
 
-const REPO_ROOT = path.resolve(__dirname, '../..');
-const WORKFLOW = path.join(REPO_ROOT, '.github/workflows/release-apk.yml');
-const workflow = fs.readFileSync(WORKFLOW, 'utf8');
+// Source-scan verdict (lane D): KEEP. CI-shape bug no behavioural test can see.
+// Bug commit: 3473dfc.
+const workflow = readRepoFile('.github/workflows/release-apk.yml');
 
 /** One `- name:` step of the single job, with its whole body and its line number. */
 type Step = { name: string; body: string; line: number };
@@ -293,10 +292,7 @@ describe('the build-variant markers are usable as grep needles', () => {
     // The marker only reaches the Hermes string table if something renders it. The
     // Health Connect card itself is the wrong host: it returns null in exactly the
     // build we need to inspect. The Settings About block always renders.
-    const settings = fs.readFileSync(
-      path.join(__dirname, '../app/(tabs)/settings.tsx'),
-      'utf8'
-    );
+    const settings = readSource('app/(tabs)/settings.tsx');
     expect(settings).toContain('HEALTH_CONNECT_BUILD_VARIANT');
     expect(settings).toMatch(/testID=\{HEALTH_CONNECT_BUILD_VARIANT\}/);
   });

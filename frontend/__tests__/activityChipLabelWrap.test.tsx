@@ -20,8 +20,7 @@
  * render() below is awaited.
  */
 import React from 'react';
-import fs from 'fs';
-import path from 'path';
+import { readSource } from '@/testing/sourceScan';
 import { Dimensions, StyleSheet } from 'react-native';
 import { render, waitFor } from '@testing-library/react-native';
 
@@ -216,10 +215,9 @@ describe('the derived cell width matches the screen that renders it', () => {
             view.getByTestId('activity-grid-1').props.style
         ).paddingHorizontal as number;
 
-        const entryForm = fs.readFileSync(
-            path.join(__dirname, '..', 'components', 'forms', 'EntryForm.tsx'),
-            'utf8'
-        );
+        // Source-scan verdict (lane D): KEEP. The padding lives in EntryForm's private
+        // StyleSheet, so there is nothing to import. Bug commit: 0374bee.
+        const entryForm = readSource('components/forms/EntryForm.tsx');
         const contentContainer = /contentContainer:\s*\{[\s\S]*?\n\s{8}\}/.exec(entryForm);
         expect(contentContainer).not.toBeNull();
         const formPadding = Number(

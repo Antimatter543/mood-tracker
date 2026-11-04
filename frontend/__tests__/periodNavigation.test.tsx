@@ -62,22 +62,7 @@ jest.mock('@/components/DateRangePicker', () => ({
     default: () => null,
 }));
 
-jest.mock('@/styles/global', () => ({
-    useThemeColors: () => ({
-        background: '#000',
-        cardBackground: '#111',
-        secondaryBackground: '#222',
-        text: '#fff',
-        textSecondary: '#aaa',
-        border: '#333',
-        accent: '#4CAF50',
-        accentDark: '#388E3C',
-        accentLight: 'rgba(76,175,80,0.1)',
-        overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-        elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-        isDark: true,
-    }),
-}));
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 import PeriodNavigator from '@/components/PeriodNavigator';
 import { TimeframeProvider, useTimeframe, type Timeframe } from '@/context/TimeframeContext';

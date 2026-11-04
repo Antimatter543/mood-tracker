@@ -13,24 +13,12 @@
  * entryCard.test.tsx), so the real component tree is exercised.
  */
 import { render, fireEvent } from '@testing-library/react-native';
-import type { ThemeColors } from '@/styles/global';
+import { THEME } from '@/testing/theme';
 import { TimelineSearchBar } from '@/components/timeline/TimelineSearchBar';
 import { MOOD_PRESETS, MoodPresetKey } from '@/components/timeline/entryFilter';
 
-const colors: ThemeColors = {
-    background: '#000',
-    cardBackground: '#111',
-    secondaryBackground: '#222',
-    text: '#fff',
-    textSecondary: '#aaa',
-    border: '#333',
-    accent: '#4CAF50',
-    accentDark: '#388E3C',
-    accentLight: 'rgba(76,175,80,0.1)',
-    overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-    elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-    isDark: true,
-};
+// The real fresh-install theme, never an invented palette.
+const colors = THEME;
 
 type Overrides = {
     query?: string;

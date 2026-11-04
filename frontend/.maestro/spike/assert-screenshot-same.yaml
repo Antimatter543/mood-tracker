@@ -1,0 +1,12 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# SPIKE measurement, positive control: assertScreenshot against a reference captured from the SAME
+# screen moments earlier in this run (the harness copies launch-greeting's home-a.png to
+# ref/home-ref.png beside this file). Expected: PASS at a strict threshold.
+- assertVisible:
+    text: "Good (morning|afternoon|evening)"
+- waitForAnimationToEnd:
+    timeout: 5000
+- assertScreenshot:
+    path: ref/home-ref.png
+    thresholdPercentage: 99.9

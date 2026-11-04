@@ -17,6 +17,10 @@ any write path.
   vice versa.
 - `DATABASE_NAME` lives in `writeTransaction.ts` and is the single source of truth for
   both connections — never hardcode `'moodTracker.db'` elsewhere.
+- **Readiness** (`readiness.ts`): `initializeDatabase` calls `markDatabaseInitialized()`
+  last. Code mounted OUTSIDE the (tabs) SQLiteProvider (the QA seed channel, lib/qa) must
+  `await whenDatabaseInitialized()` before touching the write connection, or a fresh
+  install races the WAL switch and the migrations.
 
 ## THE RULE — all multi-statement writes go through `withWriteTransaction`
 

@@ -15,29 +15,9 @@
  */
 import React from 'react';
 import { render, fireEvent, within } from '@testing-library/react-native';
-import { StyleSheet } from 'react-native';
 
-// Minimal theme so useThemeColors works without SettingsProvider (Card reads it).
-jest.mock('@/styles/global', () => {
-    const actual = jest.requireActual('@/styles/global');
-    return {
-        ...actual,
-        useThemeColors: () => ({
-            background: '#000',
-            cardBackground: '#111',
-            secondaryBackground: '#222',
-            text: '#fff',
-            textSecondary: '#aaa',
-            border: '#333',
-            accent: '#4CAF50',
-            accentDark: '#388E3C',
-            accentLight: 'rgba(76,175,80,0.1)',
-            overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-            elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-            isDark: true,
-        }),
-    };
-});
+// The real theme tokens, so useThemeColors works without SettingsProvider (Card reads it).
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 // OverlayModal pulls overlay-host context we don't need here.
 jest.mock('@/components/OverlayModal', () => ({
@@ -52,39 +32,20 @@ import { EntryCard, formatMood } from '@/components/timeline/EntryCard';
 import { PHOTO_HERO_HEIGHT } from '@/components/timeline/EntryPhotos';
 import { moodColor } from '@/components/timeline/moodColor';
 import type { MoodEntry } from '@/components/types';
+import { makeEntry, makePhoto } from '@/testing/builders';
+import { collectByStyle, styleOf } from '@/testing/rntl';
+import { THEME } from '@/testing/theme';
 
-const THEME_ACCENT = '#4CAF50';
+const THEME_ACCENT = THEME.accent;
+const RING_FALLBACK = THEME.overlays.tagBorder;
 
-const baseEntry = (over: Partial<MoodEntry> = {}): MoodEntry => ({
-    id: 1,
-    mood: 7,
-    notes: '',
-    date: '2026-06-12T10:05:00.000Z',
-    activities: [],
-    photos: [],
-    ...over,
-});
+const baseEntry = (over: Partial<MoodEntry> = {}): MoodEntry =>
+    makeEntry({ mood: 7, notes: '', date: '2026-06-12T10:05:00.000Z', ...over });
 
 const noop = () => {};
 
-// Flatten a JSON node's style prop to a single object for assertion.
-const styleOf = (node: any) => (node?.props ? StyleSheet.flatten(node.props.style) || {} : {});
-
-/** Depth-first collect of every JSON node matching a predicate on its style. */
-const collectByStyle = (
-    json: any,
-    pred: (s: any) => boolean,
-    out: any[] = []
-): any[] => {
-    if (!json || typeof json !== 'object') return out;
-    if (pred(styleOf(json))) out.push(json);
-    const kids = json.children;
-    if (Array.isArray(kids)) for (const k of kids) collectByStyle(k, pred, out);
-    return out;
-};
-
 describe('EntryCard — structure', () => {
-    const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
+    const colors = THEME;
 
     it('puts the mood in the rail node (integers bare, fractions to one decimal), not "/10" prose', async () => {
         const view = await render(
@@ -103,7 +64,7 @@ describe('EntryCard — structure', () => {
     });
 
     it("tints the node's ring with the canonical mood ramp", async () => {
-        const expected = moodColor(7, THEME_ACCENT, '#333'); // rgba(76,175,80, 0.76)
+        const expected = moodColor(7, THEME_ACCENT, RING_FALLBACK); // rgba(76,175,80, 0.76)
         const view = await render(
             <EntryCard entry={baseEntry({ mood: 7 })} onEdit={noop} onDelete={noop} onToggleStar={noop} colors={colors} />
         );
@@ -112,7 +73,7 @@ describe('EntryCard — structure', () => {
         await view.rerender(
             <EntryCard entry={baseEntry({ mood: 2 })} onEdit={noop} onDelete={noop} onToggleStar={noop} colors={colors} />
         );
-        expect(styleOf(view.getByTestId('entry-mood-node')).borderColor).toBe(moodColor(2, THEME_ACCENT, '#333'));
+        expect(styleOf(view.getByTestId('entry-mood-node')).borderColor).toBe(moodColor(2, THEME_ACCENT, RING_FALLBACK));
     });
 
     it('draws the rail into the node unless first of the day, and out of it unless last', async () => {
@@ -181,9 +142,7 @@ describe('EntryCard — structure', () => {
         const view = await render(
             <EntryCard
                 entry={baseEntry({
-                    photos: [
-                        { id: 9, entry_id: 1, file_path: 'file:///media/a.jpg', media_type: 'image' },
-                    ],
+                    photos: [makePhoto({ id: 9, file_path: 'file:///media/a.jpg' })],
                 })}
                 onEdit={noop}
                 onDelete={noop}
@@ -201,7 +160,7 @@ describe('EntryCard — structure', () => {
 });
 
 describe('EntryCard — recycled into another entry (FlashList re-uses the instance)', () => {
-    const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
+    const colors = THEME;
 
     it("does not carry an open delete strip over to the next entry", async () => {
         const card = (id: number) => (
@@ -223,7 +182,7 @@ describe('EntryCard — recycled into another entry (FlashList re-uses the insta
 });
 
 describe('EntryCard — star toggle', () => {
-    const colors: any = (jest.requireMock('@/styles/global') as any).useThemeColors();
+    const colors = THEME;
 
     it('shows an UNSTARRED (outline) star when starred_at is null: "Star entry", not selected', async () => {
         const view = await render(

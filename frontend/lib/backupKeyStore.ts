@@ -19,6 +19,7 @@ import {
   deviceTotalMemory,
   isKdfProfile,
 } from '@/lib/backupKdfProfiles';
+import { now as clockNow } from '@/lib/clock';
 
 /**
  * Where the backup-encryption key lives: expo-secure-store, i.e. a value
@@ -181,7 +182,7 @@ export async function getPasswordConfirmedAt(): Promise<number | null> {
   }
 }
 
-export async function markPasswordConfirmed(now: number = Date.now()): Promise<void> {
+export async function markPasswordConfirmed(now: number = clockNow().getTime()): Promise<void> {
   await SecureStore.setItemAsync(CONFIRMED_AT_KEY, String(now), STORE_OPTIONS);
 }
 

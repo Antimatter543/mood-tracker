@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { now } from '@/lib/clock';
 
 /**
  * Shape of an in-progress entry draft. Mirrors the persisted form payload that
@@ -29,7 +30,8 @@ export type EntryDraftValidation = {
     errors: Partial<Record<keyof EntryDraft, string>>;
 };
 
-const DEFAULT_DRAFT: EntryDraft = {
+/** Exported so test builders (`@/testing/builders`) derive their defaults from here. */
+export const DEFAULT_DRAFT: EntryDraft = {
     mood: 5.0,
     activities: [],
     notes: '',
@@ -46,7 +48,7 @@ function buildInitialDraft(init?: EntryDraftInit): EntryDraft {
         mood: init?.mood ?? DEFAULT_DRAFT.mood,
         activities: init?.activities ? [...init.activities] : [],
         notes: init?.notes ?? '',
-        date: init?.date ? new Date(init.date) : new Date(),
+        date: init?.date ? new Date(init.date) : now(),
         photos: init?.photos ? [...init.photos] : [],
     };
 }

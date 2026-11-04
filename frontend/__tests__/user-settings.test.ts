@@ -1,6 +1,3 @@
-import { createMockDatabase } from 'expo-sqlite';
-
-jest.mock('expo-sqlite');
 jest.mock('@/components/IconPicker', () => ({ IconFamilyType: {} }));
 jest.mock('@/components/types', () => ({}));
 
@@ -9,10 +6,15 @@ import {
   getSetting,
   updateSetting,
 } from '@/databases/user-settings';
+import { makeDb, resetWriteLayer } from '@/testing/fakeDb';
+
+beforeEach(() => {
+  resetWriteLayer();
+});
 
 describe('initializeSettingsTable', () => {
   it('creates the user_settings table', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     await initializeSettingsTable(db as any);
 
     const createSql = db.execAsync.mock.calls[0][0] as string;
@@ -21,7 +23,7 @@ describe('initializeSettingsTable', () => {
   });
 
   it('seeds the V1 default settings via INSERT OR IGNORE', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     await initializeSettingsTable(db as any);
 
     const seedSql = db.runAsync.mock.calls[0][0] as string;
@@ -34,7 +36,7 @@ describe('initializeSettingsTable', () => {
 
 describe('updateSetting', () => {
   it('issues an INSERT OR REPLACE upsert', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
 
     await updateSetting(db as any, 'fab_position', 'left');
@@ -47,7 +49,7 @@ describe('updateSetting', () => {
 
 describe('getSetting — additional fallback cases', () => {
   it('returns registry default when key is missing and registry has a boolean default', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue(null);
 
     const result = await getSetting(db as any, 'show_mood_benchmarks');
@@ -56,7 +58,7 @@ describe('getSetting — additional fallback cases', () => {
   });
 
   it('returns empty string for keys not in the registry', async () => {
-    const db = createMockDatabase();
+    const db = makeDb();
     db.getFirstAsync.mockResolvedValue(null);
 
     const result = await getSetting(db as any, 'utterly_unknown_key');

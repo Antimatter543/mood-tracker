@@ -13,6 +13,9 @@
  * The heavy contexts (SQLite, theme, data) are mocked to the minimum needed.
  */
 import React from 'react';
+import { makeDb, resetWriteLayer, type MockDb } from '@/testing/fakeDb';
+import { makeEntryRow } from '@/testing/builders';
+import { setInsets } from '@/testing/platform';
 import { render, act, waitFor } from '@testing-library/react-native';
 
 // ── Mock expo-router useFocusEffect (run on mount + on callback-identity change) ──
@@ -26,57 +29,14 @@ jest.mock('expo-router', () => {
     };
 });
 
-// ── Controllable mock SQLite DB behind useSQLiteContext ──────────────────────
-const mockDb = {
-    getAllAsync: jest.fn().mockResolvedValue([]),
-    getFirstAsync: jest.fn().mockResolvedValue(null),
-    runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 }),
-    withTransactionAsync: jest
-        .fn()
-        .mockImplementation(async (cb: () => Promise<void>) => cb()),
-};
-// DBViewer now renders the undo snackbar + the bin panel, which import
-// reanimated (its worklets runtime is unavailable under jest).
-jest.mock('react-native-reanimated', () => {
-    const ReactLocal = require('react');
-    const { View } = require('react-native');
-    const anim = { duration: () => anim };
-    return {
-        __esModule: true,
-        default: {
-            View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props),
-        },
-        FadeIn: anim,
-        FadeInDown: anim,
-        FadeOutDown: anim,
-    };
-});
-jest.mock('react-native-safe-area-context', () => ({
-    useSafeAreaInsets: () => ({ top: 0, bottom: 48, left: 0, right: 0 }),
-}));
-jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
-
+// The narrow expo-sqlite factory stays: it serves useSQLiteContext from the per-test db below.
+let mockDb: MockDb;
 jest.mock('expo-sqlite', () => ({
     useSQLiteContext: () => mockDb,
 }));
 
 // ── Minimal theme so useThemeColors works without SettingsProvider ───────────
-jest.mock('@/styles/global', () => ({
-    useThemeColors: () => ({
-        background: '#000',
-        cardBackground: '#111',
-        secondaryBackground: '#222',
-        text: '#fff',
-        textSecondary: '#aaa',
-        border: '#333',
-        accent: '#4CAF50',
-        accentDark: '#388E3C',
-        accentLight: 'rgba(76,175,80,0.1)',
-        overlays: { tag: '#222', tagBorder: '#333', border: '#333', textSecondary: '#aaa' },
-        elevation: { shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-        isDark: true,
-    }),
-}));
+jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule());
 
 // ── Data context (writers bump this; the focus hook consumes it) ─────────────
 jest.mock('@/context/DataContext', () => ({
@@ -153,20 +113,14 @@ const formSentinelPresent = (view: View): boolean =>
 const hasExactText = (view: View, text: string): boolean =>
     view.queryByText(text) !== null;
 
-const oneEntryRow = () => ({
-    id: 1,
-    mood: 7,
-    notes: 'hello',
-    date: '2026-06-12T10:00:00.000Z',
-    activity_ids: null,
-    activity_names: null,
-    activity_group_ids: null,
-    activity_icon_names: null,
-});
+const oneEntryRow = () => makeEntryRow({ id: 1, notes: 'hello' });
 
 beforeEach(() => {
     jest.clearAllMocks();
-    mockDb.getAllAsync.mockResolvedValue([]);
+    resetWriteLayer();
+    mockDb = makeDb();
+    // Same insets the old local safe-area mock fixed: bottom 48 (3-button nav bar), no top inset.
+    setInsets({ top: 0, bottom: 48 });
 });
 
 describe('DBViewer — EntryFormModal is rendered unconditionally (Task 1b)', () => {

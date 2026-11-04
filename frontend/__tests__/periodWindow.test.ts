@@ -10,7 +10,7 @@
  * earliest-entry clamp.
  *
  * TIMEZONE: the suite runs pinned to Australia/Brisbane (UTC+10, no DST) via
- * jest.tz.js. The ISO assertions below are only correct under that offset —
+ * jest.globalSetup.js. The ISO assertions below are only correct under that offset —
  * that's the point. A UTC-anchored implementation would produce different
  * strings and fail here, which is exactly the class of bug this app has shipped
  * before (see databases/dateHelpers.ts).
@@ -365,7 +365,7 @@ describe('alltime has nowhere to step', () => {
 describe('todayLocalDay', () => {
     it('keys an instant to the LOCAL day, not the UTC one', () => {
         // 2026-08-29T20:00Z is already 2026-08-30 in Brisbane (UTC+10). Keying
-        // this in UTC is the exact bug class jest.tz.js exists to expose.
+        // this in UTC is the exact bug class jest.globalSetup.js exists to expose.
         expect(todayLocalDay(new Date('2026-08-29T20:00:00.000Z'))).toBe('2026-08-30');
         expect(todayLocalDay(new Date('2026-08-29T03:00:00.000Z'))).toBe('2026-08-29');
     });

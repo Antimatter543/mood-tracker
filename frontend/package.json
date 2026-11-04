@@ -17,9 +17,12 @@
   },
   "jest": {
     "preset": "jest-expo",
+    "globalSetup": "<rootDir>/jest.globalSetup.js",
     "setupFiles": [
-      "<rootDir>/jest.tz.js",
       "<rootDir>/jest.setup.ts"
+    ],
+    "setupFilesAfterEnv": [
+      "<rootDir>/jest.afterEnv.ts"
     ],
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/$1",

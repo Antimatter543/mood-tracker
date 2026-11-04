@@ -112,25 +112,11 @@ jest.mock('@/lib/argon2', () => ({
   canDeriveBackupKeys: () => mockCanDerive(),
 }));
 
-jest.mock('react-native-safe-area-context', () => ({
-  useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
-}));
-jest.mock('@/hooks/useKeyboardHeight', () => ({ useKeyboardHeight: () => 0 }));
-jest.mock('react-native-reanimated', () => {
-  const ReactLocal = require('react');
-  const { View } = require('react-native');
-  const entering = { duration: () => entering };
-  return {
-    __esModule: true,
-    default: { View: (props: Record<string, unknown>) => ReactLocal.createElement(View, props) },
-    FadeIn: entering,
-  };
-});
-
 import { DataManagementSection, describeKdf } from '@/components/DataManagementSection';
 import * as dataExport from '@/databases/data-export';
 import { createBackupKey, encryptBackup } from '@/lib/backupCrypto';
 import { getBackupKey, getPasswordConfirmedAt, markPasswordConfirmed } from '@/lib/backupKeyStore';
+import { freezeNow } from '@/testing/clock';
 
 const SecureStoreMock = SecureStore as unknown as { __reset: () => void; __dump: () => Record<string, string> };
 const DAY = 24 * 60 * 60 * 1000;
@@ -335,8 +321,10 @@ describe('periodic "Confirm your backup password" on backup', () => {
   const startBackup = () => fireEvent.press(screen.getByText('Back up'));
 
   async function dueForConfirmation() {
+    const now = freezeNow();
     await renderWithEncryption();
-    await markPasswordConfirmed(Date.now() - 15 * DAY);
+    await markPasswordConfirmed(now.getTime() - 15 * DAY);
+    return now;
   }
 
   it('is not shown when the password was confirmed recently', async () => {
@@ -349,7 +337,7 @@ describe('periodic "Confirm your backup password" on backup', () => {
   });
 
   it('after 14 days: a wrong entry says so, a correct one resets the timer and backs up', async () => {
-    await dueForConfirmation();
+    const now = await dueForConfirmation();
     const exportSpy = mockExport();
     alertSpy();
 
@@ -362,11 +350,10 @@ describe('periodic "Confirm your backup password" on backup', () => {
     await waitFor(() => screen.getByText("That's not your backup password."));
     expect(exportSpy).not.toHaveBeenCalled();
 
-    const before = Date.now();
     await fireEvent.changeText(screen.getByLabelText('Backup password'), 'first passphrase');
     await fireEvent.press(screen.getByLabelText('Confirm'));
     await waitFor(() => expect(exportSpy).toHaveBeenCalledTimes(1));
-    expect(await getPasswordConfirmedAt()).toBeGreaterThanOrEqual(before);
+    expect(await getPasswordConfirmedAt()).toBe(now.getTime());
     expect(screen.queryByText('Confirm your backup password')).toBeNull();
   });
 
