@@ -36,6 +36,20 @@
   on real SQLite, fresh and from older versions. A cold-start failure stays a crash, never an empty database.
 - **Known and left alone:** migration 2 drops `activities` with foreign keys ON, and the cascade clears
   `entry_activities` for a v1 user. V1 predates every tagged release (first tag v1.2.0), so nobody is on it.
+- **The same race has a second message.** `Cannot convert provided JavaScriptObject to the SharedObject, because
+  it doesn't contain valid id` is the other unlocked read (`toNativeObjectOrNull`) missing, and it hits
+  `NativeDatabase` as well as `NativeStatement` (`The 1st argument cannot be cast...`). Search for both strings.
+- **Measuring it.** Cold-launch soak on the CI emulator (`pm clear`, then the `empty` QA seed deep link, which runs
+  all migrations twice): the unfixed build failed 25 of 605 launches (18 with the exact signature), the fixed
+  build 0 of 1347. e2e alone had too little power: at 1 red in 3, three green runs still pass 30% of the time.
+- **A different crash, not fixed here: SIGSEGV in GWP-ASan's stack walk.** About 0.5% of launches on the x86_64 emulator,
+  fixed and unfixed alike, die within 20 ms of `JSI interop was installed`: `android_unsafe_frame_pointer_chase`
+  <- `gwp_asan::GuardedPoolAllocator::deallocate` <- `libhermesvm.so`. It looks like a flow that times out on the
+  home screen, with no JS error, so search logcat for `Fatal signal 11`. Android 14+ turns on recoverable GWP-ASan
+  for about 1% of launches of an app with no `gwpAsanMode` (https://developer.android.com/ndk/guides/gwp-asan), and
+  that walker gives no guarantees on frames built without frame pointers. Likely x86_64 only, because Android's
+  arm64 ABI keeps frame pointers. That is reasoning, not a measurement. Not seen on arm64, and Play vitals show 0
+  crashes. If it ever shows on arm64, the switch is `android:gwpAsanMode="never"`.
 
 ## 2026-11-04: Encrypted backup tests: what a test of old files has to be
 
