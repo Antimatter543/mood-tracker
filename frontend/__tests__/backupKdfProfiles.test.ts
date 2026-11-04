@@ -79,7 +79,8 @@ describe('validateManualKdf', () => {
 
   it('accepts sensible params', () => {
     expect(validateManualKdf(ok)).toBeNull();
-    expect(validateManualKdf({ memoryMiB: 38, iterations: 1, parallelism: 1 })).toBeNull(); // same cost as 19 x 2
+    expect(validateManualKdf({ memoryMiB: 19, iterations: 2, parallelism: 1 })).toBeNull(); // OWASP's minimum
+    expect(validateManualKdf({ memoryMiB: 46, iterations: 1, parallelism: 1 })).toBeNull(); // OWASP's one-pass minimum
   });
 
   it.each([
@@ -92,6 +93,8 @@ describe('validateManualKdf', () => {
     [{ ...ok, parallelism: 0 }, /Lanes/],
     [{ ...ok, parallelism: 9 }, /Lanes/],
     [{ memoryMiB: 19, iterations: 1, parallelism: 4 }, /recommended minimum/],
+    [{ memoryMiB: 38, iterations: 1, parallelism: 4 }, /recommended minimum/],
+    [{ memoryMiB: 45, iterations: 1, parallelism: 4 }, /recommended minimum/],
   ])('rejects %j', (input, message) => {
     expect(validateManualKdf(input)).toMatch(message);
   });

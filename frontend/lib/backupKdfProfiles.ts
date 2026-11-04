@@ -112,9 +112,16 @@ export function manualParams(input: ManualKdfInput): KdfParams {
 }
 
 /**
+ * OWASP's Argon2id minimum at a single pass. It is not half of the 19 MiB x 2
+ * passes entry: one pass leaves more room for time-memory trade-offs, so its
+ * own table entry asks for more memory (46 MiB x 1, 19 MiB x 2).
+ */
+const MIN_MEMORY_MIB_ONE_PASS = 46;
+
+/**
  * Validation message for manual params, or `null` when they are acceptable:
- * whole numbers within MANUAL_KDF_LIMITS and never cheaper than OWASP's
- * minimum (19 MiB x 2 passes; 38 MiB x 1 pass counts the same).
+ * whole numbers within MANUAL_KDF_LIMITS and never below OWASP's minimums
+ * (19 MiB x 2 passes, 46 MiB x 1 pass).
  */
 export function validateManualKdf(input: ManualKdfInput): string | null {
   const L = MANUAL_KDF_LIMITS;
@@ -128,9 +135,8 @@ export function validateManualKdf(input: ManualKdfInput): string | null {
   if (!whole(input.parallelism) || input.parallelism < L.minParallelism || input.parallelism > L.maxParallelism) {
     return `Lanes must be a whole number from ${L.minParallelism} to ${L.maxParallelism}.`;
   }
-  const floorCost = KDF_FLOOR_PARAMS.memoryKiB * KDF_FLOOR_PARAMS.iterations;
-  if (input.memoryMiB * 1024 * input.iterations < floorCost) {
-    return 'Below the recommended minimum (19 MiB × 2 passes). Use more memory or passes.';
+  if (input.iterations === 1 && input.memoryMiB < MIN_MEMORY_MIB_ONE_PASS) {
+    return `Below the recommended minimum (${MIN_MEMORY_MIB_ONE_PASS} MiB × 1 pass, or 19 MiB × 2 passes). Use more memory or passes.`;
   }
   return null;
 }
