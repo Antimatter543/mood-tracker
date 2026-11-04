@@ -3,7 +3,7 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
-## [Unreleased]
+## [2.16.1] - 2026-11-05
 
 ### Added
 - **Encrypted backups:** choose the password hashing strength (Compatibility, Security or Manual) under Technical details. Thanks to JamesCullum!
