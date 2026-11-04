@@ -83,6 +83,14 @@ const restoringDb = () => {
 
 const entryInserts = (db: MockDb) => sqlCalls(db, /INSERT OR REPLACE INTO entries/i);
 
+/**
+ * Answers with the password once, then gives up. Restore re-asks after a
+ * failed decrypt until it gets null, so a prompt that always answers would turn
+ * broken crypto into an endless loop (a hung run) instead of a failed test.
+ */
+const answersOnce = (password: string) =>
+  jest.fn<Promise<string | null>, unknown[]>().mockResolvedValueOnce(password).mockResolvedValue(null);
+
 /** Nothing reached the database, on either connection. */
 const expectNoWrites = (db: MockDb) => {
   expect(db.runAsync).not.toHaveBeenCalled();
@@ -106,7 +114,7 @@ const editedV1 = (edit: (envelope: any) => void) => {
 describe('a backup written by the released 2.16.0', () => {
   it('restores with its password typed, with no strength warning', async () => {
     pickFileWithContents(RELEASED_2_16_0_FILE);
-    const requestPassword = jest.fn(async () => RELEASED_2_16_0_PASSWORD);
+    const requestPassword = answersOnce(RELEASED_2_16_0_PASSWORD);
     const confirmStrongKdf = jest.fn(async () => true);
     const db = restoringDb();
 
@@ -183,7 +191,7 @@ describe('files that must restore nothing', () => {
     pickFileWithContents(ENCRYPTED_BACKUP_V1_FIXTURE);
     const db = restoringDb();
 
-    const result = await importDatabaseData(db as any, { requestPassword: async () => FIXTURE_PASSWORD });
+    const result = await importDatabaseData(db as any, { requestPassword: answersOnce(FIXTURE_PASSWORD) });
 
     expect(result.success).toBe(true);
     expect(entryInserts(db)).toHaveLength(1);
@@ -293,7 +301,8 @@ describe('a backup stronger than Compatibility', () => {
     argon2Spy.mockClear();
     const steps: string[] = [];
     const confirmStrongKdf = jest.fn(async () => { steps.push('warn'); return true; });
-    const requestPassword = jest.fn(async () => { steps.push('password'); return 'strong pass'; });
+    const answer = answersOnce('strong pass');
+    const requestPassword = jest.fn(async () => { steps.push('password'); return answer(); });
     argon2Spy.mockImplementation((...args: unknown[]) => { steps.push('derive'); return realArgon2(...args); });
     const db = restoringDb();
 
@@ -323,7 +332,7 @@ describe('when the key cannot be derived', () => {
   it('says so plainly, does not blame the password, and writes nothing', async () => {
     pickFileWithContents(ENCRYPTED_BACKUP_V1_FIXTURE);
     argon2Spy.mockRejectedValueOnce(new Error('ARGON2_MEMORY_ALLOCATION_ERROR'));
-    const requestPassword = jest.fn(async () => FIXTURE_PASSWORD);
+    const requestPassword = answersOnce(FIXTURE_PASSWORD);
     const db = restoringDb();
 
     const result = await importDatabaseData(db as any, { requestPassword });

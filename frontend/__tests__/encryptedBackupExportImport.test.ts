@@ -251,7 +251,7 @@ describe('import of an encrypted backup', () => {
     pickFileWithContents(await encryptBackup(JSON.stringify(PLAIN_BACKUP), key));
     const confirmStrongKdf = jest.fn(async () => true);
 
-    const result = await importDatabaseData(makeDb() as any, { requestPassword: async () => 'other device pass', confirmStrongKdf });
+    const result = await importDatabaseData(makeDb() as any, { requestPassword: jest.fn().mockResolvedValueOnce('other device pass').mockResolvedValue(null), confirmStrongKdf });
 
     expect(result.success).toBe(true);
     expect(confirmStrongKdf).not.toHaveBeenCalled();
