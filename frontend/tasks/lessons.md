@@ -43,7 +43,7 @@
   all migrations twice): the unfixed build failed 25 of 605 launches (18 with the exact signature), the fixed
   build 0 of 1347. e2e alone had too little power: at 1 red in 3, three green runs still pass 30% of the time.
 - **A different crash, not fixed here: SIGSEGV in GWP-ASan's stack walk.** About 0.5% of launches on the x86_64 emulator,
-  fixed and unfixed alike, die within 20 ms of `JSI interop was installed`: `android_unsafe_frame_pointer_chase`
+  fixed and unfixed alike, die under 300 ms after the first `JSI interop was installed`: `android_unsafe_frame_pointer_chase`
   <- `gwp_asan::GuardedPoolAllocator::deallocate` <- `libhermesvm.so`. It looks like a flow that times out on the
   home screen, with no JS error, so search logcat for `Fatal signal 11`. Android 14+ turns on recoverable GWP-ASan
   for about 1% of launches of an app with no `gwpAsanMode` (https://developer.android.com/ndk/guides/gwp-asan), and
