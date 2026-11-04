@@ -233,7 +233,8 @@ describe('what a file may ask for', () => {
   it.each<[string, Partial<KdfParams>]>([
     ['1 KiB over the memory limit', { memoryKiB: 1024 * 1024 + 1 }],
     ['21 passes', { iterations: 21 }],
-    ['9 lanes', { parallelism: 9 }],
+    // Enough memory for 9 lanes, so only the lane limit can refuse this one.
+    ['9 lanes', { memoryKiB: 1024, parallelism: 9 }],
     ['zero passes', { iterations: 0 }],
     ['fractional memory', { memoryKiB: 64.5 }],
     ['less memory than Argon2 allows for the lanes', { memoryKiB: 15, parallelism: 2 }],

@@ -1,5 +1,21 @@
 # SoulSync — Project Lessons
 
+## 2026-11-04: Encrypted backup tests: what a test of old files has to be
+
+- **A compatibility fixture comes from the released code.** `__fixtures__/encryptedBackupV1.ts` is rebuilt
+  from the format's description, which proves the spec, not what users hold. `encryptedBackupV2_16_0.ts`
+  came from `git archive v2.16.0` running that tree's own export (a stored key too). Next format change:
+  add one per released writer the same way, and never edit an old one.
+- **A test prompt must give up.** Restore re-asks until `requestPassword` returns null, so
+  `async () => 'the password'` turns broken crypto into an endless loop: a hung run, not a failed test.
+  Use `mockResolvedValueOnce(pw).mockResolvedValue(null)`. Found only by breaking the AAD on purpose.
+- **Pin limits with one thing wrong at a time.** `{ parallelism: 9 }` at 64 KiB passed for the wrong reason
+  (the 8 KiB per lane rule refused it), and raising the lane limit went unnoticed. Break each limit once
+  and watch its test fail. These tests use literal numbers: the worst a crafted file can make a phone do.
+- **A long native derive holds up other native calls.** Expo `AsyncFunction`s share one background thread
+  (`modulesQueue`): off the JS and UI threads, but other module calls wait behind a derive. Argon2 has no
+  cancel. Above Compatibility, the warning before deriving is what protects the user.
+
 ## 2026-11-03: The QA seed deep link (lib/qa): how a build flag really removes code
 
 - **What actually removes the module from a release bundle.** babel-preset-expo's `inline-env-vars`
