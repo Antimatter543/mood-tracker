@@ -3,6 +3,11 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [Unreleased]
+
+### Fixed
+- **Crash on first launch:** a new install could rarely crash while setting up its database. Resetting the database could fail the same way.
+
 ## [2.16.0] - 2026-11-02
 
 ### Added
