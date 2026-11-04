@@ -1,0 +1,43 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Subflow: log ONE mood entry through the real UI, starting from any tab.
+# The mood stays at the form's default (5.0, useEntryDraft); the note is ${NOTE},
+# which later steps find the entry by. Background data comes from the QA seed
+# (subflows/launch.yaml); this subflow adds only the entries a flow must name.
+# With the app clock frozen, every entry added here lands at the same instant,
+# newest id first (ORDER BY date DESC, id DESC), above every seeded entry.
+- tapOn:
+    id: tab-home
+- tapOn: "Add mood entry"
+- assertVisible: "How were you\\?"
+- tapOn: "Continue"
+# Notes is the last input on the details step, below every activity group: on a
+# phone-sized screen it starts off-screen (CI run 41652287864 failed 4/4 here).
+- scrollUntilVisible:
+    element:
+      id: entry-notes-input
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: entry-notes-input
+- inputText: ${NOTE}
+- hideKeyboard
+# The form shows EITHER the inline Back/Submit row OR, while that row is scrolled
+# out of view, the floating save button (EntryForm `buttonsVisible`). Tap
+# whichever one is on screen, exactly once.
+- runFlow:
+    when:
+      visible:
+        id: entry-form-floating-save
+    commands:
+      - tapOn:
+          id: entry-form-floating-save
+- runFlow:
+    when:
+      visible: "Submit"
+    commands:
+      - tapOn: "Submit"
+- extendedWaitUntil:
+    notVisible:
+      id: entry-notes-input
+    timeout: 10000
