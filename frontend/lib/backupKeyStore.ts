@@ -11,7 +11,14 @@ import {
   deriveBackupKey,
   isValidKdfHeader,
 } from '@/lib/backupCrypto';
-import { calibrateKdfParams } from '@/lib/backupKdfCalibration';
+import { KDF_TARGET_MS, calibrateKdfParams } from '@/lib/backupKdfCalibration';
+import {
+  DEFAULT_KDF_PROFILE,
+  KdfProfile,
+  ceilingsForProfile,
+  deviceTotalMemory,
+  isKdfProfile,
+} from '@/lib/backupKdfProfiles';
 import { now as clockNow } from '@/lib/clock';
 
 /**
@@ -31,6 +38,10 @@ import { now as clockNow } from '@/lib/clock';
  * "unreadable" (something IS stored but it cannot be read, or the Keystore
  * itself failed). Unreadable must never be treated as off: export would then
  * silently write a PLAIN backup for someone who asked for encryption.
+ *
+ * Next to the key: the strength mode it was made in (lib/backupKdfProfiles.ts),
+ * so a password change keeps the mode. Keys stored before modes existed have
+ * none and read as the default, "Compatibility", which is what made them.
  */
 
 const STORE_KEY = 'backup_encryption_key_v1';
@@ -47,11 +58,12 @@ export const PASSWORD_CONFIRM_INTERVAL_MS = 14 * 24 * 60 * 60 * 1000;
 interface StoredBackupKey {
   kdf: KdfHeader;
   key: string;
+  profile?: KdfProfile;
 }
 
 export type BackupKeyState =
   | { status: 'off' }
-  | { status: 'on'; key: BackupKey }
+  | { status: 'on'; key: BackupKey; profile: KdfProfile }
   | { status: 'unreadable'; message: string };
 
 const UNREADABLE_MESSAGE =
@@ -66,12 +78,17 @@ export class BackupKeyUnreadableError extends Error {
 
 /** Pure: parse what was stored. `null` = present but not a usable key. */
 export function parseStoredBackupKey(raw: string): BackupKey | null {
+  return parseStoredEntry(raw)?.key ?? null;
+}
+
+function parseStoredEntry(raw: string): { key: BackupKey; profile: KdfProfile } | null {
   try {
     const stored = JSON.parse(raw) as Partial<StoredBackupKey> | null;
     if (!stored || !isValidKdfHeader(stored.kdf) || typeof stored.key !== 'string') return null;
     const key = base64ToBytes(stored.key);
     if (key.length !== KEY_BYTES) return null;
-    return { kdf: stored.kdf, key };
+    const profile = isKdfProfile(stored.profile) ? stored.profile : DEFAULT_KDF_PROFILE;
+    return { key: { kdf: stored.kdf, key }, profile };
   } catch {
     return null;
   }
@@ -86,8 +103,10 @@ export async function readBackupKeyState(): Promise<BackupKeyState> {
     return { status: 'unreadable', message: UNREADABLE_MESSAGE };
   }
   if (!raw) return { status: 'off' };
-  const key = parseStoredBackupKey(raw);
-  return key ? { status: 'on', key } : { status: 'unreadable', message: UNREADABLE_MESSAGE };
+  const entry = parseStoredEntry(raw);
+  return entry
+    ? { status: 'on', key: entry.key, profile: entry.profile }
+    : { status: 'unreadable', message: UNREADABLE_MESSAGE };
 }
 
 /**
@@ -117,16 +136,31 @@ export async function verifyBackupPassword(password: string): Promise<boolean> {
 }
 
 /**
- * Turn encryption on, or change the password: measure this phone for the
- * Argon2id cost (unless `params` are given, as tests do), derive a key under a
- * FRESH salt and replace whatever was stored. Backups made with the previous
- * password still open, by entering that password on restore. Counts as a
- * confirmation: the user just typed it twice.
+ * The params a new key gets in `profile`: the on-device calibration within
+ * the mode's ceilings. "Manual" has no calibration; its params are passed in.
  */
-export async function setBackupPassword(password: string, params?: KdfParams): Promise<void> {
-  const kdfParams = params ?? (await calibrateKdfParams()).params;
+export async function calibrateForProfile(profile: Exclude<KdfProfile, 'manual'>): Promise<KdfParams> {
+  const ceilings = ceilingsForProfile(profile, deviceTotalMemory());
+  return (await calibrateKdfParams(KDF_TARGET_MS, undefined, ceilings)).params;
+}
+
+/**
+ * Turn encryption on, change the password or change the strength mode:
+ * measure this phone for the Argon2id cost (unless `params` are given: the
+ * background calibration, manual params, or tests), derive a key under a
+ * FRESH salt and replace whatever was stored. Backups made before still open,
+ * by entering the password they were made with on restore. Counts as a
+ * confirmation: the user just typed the password.
+ */
+export async function setBackupPassword(
+  password: string,
+  params?: KdfParams,
+  profile: KdfProfile = DEFAULT_KDF_PROFILE
+): Promise<void> {
+  if (!params && profile === 'manual') throw new Error('Manual mode needs explicit parameters.');
+  const kdfParams = params ?? (await calibrateForProfile(profile as Exclude<KdfProfile, 'manual'>));
   const backupKey = await createBackupKey(password, kdfParams);
-  const stored: StoredBackupKey = { kdf: backupKey.kdf, key: bytesToBase64(backupKey.key) };
+  const stored: StoredBackupKey = { kdf: backupKey.kdf, key: bytesToBase64(backupKey.key), profile };
   await SecureStore.setItemAsync(STORE_KEY, JSON.stringify(stored), STORE_OPTIONS);
   await markPasswordConfirmed();
 }

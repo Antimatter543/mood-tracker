@@ -18,8 +18,10 @@ import { KdfParams } from '@/lib/backupCrypto';
  * The cost model (see KdfCostModel): Argon2 time is linear in memory, with a
  * per-pass part and a fixed allocation part, fitted from two probes. Memory is
  * the expensive resource for an attacker, so it is spent first: 2 passes over
- * as much memory as the budget allows, up to `MAX_CALIBRATED_MEMORY_KIB`, and
- * only then more passes.
+ * as much memory as the budget allows, up to the memory ceiling, and only
+ * then more passes, up to the pass ceiling. The ceilings depend on the
+ * user's choice in "Technical details" (lib/backupKdfProfiles.ts): the
+ * default `COMPATIBILITY_CEILINGS` below, or higher ones for "Security".
  *
  * The FLOOR is OWASP's minimum Argon2id configuration (19 MiB, 2 passes). A
  * phone too slow to reach it within the target uses the floor anyway and
@@ -39,17 +41,28 @@ export const KDF_FLOOR_PARAMS: KdfParams = {
   parallelism: KDF_PARALLELISM,
 };
 
+/** The most memory and passes the calibration may pick. */
+export interface KdfCeilings {
+  memoryKiB: number;
+  iterations: number;
+}
+
 /**
- * Ceilings. A fast phone gets more passes beyond the memory cap rather than
- * more memory, so its backups still open on a 2-3 GB phone (128 MiB is safe
- * to allocate there; 256 MiB on top of the app risks an OS kill). Passes are
- * capped at 6 so a phone ~10x slower than the one that wrote the backup
- * still opens it in a few seconds (a flagship does 128 MiB x 6 in ~260 ms).
- * Both must stay within backupCrypto's KDF_FILE_LIMITS (what a FILE may ask
- * for), pinned by a test, or a phone could write a backup it cannot read.
+ * Ceilings of the default "Compatibility" mode. A fast phone gets more passes
+ * beyond the memory cap rather than more memory, so its backups still open on
+ * a 2-3 GB phone (128 MiB is safe to allocate there; 256 MiB on top of the
+ * app risks an OS kill). Passes are capped at 6 so a phone ~10x slower than
+ * the one that wrote the backup still opens it in a few seconds (a flagship
+ * does 128 MiB x 6 in ~260 ms). Every mode's ceilings must stay within
+ * backupCrypto's KDF_FILE_LIMITS (what a FILE may ask for), pinned by a test,
+ * or a phone could write a backup it cannot read.
  */
 export const MAX_CALIBRATED_MEMORY_KIB = 128 * 1024;
 export const MAX_CALIBRATED_ITERATIONS = 6;
+export const COMPATIBILITY_CEILINGS: KdfCeilings = {
+  memoryKiB: MAX_CALIBRATED_MEMORY_KIB,
+  iterations: MAX_CALIBRATED_ITERATIONS,
+};
 const BASE_ITERATIONS = 2;
 
 /**
@@ -91,14 +104,18 @@ const predictMs = (m: KdfCostModel, memoryKiB: number, iterations: number) =>
  * (2 passes, as much memory as fits, whole MiB), then, at the memory cap, as
  * many passes as fit. Never weaker than the floor.
  */
-export function paramsForBudget(model: KdfCostModel, targetMs: number = KDF_TARGET_MS): KdfCalibration {
+export function paramsForBudget(
+  model: KdfCostModel,
+  targetMs: number = KDF_TARGET_MS,
+  ceilings: KdfCeilings = COMPATIBILITY_CEILINGS
+): KdfCalibration {
   let iterations = BASE_ITERATIONS;
   let memoryKiB =
     Math.floor(targetMs / (model.msPerKiB + iterations * model.msPerKiBPass) / 1024) * 1024;
-  if (memoryKiB > MAX_CALIBRATED_MEMORY_KIB) {
-    memoryKiB = MAX_CALIBRATED_MEMORY_KIB;
+  if (memoryKiB > ceilings.memoryKiB) {
+    memoryKiB = ceilings.memoryKiB;
     const affordable = Math.floor((targetMs / memoryKiB - model.msPerKiB) / model.msPerKiBPass);
-    iterations = Math.min(MAX_CALIBRATED_ITERATIONS, Math.max(BASE_ITERATIONS, affordable));
+    iterations = Math.min(ceilings.iterations, Math.max(BASE_ITERATIONS, affordable));
   }
 
   const floorCost = KDF_FLOOR_PARAMS.memoryKiB * KDF_FLOOR_PARAMS.iterations;
@@ -145,7 +162,8 @@ const PROBE_LONG_PASSES = 3;
  */
 export async function calibrateKdfParams(
   targetMs: number = KDF_TARGET_MS,
-  deps: CalibrationDeps = defaultDeps()
+  deps: CalibrationDeps = defaultDeps(),
+  ceilings: KdfCeilings = COMPATIBILITY_CEILINGS
 ): Promise<KdfCalibration> {
   const time = async (iterations: number) => {
     const probe: KdfParams = {
@@ -174,5 +192,5 @@ export async function calibrateKdfParams(
     msPerKiBPass = long / (PROBE_LONG_PASSES * m);
     msPerKiB = 0;
   }
-  return paramsForBudget({ msPerKiB, msPerKiBPass }, targetMs);
+  return paramsForBudget({ msPerKiB, msPerKiBPass }, targetMs, ceilings);
 }

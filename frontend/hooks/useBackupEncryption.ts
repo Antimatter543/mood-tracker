@@ -6,7 +6,13 @@ import type { DatabaseResult } from '@/components/types';
 import { BACKUP_KEY_UNREADABLE, RequestBackupPassword } from '@/databases/data-export';
 import { Argon2UnavailableError, canDeriveBackupKeys } from '@/lib/argon2';
 import { KdfHeader, KdfParams, validateNewBackupPassword } from '@/lib/backupCrypto';
-import { calibrateKdfParams } from '@/lib/backupKdfCalibration';
+import { KDF_TARGET_MS, calibrateKdfParams } from '@/lib/backupKdfCalibration';
+import {
+  DEFAULT_KDF_PROFILE,
+  KdfProfile,
+  ceilingsForProfile,
+  deviceTotalMemory,
+} from '@/lib/backupKdfProfiles';
 import {
   clearBackupPassword,
   getPasswordConfirmedAt,
@@ -34,6 +40,9 @@ import { now } from '@/lib/clock';
  *    is asked to enter the password again.
  *  - After restoring with a typed password on a phone without encryption:
  *    offer to keep encrypting new backups with that password.
+ *  - Strength mode ("Technical details", lib/backupKdfProfiles.ts): needs the
+ *    current password, because the key is derived again with the new params
+ *    (and a fresh salt). A password change keeps the mode.
  */
 
 export type BackupKeyStatus = 'loading' | 'off' | 'on' | 'unreadable';
@@ -47,6 +56,8 @@ export function useBackupEncryption({ onBackupNow }: { onBackupNow: () => void }
   const [status, setStatus] = useState<BackupKeyStatus>('loading');
   // The stored key's header (its calibrated strength, for "Technical details").
   const [kdf, setKdf] = useState<KdfHeader | null>(null);
+  // The strength mode the stored key was made in.
+  const [profile, setProfile] = useState<KdfProfile>(DEFAULT_KDF_PROFILE);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [busy, setBusy] = useState(false);
   // While a restore waits for a password, the pending answer for importDatabaseData.
@@ -57,37 +68,74 @@ export function useBackupEncryption({ onBackupNow }: { onBackupNow: () => void }
   // opens so it has finished (native: tens of ms) before the password is typed.
   // `null` result = it failed; setBackupPassword then calibrates itself.
   const calibration = useRef<Promise<KdfParams | null> | null>(null);
+  // The mode the key being saved is made in (and, for a mode change, its params).
+  const targetProfile = useRef<KdfProfile>(DEFAULT_KDF_PROFILE);
   // The password that opened the backup being restored, if one was typed.
   const acceptedPassword = useRef<string | null>(null);
 
-  const refresh = async () => {
-    const state = await readBackupKeyState();
+  const applyState = (state: Awaited<ReturnType<typeof readBackupKeyState>>) => {
     setStatus(state.status);
     setKdf(state.status === 'on' ? state.key.kdf : null);
+    setProfile(state.status === 'on' ? state.profile : DEFAULT_KDF_PROFILE);
+  };
+
+  const refresh = async () => {
+    const state = await readBackupKeyState();
+    applyState(state);
     return state;
   };
 
   useEffect(() => {
     let cancelled = false;
     readBackupKeyState().then(state => {
-      if (cancelled) return;
-      setStatus(state.status);
-      setKdf(state.status === 'on' ? state.key.kdf : null);
+      if (!cancelled) applyState(state);
     });
     return () => { cancelled = true; };
   }, []);
 
-  const openDialog = (mode: BackupPasswordDialogMode) => {
-    if (mode === 'set' || mode === 'change' || mode === 'reset') {
-      calibration.current = calibrateKdfParams()
-        .then(c => c.params)
-        .catch(error => {
-          console.warn('Backup KDF calibration failed, retrying on submit:', error);
-          return null;
-        });
+  /**
+   * Start working out the params for a new key in `next` mode: the on-device
+   * benchmark within the mode's ceilings, or the given manual params.
+   */
+  const prepareKey = (next: KdfProfile, manual: KdfParams | null) => {
+    if (next === 'manual' && !manual) next = DEFAULT_KDF_PROFILE;
+    targetProfile.current = next;
+    if (next === 'manual') {
+      calibration.current = Promise.resolve(manual);
+      return;
     }
+    const ceilings = ceilingsForProfile(next, deviceTotalMemory());
+    calibration.current = calibrateKdfParams(KDF_TARGET_MS, undefined, ceilings)
+      .then(c => c.params)
+      .catch(error => {
+        console.warn('Backup KDF calibration failed, retrying on submit:', error);
+        return null;
+      });
+  };
+
+  /** The stored key's params without its salt (to keep "Manual" params on a password change). */
+  const storedParams = (): KdfParams | null =>
+    kdf
+      ? { name: kdf.name, memoryKiB: kdf.memoryKiB, iterations: kdf.iterations, parallelism: kdf.parallelism }
+      : null;
+
+  const openDialog = (mode: BackupPasswordDialogMode) => {
+    if (mode === 'set') prepareKey(DEFAULT_KDF_PROFILE, null);
+    // A new password keeps the mode (and Manual params) of the key it replaces.
+    if (mode === 'change' || mode === 'reset') prepareKey(profile, storedParams());
     setBusy(false);
     setDialog({ mode, error: '' });
+  };
+
+  /**
+   * "Technical details" > Save: switch the strength mode. The key must be
+   * derived again with the new params, which needs the password.
+   */
+  const openStrengthChange = (next: KdfProfile, manual: KdfParams | null) => {
+    if (!ensureCanDerive()) return;
+    prepareKey(next, manual);
+    setBusy(false);
+    setDialog({ mode: 'strength', error: '' });
   };
 
   const showError = (error: string) => setDialog(current => (current ? { ...current, error } : current));
@@ -186,13 +234,24 @@ export function useBackupEncryption({ onBackupNow }: { onBackupNow: () => void }
     }
   };
 
-  const saveNewPassword = async (mode: 'set' | 'change' | 'reset', password: string) => {
+  const saveNewPassword = async (mode: 'set' | 'change' | 'reset' | 'strength', password: string) => {
     // Derives the key with the params the background benchmark picked
-    // (~0.5 s on this phone by construction).
+    // (~0.5 s on this phone by construction), or the Manual params.
     const params = (await calibration.current) ?? undefined;
-    await setBackupPassword(password, params);
+    await setBackupPassword(password, params, targetProfile.current);
     await refresh();
     setDialog(null);
+    if (mode === 'strength') {
+      Alert.alert(
+        'Encryption settings saved',
+        'New backups use the new settings. Backups you already made keep theirs and still open with your password.',
+        [
+          { text: 'Later', style: 'cancel' },
+          { text: 'Back up now', onPress: onBackupNow },
+        ]
+      );
+      return;
+    }
     if (mode === 'set') {
       Alert.alert(
         'Backups are encrypted',
@@ -232,7 +291,7 @@ export function useBackupEncryption({ onBackupNow }: { onBackupNow: () => void }
 
     setBusy(true);
     try {
-      if (mode === 'confirm' || mode === 'off' || mode === 'change') {
+      if (mode === 'confirm' || mode === 'off' || mode === 'change' || mode === 'strength') {
         const ok = await checkCurrent(current);
         if (ok === null) return;
         if (!ok) {
@@ -246,6 +305,9 @@ export function useBackupEncryption({ onBackupNow }: { onBackupNow: () => void }
         settleConfirm(true);
       } else if (mode === 'off') {
         await turnOff();
+      } else if (mode === 'strength') {
+        // Same password, new params: the current one is what gets re-derived.
+        await saveNewPassword(mode, current);
       } else {
         await saveNewPassword(mode, password);
       }
@@ -350,6 +412,8 @@ export function useBackupEncryption({ onBackupNow }: { onBackupNow: () => void }
   return {
     status,
     kdf,
+    profile,
+    openStrengthChange,
     handleToggle,
     openChange: () => openDialog('change'),
     openReenter: () => { if (ensureCanDerive()) openDialog('reset'); },
