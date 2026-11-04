@@ -202,10 +202,25 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   adb/Maestro QA of the entry form + dropdowns is valid. (See frontend/tasks/lessons.md top entry.)
 - **Use Maestro, not blind adb taps** (`~/.maestro/bin/maestro`; flows in `frontend/.maestro/`). RN/Fabric does
   NOT expose tab-bar labels or react-navigation text to uiautomator, so:
-  - Tap tabs by **point**: `point: X%, 89%` (Home 10 / Stats 30 / Timeline 50 / Insights 70 / Settings 90).
+  - Tap tabs by **testID**: `tapOn: id: tab-home` (`tab-stats` / `tab-timeline` / `tab-insights` /
+    `tab-settings`, from `lib/tabTestIds.ts`). Never by point: the lint below fails it.
   - The FAB has no text — tap it by its accessibility label: `tapOn: text: "Add mood entry"`.
   - Dismiss the expo dev menu with an optional `tapOn: text: "Continue"` after `launchApp`.
-  - Screen-content Text (headers, buttons like "Continue") IS matchable; tab labels are NOT.
+  - Screen-content Text (headers, buttons like "Continue") IS matchable; tab labels are NOT. Maestro text is a
+    full-match REGEX: escape `?`, `+`, `.` (`"How were you\\?"`).
+  - **Flow lint** (`__tests__/maestroFlowLint.test.ts`, in the jest gate): every flow's `appId` must equal
+    app.json `expo.android.package` (`com.raeduslabs.soulsyncapp`), a `point:` tap needs a
+    `# e2e-lint: point-ok <reason>` line above it, and every `id:` must be a testID the app renders.
+- **CI e2e smoke** (`.github/workflows/e2e.yml`): QA APK -> API 34 emulator -> `frontend/.maestro/smoke/*`
+  via `frontend/scripts/e2e-smoke.sh` (~20 min). Runs on main pushes touching frontend/, on dispatch
+  (`gh workflow run e2e.yml --ref <branch> -f flows=03-timeline-delete-undo`), and on PRs labelled `run-e2e`.
+  New smoke flow = add the yaml AND its name to `SMOKE_FLOWS` in the script (the lint checks they agree).
+  The harness is tested device-free by `frontend/scripts/test-e2e-smoke.sh` (pr-checks). Never run
+  e2e-smoke.sh locally: it drives whatever adb device is attached.
+  Every smoke flow starts with `runFlow: subflows/launch.yaml` + `env: SCENARIO: <scenario>`: clearState,
+  the QA seed link with a frozen `now`, then a wait on `qa-seed-status`. The lint checks both and parses the
+  link with the app's own parser. The cached AVD snapshot restores whatever was on screen when it was
+  saved: a poisoned cache (e.g. a baked-in ANR dialog) = bump `AVD_KEY` in e2e.yml (lessons 2026-11-03).
 - Sideload installs may hit Play Protect: `adb shell settings put global verifier_verify_adb_installs 0`,
   then `adb install -r -g <apk>`. EAS-signed release vs debug-signed dev build differ → uninstall before swapping.
 - Seed test data: Settings has `__DEV__`-only "Generate 50 Sample Entries" and "Generate 300 Timeline QA
