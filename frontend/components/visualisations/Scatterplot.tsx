@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useMemo } from 'react';
+import { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Card } from '@/components/Card';
@@ -31,7 +31,7 @@ const MoodHistogram = () => {
             marginVertical: 20,
         },
         yAxisTitleContainer: {
-            width: 40,
+            width: 20,
             height: PLOT_HEIGHT,
             justifyContent: 'center',
         },
@@ -87,18 +87,20 @@ const MoodHistogram = () => {
             fontSize: 10,
         },
         xAxisContainer: {
-            marginLeft: 80, // Match the left padding from y-axis labels
-            marginRight: 20,
             height: 30, // Reduced from 50
+            marginLeft: 60,
         },
         xAxisLabels: {
-            height: 10,
-            position: 'relative',
+            flexDirection: 'row',
+            justifyContent: 'flex-end',
+            width: '100%',
         },
         xAxisLabel: {
+            flex: 1,
             color: colors.textSecondary,
             fontSize: 12,
-            transform: [{ translateX: -4 }], // Center the label on the tick
+            textAlign: 'center',
+            width: '100%',
         },
         axisTitle: {
             color: colors.textSecondary,
@@ -221,17 +223,13 @@ const MoodHistogram = () => {
                 {/* Tick marks and numbers */}
                 <View style={styles.xAxisLabels}>
                     {Array.from({ length: NUM_BUCKETS }, (_, i) => (
-                        <Text key={i} style={[
-                            styles.xAxisLabel,
-                            { position: 'absolute', left: `${(i * 100 + 50) / NUM_BUCKETS}%` }
-                        ]}>
+                        <Text key={i} style={styles.xAxisLabel}>
                             {i}
                         </Text>
                     ))}
                 </View>
 
                 {/* X-axis title */}
-                <Text style={[styles.axisTitle, styles.xAxisTitle]}>Mood Rating</Text>
             </View>
         </Card>
     );
