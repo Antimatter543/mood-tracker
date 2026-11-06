@@ -166,7 +166,7 @@ const TimeOfDayChart = () => {
   };
 
   return (
-    <Card>
+    <Card testID="time-of-day-card">
       <InfoBubble
         text="Average mood by part of the day, from your entries' timestamps — handy for spotting whether mornings lift you or evenings drag. When you log more than once in a day, the 'Within a day' note shows how your mood typically swings from your first entry to your last."
         position="top-right"

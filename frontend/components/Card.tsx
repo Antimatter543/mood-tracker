@@ -12,6 +12,7 @@ type CardProps = {
   variant?: 'elevated' | 'flat';
   /** When true, renders a 3px accent-colored bar at the top of the card. */
   accentTop?: boolean;
+  testID?: string;
 };
 
 const useThemedStyles = (colors: ThemeColors) => {
@@ -46,12 +47,13 @@ const useThemedStyles = (colors: ThemeColors) => {
   );
 };
 
-export const Card = ({ children, style, variant = 'elevated', accentTop = false }: CardProps) => {
+export const Card = ({ children, style, variant = 'elevated', accentTop = false, testID }: CardProps) => {
   const colors = useThemeColors();
   const styles = useThemedStyles(colors);
 
   return (
     <View
+      testID={testID}
       style={[styles.container, variant === 'elevated' && styles.elevated, style]}
     >
       {accentTop && <View style={styles.accentBar} />}

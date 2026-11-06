@@ -15,6 +15,7 @@
 import { QA_FROZEN_NOW_SETTING_KEY, QA_MAX_LINK_LENGTH, QA_SCENARIOS, QA_SEEDED_SETTING_KEY } from '@/lib/qa';
 import { parseSeedLink, parseUtcInstant, isSeedLink, type SeedLinkError } from '@/lib/qa/seedLink';
 import { planScenario, seededRng, yearBoundaryAnchor, SCENARIO_SPECS } from '@/lib/qa/scenarios';
+import { aggregateTimeOfDay, timeOfDayCallout } from '@/components/visualisations/transforms/timeOfDay';
 import { restoreFrozenClock, runSeed, __resetRunSeedForTests } from '@/lib/qa/runSeed';
 import { now } from '@/lib/clock';
 import { freezeNow, unfreezeNow } from '@/testing/clock';
@@ -199,6 +200,29 @@ describe('planScenario', () => {
     expect(yearBoundaryAnchor(new Date(2026, 0, 2)).getFullYear()).toBe(2025);
     const exact = new Date(2026, 0, 3, 12);
     expect(yearBoundaryAnchor(exact).getTime()).toBe(exact.getTime());
+  });
+
+  // The golden for bd4d82d stands on this: the previous month's Stats, with enough
+  // entries for the card to speak and every one of them in a single part of the day.
+  it('oneBucket: the previous month alone holds a one-bucket Time of Day that speaks', () => {
+    const now = new Date(2026, 10, 3, 10, 0, 0);
+    const { plans } = planScenario('oneBucket', now);
+    const october = plans
+      .filter((p) => new Date(p.date).getMonth() === 9)
+      .map((p) => ({ date: p.date, mood: p.mood }));
+    const data = aggregateTimeOfDay(october);
+    expect(data.hasEnoughData).toBe(true);
+    expect(timeOfDayCallout(data)).toEqual({ kind: 'single', label: 'Morning' });
+    // The counterfactual: the planner on its own spreads a day's entries around.
+    const spread = planScenario('timeline300', now).plans.map((p) => ({ date: p.date, mood: p.mood }));
+    expect(aggregateTimeOfDay(spread).buckets.filter((b) => b.entry_count > 0).length).toBeGreaterThan(1);
+  });
+
+  it('oneBucket: an hour past the clock never produces a future entry, and the count holds', () => {
+    const earlyMorning = new Date(2026, 10, 3, 6, 0, 0);
+    const { plans } = planScenario('oneBucket', earlyMorning);
+    expect(plans).toHaveLength(SCENARIO_SPECS.oneBucket.count);
+    expect(plans.every((p) => Date.parse(p.date) <= earlyMorning.getTime())).toBe(true);
   });
 
   it('seededRng: deterministic, in [0, 1), seed-dependent', () => {

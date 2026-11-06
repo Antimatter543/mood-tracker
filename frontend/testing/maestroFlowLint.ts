@@ -100,14 +100,30 @@ export function sourceTestIds(src: string): string[] {
 }
 
 const REGEX_META = /[.*+?^$()[\]{}|\\]/;
+const FLOW_VAR = /\$\{[^}]*\}/g;
+
+/** A template sample (`activity-grid-X`) as the regex of what it can render. */
+function sampleToRegex(sample: string): RegExp {
+    const literal = sample.split('X').map(s => s.replace(/[.*+?^$()[\]{}|\\]/g, '\\$&'));
+    return new RegExp(`^${literal.join('.+')}$`);
+}
 
 /**
  * Whether a flow's `id:` can match something the app renders. Maestro treats
- * the id as a full-match regex: a plain id must be a known testID; a regex id
- * must fully match at least one known id or template sample.
+ * the id as a full-match regex: a plain id must be a known testID, or one value of
+ * a template (`activity-grid-1` for `activity-grid-X`); a regex id must fully match
+ * at least one known id or template sample. A flow variable (`setting-option-${T}`)
+ * stands for a template hole, the same `X` sourceTestIds writes.
+ *
+ * A sample that is ALL holes (`${prefix}${name}`) says nothing about what it renders,
+ * so it never vouches for a plain id: it would make this check pass anything.
  */
-export function idIsKnown(id: string, known: ReadonlySet<string>): boolean {
-    if (!REGEX_META.test(id)) return known.has(id);
+export function idIsKnown(rawId: string, known: ReadonlySet<string>): boolean {
+    const id = rawId.replace(FLOW_VAR, 'X');
+    if (!REGEX_META.test(id)) {
+        if (known.has(id)) return true;
+        return [...known].some(k => /[^X]/.test(k) && k.includes('X') && sampleToRegex(k).test(id));
+    }
     let re: RegExp;
     try {
         re = new RegExp(`^(?:${id})$`);
@@ -117,9 +133,53 @@ export function idIsKnown(id: string, known: ReadonlySet<string>): boolean {
     return [...known].some(k => re.test(k));
 }
 
-/** The `SMOKE_FLOWS=( ... )` list in scripts/e2e-smoke.sh. */
-export function smokeFlowList(script: string): string[] {
-    const m = script.match(/^SMOKE_FLOWS=\(\s*\n([\s\S]*?)^\)/m);
+/**
+ * Every screenshot a flow takes, in order: the name and the 1-based line of the
+ * `takeScreenshot` step. Both forms: `- takeScreenshot: name` and
+ * `- takeScreenshot:` + an indented `path: name`.
+ */
+export function flowScreenshots(text: string): { name: string; line: number }[] {
+    const lines = text.split('\n');
+    const out: { name: string; line: number }[] = [];
+    lines.forEach((line, i) => {
+        if (isComment(line)) return;
+        const m = line.match(/^\s*-\s*takeScreenshot:\s*(.*?)\s*(#.*)?$/);
+        if (!m) return;
+        if (m[1]) {
+            out.push({ name: unquote(m[1]), line: i + 1 });
+            return;
+        }
+        const indent = line.search(/\S/);
+        for (let j = i + 1; j < lines.length && (lines[j].search(/\S/) > indent || !lines[j].trim()); j++) {
+            const path = lines[j].match(/^\s*path:\s*(.+?)\s*(#.*)?$/);
+            if (path) {
+                out.push({ name: unquote(path[1]), line: i + 1 });
+                return;
+            }
+        }
+        out.push({ name: '', line: i + 1 });
+    });
+    return out;
+}
+
+/**
+ * 1-based lines of `takeScreenshot` steps whose previous step is not
+ * `waitForAnimationToEnd`: a shot taken mid-animation is a flaky golden, and the
+ * diff would blame the app for it.
+ */
+export function shotsWithoutSettle(text: string): number[] {
+    const lines = text.split('\n');
+    return flowScreenshots(text)
+        .filter(({ line }) => {
+            const before = lines.slice(0, line - 1).filter(l => l.trim() && !isComment(l));
+            return !/^\s*-\s*waitForAnimationToEnd\b/.test(before[before.length - 1] ?? '');
+        })
+        .map(s => s.line);
+}
+
+/** A `NAME=( ... )` list in a bash script (one item per line, `#` comments allowed). */
+export function bashList(script: string, name: string): string[] {
+    const m = script.match(new RegExp(`^${name}=\\(\\s*\\n([\\s\\S]*?)^\\)`, 'm'));
     if (!m) return [];
     return m[1]
         .split('\n')

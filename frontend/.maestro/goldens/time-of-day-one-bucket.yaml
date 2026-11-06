@@ -1,20 +1,20 @@
 appId: com.raeduslabs.soulsyncapp
 ---
 # Time of Day with every entry in one part of the day. Guards bd4d82d: the card read
-# "best in the Morning and toughest at Morning". With the clock frozen, an entry added
-# through the UI lands at the one instant, so there is exactly one bucket.
+# "best in the Afternoon and toughest at Afternoon". The card only speaks from 14
+# entries in the shown period, so the oneBucket fixture holds them, all in the morning.
+# The current month is 3 days old on the frozen clock: the fixture's month is the
+# previous one.
 - runFlow:
     file: ../smoke/subflows/launch.yaml
     env:
-      SCENARIO: empty
+      SCENARIO: oneBucket
 - runFlow:
     file: subflows/settle.yaml
-- runFlow:
-    file: ../smoke/subflows/add-entry.yaml
-    env:
-      NOTE: golden-one-bucket
 - tapOn:
     id: tab-stats
+- tapOn:
+    id: period-nav-back
 # Scroll end positions are not pixel-stable, so this shot is cropped to the element:
 # what is compared is the card itself, wherever the scroll happened to stop.
 - scrollUntilVisible:

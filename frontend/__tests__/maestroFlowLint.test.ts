@@ -15,16 +15,19 @@ import { readdirSync } from 'fs';
 import { posix } from 'path';
 import { APP_ROOT, code, listAppFiles, listSourceFiles, readSource } from '@/testing/sourceScan';
 import {
+    bashList,
     flowAppId,
     flowEnvValues,
     flowFileRefs,
     flowIds,
     flowOpenLinks,
+    flowScreenshots,
     idIsKnown,
-    smokeFlowList,
+    shotsWithoutSettle,
     sourceTestIds,
     unjustifiedPointTaps,
 } from '@/testing/maestroFlowLint';
+import { SETTINGS_REGISTRY } from '@/databases/settings';
 import { TAB_BUTTON_TEST_IDS } from '@/lib/tabTestIds';
 import { isSeedLink, parseSeedLink } from '@/lib/qa/seedLink';
 
@@ -52,6 +55,39 @@ function seedLinkProblem(link: string): string | null {
     const parsed = parseSeedLink(link);
     if (!parsed.ok) return `rejected: ${parsed.error}`;
     return parsed.command.now ? null : 'no now= (the app clock would not be frozen)';
+}
+
+/**
+ * The golden set: flows in .maestro/goldens/, and which device config runs which, as
+ * scripts/e2e-goldens.sh declares it. A flow nobody lists is a screen we think is
+ * guarded and is not; two flows writing one name in a config overwrite each other,
+ * so the golden shows only the later screen.
+ */
+const GOLDENS_SCRIPT = readSource('scripts/e2e-goldens.sh');
+const GOLDEN_CONFIGS = bashList(GOLDENS_SCRIPT, 'GOLDEN_CONFIGS');
+const goldenFlowsOf = (script: string, config: string) =>
+    bashList(script, `GOLDEN_FLOWS_${config.replace(/-/g, '_')}`);
+const goldenFlowFile = (name: string) => `.maestro/goldens/${name}.yaml`;
+const GOLDEN_FLOWS = FLOWS.filter(f => posix.dirname(f) === '.maestro/goldens');
+const SETTLE_REF = 'subflows/settle.yaml';
+const SMOKE_LAUNCH_REF = '../smoke/subflows/launch.yaml';
+
+/** Why a golden flow's opening would make its first shot unreliable, or null. */
+function goldenOpeningProblem(text: string): string | null {
+    const [first, second] = flowFileRefs(text);
+    if (first !== SMOKE_LAUNCH_REF) return `first runFlow is ${first ?? '(none)'}, not ${SMOKE_LAUNCH_REF}`;
+    if (second !== SETTLE_REF) return `second runFlow is ${second ?? '(none)'}, not ${SETTLE_REF} (the seed pill would be in the shot)`;
+    return null;
+}
+
+/** Why a set of image names (one device config) cannot be a golden set, or null. */
+function goldenNameProblem(names: string[]): string | null {
+    const dup = names.find((n, i) => names.indexOf(n) !== i);
+    if (dup) return `"${dup}" is taken twice: the later shot overwrites the earlier`;
+    const bad = names.find(n => !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(n));
+    if (bad !== undefined) return `"${bad}" is not kebab-case (it is a file name and a budget key)`;
+    if (names.includes('seed-retry')) return '"seed-retry" is launch.yaml\'s retry marker, and the harness drops it';
+    return null;
 }
 
 /** Every lint error for one flow. Empty = clean. */
@@ -95,7 +131,7 @@ describe('Maestro flows (.maestro/)', () => {
     });
 
     it('scripts/e2e-smoke.sh runs exactly the flows in .maestro/smoke (no orphan, no missing file)', () => {
-        const listed = smokeFlowList(readSource('scripts/e2e-smoke.sh'));
+        const listed = bashList(readSource('scripts/e2e-smoke.sh'), 'SMOKE_FLOWS');
         const onDisk = FLOWS.filter(f => posix.dirname(f) === '.maestro/smoke').map(f =>
             posix.basename(f).replace(/\.ya?ml$/, ''),
         );
@@ -126,6 +162,43 @@ describe('Maestro flows (.maestro/)', () => {
                 if (isSeedLink(link)) expect([rel, seedLinkProblem(link)]).toEqual([rel, null]);
             }
         }
+    });
+
+    describe('golden flows', () => {
+        it('finds the configs and flows it is about to check', () => {
+            expect(GOLDEN_CONFIGS.length).toBeGreaterThan(1);
+            expect(GOLDEN_FLOWS.length).toBeGreaterThan(0);
+        });
+
+        it('every golden flow runs on some device config, and every listed flow has a file', () => {
+            const listed = new Set(GOLDEN_CONFIGS.flatMap(c => goldenFlowsOf(GOLDENS_SCRIPT, c)));
+            expect([...listed].map(goldenFlowFile).sort()).toEqual(GOLDEN_FLOWS);
+        });
+
+        it.each(GOLDEN_FLOWS)('%s: seeds, then settles, before anything else', rel => {
+            expect(goldenOpeningProblem(readSource(rel))).toBeNull();
+        });
+
+        it.each(GOLDEN_FLOWS)('%s: takes a screenshot, each one after waitForAnimationToEnd', rel => {
+            const text = readSource(rel);
+            expect(flowScreenshots(text).length).toBeGreaterThan(0);
+            expect(shotsWithoutSettle(text)).toEqual([]);
+        });
+
+        it.each(GOLDEN_CONFIGS)('config %s: image names are unique, kebab-case file names', config => {
+            const names = goldenFlowsOf(GOLDENS_SCRIPT, config).flatMap(f =>
+                flowScreenshots(readSource(goldenFlowFile(f))).map(s => s.name),
+            );
+            expect(names.length).toBeGreaterThan(0);
+            expect(goldenNameProblem(names)).toBeNull();
+        });
+
+        it('every THEME a flow sets is an option of the theme setting', () => {
+            const themes = FLOWS.flatMap(f => flowEnvValues(readSource(f), 'THEME'));
+            expect(themes.length).toBeGreaterThan(0);
+            const options: string[] = SETTINGS_REGISTRY.theme.options.map(o => o.value);
+            expect(themes.filter(t => !options.includes(t))).toEqual([]);
+        });
     });
 
     it('every tab route carries its tab-* testID in the tab layout', () => {
@@ -169,6 +242,17 @@ describe('flow lint rules (counterfactuals)', () => {
         expect(unjustifiedPointTaps(flow(APP_ID, '- swipe:\n    start: 50%, 80%\n    end: 50%, 20%\n'))).toEqual([]);
     });
 
+    it('accepts one value of a template and a flow variable in its hole, and nothing wider', () => {
+        expect(idIsKnown('bin-restore-42', known)).toBe(true);
+        expect(idIsKnown('bin-purge-42', known)).toBe(false);
+        expect(idIsKnown('bin-restore-', known)).toBe(false);
+        expect(idIsKnown('bin-restore-${ID}', known)).toBe(true);
+        expect(idIsKnown('bin-purge-${ID}', known)).toBe(false);
+        // A sample that is all holes must not vouch for everything.
+        expect(idIsKnown('anything-at-all', new Set(['X']))).toBe(false);
+        expect(idIsKnown('anything-at-all', new Set(['XX']))).toBe(false);
+    });
+
     it('fails an id the app does not render, accepts literal and regex ids that it does', () => {
         expect(idIsKnown('entry-delete', known)).toBe(true);
         expect(idIsKnown('entry-delte', known)).toBe(false);
@@ -199,7 +283,45 @@ describe('flow lint rules (counterfactuals)', () => {
         expect(flowEnvValues(text, 'SCENARIO')).toEqual(['week']);
     });
 
-    it('parses the SMOKE_FLOWS list', () => {
-        expect(smokeFlowList('X=1\nSMOKE_FLOWS=(\n  01-a\n  02-b # why\n)\n')).toEqual(['01-a', '02-b']);
+    it('parses a bash list by name', () => {
+        const script = 'X=1\nSMOKE_FLOWS=(\n  01-a\n  02-b # why\n)\nOTHER=(\n  c\n)\n';
+        expect(bashList(script, 'SMOKE_FLOWS')).toEqual(['01-a', '02-b']);
+        expect(bashList(script, 'OTHER')).toEqual(['c']);
+        expect(bashList(script, 'MISSING')).toEqual([]);
+    });
+
+    it('reads both takeScreenshot forms, with their lines', () => {
+        const text = '- takeScreenshot: a-b\n- takeScreenshot:\n    cropOn:\n      id: x\n    path: c-d\n- tapOn: y\n# - takeScreenshot: no\n- takeScreenshot:\n    label: only\n';
+        expect(flowScreenshots(text)).toEqual([
+            { name: 'a-b', line: 1 },
+            { name: 'c-d', line: 2 },
+            { name: '', line: 8 },
+        ]);
+    });
+
+    it('fails a screenshot that does not come straight after waitForAnimationToEnd', () => {
+        expect(shotsWithoutSettle('- waitForAnimationToEnd\n- takeScreenshot: a\n')).toEqual([]);
+        // A comment or blank line between them changes nothing.
+        expect(shotsWithoutSettle('- waitForAnimationToEnd\n# why\n\n- takeScreenshot: a\n')).toEqual([]);
+        expect(shotsWithoutSettle('- tapOn: x\n- takeScreenshot: a\n')).toEqual([2]);
+        expect(shotsWithoutSettle('- takeScreenshot: a\n')).toEqual([1]);
+        expect(shotsWithoutSettle('- waitForAnimationToEnd\n- tapOn: x\n- takeScreenshot:\n    path: a\n')).toEqual([3]);
+    });
+
+    it('fails a golden flow that does not open with the seed, then the settle', () => {
+        const run = (file: string) => `- runFlow:\n    file: ${file}\n`;
+        expect(goldenOpeningProblem(run(SMOKE_LAUNCH_REF) + run(SETTLE_REF))).toBeNull();
+        expect(goldenOpeningProblem(run(SETTLE_REF))).toContain('first runFlow');
+        expect(goldenOpeningProblem(run(SMOKE_LAUNCH_REF))).toContain('second runFlow');
+        expect(goldenOpeningProblem('- launchApp\n')).toContain('first runFlow');
+    });
+
+    it('fails image names that collide, are not file-safe, or are the retry marker', () => {
+        expect(goldenNameProblem(['a', 'b-2'])).toBeNull();
+        expect(goldenNameProblem(['a', 'b', 'a'])).toContain('taken twice');
+        expect(goldenNameProblem(['Tab_Home'])).toContain('kebab-case');
+        expect(goldenNameProblem(['goldens/a'])).toContain('kebab-case');
+        expect(goldenNameProblem([''])).toContain('kebab-case');
+        expect(goldenNameProblem(['seed-retry'])).toContain('retry marker');
     });
 });
