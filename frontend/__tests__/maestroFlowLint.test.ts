@@ -211,6 +211,15 @@ describe('Maestro flows (.maestro/)', () => {
             expect(goldenNameProblem(names)).toBeNull();
         });
 
+        // A shot with no golden fails the verdict as "extra", and a golden with no shot as
+        // "missing", but only on the emulator. This says so on every PR, before a build.
+        it.each(GOLDEN_CONFIGS)('config %s: the committed goldens are exactly the shots', config => {
+            const shots = goldenFlowsOf(GOLDENS_SCRIPT, config).flatMap(f =>
+                flowScreenshots(readSource(goldenFlowFile(f))).map(s => `${s.name}.png`),
+            );
+            expect(readdirSync(posix.join(APP_ROOT, 'e2e/goldens', config)).sort()).toEqual(shots.sort());
+        });
+
         // A new tab must join this flow, or the tab-header goldens silently stop being
         // about every tab (this replaced the pageHeaderUniformity source scan).
         it('tabs-week visits every tab and shoots each one, on every device config', () => {
