@@ -19,14 +19,14 @@ appId: com.raeduslabs.soulsyncapp
     id: tab-stats
 - tapOn:
     id: period-nav-back
-# Scroll end positions are not pixel-stable, so this shot is cropped to the element:
-# what is compared is the card itself, wherever the scroll happened to stop.
-- scrollUntilVisible:
-    element:
-      id: mood-trend-chart
-    direction: DOWN
-    centerElement: true
-    timeout: 20000
+# The chart starts part way onto the first screen. Two scrolls put all of it between
+# the sticky period bar and the FAB.
+- assertVisible:
+    id: mood-trend-chart
+- runFlow:
+    file: subflows/slow-scroll.yaml
+- runFlow:
+    file: subflows/slow-scroll.yaml
 - runFlow:
     file: subflows/hold.yaml
 - takeScreenshot:

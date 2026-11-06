@@ -12,8 +12,15 @@ on 5 of 24 images, the pair after these fixes by one pixel in total.
   text that is never on screen, `optional: true`, is one.
 - **A `cropOn` over an element that doesn't fit cleanly (Time of Day, 1296 px tall, then 1197).** The crop is the
   element's visible bounds, so where the scroll stops changes its size, and the FAB and sticky period bar land
-  on it at a position that also depends on the scroll. Crop an element small enough to centre clear of both.
-  Here that is the sentence the original bug was in.
+  on it at a position that also depends on the scroll. Crop an element that ends up clear of both. Here that is
+  the sentence the original bug was in.
+- **`scrollUntilVisible` stops somewhere different now and then (Stats, 1 run in 6).** Its swipes fling,
+  and `centerElement` gives up after a few tries with the element wherever it landed. Two recordings agreed and
+  several gate runs passed before a run left the sticky period bar over both Stats crops, 99.99% of one image. A
+  pair of recordings can't rule out a flake that rare, so run the gate several times in parallel before trusting
+  it. Golden flows now scroll only with `subflows/slow-scroll.yaml`, a swipe that ends below Android's fling
+  velocity (about 137 px/s here) and so stops where the finger stops. It runs in the page gutter, because the
+  mood chart's scrub gesture takes a drag that starts on it.
 - **The status bar is not 66 px on the tall cutout overlay.** It is 132 px, because the inset follows the
   cutout. `e2e-goldens.sh` reads the height from the device and fails if `budgets.json` disagrees, since a stale
   crop either hides app pixels or compares system ones.

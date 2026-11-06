@@ -193,6 +193,31 @@ describe('Maestro flows (.maestro/)', () => {
             expect(shotsWithoutHold(text)).toEqual([]);
         });
 
+        // Its stop position depends on timing: one gate run in six left the Stats
+        // sticky bar over the crop. subflows/slow-scroll.yaml stops in the same place.
+        it.each(GOLDEN_FLOWS)('%s: never uses scrollUntilVisible', rel => {
+            expect(readSource(rel)).not.toMatch(/^\s*-\s*scrollUntilVisible\b/m);
+        });
+
+        // Over the fling velocity (about 137 px/s here) the page coasts on after the swipe,
+        // and the swipe stops being a fixed distance.
+        it('the slow scroll stays under the fling velocity, and starts in the page gutter', () => {
+            const text = readSource('.maestro/goldens/subflows/slow-scroll.yaml');
+            const FRAME_HEIGHT = 2160;
+            const percent = (axis: string) => {
+                const m = text.match(new RegExp(`^ {4}${axis}: (\\d+)%, (\\d+)%$`, 'm'));
+                if (!m) throw new Error(`no ${axis} in the slow scroll`);
+                return { x: Number(m[1]), y: Number(m[2]) };
+            };
+            const start = percent('start');
+            const end = percent('end');
+            const duration = Number(text.match(/^ {4}duration: (\d+)$/m)?.[1]);
+            const pxPerSecond = (((start.y - end.y) / 100) * FRAME_HEIGHT) / (duration / 1000);
+            expect(pxPerSecond).toBeGreaterThan(0);
+            expect(pxPerSecond).toBeLessThan(137);
+            expect([start.x, end.x]).toEqual([3, 3]);
+        });
+
         // Takes the hold out and the scroll bar is back in the pixels: about 4,000 of them
         // on the timeline, between two recordings of the same build.
         it('the hold waits for animations and then for a fixed time, without failing the flow', () => {
