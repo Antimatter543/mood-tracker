@@ -39,11 +39,13 @@ import {
     type CoOccurringRow,
 } from '@/components/visualisations/transforms/activityDetail';
 import { now } from '@/lib/clock';
+import { useSettings } from '@/context/SettingsContext';
+import { MIN_SAMPLES } from './visualisations/transforms/activityCorrelation';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
-/** Minimum distinct logged days before the optional trend sparkline is worth it. */
-const MIN_TREND_DAYS = 6;
+/** Minimum distinct logged values before the optional trend sparkline is worth it. */
+const MIN_TREND_VALUES = 6;
 const SPARK_HEIGHT = 48;
 const HISTOGRAM_HEIGHT = 132;
 
@@ -84,6 +86,8 @@ export const ActivityInsightsDetail: React.FC<{
     const insets = useSafeAreaInsets();
     const db = useSQLiteContext();
     const styles = useMemo(() => makeStyles(colors), [colors]);
+    const { settings } = useSettings();
+    const perEntry = settings.activity_perEntry;
     const [data, setData] = useState<DetailData | null>(null);
 
     const load = useCallback(() => {
@@ -119,14 +123,14 @@ export const ActivityInsightsDetail: React.FC<{
         return {
             stats: activityMoodStats(moods),
             variability: classifyVariability(moods, { label: activity.name }),
-            impact: activityMoodImpact(d.allRows, d.activityRows),
+            impact: activityMoodImpact(d.allRows, d.activityRows, MIN_SAMPLES, perEntry),
             buckets: bucketMoodHistogram(d.activityRows),
-            trend: moodTrendForActivity(d.activityRows),
+            trend: moodTrendForActivity(d.activityRows, perEntry),
             co: topCoOccurring(d.coRows),
             firstDate: d.activityRows[0]?.date ?? null,
             lastDate: d.activityRows[d.activityRows.length - 1]?.date ?? null,
         };
-    }, [data, activity.name]);
+    }, [data, activity.name, perEntry]);
 
     const header = (
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
@@ -257,7 +261,7 @@ export const ActivityInsightsDetail: React.FC<{
                     {imp.isMeaningful && imp.withAvg !== null && imp.withoutAvg !== null ? (
                         <>
                             <Text style={styles.cardBody}>
-                                On {activity.name} days your mood averages{' '}
+                                On {activity.name} {!perEntry ? "days" : "entries"} your mood averages{' '}
                                 <Text style={styles.emphasis}>{imp.withAvg.toFixed(1)}</Text> —
                                 that's{' '}
                                 <Text
@@ -274,7 +278,7 @@ export const ActivityInsightsDetail: React.FC<{
                                     {(imp.delta ?? 0) >= 0 ? '+' : ''}
                                     {(imp.delta ?? 0).toFixed(1)}
                                 </Text>{' '}
-                                vs {imp.withoutAvg.toFixed(1)} on your other days.
+                                vs {imp.withoutAvg.toFixed(1)} without.
                             </Text>
                             <View style={styles.compare}>
                                 <CompareBar
@@ -285,7 +289,7 @@ export const ActivityInsightsDetail: React.FC<{
                                     colors={colors}
                                 />
                                 <CompareBar
-                                    label="Other days"
+                                    label={"Other " + (!perEntry ? "days" : "entries")}
                                     value={imp.withoutAvg}
                                     fill={colors.textSecondary}
                                     styles={styles}
@@ -297,12 +301,12 @@ export const ActivityInsightsDetail: React.FC<{
                         <Text style={styles.cardBody}>
                             You've logged {activity.name} on{' '}
                             <Text style={styles.emphasis}>
-                                {imp.withDays} {imp.withDays === 1 ? 'day' : 'days'}
+                                {imp.withCount} {imp.withCount === 1 ? (!perEntry ? "day" : "entry") : (!perEntry ? "days" : "entries")}
                             </Text>
                             {imp.withAvg !== null
                                 ? ` (averaging ${imp.withAvg.toFixed(1)})`
                                 : ''}
-                            . Log it a few more times — and some days without it — to compare it to
+                            . Log it a few more times — and some without it — to compare it to
                             your usual mood.
                         </Text>
                     )}
@@ -310,9 +314,9 @@ export const ActivityInsightsDetail: React.FC<{
 
                 {/* (c) Distribution histogram */}
                 <Card>
-                    <Text style={styles.cardTitle}>How those days are distributed</Text>
+                    <Text style={styles.cardTitle}>How entries are distributed</Text>
                     <Text style={styles.cardBody}>
-                        How often your mood on {activity.name} days lands at each level.
+                        How often your mood on {activity.name} entries lands at each level.
                     </Text>
                     <View style={styles.histRow}>
                         {model.buckets.map((count, i) => (
@@ -360,11 +364,11 @@ export const ActivityInsightsDetail: React.FC<{
                 )}
 
                 {/* (f) Optional trend sparkline */}
-                {model.trend.length >= MIN_TREND_DAYS && (
+                {model.trend.length >= MIN_TREND_VALUES && (
                     <Card>
                         <Text style={styles.cardTitle}>Trend over time</Text>
                         <Text style={styles.cardBody}>
-                            Your daily average mood on {activity.name} days, oldest to newest.
+                            Your {!perEntry ? "daily average mood" : "mood"} on {activity.name}, oldest to newest.
                         </Text>
                         <Sparkline
                             values={model.trend.map((t) => t.avg)}

@@ -15,7 +15,7 @@
 // `localDateString` / `aggregateDailyAverages` (the one authority), never a
 // SQL date() bucket — see databases/dateHelpers.ts READ CONTRACT.
 
-import { localDateString } from '@/databases/dateHelpers';
+import { localDateString, localDateTimeString } from '@/databases/dateHelpers';
 import {
     aggregateDailyAverages,
     dailyAverageMap,
@@ -212,45 +212,49 @@ export type ActivityMoodImpact = {
     withoutAvg: number | null;
     /** withAvg − withoutAvg (null unless both sides exist). */
     delta: number | null;
-    withDays: number;
-    withoutDays: number;
+    withCount: number;
+    withoutCount: number;
     /** Both sides have ≥ minSamples days — enough to state the comparison. */
     isMeaningful: boolean;
 };
 
 /**
- * Compare mood on this activity's days vs all other days.
+ * Compare mood on this activity's vs otherwise.
  *
  * `allEntries` = every entry (raw {date, mood}); `activityEntries` = the subset
- * that logged this activity. Both are day-keyed via localDateString; we average
- * the per-day averages (so a day with many entries counts once, matching
- * activityCorrelation). "without" days are the local days present in the data
- * that this activity was NOT on.
+ * that logged this activity. If perEntry is false, both are day-keyed via
+ * localDateString; we average the per-day averages (so a day with many entries
+ * counts once, matching activityCorrelation). "without" days are the local days
+ * present in the data that this activity was NOT on.
  */
 export const activityMoodImpact = (
     allEntries: InstantValueRow[],
     activityEntries: InstantValueRow[],
     minSamples: number = MIN_SAMPLES,
+    perEntry: boolean = false,
 ): ActivityMoodImpact => {
-    const dayAvg = dailyAverageMap(allEntries); // Map<localDay, avgMood>
+    const entries = !perEntry ? dailyAverageMap(allEntries) : new Map(allEntries.map((e) => [localDateTimeString(e.date), e.mood]));
 
-    const withDaySet = new Set<string>();
+    const withSet = new Set<string>();
     for (const row of activityEntries ?? []) {
         if (!row || typeof row.date !== 'string') continue;
         if (Number.isNaN(new Date(row.date).getTime())) continue;
-        withDaySet.add(localDateString(row.date));
+        if (!perEntry)
+            withSet.add(localDateString(row.date));
+        else
+            withSet.add(localDateTimeString(row.date));
     }
 
     let sumWith = 0;
     let countWith = 0;
     let sumWithout = 0;
     let countWithout = 0;
-    for (const [day, avg] of dayAvg) {
-        if (withDaySet.has(day)) {
-            sumWith += avg;
+    for (const [date, value] of entries) {
+        if (withSet.has(date)) {
+            sumWith += value;
             countWith += 1;
         } else {
-            sumWithout += avg;
+            sumWithout += value;
             countWithout += 1;
         }
     }
@@ -264,23 +268,27 @@ export const activityMoodImpact = (
         withAvg,
         withoutAvg,
         delta,
-        withDays: countWith,
-        withoutDays: countWithout,
+        withCount: countWith,
+        withoutCount: countWithout,
         isMeaningful: countWith >= minSamples && countWithout >= minSamples,
     };
 };
 
 // ---------------------------------------------------------------------------
-// Optional trend: per-local-day averages for this activity, oldest→newest.
-// A thin adapter over the one day-keying authority (aggregateDailyAverages).
+// Optional trend: if perEntry is false, per-local-day averages for this activity
+// are returned, oldest→newest. Otherwise just does conversion  from InstantValueRow[]
+// to ActivityTrendPoint[].
 // ---------------------------------------------------------------------------
 
 export type ActivityTrendPoint = { day: string; avg: number };
 
 export const moodTrendForActivity = (
-    rows: InstantValueRow[],
+    rows: InstantValueRow[], perEntry: boolean = false
 ): ActivityTrendPoint[] =>
-    aggregateDailyAverages(rows).map((d) => ({ day: d.day, avg: d.avg }));
+    !perEntry
+        ? aggregateDailyAverages(rows).map((d) => ({ day: d.day, avg: d.avg }))
+        : rows.map((d) => ({ day: localDateTimeString(d.date), avg: d.mood }))
+                .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
 
 /**
  * Map trend values to sparkline pixel coordinates. Pure path math (per the
