@@ -8,7 +8,7 @@ The 2026-11-05 pass (`~/Pictures/screenshots/soulsync-release-2026-11-04/RESULTS
 
 ## Setup (every pass)
 
-- Device: Pixel 3 over adb-tls. `adb devices` shows the current `192.168.1.68:<port>`; the port rotates. App id `com.raeduslabs.soulsyncapp`. Device PIN `1337`; unlock with `adb shell input keyevent KEYCODE_WAKEUP && adb shell input swipe 540 1600 540 300 && adb shell input text 1337 && adb shell input keyevent 66`.
+- Device: Pixel 3 over adb-tls. `adb devices` shows the current address; the port rotates. App id `com.raeduslabs.soulsyncapp`. Unlock with `~/bin/astra-pixel-unlock.sh`.
 - Build under test: the signed release APK from CI (`gh workflow run release-apk.yml -R Antimatter543/mood-tracker --ref <branch>`, or the `main-latest` prerelease, or the tagged release). Never the QA APK: it is x86_64 only (`e2e.yml`) and will not run on the Pixel.
 - Sideload: `adb shell settings put global verifier_verify_adb_installs 0`, then `adb install -r -g <apk>`.
 - Before anything else, check the signer: `apksigner verify --print-certs <apk>` must show SHA-256 `DB:32:8A:E9:F4:88:16:44:BE:0D:40:30:21:2E:2E:65:09:38:78:F3:5E:71:9D:9D:62:E2:9B:06:3C:4E:02:AB`. A different cert cannot update over an installed release.
