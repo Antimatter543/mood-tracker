@@ -27,6 +27,20 @@ export async function getActivities(db: SQLiteDatabase): Promise<Activity[]> {
 }
 
 /**
+ * Fetch activity for the given id.
+ */
+export function getActivity(db: SQLiteDatabase, id: number): Activity | null {
+  try {
+    return db.getFirstSync<Activity>(
+      'SELECT * FROM activities WHERE id = ? ORDER BY group_id, position', id
+    );
+  } catch (error) {
+    console.error('Error fetching activities:', error);
+    return null;
+  }
+}
+
+/**
  * Append a new activity to the end of its group. Rejects empty/whitespace
  * names (mirrors `updateActivity`); duplicate (name, group_id) is caught
  * by the UNIQUE constraint and surfaces as `success: false`.

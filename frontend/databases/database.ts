@@ -29,6 +29,7 @@ export {
 // Activities: per-activity CRUD, bulk reorder, and cross-group moves.
 export {
   getActivities,
+  getActivity,
   addActivity,
   updateActivity,
   deleteActivity,

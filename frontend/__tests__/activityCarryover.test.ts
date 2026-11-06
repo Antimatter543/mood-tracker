@@ -28,12 +28,13 @@ let nextId = 1;
 const row = (
   iso: string,
   mood: number,
+  activityId: number | null,
   activity: string | null,
 ): ActivityCorrelationRawRow => ({
   entry_id: nextId++,
   date: iso,
   mood,
-  activity_id: activity ? 1 : null,
+  activity_id: activityId,
   activity_name: activity,
 });
 const rowMulti = (
@@ -110,7 +111,7 @@ describe('carryoverWeight', () => {
 // ---------------------------------------------------------------------------
 describe('exposure (via single-entry aggregate)', () => {
   it('same entry logs the activity -> exposure 1', () => {
-    const rows = [row(localIso('2026-06-15', 12), 7, 'A')];
+    const rows = [row(localIso('2026-06-15', 12), 7, 1, 'A')];
     const out = aggregateActivityCorrelation(rows, {
       carryover: true,
       windowStart: localIso('2026-06-15', 0),
@@ -124,9 +125,9 @@ describe('exposure (via single-entry aggregate)', () => {
     // Middle entry has no activity, but A is logged earlier AND later that day.
     // sameDayTerm = 1 for every entry regardless of intra-day order.
     const rows = [
-      row(localIso('2026-06-15', 8), 6, 'A'), // earlier instance
-      row(localIso('2026-06-15', 12), 8, null), // middle, no activity
-      row(localIso('2026-06-15', 20), 4, 'A'), // later instance
+      row(localIso('2026-06-15', 8), 6, 1, 'A'), // earlier instance
+      row(localIso('2026-06-15', 12), 8, null, null), // middle, no activity
+      row(localIso('2026-06-15', 20), 4, 1, 'A'), // later instance
     ];
     const out = aggregateActivityCorrelation(rows, {
       carryover: true,
@@ -140,8 +141,8 @@ describe('exposure (via single-entry aggregate)', () => {
 
   it('next local day, 12h after logging -> decayed exposure w(12) = 0.65', () => {
     const rows = [
-      row(localIso('2026-06-15', 20), 5, 'A'), // pre-window instance
-      row(localIso('2026-06-16', 8), 9, null), // in-window entry, no A, 12h later
+      row(localIso('2026-06-15', 20), 5, 1, 'A'), // pre-window instance
+      row(localIso('2026-06-16', 8), 9, null, null), // in-window entry, no A, 12h later
     ];
     const out = aggregateActivityCorrelation(rows, {
       carryover: true,
@@ -154,8 +155,8 @@ describe('exposure (via single-entry aggregate)', () => {
 
   it('more than 36h after logging -> exposure 0', () => {
     const rows = [
-      row(localIso('2026-06-14', 12), 5, 'A'), // pre-window instance
-      row(localIso('2026-06-16', 6), 8, null), // in-window entry, 42h later
+      row(localIso('2026-06-14', 12), 5, 1, 'A'), // pre-window instance
+      row(localIso('2026-06-16', 6), 8, null, null), // in-window entry, 42h later
     ];
     const out = aggregateActivityCorrelation(rows, {
       carryover: true,
@@ -169,8 +170,8 @@ describe('exposure (via single-entry aggregate)', () => {
   it('an instance on a LATER local day than the entry contributes 0 (forward-only)', () => {
     // June15 entry E (mood 8, no A); A logged only the NEXT day. E must see 0.
     const rows = [
-      row(localIso('2026-06-15', 12), 8, null), // E — earlier day, no activity
-      row(localIso('2026-06-16', 12), 2, 'A'), // A logged AFTER E
+      row(localIso('2026-06-15', 12), 8, null, null), // E — earlier day, no activity
+      row(localIso('2026-06-16', 12), 2, 1, 'A'), // A logged AFTER E
     ];
     const out = aggregateActivityCorrelation(rows, {
       carryover: true,
@@ -187,9 +188,9 @@ describe('exposure (via single-entry aggregate)', () => {
 
   it('takes the MAX weight over multiple prior instances (closest wins)', () => {
     const rows = [
-      row(localIso('2026-06-15', 0), 5, 'A'), // 24h before E -> w = 0.30
-      row(localIso('2026-06-15', 18), 5, 'A'), // 6h before E  -> w = 0.825
-      row(localIso('2026-06-16', 0), 9, null), // in-window entry E
+      row(localIso('2026-06-15', 0), 5, 1, 'A'), // 24h before E -> w = 0.30
+      row(localIso('2026-06-15', 18), 5, 1, 'A'), // 6h before E  -> w = 0.825
+      row(localIso('2026-06-16', 0), 9, null, null), // in-window entry E
     ];
     const out = aggregateActivityCorrelation(rows, {
       carryover: true,
@@ -209,8 +210,8 @@ describe('aggregateActivityCorrelation carryover ON — weighted split', () => {
     // Run on June11 @ 12:00 (mood 10). A no-activity entry June12 @ 12:00
     // (mood 2) is exactly 24h later -> w(24) = 0.3 exposure.
     const rows = [
-      row(localIso('2026-06-11', 12), 10, 'Run'),
-      row(localIso('2026-06-12', 12), 2, null),
+      row(localIso('2026-06-11', 12), 10, 1, 'Run'),
+      row(localIso('2026-06-12', 12), 2, null, null),
     ];
     const on = aggregateActivityCorrelation(rows, { carryover: true });
     const run = on.find((r) => r.activity_name === 'Run')!;
@@ -239,6 +240,7 @@ const legacyAggregate = (
   const seenEntry = new Set<number>();
   const daySum = new Map<string, { sum: number; count: number }>();
   const activityDays = new Map<string, Set<string>>();
+  const activityIds = new Map<string, number>();
   const activityNames = new Set<string>();
   for (const r of rows ?? []) {
     if (!r || typeof r.date !== 'string') continue;
@@ -257,6 +259,7 @@ const legacyAggregate = (
       }
     }
     if (r.activity_name != null && r.activity_id != null) {
+      activityIds.set(r.activity_name, r.activity_id);
       activityNames.add(r.activity_name);
       let set = activityDays.get(r.activity_name);
       if (!set) {
@@ -287,6 +290,7 @@ const legacyAggregate = (
       }
     }
     out.push({
+      activity_id: activityIds.get(name)!,
       activity_name: name,
       avg_with: countWith > 0 ? Math.round((sumWith / countWith) * 100) / 100 : null,
       avg_without: countWithout > 0 ? Math.round((sumWithout / countWithout) * 100) / 100 : null,
@@ -303,17 +307,17 @@ describe('aggregateActivityCorrelation carryover OFF — legacy parity', () => {
   const richFixture = (): ActivityCorrelationRawRow[] => {
     nextId = 1;
     return [
-      row(localIso('2026-06-11', 9), 8, 'Yoga'), // June11 multi-entry day
-      row(localIso('2026-06-11', 21), 6, 'Run'),
-      row(localIso('2026-06-12', 23, 30), 4, 'Yoga'), // late-evening (backdated feel)
-      row(localIso('2026-06-13', 12), 7, null), // activity-less day
+      row(localIso('2026-06-11', 9), 8, 1, 'Yoga'), // June11 multi-entry day
+      row(localIso('2026-06-11', 21), 6, 2, 'Run'),
+      row(localIso('2026-06-12', 23, 30), 4, 1, 'Yoga'), // late-evening (backdated feel)
+      row(localIso('2026-06-13', 12), 7, null, null), // activity-less day
       ...[
         rowMulti(100, localIso('2026-06-14', 8), 9, 1, 'Yoga'), // one entry, two activities
         rowMulti(100, localIso('2026-06-14', 8), 9, 2, 'Run'),
       ],
-      row(localIso('2026-06-15', 20), 3, 'Run'),
-      row(localIso('2026-06-16', 10), 5, null), // activity-less day
-      row(localIso('2026-06-17', 22, 45), 2, 'Yoga'), // late-evening
+      row(localIso('2026-06-15', 20), 3, 2, 'Run'),
+      row(localIso('2026-06-16', 10), 5, null, null), // activity-less day
+      row(localIso('2026-06-17', 22, 45), 2, 1, 'Yoga'), // late-evening
     ];
   };
 
@@ -346,8 +350,8 @@ describe('aggregateActivityCorrelation carryover OFF — legacy parity', () => {
 // ---------------------------------------------------------------------------
 describe('aggregateActivityCorrelation carryover ON — window edge', () => {
   const rows = () => [
-    row(localIso('2026-06-10', 18), 10, 'Run'), // PRE-window instance (mood 10)
-    row(localIso('2026-06-11', 6), 4, null), // in-window entry, 12h later (mood 4)
+    row(localIso('2026-06-10', 18), 10, 1, 'Run'), // PRE-window instance (mood 10)
+    row(localIso('2026-06-11', 6), 4, null, null), // in-window entry, 12h later (mood 4)
   ];
   const windowStart = localIso('2026-06-11', 0); // true window start: June11 local midnight
 
@@ -396,7 +400,7 @@ describe('aggregateActivityCorrelation carryover ON — edges', () => {
   });
 
   it('single day, single entry -> count_with 1, no NaN', () => {
-    const out = aggregateActivityCorrelation([row(localIso('2026-06-15', 9), 6, 'A')], {
+    const out = aggregateActivityCorrelation([row(localIso('2026-06-15', 9), 6, 1, 'A')], {
       carryover: true,
     });
     const a = out.find((r) => r.activity_name === 'A')!;
@@ -408,9 +412,9 @@ describe('aggregateActivityCorrelation carryover ON — edges', () => {
 
   it('activity logged every day -> count_without 0, avg_without null, no NaN', () => {
     const rows = [
-      row(localIso('2026-06-11', 9), 5, 'A'),
-      row(localIso('2026-06-12', 9), 7, 'A'),
-      row(localIso('2026-06-13', 9), 3, 'A'),
+      row(localIso('2026-06-11', 9), 5, 1, 'A'),
+      row(localIso('2026-06-12', 9), 7, 1, 'A'),
+      row(localIso('2026-06-13', 9), 3, 1, 'A'),
     ];
     const out = aggregateActivityCorrelation(rows, { carryover: true });
     const a = out.find((r) => r.activity_name === 'A')!;
@@ -423,12 +427,12 @@ describe('aggregateActivityCorrelation carryover ON — edges', () => {
   it('produces only finite counts across a rich ON-mode fixture', () => {
     nextId = 1;
     const rows = [
-      row(localIso('2026-06-11', 9), 8, 'Yoga'),
-      row(localIso('2026-06-11', 21), 6, 'Run'),
-      row(localIso('2026-06-12', 23, 30), 4, 'Yoga'),
-      row(localIso('2026-06-13', 12), 7, null),
-      row(localIso('2026-06-14', 8), 3, 'Run'),
-      row(localIso('2026-06-15', 20), 9, 'Yoga'),
+      row(localIso('2026-06-11', 9), 8, 1, 'Yoga'),
+      row(localIso('2026-06-11', 21), 6, 2, 'Run'),
+      row(localIso('2026-06-12', 23, 30), 4, 1, 'Yoga'),
+      row(localIso('2026-06-13', 12), 7, null, null),
+      row(localIso('2026-06-14', 8), 3, 2, 'Run'),
+      row(localIso('2026-06-15', 20), 9, 1, 'Yoga'),
     ];
     const out = aggregateActivityCorrelation(rows, { carryover: true });
     expect(out.length).toBeGreaterThan(0);
