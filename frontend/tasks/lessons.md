@@ -1,5 +1,27 @@
 # SoulSync — Project Lessons
 
+## 2026-11-06: What made golden screenshots differ between two CI recordings of one build
+
+Measured by diffing two record runs per image with `scripts/golden-diff.mjs --no-fail`. The first pair differed
+on 5 of 24 images, the pair after these fixes by one pixel in total.
+
+- **A scroll bar mid-fade (tab-timeline, about 4,000 px).** Android awakens a list's scroll bar on layout and
+  fades it about 1.5 s later, and that fade does not follow the animator scale. `waitForAnimationToEnd` calls
+  the screen static long before it ends, because the bar is too few pixels to count. Every shot now goes through
+  `.maestro/goldens/subflows/hold.yaml`, which also waits 2 s. Maestro has no sleep: an `extendedWaitUntil` on
+  text that is never on screen, `optional: true`, is one.
+- **A `cropOn` over an element that doesn't fit cleanly (Time of Day, 1296 px tall, then 1197).** The crop is the
+  element's visible bounds, so where the scroll stops changes its size, and the FAB and sticky period bar land
+  on it at a position that also depends on the scroll. Crop an element small enough to centre clear of both.
+  Here that is the sentence the original bug was in.
+- **The status bar is not 66 px on the tall cutout overlay.** It is 132 px, because the inset follows the
+  cutout. `e2e-goldens.sh` reads the height from the device and fails if `budgets.json` disagrees, since a stale
+  crop either hides app pixels or compares system ones.
+- **What is left: the 64 px Home mood numeral.** Its edges vary by at most 4/255 between runs: 784 px in one
+  comparison, 1 px in another, no animation involved. We count any change at `threshold: 0`, so the 0.1% image
+  budget (about 2,200 px) is what absorbs this. No other text has done it so far. Don't chase it; if an image
+  goes over budget on nothing but numeral edges, that is new information, so look at it before re-recording.
+
 ## 2026-11-04: "Cannot use shared object that was already released" on a LIVE statement (expo-modules-core race)
 
 - **Symptom.** `NativeDatabase.prepareAsync` rejects: `The 2nd argument cannot be cast to type
@@ -779,6 +801,9 @@ pair. Three different page-header shapes across five tabs, every one of them typ
   (`useScrollView={false}`: Statistics, Timeline) get NO padding from it and must apply it —
   they'd been eyeballing 16 against the scrolling screens' 20, which showed up as a 4dp seam the
   moment a title sat above that content.
+
+(2026-11-06: that scan is deleted. The `tab-*` golden screenshots now guard this, and removing this
+inset's top padding turned them red on Statistics and Timeline only, run 42218341429.)
 
 **Rung**: hook-grade — `__tests__/pageHeaderUniformity.test.ts` is a CLASS-level invariant over the
 source of every file in `app/(tabs)/`: each screen must import + render `<PageHeader/>`, none may

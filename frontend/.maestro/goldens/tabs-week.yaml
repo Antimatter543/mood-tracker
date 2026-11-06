@@ -2,7 +2,7 @@ appId: com.raeduslabs.soulsyncapp
 ---
 # Every tab, seeded with a week, on the default dark theme. Two jobs:
 #   - every tab's page header lines up (db73a35, 55a0ad2: the header sat differently
-#     per screen, and pageHeaderUniformity.test.ts only scanned the source for it),
+#     per screen),
 #   - the layout under each nav config (91b9554, #20: broken by a top notch and by
 #     soft navigation buttons), which is why this flow runs on both configs.
 - runFlow:

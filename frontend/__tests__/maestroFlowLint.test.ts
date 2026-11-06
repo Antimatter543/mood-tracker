@@ -221,7 +221,8 @@ describe('Maestro flows (.maestro/)', () => {
         });
 
         // A new tab must join this flow, or the tab-header goldens silently stop being
-        // about every tab (this replaced the pageHeaderUniformity source scan).
+        // about every tab. They are the only guard left on the page header since the
+        // source scan that used to pin it was deleted.
         it('tabs-week visits every tab and shoots each one, on every device config', () => {
             const text = readSource(goldenFlowFile(TABS_FLOW));
             const tabs = Object.values(TAB_BUTTON_TEST_IDS);
