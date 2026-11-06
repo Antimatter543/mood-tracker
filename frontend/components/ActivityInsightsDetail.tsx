@@ -44,8 +44,8 @@ import { MIN_SAMPLES } from './visualisations/transforms/activityCorrelation';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
-/** Minimum distinct logged days before the optional trend sparkline is worth it. */
-const MIN_TREND_DAYS = 6;
+/** Minimum distinct logged values before the optional trend sparkline is worth it. */
+const MIN_TREND_VALUES = 6;
 const SPARK_HEIGHT = 48;
 const HISTOGRAM_HEIGHT = 132;
 
@@ -301,12 +301,12 @@ export const ActivityInsightsDetail: React.FC<{
                         <Text style={styles.cardBody}>
                             You've logged {activity.name} on{' '}
                             <Text style={styles.emphasis}>
-                                {imp.withDays} {imp.withDays === 1 ? (!perEntry ? "day" : "entry") : (!perEntry ? "days" : "entries")}
+                                {imp.withCount} {imp.withCount === 1 ? (!perEntry ? "day" : "entry") : (!perEntry ? "days" : "entries")}
                             </Text>
                             {imp.withAvg !== null
                                 ? ` (averaging ${imp.withAvg.toFixed(1)})`
                                 : ''}
-                            . Log it a few more times — and some {!perEntry ? "days" : "entries"} without it — to compare it to
+                            . Log it a few more times — and some without it — to compare it to
                             your usual mood.
                         </Text>
                     )}
@@ -364,11 +364,11 @@ export const ActivityInsightsDetail: React.FC<{
                 )}
 
                 {/* (f) Optional trend sparkline */}
-                {model.trend.length >= MIN_TREND_DAYS && (
+                {model.trend.length >= MIN_TREND_VALUES && (
                     <Card>
                         <Text style={styles.cardTitle}>Trend over time</Text>
                         <Text style={styles.cardBody}>
-                            Your daily average mood on {activity.name} {!perEntry ? "days" : "entries"}, oldest to newest.
+                            Your {!perEntry ? "daily average mood" : "mood"} on {activity.name}, oldest to newest.
                         </Text>
                         <Sparkline
                             values={model.trend.map((t) => t.avg)}
