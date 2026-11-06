@@ -296,4 +296,4 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
 - `frontend/lib/notifications.ts` — local daily-reminder scheduling (pure + testable).
 - `frontend/databases/` — SQLite facade, migrations, CRUD, mediaHelpers, entry-media, `writeTransaction.ts`
   (the write primitive). **Read `frontend/databases/CLAUDE.md` before touching any write path.**
-- `frontend/.maestro/` — device QA flows. `frontend/tasks/lessons.md` — project lessons. `frontend/docs/` — RELEASING.md + exec plans.
+- `frontend/.maestro/` — device QA flows. `frontend/tasks/lessons.md` — project lessons. `frontend/docs/` — TESTING.md, device-qa-checklist.md, RELEASING.md + exec plans.
