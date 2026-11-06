@@ -11,6 +11,8 @@ appId: com.raeduslabs.soulsyncapp
       SCENARIO: week
 - runFlow:
     file: subflows/settle.yaml
+- tapOn:
+    id: tab-home
 - waitForAnimationToEnd
 - takeScreenshot: tab-home
 - tapOn:

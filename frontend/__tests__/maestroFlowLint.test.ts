@@ -90,6 +90,14 @@ function goldenNameProblem(names: string[]): string | null {
     return null;
 }
 
+const TABS_FLOW = 'tabs-week';
+
+/** Tab testIDs a flow never taps. */
+function tabsMissingFromFlow(text: string, tabs: readonly string[]): string[] {
+    const tapped = new Set(flowIds(text).map(i => i.id));
+    return tabs.filter(t => !tapped.has(t));
+}
+
 /** Every lint error for one flow. Empty = clean. */
 function lintFlow(rel: string, text: string, appId: string, known: ReadonlySet<string>): string[] {
     const errors: string[] = [];
@@ -191,6 +199,18 @@ describe('Maestro flows (.maestro/)', () => {
             );
             expect(names.length).toBeGreaterThan(0);
             expect(goldenNameProblem(names)).toBeNull();
+        });
+
+        // A new tab must join this flow, or the tab-header goldens silently stop being
+        // about every tab (this replaced the pageHeaderUniformity source scan).
+        it('tabs-week visits every tab and shoots each one, on every device config', () => {
+            const text = readSource(goldenFlowFile(TABS_FLOW));
+            const tabs = Object.values(TAB_BUTTON_TEST_IDS);
+            expect(tabsMissingFromFlow(text, tabs)).toEqual([]);
+            expect(flowScreenshots(text).map(s => s.name).sort()).toEqual(tabs.slice().sort());
+            for (const config of GOLDEN_CONFIGS) {
+                expect([config, goldenFlowsOf(GOLDENS_SCRIPT, config).includes(TABS_FLOW)]).toEqual([config, true]);
+            }
         });
 
         it('every THEME a flow sets is an option of the theme setting', () => {
@@ -314,6 +334,12 @@ describe('flow lint rules (counterfactuals)', () => {
         expect(goldenOpeningProblem(run(SETTLE_REF))).toContain('first runFlow');
         expect(goldenOpeningProblem(run(SMOKE_LAUNCH_REF))).toContain('second runFlow');
         expect(goldenOpeningProblem('- launchApp\n')).toContain('first runFlow');
+    });
+
+    it('names a tab the tabs flow forgot', () => {
+        const text = '- tapOn:\n    id: tab-home\n- tapOn:\n    id: tab-stats\n';
+        expect(tabsMissingFromFlow(text, ['tab-home', 'tab-stats'])).toEqual([]);
+        expect(tabsMissingFromFlow(text, ['tab-home', 'tab-stats', 'tab-new'])).toEqual(['tab-new']);
     });
 
     it('fails image names that collide, are not file-safe, or are the retry marker', () => {

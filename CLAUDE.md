@@ -227,6 +227,25 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   the QA seed link with a frozen `now`, then a wait on `qa-seed-status`. The lint checks both and parses the
   link with the app's own parser. The cached AVD snapshot restores whatever was on screen when it was
   saved: a poisoned cache (e.g. a baked-in ANR dialog) = bump `AVD_KEY` in e2e.yml (lessons 2026-11-03).
+- **CI golden screenshots** (same workflow, a step after smoke): `frontend/.maestro/goldens/*` via
+  `frontend/scripts/e2e-goldens.sh` on two device configs (gesture; 3-button + tall cutout), judged by
+  `frontend/scripts/golden-diff.mjs` against `frontend/e2e/goldens/<config>/<name>.png`. Budget and status-bar
+  crop: `frontend/e2e/goldens/budgets.json`. A miss turns the job red; the job summary lists each image and
+  the `e2e-out` artifact holds `goldens/diff/<config>/<name>.{expected,actual,delta}.png`.
+  - **A golden changes legitimately** only when the PR means to change those pixels. Look at the delta first,
+    then say in the PR body which image changed and why. Never raise a budget to get a run green: a screen
+    that will not hold still is a source to fix, or a screen to drop from the set with the reason in the PR.
+  - **Re-record, on CI only, never on the laptop:** `gh workflow run e2e.yml -R Antimatter543/mood-tracker
+    --ref <branch> -f record=true`, then `gh run download <run-id> -R Antimatter543/mood-tracker -n
+    goldens-recorded -D frontend/e2e/goldens`, then look at the changed PNGs (`git status`) and commit only
+    the ones you meant to change. The workflow has no write permission and never pushes. A record run skips
+    smoke and the verdict, and fails on a Maestro failure so a half-finished set can't be committed.
+  - **New golden** = a yaml in `.maestro/goldens/` that starts with `launch.yaml` then `subflows/settle.yaml`,
+    `waitForAnimationToEnd` right before each `takeScreenshot`, and its name in a `GOLDEN_FLOWS_*` list in the
+    script; each image should name the bug it guards. Scrolled content: `cropOn` the element, scroll end
+    positions are not pixel-stable. The lint checks all of this, and that a golden exists for every shot.
+  - Harness and verdict are tested device-free in pr-checks: `scripts/test-e2e-goldens.sh`,
+    `node --test scripts/test-golden-diff.mjs`.
 - Sideload installs may hit Play Protect: `adb shell settings put global verifier_verify_adb_installs 0`,
   then `adb install -r -g <apk>`. EAS-signed release vs debug-signed dev build differ → uninstall before swapping.
 - Seed test data: Settings has `__DEV__`-only "Generate 50 Sample Entries" and "Generate 300 Timeline QA
@@ -235,7 +254,7 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   such button: for the Pixel pass load `node scripts/make-demo-data.js --days 300` through Settings -> Restore.
   **Scripted/CI seeding = the QA deep link** (QA builds ONLY, `EXPO_PUBLIC_QA=1`, e.g. the e2e emulator
   workflow): `adb shell am start -a android.intent.action.VIEW -d 'myapp://qa/seed?scenario=week&now=2026-06-15T12:00:00Z'`
-  (Maestro: `openLink`). Scenarios `empty | week | timeline300 | yearBoundary`; optional `now` (strict UTC,
+  (Maestro: `openLink`). Scenarios `empty | week | timeline300 | yearBoundary | oneBucket`; optional `now` (strict UTC,
   `YYYY-MM-DDTHH:MM:SS(.sss)Z`) freezes the app clock (`lib/clock.ts`) and anchors the data, and survives a
   relaunch. It WIPES the DB first, and refuses (`error foreign-data`) when the DB holds entries no seed wrote.
   Wait on testID `qa-seed-status` = `QA seed: ok <scenario> (<n>)`. Settings loads once per launch, so relaunch
