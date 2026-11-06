@@ -162,17 +162,13 @@ export function flowScreenshots(text: string): { name: string; line: number }[] 
     return out;
 }
 
-/**
- * 1-based lines of `takeScreenshot` steps whose previous step is not
- * `waitForAnimationToEnd`: a shot taken mid-animation is a flaky golden, and the
- * diff would blame the app for it.
- */
-export function shotsWithoutSettle(text: string): number[] {
+/** Lines of screenshots not straight after the hold subflow (see goldens/subflows/hold.yaml). */
+export function shotsWithoutHold(text: string): number[] {
     const lines = text.split('\n');
     return flowScreenshots(text)
         .filter(({ line }) => {
             const before = lines.slice(0, line - 1).filter(l => l.trim() && !isComment(l));
-            return !/^\s*-\s*waitForAnimationToEnd\b/.test(before[before.length - 1] ?? '');
+            return !/^\s*file:\s*subflows\/hold\.yaml\s*$/.test(before[before.length - 1] ?? '');
         })
         .map(s => s.line);
 }

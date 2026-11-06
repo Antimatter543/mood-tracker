@@ -3,7 +3,7 @@
   "frameHeight": 2160,
   "crop": {
     "gesture": { "top": 66 },
-    "threebutton-cutout": { "top": 66 }
+    "threebutton-cutout": { "top": 132 }
   },
   "overrides": {}
 }

@@ -14,11 +14,13 @@ appId: com.raeduslabs.soulsyncapp
       THEME: light
 - tapOn:
     id: tab-home
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: home-week-light
 - runFlow:
     file: subflows/set-theme.yaml
     env:
       THEME: forest
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: settings-forest

@@ -15,16 +15,19 @@ appId: com.raeduslabs.soulsyncapp
     id: tab-stats
 - tapOn:
     id: period-nav-back
-# Scroll end positions are not pixel-stable, so this shot is cropped to the element:
-# what is compared is the card itself, wherever the scroll happened to stop.
+# Scroll end positions are not pixel-stable, and a crop is only stable for an element
+# that fits on screen with nothing over it. Cropping the whole card failed that: its
+# height differed between two recordings, and the FAB and the sticky period bar landed
+# on it. So this crops the sentence bd4d82d got wrong, centred clear of both.
 - scrollUntilVisible:
     element:
-      id: time-of-day-card
+      id: time-of-day-callout
     direction: DOWN
     centerElement: true
     timeout: 20000
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot:
     path: time-of-day-one-bucket
     cropOn:
-      id: time-of-day-card
+      id: time-of-day-callout

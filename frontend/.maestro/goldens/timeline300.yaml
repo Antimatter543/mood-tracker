@@ -12,7 +12,8 @@ appId: com.raeduslabs.soulsyncapp
     file: subflows/settle.yaml
 - tapOn:
     id: tab-timeline
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: timeline300-top
 - tapOn:
     id: tab-stats
@@ -26,7 +27,8 @@ appId: com.raeduslabs.soulsyncapp
     direction: DOWN
     centerElement: true
     timeout: 20000
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot:
     path: trend-month-with-gaps
     cropOn:

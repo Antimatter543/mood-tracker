@@ -14,7 +14,8 @@ appId: com.raeduslabs.soulsyncapp
 - tapOn: "Add mood entry"
 - assertVisible: "How were you\\?"
 - tapOn: "Continue"
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: entry-form-details
 # Scroll end positions are not pixel-stable, so this shot is cropped to the element:
 # what is compared is the card itself, wherever the scroll happened to stop.
@@ -24,7 +25,8 @@ appId: com.raeduslabs.soulsyncapp
     direction: DOWN
     centerElement: true
     timeout: 20000
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot:
     path: activity-grid-long-names
     cropOn:

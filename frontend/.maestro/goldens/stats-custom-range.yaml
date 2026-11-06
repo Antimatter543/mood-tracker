@@ -22,5 +22,6 @@ appId: com.raeduslabs.soulsyncapp
     id: date-range-apply
 - assertNotVisible:
     id: date-range-picker
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: stats-custom-range

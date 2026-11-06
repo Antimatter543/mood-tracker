@@ -13,21 +13,26 @@ appId: com.raeduslabs.soulsyncapp
     file: subflows/settle.yaml
 - tapOn:
     id: tab-home
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: tab-home
 - tapOn:
     id: tab-stats
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: tab-stats
 - tapOn:
     id: tab-timeline
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: tab-timeline
 - tapOn:
     id: tab-insights
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: tab-insights
 - tapOn:
     id: tab-settings
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: tab-settings

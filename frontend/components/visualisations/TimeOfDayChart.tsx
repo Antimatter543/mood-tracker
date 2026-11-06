@@ -166,7 +166,7 @@ const TimeOfDayChart = () => {
   };
 
   return (
-    <Card testID="time-of-day-card">
+    <Card>
       <InfoBubble
         text="Average mood by part of the day, from your entries' timestamps — handy for spotting whether mornings lift you or evenings drag. When you log more than once in a day, the 'Within a day' note shows how your mood typically swings from your first entry to your last."
         position="top-right"
@@ -212,7 +212,7 @@ const TimeOfDayCallout = ({ data, styles }: { data: TimeOfDayData; styles: Style
       return null;
     case 'single':
       return (
-        <Text style={styles.callout}>
+        <Text testID="time-of-day-callout" style={styles.callout}>
           All your entries so far are in the{' '}
           <Text style={styles.calloutEmphasis}>{callout.label}</Text>, log at other
           times to compare.
@@ -220,13 +220,13 @@ const TimeOfDayCallout = ({ data, styles }: { data: TimeOfDayData; styles: Style
       );
     case 'flat':
       return (
-        <Text style={styles.callout}>
+        <Text testID="time-of-day-callout" style={styles.callout}>
           Your mood sits about the same at every time of day you've logged so far.
         </Text>
       );
     case 'contrast':
       return (
-        <Text style={styles.callout}>
+        <Text testID="time-of-day-callout" style={styles.callout}>
           You tend to feel best in the{' '}
           <Text style={styles.calloutEmphasis}>{callout.best}</Text> and toughest
           at <Text style={styles.calloutEmphasis}>{callout.worst}</Text>.

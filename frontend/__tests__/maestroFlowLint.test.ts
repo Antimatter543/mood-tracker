@@ -23,7 +23,7 @@ import {
     flowOpenLinks,
     flowScreenshots,
     idIsKnown,
-    shotsWithoutSettle,
+    shotsWithoutHold,
     sourceTestIds,
     unjustifiedPointTaps,
 } from '@/testing/maestroFlowLint';
@@ -187,10 +187,20 @@ describe('Maestro flows (.maestro/)', () => {
             expect(goldenOpeningProblem(readSource(rel))).toBeNull();
         });
 
-        it.each(GOLDEN_FLOWS)('%s: takes a screenshot, each one after waitForAnimationToEnd', rel => {
+        it.each(GOLDEN_FLOWS)('%s: takes a screenshot, each one after the hold', rel => {
             const text = readSource(rel);
             expect(flowScreenshots(text).length).toBeGreaterThan(0);
-            expect(shotsWithoutSettle(text)).toEqual([]);
+            expect(shotsWithoutHold(text)).toEqual([]);
+        });
+
+        // Takes the hold out and the scroll bar is back in the pixels: about 4,000 of them
+        // on the timeline, between two recordings of the same build.
+        it('the hold waits for animations and then for a fixed time, without failing the flow', () => {
+            const text = readSource('.maestro/goldens/subflows/hold.yaml');
+            expect(text).toMatch(/^- waitForAnimationToEnd$/m);
+            expect(text).toMatch(/^- extendedWaitUntil:$/m);
+            expect(text).toMatch(/^ {4}timeout: \d{4,}$/m);
+            expect(text).toMatch(/^ {4}optional: true$/m);
         });
 
         it.each(GOLDEN_CONFIGS)('config %s: image names are unique, kebab-case file names', config => {
@@ -319,13 +329,14 @@ describe('flow lint rules (counterfactuals)', () => {
         ]);
     });
 
-    it('fails a screenshot that does not come straight after waitForAnimationToEnd', () => {
-        expect(shotsWithoutSettle('- waitForAnimationToEnd\n- takeScreenshot: a\n')).toEqual([]);
+    it('fails a screenshot that does not come straight after the hold subflow', () => {
+        expect(shotsWithoutHold('- runFlow:\n    file: subflows/hold.yaml\n- takeScreenshot: a\n')).toEqual([]);
         // A comment or blank line between them changes nothing.
-        expect(shotsWithoutSettle('- waitForAnimationToEnd\n# why\n\n- takeScreenshot: a\n')).toEqual([]);
-        expect(shotsWithoutSettle('- tapOn: x\n- takeScreenshot: a\n')).toEqual([2]);
-        expect(shotsWithoutSettle('- takeScreenshot: a\n')).toEqual([1]);
-        expect(shotsWithoutSettle('- waitForAnimationToEnd\n- tapOn: x\n- takeScreenshot:\n    path: a\n')).toEqual([3]);
+        expect(shotsWithoutHold('- runFlow:\n    file: subflows/hold.yaml\n# why\n\n- takeScreenshot: a\n')).toEqual([]);
+        expect(shotsWithoutHold('- waitForAnimationToEnd\n- takeScreenshot: a\n')).toEqual([2]);
+        expect(shotsWithoutHold('- tapOn: x\n- takeScreenshot: a\n')).toEqual([2]);
+        expect(shotsWithoutHold('- takeScreenshot: a\n')).toEqual([1]);
+        expect(shotsWithoutHold('- runFlow:\n    file: subflows/hold.yaml\n- tapOn: x\n- takeScreenshot:\n    path: a\n')).toEqual([4]);
     });
 
     it('fails a golden flow that does not open with the seed, then the settle', () => {

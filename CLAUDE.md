@@ -241,9 +241,9 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
     the ones you meant to change. The workflow has no write permission and never pushes. A record run skips
     smoke and the verdict, and fails on a Maestro failure so a half-finished set can't be committed.
   - **New golden** = a yaml in `.maestro/goldens/` that starts with `launch.yaml` then `subflows/settle.yaml`,
-    `waitForAnimationToEnd` right before each `takeScreenshot`, and its name in a `GOLDEN_FLOWS_*` list in the
-    script; each image should name the bug it guards. Scrolled content: `cropOn` the element, scroll end
-    positions are not pixel-stable. The lint checks all of this, and that a golden exists for every shot.
+    `subflows/hold.yaml` right before each `takeScreenshot`, and its name in a `GOLDEN_FLOWS_*` list in the
+    script; each image should name the bug it guards. Scrolled content: `cropOn` an element small enough
+    to centre clear of the FAB and any sticky bar, since scroll end positions are not pixel-stable. The lint checks all of this, and that a golden exists for every shot.
   - Harness and verdict are tested device-free in pr-checks: `scripts/test-e2e-goldens.sh`,
     `node --test scripts/test-golden-diff.mjs`.
 - Sideload installs may hit Play Protect: `adb shell settings put global verifier_verify_adb_installs 0`,

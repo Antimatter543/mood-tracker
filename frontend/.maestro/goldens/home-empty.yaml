@@ -7,7 +7,8 @@ appId: com.raeduslabs.soulsyncapp
       SCENARIO: empty
 - runFlow:
     file: subflows/settle.yaml
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: home-empty-dark
 - runFlow:
     file: subflows/set-theme.yaml
@@ -15,5 +16,6 @@ appId: com.raeduslabs.soulsyncapp
       THEME: light
 - tapOn:
     id: tab-home
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: home-empty-light

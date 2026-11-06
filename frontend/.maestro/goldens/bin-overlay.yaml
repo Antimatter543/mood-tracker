@@ -25,5 +25,6 @@ appId: com.raeduslabs.soulsyncapp
     id: timeline-open-bin
 - assertVisible:
     id: bin-close
-- waitForAnimationToEnd
+- runFlow:
+    file: subflows/hold.yaml
 - takeScreenshot: bin-overlay
