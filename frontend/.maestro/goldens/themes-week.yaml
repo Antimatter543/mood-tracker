@@ -1,0 +1,24 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Seeded Home on the light theme, and Settings on Forest (the AA contrast fix: a
+# colour token change no render test can see).
+- runFlow:
+    file: ../smoke/subflows/launch.yaml
+    env:
+      SCENARIO: week
+- runFlow:
+    file: subflows/settle.yaml
+- runFlow:
+    file: subflows/set-theme.yaml
+    env:
+      THEME: light
+- tapOn:
+    id: tab-home
+- waitForAnimationToEnd
+- takeScreenshot: home-week-light
+- runFlow:
+    file: subflows/set-theme.yaml
+    env:
+      THEME: forest
+- waitForAnimationToEnd
+- takeScreenshot: settings-forest

@@ -1,0 +1,19 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Home with no entries, dark and light: the first screen a new user sees.
+- runFlow:
+    file: ../smoke/subflows/launch.yaml
+    env:
+      SCENARIO: empty
+- runFlow:
+    file: subflows/settle.yaml
+- waitForAnimationToEnd
+- takeScreenshot: home-empty-dark
+- runFlow:
+    file: subflows/set-theme.yaml
+    env:
+      THEME: light
+- tapOn:
+    id: tab-home
+- waitForAnimationToEnd
+- takeScreenshot: home-empty-light

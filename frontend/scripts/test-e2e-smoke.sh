@@ -81,7 +81,7 @@ run_case() {
   while [[ $# -gt 0 && "$1" != "--" ]]; do vars+=("$1"); shift; done
   [[ "${1:-}" == "--" ]] && shift
   env -i PATH="$SHIM:/usr/bin:/bin" HOME="$TMP/$name/home" SHIM_LOG="$LOG" \
-    E2E_OUT="$OUTDIR" "${vars[@]}" bash "$SCRIPT" "$@" >"$TMP/$name/stdout" 2>&1
+    E2E_OUT="$OUTDIR" E2E_LIB="$HERE/e2e-lib.sh" "${vars[@]}" bash "$SCRIPT" "$@" >"$TMP/$name/stdout" 2>&1
   RC=$?
 }
 maestro_calls() { grep -c '^maestro ' "$LOG" || true; }
@@ -197,6 +197,7 @@ check "exits non-zero (zero flows is not a pass)" test "$RC" -ne 0
 
 echo "static: the script never uses pkill -f (it would match its own command line)"
 check "no pkill in e2e-smoke.sh" bash -c '! grep -vE "^\s*#" "$1" | grep -q pkill' _ "$SCRIPT"
+check "no pkill in e2e-lib.sh" bash -c '! grep -vE "^\s*#" "$1" | grep -q pkill' _ "$HERE/e2e-lib.sh"
 
 echo
 echo "$pass passed, $fails failed"

@@ -1,0 +1,33 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# The largest seed. The Timeline's first screen (card layout with notes, photos and
+# stars), then a month of it on the trend chart. Guards fa015e1: on a month with gaps
+# the area under the line drew as vertical columns under each run of days. October has
+# skipped days (the planner drops ~20%), so its line has dashed bridges to fill under.
+- runFlow:
+    file: ../smoke/subflows/launch.yaml
+    env:
+      SCENARIO: timeline300
+- runFlow:
+    file: subflows/settle.yaml
+- tapOn:
+    id: tab-timeline
+- waitForAnimationToEnd
+- takeScreenshot: timeline300-top
+- tapOn:
+    id: tab-stats
+- tapOn:
+    id: period-nav-back
+# Scroll end positions are not pixel-stable, so this shot is cropped to the element:
+# what is compared is the card itself, wherever the scroll happened to stop.
+- scrollUntilVisible:
+    element:
+      id: mood-trend-chart
+    direction: DOWN
+    centerElement: true
+    timeout: 20000
+- waitForAnimationToEnd
+- takeScreenshot:
+    path: trend-month-with-gaps
+    cropOn:
+      id: mood-trend-chart

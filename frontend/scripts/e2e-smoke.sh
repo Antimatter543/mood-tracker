@@ -50,25 +50,13 @@ DEVICE="${E2E_DEVICE:-emulator-5554}"
 BOOT_TRIES="${BOOT_TRIES:-150}"
 FLOW_DIR="$(cd "$(dirname "$0")/.." && pwd)/.maestro/smoke"
 mkdir -p "$OUT/screens" "$OUT/maestro"
-RESULT_ENV="$OUT/result.env"
-SUMMARY="$OUT/summary.md"
-: >"$RESULT_ENV"
 T_START="$(date +%s)"
 
-log() { printf '[e2e %s] %s\n' "$(date +%H:%M:%S)" "$*"; }
-kv() { echo "$1=$2" >>"$RESULT_ENV"; }
-
-# fail: a SETUP failure (no flow verdicts possible). Flow failures don't come here.
-DEVICE_UP=0
-fail() {
-  log "FAIL: $*"
-  # Only screenshot once a device is known to be there: input errors must not touch adb.
-  (( DEVICE_UP )) && { adb exec-out screencap -p >"$OUT/screens/setup-fail.png" 2>/dev/null || true; }
-  kv RESULT fail
-  kv REASON "$*"
-  { echo "## E2E smoke: setup failed"; echo; echo "$*"; } >"$SUMMARY"
-  exit 1
-}
+# Setup shared with e2e-goldens.sh. E2E_LIB: the self-test's SMOKE_SCRIPT counterfactual
+# runs a copy of this script from elsewhere, so the sibling path alone would not resolve.
+FAIL_TITLE="E2E smoke"
+# shellcheck source=e2e-lib.sh
+source "${E2E_LIB:-$(cd "$(dirname "$0")" && pwd)/e2e-lib.sh}"
 
 # ── inputs (checked before touching the device) ───────────────────────────────
 resolve_inputs() {
@@ -103,66 +91,10 @@ resolve_inputs() {
 SNAPSHOT=0
 if [[ "$APK" == "--snapshot" ]]; then SNAPSHOT=1; else resolve_inputs; fi
 
-# ── device ready (bounded: a wedged emulator must fail, not hang to the job timeout) ──
-adb wait-for-device
-DEVICE_UP=1
-booted=0
-for (( i = 0; i < BOOT_TRIES; i++ )); do
-  if [[ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == "1" ]]; then
-    booted=1
-    break
-  fi
-  sleep 2
-done
-(( booted )) || fail "emulator did not finish booting after $BOOT_TRIES polls"
+# ── device ready ──────────────────────────────────────────────────────────────
+wait_for_device
 kv BOOT_S $(( T_START - ${EMU_T0:-$T_START} ))
-
-# `adb root` restarts adbd, which kills every open adb stream: it must come
-# BEFORE the logcat capture, or logcat.txt ends up empty (first CI run did).
-adb root >/dev/null 2>&1 || true
-adb wait-for-device
-
-# System error dialogs off, BEFORE anything restarts the launcher. On a busy CI
-# emulator the Pixel Launcher can ANR while it relaunches for the nav-mode
-# switch below; its "isn't responding" dialog then sits over the app and every
-# flow fails its first assertion (first CI run: 5/5 flows, all on that dialog).
-# The ANR is still logged, and an app crash still fails the flow's assertions.
-adb shell settings put global hide_error_dialogs 1
-
-adb logcat -c || true
-adb logcat -v time >"$OUT/logcat.txt" 2>&1 &
-LOGCAT_PID=$!
-trap 'kill "$LOGCAT_PID" 2>/dev/null || true' EXIT
-
-# clear_system_dialogs <when>: close a system ANR/crash dialog that exists
-# anyway, and record it. Second CI run: the dialog was already up when the AVD
-# snapshot restored (it was SAVED into the snapshot), so the setting above never
-# saw it raised. Detection lists ALL windows: that dialog did not hold
-# mCurrentFocus, which is why a focus check missed it. It is closed by tapping
-# its own "Close app" button (android:id/aerr_close, from a uiautomator dump):
-# "Wait" leaves a hung process that re-raises it, and CLOSE_SYSTEM_DIALOGS does
-# not reliably dismiss an error dialog (kept as the fallback only).
-SYSTEM_DIALOGS=0
-clear_system_dialogs() {
-  local win bounds
-  win="$(adb shell dumpsys window windows 2>/dev/null | tr -d '\r' \
-    | grep -oE 'Application (Not Responding|Error): [A-Za-z0-9._]+' | head -1)"
-  [[ -n "$win" ]] || return 0
-  SYSTEM_DIALOGS=$(( SYSTEM_DIALOGS + 1 ))
-  log "system dialog before $1, closing it: $win"
-  kv "SYSTEM_DIALOG_$SYSTEM_DIALOGS" "$1: $win"
-  adb shell uiautomator dump /sdcard/e2e-ui.xml >/dev/null 2>&1 || true
-  # uiautomator writes bounds last on each node: [x1,y1][x2,y2] -> 4 numbers.
-  bounds="$(adb shell cat /sdcard/e2e-ui.xml 2>/dev/null | tr -d '\r' \
-    | grep -oE 'resource-id="android:id/aerr_close"[^>]*bounds="\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]"' \
-    | grep -oE '[0-9]+' | tail -4 | tr '\n' ' ')"
-  if [[ "$bounds" =~ ^([0-9]+)\ ([0-9]+)\ ([0-9]+)\ ([0-9]+)\ $ ]]; then
-    adb shell input tap $(( (BASH_REMATCH[1] + BASH_REMATCH[3]) / 2 )) $(( (BASH_REMATCH[2] + BASH_REMATCH[4]) / 2 ))
-  else
-    adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS >/dev/null 2>&1 || true
-  fi
-  sleep 2
-}
+prepare_device
 
 if (( SNAPSHOT )); then
   # A fresh AVD's first boot keeps working (package scans, launcher setup, Play
@@ -178,41 +110,14 @@ if (( SNAPSHOT )); then
 fi
 
 # ── determinism ───────────────────────────────────────────────────────────────
-# Clock: Home's greeting and "today" come from the device clock. Pin it
-# (google_apis images allow `adb root`): 2026-11-03 10:00 -> "Good morning".
-# Lane G's frozen-clock seed link will make this redundant for seeded flows.
-adb shell settings put global auto_time 0
-adb shell settings put global auto_time_zone 0
-adb shell date 110310002026.00 >/dev/null 2>&1 || log "warn: could not set the device clock"
-kv CLOCK_AFTER_PIN "$(adb shell date | tr -d '\r')"
-adb shell settings put system font_scale 1.0
-# The runner's disable-animations already zeroes these; re-assert (cheap, explicit).
-for k in window_animation_scale transition_animation_scale animator_duration_scale; do
-  adb shell settings put global "$k" 0
-done
+pin_determinism
 # Gesture navigation, so the bottom safe-area inset is app-owned (see header).
 adb shell cmd overlay enable-exclusive --category com.android.internal.systemui.navbar.gestural \
   >/dev/null 2>&1 || log "warn: could not switch to gesture navigation"
-# The switch relaunches SystemUI and the launcher. Wait (bounded) for the mode to
-# land, then give the launcher a moment to finish relaunching before the install.
-nav=""
-for (( i = 0; i < 15; i++ )); do
-  nav="$(adb shell settings get secure navigation_mode 2>/dev/null | tr -d '\r')"
-  [[ "$nav" == "2" ]] && break
-  sleep 1
-done
-kv NAV_MODE "$nav"
-sleep 5
+wait_for_nav_mode 2
+kv NAV_MODE "$NAV_MODE"
 clear_system_dialogs setup
-# Status bar demo mode: fixed clock, full battery, no notification icons.
-adb shell settings put global sysui_demo_allowed 1
-demo() { adb shell am broadcast -a com.android.systemui.demo -e command "$@" >/dev/null 2>&1 || true; }
-demo enter
-demo clock -e hhmm 1000
-demo battery -e level 100 -e plugged false
-demo network -e wifi show -e level 4
-demo network -e mobile hide
-demo notifications -e visible false
+demo_mode
 
 # ── install ───────────────────────────────────────────────────────────────────
 T=$(date +%s)

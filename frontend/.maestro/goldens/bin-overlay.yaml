@@ -1,0 +1,29 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# The full-screen "Recently deleted" panel. Guards 7fade96: its opaque surface stopped
+# short of the window's bottom edge by the safe-area inset, so the screen behind it
+# showed through. Runs on both nav configs, since that inset is what differs.
+- runFlow:
+    file: ../smoke/subflows/launch.yaml
+    env:
+      SCENARIO: week
+- runFlow:
+    file: subflows/settle.yaml
+- tapOn:
+    id: tab-timeline
+- tapOn:
+    id: entry-more
+    index: 0
+- tapOn:
+    id: entry-delete
+# The undo snackbar is on an 8 s timer: gone before the shot, not racing it.
+- extendedWaitUntil:
+    notVisible:
+      id: undo-snackbar
+    timeout: 20000
+- tapOn:
+    id: timeline-open-bin
+- assertVisible:
+    id: bin-close
+- waitForAnimationToEnd
+- takeScreenshot: bin-overlay

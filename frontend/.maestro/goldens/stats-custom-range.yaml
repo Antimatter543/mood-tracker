@@ -1,0 +1,26 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Statistics on a custom date range. Guards d82b9b7: the streak tile's label truncated
+# only on a custom range, because its wording is longer there (StatSummaryCard).
+- runFlow:
+    file: ../smoke/subflows/launch.yaml
+    env:
+      SCENARIO: week
+- runFlow:
+    file: subflows/settle.yaml
+- tapOn:
+    id: tab-stats
+- tapOn:
+    id: period-nav-label
+- assertVisible:
+    id: date-range-picker
+# Calendar days have no testID of ours. Their accessibility label is the date, and
+# the frozen clock makes these two dates fixed.
+- tapOn: ".*Sunday 1 November 2026.*"
+- tapOn: ".*Tuesday 3 November 2026.*"
+- tapOn:
+    id: date-range-apply
+- assertNotVisible:
+    id: date-range-picker
+- waitForAnimationToEnd
+- takeScreenshot: stats-custom-range
