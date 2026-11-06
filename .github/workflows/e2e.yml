@@ -327,7 +327,7 @@ jobs:
       - name: Install the diff's dependencies
         if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' }}
         working-directory: frontend
-        run: npm ci --ignore-scripts
+        run: npm ci
 
       - name: Compare against the goldens
         if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' }}
