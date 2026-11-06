@@ -409,23 +409,30 @@ const DaySummaryCard = ({
         <Text style={styles.summaryEmptyText}>Nothing logged on this day.</Text>
       </View>
     ) : (
-      <ScrollView style={styles.summaryList} contentContainerStyle={styles.summaryListContent}>
-        {summary.entries.map((entry) => (
-          <View key={entry.id} style={styles.summaryRow}>
-            <View style={styles.summaryMoodPill}>
-              <Text style={styles.summaryMoodValue}>{entry.mood}</Text>
-            </View>
-            <View style={styles.summaryRowBody}>
-              <Text style={styles.summaryTime}>{formatTime(entry.instant)}</Text>
-              {entry.activities.length > 0 && (
-                <Text style={styles.summaryActivities} numberOfLines={2}>
-                  {entry.activities.join(' · ')}
-                </Text>
-              )}
-            </View>
-          </View>
-        ))}
-      </ScrollView>
+      <View style={styles.summaryListContainer}>
+        <ScrollView
+            showsVerticalScrollIndicator
+            keyboardShouldPersistTaps="handled"
+            scrollEventThrottle={16}
+            contentContainerStyle={styles.summaryListContent}
+        >
+            {summary.entries.map((entry) => (
+              <View key={entry.id} style={styles.summaryRow} onStartShouldSetResponder={() => true}>
+                <View style={styles.summaryMoodPill}>
+                  <Text style={styles.summaryMoodValue}>{entry.mood}</Text>
+                </View>
+                <View style={styles.summaryRowBody}>
+                  <Text style={styles.summaryTime}>{formatTime(entry.instant)}</Text>
+                  {entry.activities.length > 0 && (
+                    <Text style={styles.summaryActivities} numberOfLines={2}>
+                      {entry.activities.join(' · ')}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            ))}
+        </ScrollView>
+      </View>
     )}
   </View>
 );
@@ -489,13 +496,14 @@ const makeStyles = (colors: ThemeColors) =>
       backgroundColor: colors.cardBackground,
       width: '90%',
       maxWidth: 420,
-      maxHeight: '80%',
       borderRadius: 20,
       padding: 20,
       borderWidth: 1,
       borderColor: colors.border,
+      flexDirection: 'column',
     },
     summaryHeader: {
+      flexGrow: 0,
       flexDirection: 'row',
       alignItems: 'flex-start',
       justifyContent: 'space-between',
@@ -527,15 +535,21 @@ const makeStyles = (colors: ThemeColors) =>
       fontSize: 14,
       color: colors.textSecondary,
     },
-    summaryList: {
-      flexGrow: 0,
+    summaryListContainer: {
+      // Limit the list height to 3 rows (48px each)
+      maxHeight: 3 * 48,
+      marginBottom: 6,
     },
     summaryListContent: {
+      // flexGrow (not flex) so the content stays vertically centred when it
+      // fits the viewport, but grows past it and scrolls when it doesn't.
+      flexGrow: 1,
+      alignItems: 'flex-start',
       gap: 10,
     },
     summaryRow: {
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       gap: 12,
     },
     summaryMoodPill: {
