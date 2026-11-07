@@ -366,7 +366,7 @@ const formatTime = (instant: string): string =>
     minute: '2-digit',
   });
 
-const DaySummaryCard = ({
+export const DaySummaryCard = ({
   summary,
   onClose,
   styles,
@@ -415,9 +415,11 @@ const DaySummaryCard = ({
             persistentScrollbar
             contentContainerStyle={styles.summaryListContent}
         >
+          {/* Catches the touch for the whole list, gaps included, so a drag that starts anywhere
+              in it scrolls instead of landing on the card's Pressable (seen on a Fairphone 5). */}
+          <View testID="day-summary-rows" style={styles.summaryRows} onStartShouldSetResponder={() => true}>
             {summary.entries.map((entry) => (
-              // The row catches the touch so a drag that starts on it reaches the list (seen on a Fairphone 5).
-              <View key={entry.id} style={styles.summaryRow} onStartShouldSetResponder={() => true}>
+              <View key={entry.id} style={styles.summaryRow}>
                 <View style={styles.summaryMoodPill}>
                   <Text style={styles.summaryMoodValue}>{entry.mood}</Text>
                 </View>
@@ -431,13 +433,14 @@ const DaySummaryCard = ({
                 </View>
               </View>
             ))}
+          </View>
         </ScrollView>
       </View>
     )}
   </View>
 );
 
-const makeStyles = (colors: ThemeColors) =>
+export const makeStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     title: {
       fontSize: 18,
@@ -541,6 +544,8 @@ const makeStyles = (colors: ThemeColors) =>
     },
     summaryListContent: {
       flexGrow: 1,
+    },
+    summaryRows: {
       gap: 10,
     },
     summaryRow: {
