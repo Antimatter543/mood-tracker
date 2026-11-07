@@ -48,6 +48,15 @@ describe('writer vs reader limits', () => {
     expect(MAX_CALIBRATED_MEMORY_KIB).toBe(128 * MiB);
   });
 
+  it('the ceilings are a parameter: higher ones give a fast phone more memory', () => {
+    const flagship = perPassOnly((256 * MiB * 3) / 258);
+    const capped = paramsForBudget(flagship);
+    const uncapped = paramsForBudget(flagship, 500, { memoryKiB: 1024 * MiB, iterations: 20 });
+    expect(uncapped.params.memoryKiB).toBeGreaterThan(capped.params.memoryKiB);
+    expect(uncapped.params.memoryKiB).toBeLessThanOrEqual(1024 * MiB);
+    expect(uncapped.estimatedMs).toBeLessThanOrEqual(500);
+  });
+
   it('the file limits accept everything calibration (and the floor) can produce', () => {
     expect(KDF_FILE_LIMITS.maxMemoryKiB).toBeGreaterThanOrEqual(MAX_CALIBRATED_MEMORY_KIB);
     expect(KDF_FILE_LIMITS.maxMemoryKiB).toBeGreaterThanOrEqual(KDF_FLOOR_PARAMS.memoryKiB);

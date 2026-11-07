@@ -13,6 +13,8 @@ import { OverlayModal } from './OverlayModal';
  *    or when the stored key can no longer be read),
  *  - `off`: current password, to turn encryption off,
  *  - `confirm`: the periodic "do you still know it?" check before a backup,
+ *  - `strength`: current password, to derive the key again in another
+ *    strength mode ("Technical details"),
  *  - `unlock`: restoring a backup this device cannot open by itself.
  *
  * CONTROLLED like the group dialogs: the parent runs the (slow, Argon2id) key
@@ -24,7 +26,7 @@ import { OverlayModal } from './OverlayModal';
 /** Shared danger red, the one colour the theme deliberately does not own. */
 const DANGER = '#ff6b6b';
 
-export type BackupPasswordDialogMode = 'set' | 'change' | 'reset' | 'off' | 'confirm' | 'unlock';
+export type BackupPasswordDialogMode = 'set' | 'change' | 'reset' | 'off' | 'confirm' | 'unlock' | 'strength';
 
 interface ModeCopy {
   title: string;
@@ -73,6 +75,14 @@ export const BACKUP_PASSWORD_COPY: Record<BackupPasswordDialogMode, ModeCopy> = 
     body: 'Enter your backup password to check you still remember it.',
     submit: 'Confirm',
     busy: 'Checking…',
+    currentLabel: 'Backup password',
+    newPassword: false,
+  },
+  strength: {
+    title: 'Apply encryption settings',
+    body: 'Enter your backup password. Its key is created again with the new settings; the password stays the same.',
+    submit: 'Apply',
+    busy: 'Securing…',
     currentLabel: 'Backup password',
     newPassword: false,
   },

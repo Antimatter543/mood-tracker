@@ -314,6 +314,7 @@ const DetailsStep = ({
 
             <Text style={styles.label}>Notes:</Text>
             <TextInput
+                testID="entry-notes-input"
                 style={styles.noteInput}
                 value={notes}
                 onChangeText={onNotesChange}

@@ -18,17 +18,26 @@ type Migration = {
     up: (db: SQLiteDatabase) => Promise<void>;
 };
 
+/**
+ * One statement at a time, NEVER Promise.all. Migrations run on one connection
+ * inside one transaction, so overlap gains nothing and costs two things:
+ *   - Every statement registers a native object on the JS thread while native
+ *     converts the others on a background thread. That burst is what reliably
+ *     reached the expo-modules-core registry race on a fresh install
+ *     (expo/expo#50855; patched in patches/, see tasks/lessons.md 2026-11-04).
+ *   - Promise.all rejects on the first failure with the rest still in flight, so
+ *     they can land after withTransactionAsync's ROLLBACK, outside any transaction.
+ * Guarded by __tests__/migrationAtomicity.integration.test.ts.
+ */
 async function updateV1ActivitiesToV2(db: SQLiteDatabase): Promise<void> {
-    const updates = initialActivities.map(activity => 
-        db.runAsync(
-            `UPDATE activities 
-             SET icon_family = ?, icon_name = ? 
+    for (const activity of initialActivities) {
+        await db.runAsync(
+            `UPDATE activities
+             SET icon_family = ?, icon_name = ?
              WHERE name = ? AND group_id = ?`,
             [activity.icon_family, activity.icon_name, activity.name, activity.group_id]
-        )
-    );
-    
-    await Promise.all(updates);
+        );
+    }
 }
 // List of all migrations
 export const migrations: Migration[] = [
@@ -36,7 +45,14 @@ export const migrations: Migration[] = [
         version: 1,
         up: async (db: SQLiteDatabase) => {
             await createInitialSchema(db);
-            await seedActivitiesV1(db);
+            // seedActivitiesV1 is frozen and reports failure by RETURNING it. Ignoring
+            // that result let a failed seed COMMIT: an install with a partial or empty
+            // activity list, stamped as migrated, which no later launch would repair.
+            // Throw so the whole transaction rolls back and the next launch starts over.
+            const seeded = await seedActivitiesV1(db);
+            if (!seeded.success) {
+                throw new Error(seeded.message);
+            }
             await initializeSettingsTable(db);
         }
     },

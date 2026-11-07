@@ -11,28 +11,11 @@ import {
   SUPPORTED_RESTORE_SOURCES,
 } from '@/databases/data-export';
 import { describeDaylioImport } from '@/databases/daylio-import';
-import { KdfHeader } from '@/lib/backupCrypto';
 import { useBackupEncryption } from '@/hooks/useBackupEncryption';
 import { BackupPasswordDialog } from './BackupPasswordDialog';
+import { BackupStrengthDialog } from './BackupStrengthDialog';
 
-/** "Argon2id, 48 MiB × 2 passes, 4 lanes": the calibrated strength. */
-export function describeKdf(kdf: KdfHeader): string {
-  const mib = Math.round(kdf.memoryKiB / 1024);
-  return `Argon2id, ${mib} MiB × ${kdf.iterations} ${kdf.iterations === 1 ? 'pass' : 'passes'}, ${kdf.parallelism} ${kdf.parallelism === 1 ? 'lane' : 'lanes'}`;
-}
-
-/**
- * The "Technical details" text. Kept out of the hint on purpose: most users
- * only need to know their backups are locked; the parameters are for those
- * who want to check them.
- */
-export function backupTechnicalDetails(kdf: KdfHeader): string {
-  return [
-    `Password hashing: ${describeKdf(kdf)}. Tuned to this phone so that unlocking takes about half a second.`,
-    'Encryption: AES-256-GCM.',
-    'Only a key derived from your password is stored, in this phone\'s secure storage. The password itself is never stored.',
-  ].join('\n\n');
-}
+export { describeKdf } from './BackupStrengthDialog';
 
 const ENCRYPTION_HINT = {
   on: 'Backups are locked with your password. It cannot be shown or recovered, only changed.',
@@ -51,6 +34,9 @@ export const DataManagementSection = () => {
   const exportRef = React.useRef<() => void>(() => {});
   const encryption = useBackupEncryption({ onBackupNow: () => exportRef.current() });
   const encryptionKdf = encryption.kdf;
+  // "Technical details": the strength and its mode, kept out of the hint on
+  // purpose (most users only need to know their backups are locked).
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const handleExport = async () => {
     try {
@@ -105,6 +91,12 @@ export const DataManagementSection = () => {
             true
           ),
         confirmDaylio: summary => confirmAlert('Import from Daylio', describeDaylioImport(summary), 'Import'),
+        confirmStrongKdf: () =>
+          confirmAlert(
+            'Strong encryption settings',
+            "This backup was made with stronger encryption settings than usual. If they are too much for this phone, the app may freeze or crash while opening it. Only open backups you made yourself.",
+            'Open'
+          ),
       });
 
       if (result.success) {
@@ -321,7 +313,8 @@ export const DataManagementSection = () => {
             </Pressable>
             <Pressable
               style={styles.linkButton}
-              onPress={() => Alert.alert('Technical details', backupTechnicalDetails(encryptionKdf))}
+              onPress={() => setDetailsOpen(true)}
+              disabled={busy}
               accessibilityRole="button"
               accessibilityLabel="Backup encryption technical details"
             >
@@ -384,6 +377,18 @@ export const DataManagementSection = () => {
         </Text>
       </Text>
 
+      {encryptionKdf ? (
+        <BackupStrengthDialog
+          visible={detailsOpen}
+          kdf={encryptionKdf}
+          profile={encryption.profile}
+          onClose={() => setDetailsOpen(false)}
+          onSave={(profile, params) => {
+            setDetailsOpen(false);
+            encryption.openStrengthChange(profile, params);
+          }}
+        />
+      ) : null}
       <BackupPasswordDialog {...encryption.dialogProps} />
     </View>
   );

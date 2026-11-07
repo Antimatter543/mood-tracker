@@ -55,6 +55,12 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # Device-free test of the emulator harness (frontend/scripts/e2e-smoke.sh) against a
+      # shimmed adb + maestro. The real emulator run (e2e.yml) is too slow for every PR, so
+      # the harness logic (rc propagation, flow selection, PASS/FAIL table) is gated here.
+      - name: E2E harness self-test
+        run: bash scripts/test-e2e-smoke.sh
+
       - run: npm ci
 
       - name: Type check

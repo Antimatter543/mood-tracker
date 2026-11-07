@@ -1,5 +1,101 @@
 # SoulSync — Project Lessons
 
+## 2026-11-04: "Cannot use shared object that was already released" on a LIVE statement (expo-modules-core race)
+
+- **Symptom.** `NativeDatabase.prepareAsync` rejects: `The 2nd argument cannot be cast to type
+  expo.modules.sqlite.NativeStatement (received Integer)` -> `Cannot use shared object that was already
+  released`. Out of `SQLiteProvider` it is a FATAL JavascriptException; through `resetDatabase` it is
+  QA seed `reset-failed`. About 2 in 20 launches on the CI emulator.
+- **Root cause: a data race inside expo-modules-core, not our handle lifetime.** `SharedObjectRegistry.pairs`
+  is a plain `LinkedHashMap`. `add()` writes under `synchronized(this)` on the JS thread, but `toNativeObject`
+  (and `ensureWasNotRelease`) reads it WITHOUT the lock while `runOnQueue` converts arguments on
+  `Dispatchers.IO`. During a `HashMap.resize()` the new empty table is published before entries move, so an
+  unlocked lookup of a live object misses and the miss is reported as "released". Upstream:
+  https://github.com/expo/expo/issues/50855 and the fix https://github.com/expo/expo/pull/50939 (open when
+  written). Applies to expo-modules-core 56.0.16 (ours), identical through the latest SDK 56 release 56.0.27;
+  a comment on #50855 reports it still on 57.0.22. **So a version bump does not fix it.**
+- **Not the look-alike.** https://github.com/expo/expo/issues/49799 (fixed by PR #50513) is the JS object being
+  GC'd during an async call. In `prepareAsync` the statement is read again after the await, so it stays
+  reachable. We also never close a connection and make a fresh statement per call.
+- **Why fresh install and reset.** Only a version-0 run hits it: migration 1's sequential seed fills the
+  registry, then migration 2's `Promise.all` fires one overlapping `runAsync` per activity, each one an `add()`
+  on the JS thread racing a conversion on IO, right across a resize threshold (12/24/48/96). That burst was
+  ours and is gone, but other reads overlap at startup, so the map race itself had to be fixed.
+- **The canonical fix we carry.** PR #50939's two locked reads, as `patches/expo-modules-core+56.0.16.patch`
+  applied by `postinstall: patch-package --error-on-fail`. expo-modules-core Android compiles from source in
+  CI (`:expo-modules-core:compileReleaseKotlin` in the build log), so the patch takes effect. CI's Gradle build
+  cache keys on source, so it cannot serve the unpatched class. `__tests__/expoModulesCorePatch.test.ts` pins
+  the compiled Kotlin and fails on a version bump: **then re-check #50939 and delete the patch if it shipped.**
+- **A second bug the race exposed.** `seedActivitiesV1` is frozen and returns `{success:false}` instead of
+  throwing, and migration 1 ignored it. A statement failing during the seed COMMITTED an install with a partial
+  activity list, stamped as migrated, never repaired. Migration 1 now throws on it.
+- **No retry, on purpose.** A retry would hide the signal we need if the race ever returns, and the failure is
+  already safe: all pending migrations and their `PRAGMA user_version` stamps (transactional in SQLite) run in
+  ONE transaction, so a failure rolls back to the previous version with no data touched and the next launch
+  starts over. `__tests__/migrationAtomicity.integration.test.ts` proves it by failing every statement in turn
+  on real SQLite, fresh and from older versions. A cold-start failure stays a crash, never an empty database.
+- **Known and left alone:** migration 2 drops `activities` with foreign keys ON, and the cascade clears
+  `entry_activities` for a v1 user. V1 predates every tagged release (first tag v1.2.0), so nobody is on it.
+- **The same race has a second message.** `Cannot convert provided JavaScriptObject to the SharedObject, because
+  it doesn't contain valid id` is the other unlocked read (`toNativeObjectOrNull`) missing, and it hits
+  `NativeDatabase` as well as `NativeStatement` (`The 1st argument cannot be cast...`). Search for both strings.
+- **Measuring it.** Cold-launch soak on the CI emulator (`pm clear`, then the `empty` QA seed deep link, which runs
+  all migrations twice): the unfixed build failed 25 of 605 launches (18 with the exact signature), the fixed
+  build 0 of 1347. e2e alone had too little power: at 1 red in 3, three green runs still pass 30% of the time.
+- **A different crash, not fixed here: SIGSEGV in GWP-ASan's stack walk.** About 0.5% of launches on the x86_64 emulator,
+  fixed and unfixed alike, die under 300 ms after the first `JSI interop was installed`: `android_unsafe_frame_pointer_chase`
+  <- `gwp_asan::GuardedPoolAllocator::deallocate` <- `libhermesvm.so`. It looks like a flow that times out on the
+  home screen, with no JS error, so search logcat for `Fatal signal 11`. Android 14+ turns on recoverable GWP-ASan
+  for about 1% of launches of an app with no `gwpAsanMode` (https://developer.android.com/ndk/guides/gwp-asan), and
+  that walker gives no guarantees on frames built without frame pointers. Likely x86_64 only, because Android's
+  arm64 ABI keeps frame pointers. That is reasoning, not a measurement. Not seen on arm64, and Play vitals show 0
+  crashes. If it ever shows on arm64, the switch is `android:gwpAsanMode="never"`.
+
+## 2026-11-04: Encrypted backup tests: what a test of old files has to be
+
+- **A compatibility fixture comes from the released code.** `__fixtures__/encryptedBackupV1.ts` is rebuilt
+  from the format's description, which proves the spec, not what users hold. `encryptedBackupV2_16_0.ts`
+  came from `git archive v2.16.0` running that tree's own export (a stored key too). Next format change:
+  add one per released writer the same way, and never edit an old one.
+- **A test prompt must give up.** Restore re-asks until `requestPassword` returns null, so
+  `async () => 'the password'` turns broken crypto into an endless loop: a hung run, not a failed test.
+  Use `mockResolvedValueOnce(pw).mockResolvedValue(null)`. Found only by breaking the AAD on purpose.
+- **Pin limits with one thing wrong at a time.** `{ parallelism: 9 }` at 64 KiB passed for the wrong reason
+  (the 8 KiB per lane rule refused it), and raising the lane limit went unnoticed. Break each limit once
+  and watch its test fail. These tests use literal numbers: the worst a crafted file can make a phone do.
+- **A long native derive holds up other native calls.** Expo `AsyncFunction`s share one background thread
+  (`modulesQueue`): off the JS and UI threads, but other module calls wait behind a derive. Argon2 has no
+  cancel. Above Compatibility, the warning before deriving is what protects the user.
+
+## 2026-11-03: CI e2e: an ANR dialog saved INTO the cached AVD snapshot failed every flow
+
+- **Symptom.** The first two e2e.yml runs failed 5/5 smoke flows on timeouts. The screenshots showed
+  "Pixel Launcher isn't responding" over the app on every flow, in both runs.
+- **Root cause.** The snapshot-creation step (cache miss) booted the AVD, ran `echo`, and saved the
+  emulator state, with the launcher's first-boot ANR dialog on screen. Every later restore brings that
+  dialog back. It is a system window that does NOT hold `mCurrentFocus`, and its ANR happened before
+  the restore, so no `ANR in` line appears in this run's logcat. A focus-based dialog check saw nothing.
+- **Fix.** (1) The snapshot step runs `e2e-smoke.sh --snapshot`: settle 60 s, then close any
+  `Application Not Responding|Error` window before the state is saved. (2) The smoke run sets
+  `hide_error_dialogs 1` and checks ALL windows (`dumpsys window windows`) before install and before
+  each flow, tapping `android:id/aerr_close` from a uiautomator dump (broadcast fallback). It counts
+  them as `SYSTEM_DIALOGS`. (3) `AVD_KEY` v1 -> v2 discarded the poisoned cache.
+- **Also: `adb root` restarts adbd and kills any `adb logcat` started before it.** Run 1's logcat.txt
+  was empty for that reason. Root first, `wait-for-device`, then start logcat (the self-test pins the order).
+- **Flow selectors, two more traps from the same runs.** (a) A text selector also matches
+  accessibility labels: `assertNotVisible: "Recently deleted"` failed after the panel closed because
+  the Timeline's bin BUTTON is labelled exactly that when the bin is empty. Identify an overlay by a
+  testID it alone renders (`bin-close`). (b) Notes is below the fold on the details step: use
+  `scrollUntilVisible` before tapping anything low in the entry form.
+- **OPEN BUG the smoke found (2026-11-03, expo-sqlite 56.0.5):** a cold start of a fresh install
+  can CRASH. `initializeDatabase` -> `runMigrations` fails with "NativeDatabase.prepareAsync rejected
+  ... Cannot use shared object that was already released", and the error escapes through
+  `SQLiteProvider` as a FATAL JavascriptException (CI run 41662479999, flow 01). The same error hits
+  `resetDatabase` (the QA seed's `reset-failed`, run 41659037408). It happened about 2 times in 20
+  launches on the CI emulator. It is not yet root-caused, and it is not lane F's to fix.
+- **Rule.** A cached emulator snapshot is a fixture: assert its screen is clean before saving it, and
+  key the cache so a bad one can be thrown away with a one-line bump.
+
 ## 2026-11-03: The QA seed deep link (lib/qa): how a build flag really removes code
 
 - **What actually removes the module from a release bundle.** babel-preset-expo's `inline-env-vars`
@@ -35,8 +131,8 @@
 - **Every "what time is it" in app code is `now()` from `@/lib/clock`.** Pure transforms take
   `now` / `today` as a REQUIRED parameter: a hidden `today = localDateString(new Date())` default
   lets a test omit it and race the real day. `__tests__/clockInjection.test.ts` fails on any
-  zero-arg `new Date()` / `Date.now()` in app source (allowlist: the clock itself, the media
-  filename stamp, and the tabs layout until lane F/G moves it).
+  zero-arg `new Date()` / `Date.now()` in app source (allowlist: the clock itself and the media
+  filename stamp).
 - **`Date.now()` stays where it is an ID, not a time.** `buildMediaFilename` stamps filenames with
   it; routing it through a FROZEN QA clock would give every photo the same name.
 - **A name clash with `now`** (`const now = now()` is a TDZ error; tsc catches it): rename the local

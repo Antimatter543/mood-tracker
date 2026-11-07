@@ -1,6 +1,7 @@
 # frontend/testing: shared test helpers
 
-Test-only code. App code never imports from here (`__tests__/testingHelpers.test.tsx` scans for it).
+Test-only code. Which test layer a change owes, and the cadence, are in `frontend/docs/TESTING.md`.
+App code never imports from here (`__tests__/testingHelpers.test.tsx` scans for it).
 Import each module directly. There is no barrel, because the modules load different production code.
 
 | Module | Use it for |
