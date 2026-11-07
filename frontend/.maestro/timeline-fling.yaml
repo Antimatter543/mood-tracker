@@ -26,12 +26,14 @@ appId: com.raeduslabs.soulsyncapp
     text: "Timeline"
 - takeScreenshot: timeline-fling-0-top
 
+# Every swipe starts at 60%: the sticky "Back to top" pill sits at about 78% of the height and
+# takes a drag that starts on it, so a swipe from 80% left the list where it was (2026-11-08).
 # Burst 1: five hard flings (short duration = high velocity).
 - repeat:
     times: 5
     commands:
       - swipe:
-          start: 50%, 80%
+          start: 50%, 60%
           end: 50%, 20%
           duration: 80
 - takeScreenshot: timeline-fling-1
@@ -41,7 +43,7 @@ appId: com.raeduslabs.soulsyncapp
     times: 8
     commands:
       - swipe:
-          start: 50%, 80%
+          start: 50%, 60%
           end: 50%, 20%
           duration: 80
 - takeScreenshot: timeline-fling-2
@@ -51,7 +53,7 @@ appId: com.raeduslabs.soulsyncapp
     times: 12
     commands:
       - swipe:
-          start: 50%, 80%
+          start: 50%, 60%
           end: 50%, 20%
           duration: 80
 - takeScreenshot: timeline-fling-3
