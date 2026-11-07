@@ -9,7 +9,7 @@
 //   - The <2-data-point edge case (which crashed before) is handled here.
 import { Activity } from "@/components/types";
 import { daysBetween } from "./dateHelpers";
-import { convertStringToDate, localDateString } from "@/databases/dateHelpers";
+import { addDays, convertStringToDate, localDateString } from "@/databases/dateHelpers";
 
 export const RECOVERY_THRESHOLD = 6.0;
 export const DIP_THRESHOLD = 4.0;
@@ -92,13 +92,15 @@ export const analyseRecoveryPatterns = (
         if (mood >= RECOVERY_THRESHOLD || mood > currentEp.currentMood)
             activities.forEach((a) => {
                 const occurance = activityOccurance.get(a) ?? {worsening: 0, recovering: 0};
-                occurance.recovering += 1;
+                occurance.recovering += (mood - currentEp!.currentMood)
+                        + (mood >= RECOVERY_THRESHOLD ? 1 : 0);
                 activityOccurance.set(a, occurance);
             });
         else if (mood < currentEp.currentMood || mood <= DIP_THRESHOLD)
             activities.forEach((a) => {
                 const occurance = activityOccurance.get(a) ?? {worsening: 0, recovering: 0};
-                occurance.worsening += 1;
+                occurance.worsening += (currentEp!.currentMood - mood)
+                        + (mood <= DIP_THRESHOLD ? 1 : 0);
                 activityOccurance.set(a, occurance);
             });
 
@@ -114,19 +116,30 @@ export const analyseRecoveryPatterns = (
         
     const finalizeActivities = (episode: RecoveryEpisode) => {
         const activities = [...activityOccurance.entries()]
+
+        // Count activities that have at least 5 % more worsening occurancies
+        // than recovering as worsening activites. Select the ten such activities
+        // with highest worsening - recovering count.
         episode.worseningActivities = new Set(activities.filter((v) => {
                 const [_, {worsening, recovering}] = v;
-                return worsening > recovering;
+                return worsening / (worsening + recovering) >= 0.55;
             })
-            .sort((v1, v2) => v2[1].worsening - v1[1].worsening)
+            .sort((v1, v2) => 
+                    (v2[1].worsening - v2[1].recovering)
+                    - (v1[1].worsening - v1[1].recovering))
             .splice(0, 10)
             .map((v) => v[0]));
 
+        // Count activities that have at least 5 % more recovering occurancies
+        // than worsening as recovering activites. Select the ten such activities
+        // with highest recovering - worsening count.
         episode.recoveringActivities = new Set(activities.filter((v) => {
                 const [_, {worsening, recovering}] = v;
-                return recovering > worsening;
+                return recovering / (worsening + recovering) >= 0.55;
             })
-            .sort((v1, v2) => v2[1].recovering - v1[1].recovering)
+            .sort((v1, v2) => 
+                    (v2[1].recovering - v2[1].worsening)
+                    - (v1[1].recovering - v1[1].worsening))
             .splice(0, 10)
             .map((v) => v[0]));
     }
@@ -156,13 +169,19 @@ export const analyseRecoveryPatterns = (
         currentEp = null;
     }
 
+    const lastDay = addDays(localDateString(entries[entries.length - 1].date), -1);
     for (const entry of entries) {
         if (!entry || typeof entry.date !== 'string') continue;
         if (typeof entry.mood !== 'number' || !Number.isFinite(entry.mood)) continue;
         if (Number.isNaN(convertStringToDate(entry.date).getTime())) continue;
 
+        // If current entry day or the following day has a dip, entry is not
+        // considered for inclusion in recovery.
+        const localDay = localDateString(entry.date);
+        const dipping = dipDates.has(localDay) || (localDay <= lastDay && dipDates.has(addDays(localDay, 1)));
+
         const mood = entry.mood;
-        const isOnDipDate = dipDates.has(localDateString(entry.date));
+
         if (!currentEp && mood <= DIP_THRESHOLD) {
             currentEp = {
                 startDate: entry.date,
@@ -170,7 +189,7 @@ export const analyseRecoveryPatterns = (
                 worstMood: mood,
                 currentMood: mood,
                 durationDays: 0,
-                dips: 1,
+                dips: 0,
                 entries: [],
                 worseningActivities: new Set(),
                 recoveringActivities: new Set(),
@@ -181,29 +200,27 @@ export const analyseRecoveryPatterns = (
             currentEntries = [];
             processEntry(entry);
         }
-        else if (currentEp && !isOnDipDate && mood >= RECOVERY_THRESHOLD) {
-            processEntry(entry);
-
-            if (startOfRecovery == null) {
-                startOfRecovery = entry.date;
-                if (startOfNonRecovery == null)
-                    startOfNonRecovery = entry.date;
-                continue;
-            }
-
-            const recoveryDays = daysBetween(startOfRecovery, entry.date, true);
-            if (recoveryDays >= MIN_RECOVERY_DAYS) {
-                currentEp.recovered = true;
-                closeCurrentEpisode();
-            }
-        }
         else if (currentEp) {
             processEntry(entry);
 
-            if (!isOnDipDate && mood >= NONRECOVERY_THRESHOLD) {
+            if (!dipping && mood >= RECOVERY_THRESHOLD) {
+                if (startOfRecovery == null) {
+                    startOfRecovery = entry.date;
+                    if (startOfNonRecovery == null)
+                        startOfNonRecovery = entry.date;
+                    continue;
+                }
+
+                const recoveryDays = daysBetween(startOfRecovery, entry.date, true);
+                if (recoveryDays >= MIN_RECOVERY_DAYS) {
+                    currentEp.recovered = true;
+                    closeCurrentEpisode();
+                }  
+            }
+            else if (!dipping && mood >= NONRECOVERY_THRESHOLD) {
+                startOfRecovery = null;
                 if (startOfNonRecovery == null) {
                     startOfNonRecovery = entry.date;
-                    startOfRecovery = null;
                     continue;
                 }
 

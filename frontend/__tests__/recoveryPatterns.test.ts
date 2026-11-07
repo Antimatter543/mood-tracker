@@ -159,10 +159,11 @@ describe('analyseRecoveryPatterns', () => {
     expect(r.currentEpisode).not.toBeNull
     expect(r.currentEpisode!.endDate).toBeNull
     expect(r.currentEpisode!.worstMood).toBe(1)
+    expect(r.currentEpisode!.recovered).toBe(false)
   });
 
-  it('doesn\'t count days with dips after the end recovery towards recovery time', () => {
-    const r = analyseRecoveryPatterns(
+  it('doesn\'t count day as recovery, if the day has a dip', () => {
+    let r = analyseRecoveryPatterns(
       series(
         ['2025-06-01T09:00:00', 3],
         ['2025-06-01T18:00:00', 0],
@@ -179,6 +180,47 @@ describe('analyseRecoveryPatterns', () => {
     expect(r.currentEpisode!.endDate).toBeNull
     expect(r.currentEpisode!.worstMood).toBe(0)
     expect(r.currentEpisode!.entries.length).toBe(8)
+    expect(r.currentEpisode!.recovered).toBe(false)
+
+    r = analyseRecoveryPatterns(
+      series(
+        ['2025-06-01T09:00:00', 3],
+        ['2025-06-01T18:00:00', 0],
+        ['2025-06-01T21:00:00', 3],
+        ['2025-06-02T12:00:00', 4],
+        ['2025-06-03T12:00:00', 5],
+        ['2025-06-04T21:00:00', 7],
+        ['2025-06-05T12:00:00', 9],
+        ['2025-06-05T18:00:00', 4],
+      ),
+    );
+    expect(r.historicalEpisodes.length).toBe(0);
+    expect(r.currentEpisode).not.toBeNull
+    expect(r.currentEpisode!.endDate).toBeNull
+    expect(r.currentEpisode!.worstMood).toBe(0)
+    expect(r.currentEpisode!.entries.length).toBe(8)
+    expect(r.currentEpisode!.recovered).toBe(false)
+  });
+
+  it('doesn\'t count day as recovery, if the following day has a dip', () => {
+    const r = analyseRecoveryPatterns(
+      series(
+        ['2025-06-01T09:00:00', 3],
+        ['2025-06-01T18:00:00', 0],
+        ['2025-06-01T21:00:00', 3],
+        ['2025-06-02T12:00:00', 4],
+        ['2025-06-03T12:00:00', 5],
+        ['2025-06-04T21:00:00', 7],
+        ['2025-06-05T09:00:00', 9],
+        ['2025-06-06T12:00:00', 4],
+      ),
+    );
+    expect(r.historicalEpisodes.length).toBe(0);
+    expect(r.currentEpisode).not.toBeNull
+    expect(r.currentEpisode!.endDate).toBeNull
+    expect(r.currentEpisode!.worstMood).toBe(0)
+    expect(r.currentEpisode!.entries.length).toBe(8)
+    expect(r.currentEpisode!.recovered).toBe(false)
   });
 
   it('calculates duration as days, not as number of entries for date time entries', () => {

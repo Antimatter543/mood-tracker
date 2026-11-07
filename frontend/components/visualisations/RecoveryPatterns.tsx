@@ -146,12 +146,15 @@ const RecoveryAnalysis = () => {
             </View>
             <View style={styles.grow}>
                 <Text style={styles.text}>
-                    {formatDate(episode.startDate, 'numericShort')} – {episode.endDate ? formatDate(episode.endDate, 'numericShort') : 'Ongoing'}
+                    {formatDate(episode.startDate, 'numericShort')} – {episode.endDate ? formatDate(episode.endDate, 'numericShort') : 'ongoing'}
                 </Text>
                 {episode.dips > 1 && (
                     <Text style={styles.text}>{episode.dips} dips{episode.endDate && (episode.recovered ? ', recovered' : ', not recovered')}</Text>
                 )}
-                {episode.dips <= 1 && episode.endDate && (
+                {episode.dips == 1 && (
+                    <Text style={styles.text}>{episode.dips} dip{episode.endDate && (episode.recovered ? ', recovered' : ', not recovered')}</Text>
+                )}
+                {episode.dips == 0 && episode.endDate && (
                     <Text style={styles.text}>{episode.recovered ? 'Recovered' : 'Not recovered'}</Text>
                 )}
                 <Text style={styles.text}>

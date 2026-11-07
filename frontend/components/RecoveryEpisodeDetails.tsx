@@ -42,7 +42,7 @@ export const RecoveryEpisodeDetails: React.FC<{
             </View>
             <Text> </Text>
             <Text style={styles.topTitle}>
-                Episode {formatDate(episode.startDate, 'numericShort')} – {episode.endDate ? formatDate(episode.endDate, 'numericShort') : 'Ongoing'}
+                Episode {formatDate(episode.startDate, 'numericShort')} – {episode.endDate ? formatDate(episode.endDate, 'numericShort') : 'ongoing'}
             </Text>
             <Pressable
                 onPress={onClose}
@@ -77,7 +77,7 @@ export const RecoveryEpisodeDetails: React.FC<{
                                 label='Duration'/>
                         </View>
     
-                        {episode.dips > 1 && (
+                        {episode.dips > 0 && (
                             <View key="dips" style={styles.tileCell}>
                                 <StatTile icon='chevrons-down' value={episode.dips}
                                     label='Mood dips'/>
