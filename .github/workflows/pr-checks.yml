@@ -61,7 +61,17 @@ jobs:
       - name: E2E harness self-test
         run: bash scripts/test-e2e-smoke.sh
 
+      # The same for the golden-screenshot harness (scripts/e2e-goldens.sh): config assertions,
+      # image collection, rc propagation. No node_modules needed, so a broken install can't hide it.
+      - name: Goldens harness self-test
+        run: bash scripts/test-e2e-goldens.sh
+
       - run: npm ci
+
+      # The pixel verdict itself (scripts/golden-diff.mjs) on generated PNGs: misses, missing and
+      # extra images, crop, budgets. It must fail closed, so that is checked without an emulator.
+      - name: Golden-diff self-test
+        run: node --test scripts/test-golden-diff.mjs
 
       - name: Type check
         run: npx tsc --noEmit

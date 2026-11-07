@@ -1,0 +1,38 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Time of Day with every entry in one part of the day. Guards bd4d82d: the card read
+# "best in the Afternoon and toughest at Afternoon". The card only speaks from 14
+# entries in the shown period, so the oneBucket fixture holds them, all in the morning.
+# The current month is 3 days old on the frozen clock: the fixture's month is the
+# previous one.
+- runFlow:
+    file: ../smoke/subflows/launch.yaml
+    env:
+      SCENARIO: oneBucket
+- runFlow:
+    file: subflows/settle.yaml
+- tapOn:
+    id: tab-stats
+- tapOn:
+    id: period-nav-back
+# A crop is only stable for an element that fits on screen with nothing over it.
+# Cropping the whole card failed that: its height differed between two recordings, and
+# the FAB and the sticky period bar landed on it. So this crops the sentence bd4d82d got
+# wrong. It first shows at the bottom of the page, under where the FAB sits, and the
+# extra scroll lifts it clear.
+- repeat:
+    times: 30
+    while:
+      notVisible:
+        id: time-of-day-callout
+    commands:
+      - runFlow:
+          file: subflows/slow-scroll.yaml
+- runFlow:
+    file: subflows/slow-scroll.yaml
+- runFlow:
+    file: subflows/hold.yaml
+- takeScreenshot:
+    path: time-of-day-one-bucket
+    cropOn:
+      id: time-of-day-callout

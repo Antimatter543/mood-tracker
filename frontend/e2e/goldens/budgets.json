@@ -1,0 +1,9 @@
+{
+  "defaultBudgetPct": 0.1,
+  "frameHeight": 2160,
+  "crop": {
+    "gesture": { "top": 66 },
+    "threebutton-cutout": { "top": 132 }
+  },
+  "overrides": {}
+}

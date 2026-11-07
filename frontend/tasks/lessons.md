@@ -1,5 +1,41 @@
 # SoulSync — Project Lessons
 
+## 2026-11-06: What made golden screenshots differ between two CI recordings of one build
+
+Measured by diffing record runs per image with `scripts/golden-diff.mjs --no-fail`. The first pair differed on 5
+of 24 images, by up to 4,158 px. With the fixes below, recordings differ by at most 15 px in any image.
+
+- **A scroll bar mid-fade (tab-timeline, about 4,000 px).** Android awakens a list's scroll bar on layout and
+  fades it about 1.5 s later, and that fade does not follow the animator scale. `waitForAnimationToEnd` calls
+  the screen static long before it ends, because the bar is too few pixels to count. Every shot now goes through
+  `.maestro/goldens/subflows/hold.yaml`, which also waits 2 s. Maestro has no sleep: an `extendedWaitUntil` on
+  text that is never on screen, `optional: true`, is one.
+- **A `cropOn` over an element that doesn't fit cleanly (Time of Day, 1296 px tall, then 1197).** The crop is the
+  element's visible bounds, so where the scroll stops changes its size, and the FAB and sticky period bar land
+  on it at a position that also depends on the scroll. Crop an element that ends up clear of both. Here that is
+  the sentence the original bug was in.
+- **`scrollUntilVisible` stops somewhere different now and then (Stats, 1 run in 6).** Its swipes fling,
+  and `centerElement` gives up after a few tries with the element wherever it landed. Two recordings agreed and
+  several gate runs passed before a run left the sticky period bar over both Stats crops, 99.99% of one image. A
+  pair of recordings can't rule out a flake that rare, so run the gate several times in parallel before trusting
+  it. Golden flows now scroll only with `subflows/slow-scroll.yaml`, a swipe that ends below Android's fling
+  velocity (about 137 px/s here) and so stops where the finger stops. It runs in the page gutter, because the
+  mood chart's scrub gesture takes a drag that starts on it.
+- **The status bar is not 66 px on the tall cutout overlay.** It is 132 px, because the inset follows the
+  cutout. `e2e-goldens.sh` reads the height from the device and fails if `budgets.json` disagrees, since a stale
+  crop either hides app pixels or compares system ones.
+- **What is left: the 64 px Home mood numeral.** Its edges vary by at most 4/255 between runs: 784 px in one
+  comparison, 1 px in another, no animation involved. We count any change at `threshold: 0`, so the 0.1% image
+  budget (about 2,200 px) is what absorbs this. No other text has done it so far. Don't chase it; if an image
+  goes over budget on nothing but numeral edges, that is new information, so look at it before re-recording.
+- **Goldens did not add a crash, but they make an old one show more often.** Two gate runs (42232718991,
+  42232738068) went red with goldens at 24/24 and a smoke flow stuck in `launch.yaml`. Both were the GWP-ASan SIGSEGV
+  from the 2026-11-04 entry below. An A/B soak of cold launches (run 42371774673) measured the rate: 11 of 1,375 with
+  this branch, 11 of 1,573 on main. Of the 16 failure logs the soak kept, 15 have the stack; the other is a process
+  that failed to attach seconds after boot. The rate did not move, the exposure did: e2e now launches 16 times a run
+  instead of 5, so about 11% of runs hit it instead of about 4%. Six green runs on main (about 30 launches) could
+  not show it, which is why it first looked like it belonged to this branch.
+
 ## 2026-11-04: "Cannot use shared object that was already released" on a LIVE statement (expo-modules-core race)
 
 - **Symptom.** `NativeDatabase.prepareAsync` rejects: `The 2nd argument cannot be cast to type
@@ -779,6 +815,9 @@ pair. Three different page-header shapes across five tabs, every one of them typ
   (`useScrollView={false}`: Statistics, Timeline) get NO padding from it and must apply it —
   they'd been eyeballing 16 against the scrolling screens' 20, which showed up as a 4dp seam the
   moment a title sat above that content.
+
+(2026-11-06: that scan is deleted. The `tab-*` golden screenshots now guard this, and removing this
+inset's top padding turned them red on Statistics and Timeline only, run 42218341429.)
 
 **Rung**: hook-grade — `__tests__/pageHeaderUniformity.test.ts` is a CLASS-level invariant over the
 source of every file in `app/(tabs)/`: each screen must import + render `<PageHeader/>`, none may

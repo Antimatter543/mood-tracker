@@ -1,11 +1,14 @@
-name: E2E smoke (emulator + Maestro)
+name: E2E smoke + goldens (emulator + Maestro)
 
 # Builds a QA APK on a free runner, boots an API 34 emulator and runs the Maestro smoke set
 # (frontend/.maestro/smoke, driven by frontend/scripts/e2e-smoke.sh). It catches what jest can't:
 # a control that renders but can't be pressed, an overlay that lets taps through, a screen that
-# never re-reads after a write. ~20 min, so it is NOT on every PR push:
+# never re-reads after a write. Then the golden screenshots, on a fresh boot of the same image
+# (frontend/.maestro/goldens, frontend/scripts/e2e-goldens.sh, judged by golden-diff.mjs): what a
+# flow can't see, like a layout shift or a contrast change. Too slow for every PR push:
 #   - every push to main that touches frontend/ (the release tree always has a run),
-#   - workflow_dispatch (any ref; `flows` input runs a subset),
+#   - workflow_dispatch (any ref; `flows` input runs a subset of smoke and skips the goldens;
+#     `record` records new goldens as a run artifact and skips smoke and the verdict),
 #   - a PR labelled `run-e2e` (re-runs on each push while the label stays on).
 # The harness logic itself is tested device-free in the PR gate (pr-checks.yml, test-e2e-smoke.sh).
 #
@@ -17,6 +20,8 @@ name: E2E smoke (emulator + Maestro)
 #     short-lived run artifact only, never a release asset.
 #   - Caches: written only by main pushes and manual dispatches; a PR run only reads them.
 #   - permissions: contents: read. Every action pinned to a full commit SHA (tag in the comment).
+#   - Recording never pushes. `record` only uploads the PNGs; a person (or agent) commits them from
+#     the artifact in a reviewable PR, so this workflow needs no write permission at all.
 
 on:
   push:
@@ -30,9 +35,14 @@ on:
   workflow_dispatch:
     inputs:
       flows:
-        description: 'Comma-separated subset of the smoke flows (blank = all)'
+        description: 'Comma-separated subset of the smoke flows (blank = all). Set = no goldens.'
         required: false
         default: ''
+      record:
+        description: 'Record new goldens as the goldens-recorded artifact (no smoke, no verdict)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -161,7 +171,8 @@ jobs:
   emulator-maestro:
     needs: build-qa-apk
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Smoke ~9 min + goldens, plus a cold AVD when the cache misses.
+    timeout-minutes: 55
     env:
       E2E_OUT: e2e-out
       E2E_FLOWS: ${{ github.event.inputs.flows }}
@@ -255,6 +266,7 @@ jobs:
         run: echo "SMOKE_T0=$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Emulator + Maestro smoke (API 34 x86_64 google_apis)
+        if: github.event.inputs.record != 'true'
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
           EMU_T0: ${{ env.SMOKE_T0 }}
@@ -273,6 +285,63 @@ jobs:
           disable-animations: true
           script: bash frontend/scripts/e2e-smoke.sh qa-apk/soulsync-qa.apk
 
+      # A fresh boot of the same snapshot, not the smoke step's emulator: the images must not
+      # depend on what the smoke flows left behind (about a minute, and it isolates the two).
+      # Runs after a smoke failure too: it is a separate verdict, and often the explanation.
+      - name: Mark goldens step start
+        if: ${{ !cancelled() && github.event.inputs.flows == '' }}
+        run: echo "GOLDENS_T0=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Emulator + Maestro golden screenshots
+        if: ${{ !cancelled() && github.event.inputs.flows == '' }}
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          E2E_OUT: e2e-out/goldens
+          E2E_RECORD: ${{ github.event.inputs.record == 'true' && '1' || '0' }}
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_3
+          cores: 3
+          ram-size: 4096M
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash frontend/scripts/e2e-goldens.sh qa-apk/soulsync-qa.apk
+
+      - name: Record end of the goldens step
+        if: ${{ !cancelled() && github.event.inputs.flows == '' }}
+        run: echo "GOLDENS_STEP_S=$(( $(date +%s) - GOLDENS_T0 ))" >> "$GITHUB_ENV"
+
+      # The verdict runs even when a flow failed: whatever images exist still get their deltas,
+      # and the missing ones are listed as misses. Node only here: pngjs + pixelmatch from the
+      # lockfile, with no lifecycle scripts (nothing in this step needs them).
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' }}
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the diff's dependencies
+        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' }}
+        working-directory: frontend
+        run: npm ci
+
+      - name: Compare against the goldens
+        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' }}
+        run: node frontend/scripts/golden-diff.mjs --goldens frontend/e2e/goldens --actual e2e-out/goldens/actual --out e2e-out/goldens/diff
+
+      - name: Upload the recorded goldens
+        if: ${{ success() && github.event.inputs.record == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: goldens-recorded
+          path: e2e-out/goldens/actual/
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Summary
         if: always()
         env:
@@ -286,6 +355,8 @@ jobs:
           emu_job=$(( $(date +%s) - JOB_T0 ))
           total=$(( ${BUILD_S:-0} + emu_job ))
           m() { [ -n "$1" ] && awk -v s="$1" 'BEGIN{printf "%.1f", s/60}' || echo n/a; }
+          g="$E2E_OUT/goldens/result.env"
+          gget() { sed -n "s/^$1=//p" "$g" 2>/dev/null | tail -1; }
           {
             echo "## E2E smoke: $(get RESULT)"
             echo
@@ -298,6 +369,17 @@ jobs:
             cat "$E2E_OUT/summary.md" 2>/dev/null || echo "(no flow table: setup failed: $(get REASON))"
             echo
             echo "nav mode: $(get NAV_MODE) (2 = gesture) | clock: $(get CLOCK_AFTER_PIN) | system dialogs closed: $(get SYSTEM_DIALOGS) | seed retries: $(get SEED_RETRIES)"
+            echo
+            echo "## Golden screenshots: $(gget RESULT)"
+            echo
+            echo "goldens step: $(m "$GOLDENS_STEP_S") min (boot included) | flows: $(gget GOLDENS_S)s | images: $(gget IMAGES) | seed retries: $(gget SEED_RETRIES) | system dialogs closed: $(gget SYSTEM_DIALOGS)"
+            echo "status bar: gesture $(gget STATUS_BAR_gesture) px, threebutton-cutout $(gget STATUS_BAR_threebutton-cutout) px"
+            gget CROP_MISMATCH_gesture
+            gget CROP_MISMATCH_threebutton-cutout
+            echo
+            cat "$E2E_OUT/goldens/summary.md" 2>/dev/null || echo "(goldens did not run or setup failed: $(gget REASON))"
+            echo
+            cat "$E2E_OUT/goldens/diff/summary.md" 2>/dev/null || echo "(no pixel verdict in this run)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload screenshots, logcat, Maestro output

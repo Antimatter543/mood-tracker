@@ -1,0 +1,11 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Subflow: wait until nothing transient is left on screen before the first
+# screenshot of a flow. The "QA seed: ok" pill sits over the content for 6 s after
+# subflows/launch.yaml has moved on. A pill that never leaves (the error pill does not
+# auto-hide) fails here, with a clear reason, instead of in a pixel diff.
+- extendedWaitUntil:
+    notVisible:
+      id: qa-seed-status
+    timeout: 15000
+- waitForAnimationToEnd
