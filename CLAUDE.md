@@ -247,6 +247,12 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
     the FAB and any sticky bar. The lint checks all of this, and that a golden exists for every shot.
   - Harness and verdict are tested device-free in pr-checks: `scripts/test-e2e-goldens.sh`,
     `node --test scripts/test-golden-diff.mjs`.
+  - **The PR gate does not run goldens.** A PR that moves pixels needs the `run-e2e` label before merge, or the
+    next push to main goes red (`release.sh` gates on `pr-checks.yml` only, so a release is not blocked). A
+    fork's head can't be dispatched on: push it to a temporary branch here to record.
+  - **Red with goldens at 24/24 and a flow stuck in `launch.yaml`:** grep logcat in `e2e-out` for
+    `GuardedPoolAllocator::deallocate` before anything else. It is a known startup crash on the x86_64 emulator
+    that hits about 11% of runs; re-run the job (`frontend/tasks/lessons.md`, 2026-11-06).
 - Sideload installs may hit Play Protect: `adb shell settings put global verifier_verify_adb_installs 0`,
   then `adb install -r -g <apk>`. EAS-signed release vs debug-signed dev build differ → uninstall before swapping.
 - Seed test data: Settings has `__DEV__`-only "Generate 50 Sample Entries" and "Generate 300 Timeline QA

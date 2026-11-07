@@ -2,8 +2,8 @@
 
 ## 2026-11-06: What made golden screenshots differ between two CI recordings of one build
 
-Measured by diffing two record runs per image with `scripts/golden-diff.mjs --no-fail`. The first pair differed
-on 5 of 24 images, the pair after these fixes by one pixel in total.
+Measured by diffing record runs per image with `scripts/golden-diff.mjs --no-fail`. The first pair differed on 5
+of 24 images, by up to 4,158 px. With the fixes below, recordings differ by at most 15 px in any image.
 
 - **A scroll bar mid-fade (tab-timeline, about 4,000 px).** Android awakens a list's scroll bar on layout and
   fades it about 1.5 s later, and that fade does not follow the animator scale. `waitForAnimationToEnd` calls
@@ -28,6 +28,13 @@ on 5 of 24 images, the pair after these fixes by one pixel in total.
   comparison, 1 px in another, no animation involved. We count any change at `threshold: 0`, so the 0.1% image
   budget (about 2,200 px) is what absorbs this. No other text has done it so far. Don't chase it; if an image
   goes over budget on nothing but numeral edges, that is new information, so look at it before re-recording.
+- **Goldens did not add a crash, but they make an old one show more often.** Two gate runs (42232718991,
+  42232738068) went red with goldens at 24/24 and a smoke flow stuck in `launch.yaml`. Both were the GWP-ASan SIGSEGV
+  from the 2026-11-04 entry below. An A/B soak of cold launches (run 42371774673) measured the rate: 11 of 1,375 with
+  this branch, 11 of 1,573 on main. Of the 16 failure logs the soak kept, 15 have the stack; the other is a process
+  that failed to attach seconds after boot. The rate did not move, the exposure did: e2e now launches 16 times a run
+  instead of 5, so about 11% of runs hit it instead of about 4%. Six green runs on main (about 30 launches) could
+  not show it, which is why it first looked like it belonged to this branch.
 
 ## 2026-11-04: "Cannot use shared object that was already released" on a LIVE statement (expo-modules-core race)
 
