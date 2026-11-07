@@ -3,6 +3,11 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.16.2] - 2026-11-08
+
+### Fixed
+- **Calendar day card:** it now shows a day's entries in full, and the list scrolls when there are more. Thanks to makusuko!
+
 ## [2.16.1] - 2026-11-05
 
 ### Added
