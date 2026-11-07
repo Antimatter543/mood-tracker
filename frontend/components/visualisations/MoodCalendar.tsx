@@ -412,11 +412,11 @@ const DaySummaryCard = ({
       <View style={styles.summaryListContainer}>
         <ScrollView
             showsVerticalScrollIndicator
-            keyboardShouldPersistTaps="handled"
-            scrollEventThrottle={16}
+            persistentScrollbar
             contentContainerStyle={styles.summaryListContent}
         >
             {summary.entries.map((entry) => (
+              // The row catches the touch so a drag that starts on it reaches the list (seen on a Fairphone 5).
               <View key={entry.id} style={styles.summaryRow} onStartShouldSetResponder={() => true}>
                 <View style={styles.summaryMoodPill}>
                   <Text style={styles.summaryMoodValue}>{entry.mood}</Text>
@@ -500,10 +500,8 @@ const makeStyles = (colors: ThemeColors) =>
       padding: 20,
       borderWidth: 1,
       borderColor: colors.border,
-      flexDirection: 'column',
     },
     summaryHeader: {
-      flexGrow: 0,
       flexDirection: 'row',
       alignItems: 'flex-start',
       justifyContent: 'space-between',
@@ -536,20 +534,18 @@ const makeStyles = (colors: ThemeColors) =>
       color: colors.textSecondary,
     },
     summaryListContainer: {
-      // Limit the list height to 3 rows (48px each)
-      maxHeight: 3 * 48,
+      // Three rows plus part of a fourth: rows sit 50 apart (40 pill + 10 gap), and the half row
+      // is the hint that the list scrolls. At exactly 3 * 50 the cut lands in the gap.
+      maxHeight: 3 * 50 + 20,
       marginBottom: 6,
     },
     summaryListContent: {
-      // flexGrow (not flex) so the content stays vertically centred when it
-      // fits the viewport, but grows past it and scrolls when it doesn't.
       flexGrow: 1,
-      alignItems: 'flex-start',
       gap: 10,
     },
     summaryRow: {
       flexDirection: 'row',
-      alignItems: 'flex-start',
+      alignItems: 'center',
       gap: 12,
     },
     summaryMoodPill: {

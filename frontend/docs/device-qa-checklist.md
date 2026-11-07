@@ -65,6 +65,8 @@ List the overlays added or changed since the last release (`git log --oneline <l
 
 Pass: every control responds on the first tap, and the overlay dismisses. No new overlays this release: record NOT APPLICABLE with the commit range. Evidence: one screenshot per overlay and a line per control in RESULTS.md. Why: reanimated entering animations have broken Fabric hit-testing twice (800789a dead Undo on the bin, 06df84b the snackbar's UNDO), and the CI emulator taps synthetically.
 
+The calendar's day summary card is always on this list, because no golden opens it and jest cannot see its layout (#43). On Statistics, tap a day with 1 entry: the row shows in full. Tap a day with 5 entries: part of row 4 shows, a swipe scrolls the list both from on a row and from a gap between rows, and the X still closes the card.
+
 ## Not on this list, on purpose
 
 - "Reset Database" is `__DEV__` only and does not exist in a release APK; the 2026-11-05 pass could not run it (case R1). Do not list it as a release case.
