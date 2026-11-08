@@ -18,7 +18,7 @@
  */
 import React from 'react';
 import { Platform } from 'react-native';
-import { render, waitFor, act } from '@testing-library/react-native';
+import { render, waitFor, act, fireEvent } from '@testing-library/react-native';
 
 // Render on Android (the section is gated off elsewhere) at a supported API level
 // (below the Android-16 gate) so the SDK status — not the version gate — decides.
@@ -138,5 +138,49 @@ describe('HealthConnectSection — Bug 2: re-check on focus (no restart needed)'
     );
     expect(mockGetStatus).toHaveBeenCalledTimes(2);
     expect(queryByText('Install Health Connect')).toBeNull();
+  });
+});
+
+describe('HealthConnectSection — daily sync toggle', () => {
+  const settings = jest.requireMock('@/databases/user-settings');
+  const native = jest.requireMock('@/lib/healthConnect');
+  const dailyToggle = (view: any) => view.getByLabelText('Sync daily');
+
+  beforeEach(() => {
+    mockGetStatus.mockResolvedValue('available');
+    native.hasReadPermission.mockResolvedValue(true);
+    settings.updateSetting.mockClear();
+  });
+
+  afterEach(() => {
+    native.hasReadPermission.mockResolvedValue(false);
+    settings.getSetting.mockImplementation(async () => '');
+  });
+
+  it('is off by default and saves the choice', async () => {
+    settings.getSetting.mockImplementation(async (_db: unknown, key: string) =>
+      key === 'health_connect_opt_in' ? 'true' : ''
+    );
+    const view = await render(<HealthConnectSection />);
+    await waitFor(() => view.getByTestId('health-daily-sync-toggle'));
+    expect(dailyToggle(view).props.on).toBe(false);
+
+    await fireEvent(dailyToggle(view), 'valueChange', true);
+    expect(settings.updateSetting).toHaveBeenCalledWith(expect.anything(), 'health_daily_sync', 'true');
+    expect(dailyToggle(view).props.on).toBe(true);
+  });
+
+  it('shows the stored choice', async () => {
+    settings.getSetting.mockImplementation(async (_db: unknown, key: string) =>
+      key === 'health_connect_opt_in' || key === 'health_daily_sync' ? 'true' : ''
+    );
+    const view = await render(<HealthConnectSection />);
+    await waitFor(() => expect(dailyToggle(view).props.on).toBe(true));
+  });
+
+  it('is not offered before connecting', async () => {
+    const view = await render(<HealthConnectSection />);
+    await waitFor(() => expect(view.getByText('Connect Health Connect')).toBeTruthy());
+    expect(view.queryByTestId('health-daily-sync-toggle')).toBeNull();
   });
 });

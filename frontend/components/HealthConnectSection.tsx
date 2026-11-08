@@ -17,6 +17,7 @@ import {
   ActivityIndicator,
   Linking,
   Platform,
+  Switch,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Feather from '@expo/vector-icons/Feather';
@@ -42,6 +43,7 @@ import {
   HEALTH_CONNECT_PLAY_WEB_URL,
   HEALTH_OPT_IN_SETTING_KEY,
   HEALTH_LAST_SYNCED_SETTING_KEY,
+  HEALTH_DAILY_SYNC_SETTING_KEY,
   resolveHealthConnectPhase,
   shouldShowHealthConnect,
   type HealthConnectCardPhase,
@@ -88,6 +90,7 @@ export const HealthConnectSection = () => {
   const [connected, setConnected] = useState(false);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [dailySync, setDailySync] = useState(false);
   // True while a user-initiated op (connect / sync / disconnect) is mid-flight.
   // A ref, not state, so it can gate the focus re-resolve WITHOUT re-triggering
   // the memoized effect when it flips.
@@ -126,10 +129,12 @@ export const HealthConnectSection = () => {
       const optedIn = (await getSetting(db, HEALTH_OPT_IN_SETTING_KEY)) === 'true';
       const granted = optedIn ? await hasReadPermission() : false;
       const synced = await getSetting(db, HEALTH_LAST_SYNCED_SETTING_KEY);
+      const daily = (await getSetting(db, HEALTH_DAILY_SYNC_SETTING_KEY)) === 'true';
       if (cancelled) return;
 
       setConnected(optedIn && granted);
       setLastSynced(synced || null);
+      setDailySync(daily);
       setPhase('available');
     })();
 
@@ -187,6 +192,14 @@ export const HealthConnectSection = () => {
       operationInFlight.current = false;
     }
   }, [runSync]);
+
+  const handleDailySyncChange = useCallback(
+    async (value: boolean) => {
+      setDailySync(value);
+      await updateSetting(db, HEALTH_DAILY_SYNC_SETTING_KEY, value ? 'true' : 'false');
+    },
+    [db]
+  );
 
   const handleDisconnect = useCallback(() => {
     Alert.alert(
@@ -326,6 +339,22 @@ export const HealthConnectSection = () => {
           loading={busy}
         />
 
+        <View style={styles.toggleRow}>
+          <View style={styles.toggleText}>
+            <Text style={styles.toggleLabel}>Sync daily</Text>
+            <Text style={styles.toggleHint}>The first time you open the app each day.</Text>
+          </View>
+          <Switch
+            testID="health-daily-sync-toggle"
+            value={dailySync}
+            onValueChange={handleDailySyncChange}
+            disabled={busy}
+            trackColor={{ false: '#767577', true: colors.accent }}
+            thumbColor="#f4f3f4"
+            accessibilityLabel="Sync daily"
+          />
+        </View>
+
         <Pressable
           style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
           onPress={handleDisconnect}
@@ -457,6 +486,25 @@ const useStyles = (colors: ReturnType<typeof useThemeColors>) =>
       color: colors.textSecondary,
       fontSize: 13,
       marginBottom: 12,
+      lineHeight: 18,
+    },
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginTop: 12,
+    },
+    toggleText: {
+      flex: 1,
+    },
+    toggleLabel: {
+      color: colors.text,
+      fontSize: 15,
+      fontWeight: '500',
+    },
+    toggleHint: {
+      color: colors.textSecondary,
+      fontSize: 13,
       lineHeight: 18,
     },
     centerRow: {
