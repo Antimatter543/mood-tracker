@@ -177,7 +177,7 @@ Branch pushed to origin. **main untouched at 49aab20.**
 > Pre-req context: as of this hop, fix commits are on **main @ 49aab20** but **v1.2.3 was never
 > released as an APK** (quota). app.json on main is at 1.2.2 (the local v1.2.3 tag was intentionally
 > unwound to keep the repo invariant tag==app.json==APK==release intact). The SDK 56 work is on
-> **`upgrade/sdk-56`** and is fully code-green. Device: Pixel 3 @ `192.168.1.68:5555`, PIN `1337`,
+> **`upgrade/sdk-56`** and is fully code-green. Device: Pixel 3 at the Pixel's adb-tls address (`adb devices`); unlock with ~/bin/astra-pixel-unlock.sh (holds the PIN; private, never commit it),
 > app `com.raeduslabs.soulsync`. NEVER local-build (pegs Anti's machine) — EAS cloud only.
 
 ### Step 1 — Ship v1.2.3 from MAIN first (independent of this branch)

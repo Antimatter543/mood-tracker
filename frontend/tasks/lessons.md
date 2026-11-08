@@ -1820,4 +1820,4 @@ not by Maestro/adb taps. The modal RENDERING is the part to assert via screensho
   (Home 10 / Stats 30 / Timeline 50 / Insights 70 / Settings 90).
 - Build incremental new-arch dev build:
   `export ANDROID_HOME=/home/astraedus/Android/Sdk && npx expo run:android`
-  (android/ is prebuilt). Ensure `adb reverse tcp:8081 tcp:8081`. Device 192.168.1.68:5555, PIN 1337.
+  (android/ is prebuilt). Ensure `adb reverse tcp:8081 tcp:8081`. Device: the Pixel's adb-tls address (`adb devices`); unlock with ~/bin/astra-pixel-unlock.sh (holds the PIN; private, never commit it).
