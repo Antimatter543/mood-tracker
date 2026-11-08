@@ -12,6 +12,7 @@ import {
 } from '@/databases/data-export';
 import { describeDaylioImport } from '@/databases/daylio-import';
 import { useBackupEncryption } from '@/hooks/useBackupEncryption';
+import { keepRestoredEncryptionMessage } from '@/lib/backupKdfProfiles';
 import { BackupPasswordDialog } from './BackupPasswordDialog';
 import { BackupStrengthDialog } from './BackupStrengthDialog';
 
@@ -103,11 +104,11 @@ export const DataManagementSection = () => {
         refetchEntries(); // Refresh the app's data
         // Restored with a typed password on a phone without encryption:
         // offer to keep encrypting new backups with it.
-        const keepPassword = await encryption.takeKeepPasswordOffer();
-        if (keepPassword !== null) {
-          Alert.alert('Data restored', `${result.message}\n\nKeep encrypting new backups with this password?`, [
+        const offer = await encryption.takeKeepPasswordOffer();
+        if (offer !== null) {
+          Alert.alert('Data restored', `${result.message}\n\n${keepRestoredEncryptionMessage(offer.kdf, offer.deriveMs)}`, [
             { text: 'No', style: 'cancel' },
-            { text: 'Yes', onPress: () => encryption.keepPassword(keepPassword) },
+            { text: 'Yes', onPress: () => encryption.keepPassword(offer) },
           ]);
         } else {
           Alert.alert('Success', result.message);

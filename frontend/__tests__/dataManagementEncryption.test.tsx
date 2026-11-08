@@ -114,7 +114,7 @@ jest.mock('@/lib/argon2', () => ({
 
 import { DataManagementSection, describeKdf } from '@/components/DataManagementSection';
 import * as dataExport from '@/databases/data-export';
-import { createBackupKey, encryptBackup } from '@/lib/backupCrypto';
+import { createBackupKey, encryptBackup, type KdfParams } from '@/lib/backupCrypto';
 import { getBackupKey, getPasswordConfirmedAt, markPasswordConfirmed } from '@/lib/backupKeyStore';
 import { freezeNow } from '@/testing/clock';
 
@@ -419,8 +419,10 @@ describe('stored key unreadable', () => {
 });
 
 describe('restoring an encrypted backup from elsewhere', () => {
-  async function restoreFromOtherPhone(alerts: Record<string, string>) {
-    const key = await createBackupKey('other phone pass', { name: 'argon2id', memoryKiB: 64, iterations: 1, parallelism: 1 });
+  const OTHER_KDF = { name: 'argon2id', memoryKiB: 64, iterations: 1, parallelism: 1 } as const;
+
+  async function restoreFromOtherPhone(alerts: Record<string, string>, kdf: KdfParams = OTHER_KDF) {
+    const key = await createBackupKey('other phone pass', kdf);
     const file = await encryptBackup(
       JSON.stringify({ version: 3, data: { activityGroups: [], activities: [], entries: [], settings: [] } }),
       key
@@ -454,7 +456,7 @@ describe('restoring an encrypted backup from elsewhere', () => {
     expect(mockRefetchEntries).toHaveBeenCalled();
   });
 
-  it('on a phone without encryption, offers to keep encrypting with that password (Yes)', async () => {
+  it("on a phone without encryption, offers the backup's password and protection with its unlock time (Yes)", async () => {
     const alerts = await restoreFromOtherPhone({ 'Data restored': 'Yes' });
     await fireEvent.changeText(screen.getByLabelText('Backup password'), 'other phone pass');
     await fireEvent.press(screen.getByLabelText('Unlock and restore'));
@@ -462,13 +464,31 @@ describe('restoring an encrypted backup from elsewhere', () => {
     await waitFor(() =>
       expect(alerts).toHaveBeenCalledWith(
         'Data restored',
-        expect.stringMatching(/Keep encrypting new backups with this password\?$/),
+        expect.stringMatching(
+          /standard protection: unlocking it took \d+ ms on this phone\.\n\nKeep this password and protection for new backups\?$/
+        ),
         expect.any(Array)
       )
     );
     await waitFor(() => expect(encryptionSwitch().props.value).toBe(true));
-    // A fresh salt on THIS phone, not the other phone's.
-    expect((await getBackupKey())!.kdf.memoryKiB).toBe(48 * 1024);
+    const stored = (await getBackupKey())!;
+    // The backup's params, under a fresh salt.
+    expect(stored.kdf).toMatchObject(OTHER_KDF);
+    expect(JSON.parse(SecureStoreMock.__dump().backup_encryption_key_v1).profile).toBe('compatibility');
+  });
+
+  it('takes over strong protection as Manual, and calls it strong', async () => {
+    const strong = { name: 'argon2id', memoryKiB: 256 * 1024, iterations: 2, parallelism: 4 } as const;
+    const alerts = await restoreFromOtherPhone({ 'Data restored': 'Yes', 'Strong encryption settings': 'Open' }, strong);
+    await fireEvent.changeText(screen.getByLabelText('Backup password'), 'other phone pass');
+    await fireEvent.press(screen.getByLabelText('Unlock and restore'));
+
+    await waitFor(() =>
+      expect(alerts).toHaveBeenCalledWith('Data restored', expect.stringMatching(/strong protection/), expect.any(Array))
+    );
+    await waitFor(() => expect(encryptionSwitch().props.value).toBe(true));
+    expect((await getBackupKey())!.kdf).toMatchObject(strong);
+    expect(JSON.parse(SecureStoreMock.__dump().backup_encryption_key_v1).profile).toBe('manual');
   });
 
   it('No leaves encryption off', async () => {

@@ -193,3 +193,22 @@ export function sameParams(a: KdfParams, b: KdfParams): boolean {
 export function exceedsCompatibility(kdf: KdfParams): boolean {
   return kdf.memoryKiB > COMPATIBILITY_CEILINGS.memoryKiB || kdf.iterations > COMPATIBILITY_CEILINGS.iterations;
 }
+
+/** The mode to store for params taken over from a restored backup. */
+export function profileForAdoptedParams(kdf: KdfParams): KdfProfile {
+  return exceedsCompatibility(kdf) ? 'manual' : 'compatibility';
+}
+
+/** "700 ms" / "1.2 s". */
+export function formatDuration(ms: number): string {
+  return ms < 1000 ? `${Math.max(1, Math.round(ms))} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
+
+/** The question after a restore: keep this backup's password and protection for new backups? */
+export function keepRestoredEncryptionMessage(kdf: KdfParams, deriveMs: number): string {
+  const strength = exceedsCompatibility(kdf) ? 'strong' : 'standard';
+  return (
+    `The backup's password has ${strength} protection: unlocking it took ${formatDuration(deriveMs)} on this phone.` +
+    '\n\nKeep this password and protection for new backups?'
+  );
+}
