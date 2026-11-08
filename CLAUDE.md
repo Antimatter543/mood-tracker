@@ -180,8 +180,7 @@ APK is optimized: `eas.json` preview profile = **arm-only ABIs** (via `plugins/w
 drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-properties`). ~45MB, not ~98MB.
 
 ## On-device QA (the only reliable way to verify UI on this app)
-- Pixel 3 via adb-tls (`adb devices` for the current 192.168.1.68:<port>, the port rotates), app `com.raeduslabs.soulsyncapp`, **device PIN `1337`**
-  (unlock: `adb shell input keyevent KEYCODE_WAKEUP && adb shell input swipe 540 1600 540 300 && adb shell input text 1337 && adb shell input keyevent 66`).
+- Pixel 3 via adb-tls (`adb devices` for the current adb-tls address, the port rotates), app `com.raeduslabs.soulsyncapp`, **unlock with ~/bin/astra-pixel-unlock.sh (holds the PIN; private, never commit it)**.
 - **Iteration loop = Expo Go (Anti-directed, 2026-06-12).** Expo Go 56.0.1 is installed on the Pixel and
   version-matches the project (SDK 56+). This app is vanilla CNG with NO custom native modules, so Go runs
   it faithfully (new-arch/Fabric, gesture-handler/reanimated/sortables/sqlite all bundled or pure-JS;

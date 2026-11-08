@@ -36,7 +36,7 @@ the root has a concrete size.
       accent green (reads as two green bars). Render a clear no-entry state instead.
 
 ## Verify
-- [ ] `npx expo run:android` incremental, on Pixel 3 (192.168.1.68:5555)
+- [ ] `npx expo run:android` incremental, on Pixel 3 (adb-tls address from `adb devices`)
 - [ ] Maestro `.maestro/soulsync-tour.yaml` entry+photo beats PASS
 - [ ] `npx tsc --noEmit` clean
 - [ ] `npx jest` green (333 baseline)
