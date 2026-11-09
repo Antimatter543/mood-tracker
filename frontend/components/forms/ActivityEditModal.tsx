@@ -193,7 +193,6 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
             // scrolls + stays keyboard-safe on small screens).
             width: '94%',
             maxWidth: 560,
-            maxHeight: '85%',
             borderRadius: 16,
             padding: 24,
             gap: 20,
@@ -293,15 +292,18 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
             backgroundColor: colors.cardBackground,
             width: '90%',
             maxWidth: 480,
-            maxHeight: '70%',
             borderRadius: 16,
             padding: 24,
             gap: 12,
         },
         groupList: {
+            flexGrow: 0,            
             // Cap the visible list height so a long group list scrolls inside the
             // dialog instead of pushing it off-screen.
             maxHeight: 360,
+        },
+        groupListContent: {
+            flexGrow: 1,
         },
         groupRow: {
             flexDirection: 'row',
@@ -399,7 +401,7 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
                                     <Ionicons name="close" color={colors.text} size={24} />
                                 </Pressable>
                             </View>
-                            <ScrollView style={styles.groupList}>
+                            <ScrollView style={styles.groupList} contentContainerStyle={styles.groupListContent}>
                                 {groups.map((group) => {
                                     const isSelected = group.id === selectedGroupId;
                                     return (
