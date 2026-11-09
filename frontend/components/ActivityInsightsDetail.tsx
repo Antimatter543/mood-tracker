@@ -18,7 +18,7 @@ import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { Card } from '@/components/Card';
 import { ActivityIcon } from '@/components/activityIcon';
-import { Activity } from '@/components/types';
+import { Activity, ActivityGroup } from '@/components/types';
 import { moodColor } from '@/components/timeline/moodColor';
 import { startOfLocalDay, endOfLocalDay } from '@/databases/dateHelpers';
 import {
@@ -39,6 +39,9 @@ import {
     type CoOccurringRow,
 } from '@/components/visualisations/transforms/activityDetail';
 import { now } from '@/lib/clock';
+import { getActivityGroups } from '@/databases/groups';
+import { ActivityEditModal } from './forms/ActivityEditModal';
+import { getActivity } from '@/databases/activities';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
@@ -52,8 +55,10 @@ type DetailData = {
     activityRows: EntryRow[];
     allRows: { date: string; mood: number }[];
     coRows: CoOccurringRow[];
+    group: ActivityGroup | undefined;
+    groups: ActivityGroup[];
 };
-const EMPTY_DATA: DetailData = { activityRows: [], allRows: [], coRows: [] };
+const EMPTY_DATA: DetailData = { activityRows: [], allRows: [], coRows: [], group: undefined, groups: [] };
 
 const VARIABILITY_ICON: Record<VariabilityKind, FeatherName> = {
     insufficient: 'clock',
@@ -84,7 +89,9 @@ export const ActivityInsightsDetail: React.FC<{
     const insets = useSafeAreaInsets();
     const db = useSQLiteContext();
     const styles = useMemo(() => makeStyles(colors), [colors]);
+    const [currentActivity, setCurrentActivity] = useState(activity);
     const [data, setData] = useState<DetailData | null>(null);
+    const [editorVisible, setEditorVisible] = useState<boolean>(false);
 
     const load = useCallback(() => {
         let active = true;
@@ -93,15 +100,19 @@ export const ActivityInsightsDetail: React.FC<{
                 // All-time bounds for the "vs usual" split (all entries).
                 const start = startOfLocalDay(new Date(0));
                 const end = endOfLocalDay(now());
-                const [activityRows, allRows, coRows] = await Promise.all([
-                    db.getAllAsync<EntryRow>(ENTRIES_FOR_ACTIVITY, [activity.id]),
+                const [activityRows, allRows, coRows, groups] = await Promise.all([
+                    db.getAllAsync<EntryRow>(ENTRIES_FOR_ACTIVITY, [currentActivity.id]),
                     db.getAllAsync<{ date: string; mood: number }>(WEEKLY_MOOD_AVERAGES, [
                         start,
                         end,
                     ]),
-                    db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES, [activity.id]),
+                    db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES, [currentActivity.id]),
+                    getActivityGroups(db),
                 ]);
-                if (active) setData({ activityRows, allRows, coRows });
+                if (active) {
+                    const group = groups.find((g) => g.id == currentActivity.group_id);
+                    setData({ activityRows, allRows, coRows, groups, group});
+                }
             } catch (e) {
                 console.error('Error loading activity insights:', e);
                 if (active) setData(EMPTY_DATA);
@@ -110,15 +121,15 @@ export const ActivityInsightsDetail: React.FC<{
         return () => {
             active = false;
         };
-    }, [db, activity.id]);
-    useDataRefresh(load, [db, activity.id]);
+    }, [db, currentActivity.id, currentActivity.group_id]);
+    useDataRefresh(load, [db, currentActivity.id, currentActivity.group_id]);
 
     const model = useMemo(() => {
         const d = data ?? EMPTY_DATA;
         const moods = d.activityRows.map((r) => r.mood);
         return {
             stats: activityMoodStats(moods),
-            variability: classifyVariability(moods, { label: activity.name }),
+            variability: classifyVariability(moods, { label: currentActivity.name }),
             impact: activityMoodImpact(d.allRows, d.activityRows),
             buckets: bucketMoodHistogram(d.activityRows),
             trend: moodTrendForActivity(d.activityRows),
@@ -126,13 +137,46 @@ export const ActivityInsightsDetail: React.FC<{
             firstDate: d.activityRows[0]?.date ?? null,
             lastDate: d.activityRows[d.activityRows.length - 1]?.date ?? null,
         };
-    }, [data, activity.name]);
+    }, [data, currentActivity.name]);
+
+    const onEdit = () => setEditorVisible(true);
+    const onCloseEdit = () => setEditorVisible(false);
+    const onUpdate = async () => {
+        // Handle possible deletion. Otherwise update the current activity.
+        const activity = getActivity(db, currentActivity.id);
+        if (activity == null) {
+            onClose();
+            return;
+        }
+        else
+            setCurrentActivity(activity);
+    }
 
     const header = (
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-            <Text style={styles.topTitle} numberOfLines={1}>
-                {activity.name}
-            </Text>
+            <View>
+                <Text style={styles.topTitle} numberOfLines={1}>
+                    {currentActivity.name}
+                </Text>
+                {data?.group && (
+                    <Text style={styles.topSubtitle}>
+                        {data?.group?.name}
+                    </Text>
+                )}
+            </View>
+
+            <View style={styles.editBtnContainer}>
+                <Pressable
+                    onPress={onEdit}
+                    hitSlop={16}
+                    style={styles.editBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit the activity"
+                >
+                    <Feather name="edit-2" size={20} color={colors.text} />
+                </Pressable>
+            </View>
+
             <Pressable
                 onPress={onClose}
                 hitSlop={16}
@@ -165,15 +209,15 @@ export const ActivityInsightsDetail: React.FC<{
                 <View style={styles.centerFill}>
                     <View style={[styles.iconHalo, { backgroundColor: colors.accentLight }]}>
                         <ActivityIcon
-                            iconName={activity.icon_name}
-                            iconFamily={activity.icon_family}
+                            iconName={currentActivity.icon_name}
+                            iconFamily={currentActivity.icon_family}
                             color={colors.accent}
                             size={30}
                         />
                     </View>
-                    <Text style={styles.emptyTitle}>No {activity.name} entries yet</Text>
+                    <Text style={styles.emptyTitle}>No {currentActivity.name} entries yet</Text>
                     <Text style={styles.emptyBody}>
-                        Log {activity.name} alongside your mood a few times and its pattern will
+                        Log {currentActivity.name} alongside your mood a few times and its pattern will
                         show up here.
                     </Text>
                 </View>
@@ -214,14 +258,14 @@ export const ActivityInsightsDetail: React.FC<{
                     <View style={styles.headerRow}>
                         <View style={[styles.iconChip, { backgroundColor: colors.accentLight }]}>
                             <ActivityIcon
-                                iconName={activity.icon_name}
-                                iconFamily={activity.icon_family}
+                                iconName={currentActivity.icon_name}
+                                iconFamily={currentActivity.icon_family}
                                 color={colors.accent}
                                 size={26}
                             />
                         </View>
                         <View style={styles.grow}>
-                            <Text style={styles.activityTitle}>{activity.name}</Text>
+                            <Text style={styles.activityTitle}>{currentActivity.name}</Text>
                             <Text style={styles.activitySub}>
                                 {s.count} {s.count === 1 ? 'entry' : 'entries'}
                                 {rangeText ? ` · ${rangeText}` : ''}
@@ -253,11 +297,11 @@ export const ActivityInsightsDetail: React.FC<{
 
                 {/* (b) Mood when doing X — vs your usual */}
                 <Card>
-                    <Text style={styles.cardTitle}>Mood when doing {activity.name}</Text>
+                    <Text style={styles.cardTitle}>Mood when doing {currentActivity.name}</Text>
                     {imp.isMeaningful && imp.withAvg !== null && imp.withoutAvg !== null ? (
                         <>
                             <Text style={styles.cardBody}>
-                                On {activity.name} days your mood averages{' '}
+                                On {currentActivity.name} days your mood averages{' '}
                                 <Text style={styles.emphasis}>{imp.withAvg.toFixed(1)}</Text> —
                                 that's{' '}
                                 <Text
@@ -278,14 +322,14 @@ export const ActivityInsightsDetail: React.FC<{
                             </Text>
                             <View style={styles.compare}>
                                 <CompareBar
-                                    label={`With ${activity.name}`}
+                                    label={`With ${currentActivity.name}`}
                                     value={imp.withAvg}
                                     fill={colors.accent}
                                     styles={styles}
                                     colors={colors}
                                 />
                                 <CompareBar
-                                    label="Other days"
+                                    label="Without"
                                     value={imp.withoutAvg}
                                     fill={colors.textSecondary}
                                     styles={styles}
@@ -295,7 +339,7 @@ export const ActivityInsightsDetail: React.FC<{
                         </>
                     ) : (
                         <Text style={styles.cardBody}>
-                            You've logged {activity.name} on{' '}
+                            You've logged {currentActivity.name} on{' '}
                             <Text style={styles.emphasis}>
                                 {imp.withDays} {imp.withDays === 1 ? 'day' : 'days'}
                             </Text>
@@ -312,7 +356,7 @@ export const ActivityInsightsDetail: React.FC<{
                 <Card>
                     <Text style={styles.cardTitle}>How those days are distributed</Text>
                     <Text style={styles.cardBody}>
-                        How often your mood on {activity.name} days lands at each level.
+                        How often your mood on {currentActivity.name} days lands at each level.
                     </Text>
                     <View style={styles.histRow}>
                         {model.buckets.map((count, i) => (
@@ -364,7 +408,7 @@ export const ActivityInsightsDetail: React.FC<{
                     <Card>
                         <Text style={styles.cardTitle}>Trend over time</Text>
                         <Text style={styles.cardBody}>
-                            Your daily average mood on {activity.name} days, oldest to newest.
+                            Your daily average mood on {currentActivity.name} days, oldest to newest.
                         </Text>
                         <Sparkline
                             values={model.trend.map((t) => t.avg)}
@@ -374,6 +418,17 @@ export const ActivityInsightsDetail: React.FC<{
                     </Card>
                 )}
             </ScrollView>
+
+            {editorVisible && (
+                <ActivityEditModal
+                    visible={editorVisible}
+                    activity={currentActivity}
+                    groups={data.groups}
+                    onClose={onCloseEdit}
+                    onUpdate={onUpdate}
+                    db={db}
+                />
+            )};
         </View>
     );
 };
@@ -455,12 +510,26 @@ const makeStyles = (colors: ThemeColors) =>
             backgroundColor: colors.background,
         },
         topTitle: {
-            flex: 1,
             fontSize: 20,
             fontWeight: '800',
             color: colors.text,
             letterSpacing: -0.4,
+            paddingBottom: 0,
         },
+        topSubtitle: {
+            marginTop: -3,
+            padding: 0,
+            fontSize: 13,
+            color: colors.textSecondary,
+        },
+        editBtnContainer: {
+            flex: 1,
+        },
+        editBtn: {
+            padding: 4,
+            marginLeft: 16,
+            marginRight: 8,
+        },        
         closeBtn: {
             padding: 4,
             marginLeft: 8,
