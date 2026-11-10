@@ -169,58 +169,74 @@ const RecoveryAnalysis = () => {
         </Pressable>
     );
     
-  return (
-    <Card>
-        <InfoBubble 
-            text="Recovery analysis tracks how you bounce back from low moods. It shows your recovery patterns, duration, and success rate. A recovery is completed once two days exceed an average mood of 6 (after having delved below 4). Episode is marked as non-recovered, if the mood is at least 5 for four days."
-            position="top-right"
-        />
-        <Text style={styles.title}>Recovery analysis</Text>
-        
-        {currentEpisode != null && (<Text style={styles.subtitle}>Current episode</Text>)}
-        {currentEpisode != null && episodeEntry(currentEpisode!, 'current')}
+    if (!currentEpisode && historicalEpisodes.length == 0)
+        return (
+            <Card>
+                <InfoBubble 
+                    text="Recovery analysis tracks how you bounce back from low moods. It shows your recovery patterns, duration, and success rate. A recovery is completed once two days exceed an average mood of 6 (after having delved below 4). Episode is marked as non-recovered, if the mood is at least 5 for four days."
+                    position="top-right"
+                />
+                <Text style={styles.title}>Recovery analysis</Text>
+                <View style={styles.emptyState}>
+                    <Text style={styles.emptyText}>
+                        No recovery episodes recognized. Keep on logging moods!
+                    </Text>
+                </View>
+            </Card>
+        )
 
-        <View style={styles.stats}>
-            <View style={styles.statItem}>
-                <Text style={styles.statLabel}>Success rate</Text>
-                <Text style={styles.statValue}>{successRate.toFixed(0)}%</Text>
-                <Text style={styles.statDetail}>full recovery</Text>
-            </View>
+    return (
+        <Card>
+            <InfoBubble 
+                text="Recovery analysis tracks how you bounce back from low moods. It shows your recovery patterns, duration, and success rate. A recovery is completed once two days exceed an average mood of 6 (after having delved below 4). Episode is marked as non-recovered, if the mood is at least 5 for four days."
+                position="top-right"
+            />
+            <Text style={styles.title}>Recovery analysis</Text>
+            
+            {currentEpisode != null && (<Text style={styles.subtitle}>Current episode</Text>)}
+            {currentEpisode != null && episodeEntry(currentEpisode!, 'current')}
 
-            <View style={styles.statItem}>
-                <Text style={styles.statLabel}>Average duration</Text>
-                <Text style={styles.statValue}>{avgDuration.toFixed(1)}</Text>
-                <Text style={styles.statDetail}>days to recover</Text>
-            </View>
-        </View>
+            <View style={styles.stats}>
+                <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Success rate</Text>
+                    <Text style={styles.statValue}>{successRate.toFixed(0)}%</Text>
+                    <Text style={styles.statDetail}>full recovery</Text>
+                </View>
 
-        {historicalEpisodes.length > 0 && (
-            <View>
-                <Text style={styles.subtitle}>Recent episodes</Text>
-                <View style={styles.history}>
-                    {historicalEpisodes.slice(0, 5).map((episode, index) => (
-                        episodeEntry(episode, `episode-${index}`)
-                    ))}
+                <View style={styles.statItem}>
+                    <Text style={styles.statLabel}>Average duration</Text>
+                    <Text style={styles.statValue}>{avgDuration.toFixed(1)}</Text>
+                    <Text style={styles.statDetail}>days to recover</Text>
                 </View>
             </View>
-        )}
 
-        {selected && (
-            <OverlayModal
-                visible={selected !== null}
-                onClose={() => setSelected(null)}
-                fullScreen
-            >
-                {selected && (
-                    <RecoveryEpisodeDetails
-                        episode={selected}
-                        onClose={() => setSelected(null)}
-                    />
-                )}
-            </OverlayModal>            
-        )}
-    </Card>
-  );
+            {historicalEpisodes.length > 0 && (
+                <View>
+                    <Text style={styles.subtitle}>Recent episodes</Text>
+                    <View style={styles.history}>
+                        {historicalEpisodes.slice(0, 5).map((episode, index) => (
+                            episodeEntry(episode, `episode-${index}`)
+                        ))}
+                    </View>
+                </View>
+            )}
+
+            {selected && (
+                <OverlayModal
+                    visible={selected !== null}
+                    onClose={() => setSelected(null)}
+                    fullScreen
+                >
+                    {selected && (
+                        <RecoveryEpisodeDetails
+                            episode={selected}
+                            onClose={() => setSelected(null)}
+                        />
+                    )}
+                </OverlayModal>            
+            )}
+        </Card>
+    );
 };
 
 export default RecoveryAnalysis;
@@ -230,78 +246,89 @@ export default RecoveryAnalysis;
 // Themed styles hook
 const useThemedStyles = (colors: ThemeColors) => {
     return useMemo(() => StyleSheet.create({
-      title: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: colors.text,
-        marginBottom: 16,
-      },
-      subtitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: colors.text,
-        marginBottom: 8,
-      },
-      stats: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        marginTop: 16,
-        marginBottom: 32,
-      },
-      statItem: {
-        alignItems: 'center',
-      },
-      statLabel: {
-        fontSize: 14,
-        color: colors.textSecondary,
-        marginBottom: 4,
-      },
-      statValue: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: colors.accent,
-      },
-      statDetail: {
-        fontSize: 12,
-        color: colors.textSecondary,
-      },
-      history: {
-        marginBottom: 16,
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: colors.overlays.border,
-      },
-      bottomBorder: {
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: colors.overlays.border,
-      },
-      episodeItem: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: 12,
-        paddingVertical: 10,
-      },
-      episodePressed: {
-       opacity: 0.6,
-      },
-      episodeIcon: {
-        width: 70,
-        height: 50,
-        color: colors.textSecondary,
-        borderRadius: 25,
-        backgroundColor: colors.accentLight,
-        alignItems: 'center',
-        justifyContent: 'center',
-      },
-      grow: { flex: 1 },
-      text: {
-        color: colors.text,
-        fontSize: 14,
-        marginBottom: 4,
-      },
-      secondaryText: {
-        color: colors.textSecondary,
-        fontSize: 14,
-        marginBottom: 4,
-      },
+        title: {
+            fontSize: 20,
+            fontWeight: 'bold',
+            color: colors.text,
+            marginBottom: 16,
+        },
+        subtitle: {
+            fontSize: 16,
+            fontWeight: '600',
+            color: colors.text,
+            marginBottom: 8,
+        },
+        stats: {
+            flexDirection: 'row',
+            justifyContent: 'space-around',
+            marginTop: 16,
+            marginBottom: 32,
+        },
+        statItem: {
+            alignItems: 'center',
+        },
+        statLabel: {
+            fontSize: 14,
+            color: colors.textSecondary,
+            marginBottom: 4,
+        },
+        statValue: {
+            fontSize: 24,
+            fontWeight: 'bold',
+            color: colors.accent,
+        },
+        statDetail: {
+            fontSize: 12,
+            color: colors.textSecondary,
+        },
+        history: {
+            marginBottom: 16,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: colors.overlays.border,
+        },
+        bottomBorder: {
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: colors.overlays.border,
+        },
+        episodeItem: {
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+            gap: 12,
+            paddingVertical: 10,
+        },
+        episodePressed: {
+        opacity: 0.6,
+        },
+        episodeIcon: {
+            width: 70,
+            height: 50,
+            color: colors.textSecondary,
+            borderRadius: 25,
+            backgroundColor: colors.accentLight,
+            alignItems: 'center',
+            justifyContent: 'center',
+        },
+        grow: { flex: 1 },
+        text: {
+            color: colors.text,
+            fontSize: 14,
+            marginBottom: 4,
+        },
+        secondaryText: {
+            color: colors.textSecondary,
+            fontSize: 14,
+            marginBottom: 4,
+        },
+        emptyState: {
+            alignItems: 'center',
+            gap: 10,
+            paddingVertical: 20,
+        },
+        emptyText: {
+            fontSize: 14,
+            color: colors.textSecondary,
+            textAlign: 'center',
+            lineHeight: 20,
+        },
     }), [colors]);
 };
