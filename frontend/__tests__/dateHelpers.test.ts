@@ -77,35 +77,35 @@ describe('localDateString', () => {
 
 
 describe('localDateTimeString', () => {
-  it('formats a Date as YYYY-MM-DD\'T\'HHM:mm in local TZ', () => {
+  it('formats a Date as YYYY-MM-DD\'T\'HHM:mm:ss in local TZ', () => {
     const date = new Date(2025, 4, 19, 12, 13, 30, 15); // local May 19
-    expect(localDateTimeString(date)).toBe('2025-05-19T12:13');
+    expect(localDateTimeString(date)).toBe('2025-05-19T12:13:30');
   });
 
-  it('formats an UTC date-time string as YYYY-MM-DD\'T\'HHM:mm in local TZ', () => {
-    expect(localDateTimeString('2025-05-19T12:13:15Z')).toBe('2025-05-19T22:13');
+  it('formats an UTC date-time string as YYYY-MM-DD\'T\'HHM:mm:ss in local TZ', () => {
+    expect(localDateTimeString('2025-05-19T12:13:15Z')).toBe('2025-05-19T22:13:15');
   });
 
-  it('formats an UTC Date as YYYY-MM-DD\'T\'HHM:mm in local TZ', () => {
+  it('formats an UTC Date as YYYY-MM-DD\'T\'HHM:mm:ss in local TZ', () => {
     const date = new Date('2025-05-19T12:13:15Z'); // local May 19
-    expect(localDateTimeString(date)).toBe('2025-05-19T22:13');
+    expect(localDateTimeString(date)).toBe('2025-05-19T22:13:15');
   });
 
-  it('pads month, day, hour and minute to two digits', () => {
+  it('pads month, day, hour, minute and second to two digits', () => {
     const date = new Date(2025, 0, 5, 1, 5, 0); // local Jan 5
-    expect(localDateTimeString(date)).toBe('2025-01-05T01:05');
+    expect(localDateTimeString(date)).toBe('2025-01-05T01:05:00');
   });
 
   it('accepts an ISO date-time string and reformats it', () => {
     // Use a local-time string (no Z/offset) so it's interpreted as local
     const result = localDateTimeString('2025-12-31T15:25:30');
-    expect(result).toBe('2025-12-31T15:25');
+    expect(result).toBe('2025-12-31T15:25:30');
   });
 
   it('accepts an ISO date only string', () => {
     // Use a local-time string (no Z/offset) so it's interpreted as local
     const result = localDateTimeString('2025-12-31');
-    expect(result).toBe('2025-12-31T00:00');
+    expect(result).toBe('2025-12-31T00:00:00');
   });
 
   it('throws on invalid input', () => {

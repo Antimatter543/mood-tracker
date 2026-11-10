@@ -15,7 +15,7 @@
 // `localDateString` / `aggregateDailyAverages` (the one authority), never a
 // SQL date() bucket — see databases/dateHelpers.ts READ CONTRACT.
 
-import { convertStringToDate, localDateString, localDateTimeString } from '@/databases/dateHelpers';
+import { convertStringToDate, localDateString } from '@/databases/dateHelpers';
 import {
     aggregateDailyAverages,
     dailyAverageMap,
