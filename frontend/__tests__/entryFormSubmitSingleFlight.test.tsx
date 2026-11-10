@@ -46,7 +46,7 @@ import { EntryForm } from '@/components/forms/EntryForm';
 async function renderOnDetailsStep(onSubmit: (data: any) => Promise<void>) {
     // RNTL 14: render/fireEvent are ASYNC. An un-awaited press silently does
     // nothing, so every navigation press below is awaited.
-    const view = await render(<EntryForm onSubmit={onSubmit} onCancel={jest.fn()} />);
+    const view = await render(<EntryForm onSubmit={onSubmit} onCancel={jest.fn()} onDateChange={jest.fn()} />);
     await act(async () => {
         await fireEvent.press(view.getByText('Continue'));
     });
@@ -66,7 +66,7 @@ describe('EntryForm, Submit single-flight (no duplicate entries)', () => {
         const gate = deferred();
         const onSubmit = jest.fn(() => gate.promise);
         const view = await renderOnDetailsStep(onSubmit);
-        const submit = view.getByText('Submit');
+        const submit = view.getByText('Add');
 
         // BOTH presses dispatched before either is awaited - the double tap.
         // Without the single-flight gate the button is only ever disabled by
@@ -94,7 +94,7 @@ describe('EntryForm, Submit single-flight (no duplicate entries)', () => {
         // and the write is deliberately parked on `gate`.
         let pressed!: Promise<void>;
         await act(async () => {
-            pressed = fireEvent.press(view.getByText('Submit'));
+            pressed = fireEvent.press(view.getByText('Add'));
         });
         expect(submitHost(view).props.accessibilityState).toEqual({ disabled: true, busy: true });
 
@@ -113,14 +113,14 @@ describe('EntryForm, Submit single-flight (no duplicate entries)', () => {
         const view = await renderOnDetailsStep(onSubmit);
 
         await act(async () => {
-            await fireEvent.press(view.getByText('Submit'));
+            await fireEvent.press(view.getByText('Add'));
         });
         // The draft hook swallows the rejection; the button must come back.
         expect(onSubmit).toHaveBeenCalledTimes(1);
         expect(submitHost(view).props.accessibilityState).toEqual({ disabled: false, busy: false });
 
         await act(async () => {
-            await fireEvent.press(view.getByText('Submit'));
+            await fireEvent.press(view.getByText('Add'));
         });
         expect(onSubmit).toHaveBeenCalledTimes(2);
     });
