@@ -40,8 +40,8 @@ export type LatestEntry = {
  * sees "14:30". Returns '' for an unparseable instant — a readout with a
  * missing time is a cosmetic gap; a throw on the render path is a white screen.
  */
-export const formatEntryTime = (instant: string): string => {
-    const d = new Date(instant);
+export const formatEntryTime = (instant: string | Date): string => {
+    const d = typeof instant === 'string' ? new Date(instant) : instant;
     if (Number.isNaN(d.getTime())) return '';
     return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 };

@@ -126,6 +126,13 @@ describe('formatEntryTime', () => {
     it('returns an empty string rather than throwing on garbage', () => {
         expect(formatEntryTime('nope')).toBe('');
     });
+
+    it('works on Date', () => {
+        // Loose on the 12h/24h split (locale-driven), strict on the CLOCK.
+        expect(formatEntryTime(new Date('2026-09-02T04:30:00.000Z'))).toMatch(/\b(14|2):30\b/);
+        // 23:05Z is 09:05 the NEXT local morning.
+        expect(formatEntryTime(new Date('2026-09-02T23:05:00.000Z'))).toMatch(/\b0?9:05\b/);
+    });
 });
 
 describe('formatReadoutDay', () => {
