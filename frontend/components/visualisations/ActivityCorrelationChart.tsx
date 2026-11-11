@@ -73,13 +73,10 @@ const CorrelationRow = ({
           key={item.activity_id}
           onPress={() => setSelected(getActivity(db, item.activity_id))}
           style={({ pressed }) => [
-              styles.row,
               pressed && styles.rowPressed,
           ]}
           accessibilityRole="button"
-          accessibilityLabel={`Open ${item.activity_name} insights, ${item.count_with + item.count_without} ${
-              item.count_with + item.count_without === 1 ? 'entry' : 'entries'
-          }`}
+          accessibilityLabel={`Open ${item.activity_name} insights`}
       >
       <View style={styles.rowHeader}>
         <View style={styles.nameWrap}>

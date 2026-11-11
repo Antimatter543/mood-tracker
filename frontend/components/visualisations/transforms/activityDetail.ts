@@ -22,6 +22,7 @@ import {
     type InstantValueRow,
 } from './dailyAverages';
 import { MIN_SAMPLES } from './activityCorrelation';
+import { IconFamilyType } from '@/components/iconRegistry';
 
 // Re-export so consumers can `bucketMoodHistogram` the activity's moods from one
 // import surface without reimplementing the distribution (the histogram uses the
@@ -312,9 +313,11 @@ export const sparklinePoints = (
 
 export type CoOccurringRow = {
     id: number;
+    group_id: number;
     name: string;
-    icon_family: string;
     icon_name: string;
+    icon_family: IconFamilyType;
+    position: number;
     n: number;
 };
 

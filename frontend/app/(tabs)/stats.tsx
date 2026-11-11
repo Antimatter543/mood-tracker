@@ -21,7 +21,7 @@ import MonthOverMonthCard from '@/components/visualisations/MonthOverMonthCard';
 import TimeframeSelector from '@/components/TimeframeSelector';
 import PeriodNavigator from '@/components/PeriodNavigator';
 import PeriodSwipe from '@/components/PeriodSwipe';
-import { TimeframeProvider, useTimeframe } from '@/context/TimeframeContext';
+import { useTimeframe } from '@/context/TimeframeContext';
 import { useThemeColors } from '@/styles/global';
 
 /** Fallback used until the sticky header reports its real height via onLayout. */
@@ -185,21 +185,19 @@ export { ScreenErrorBoundary as ErrorBoundary } from '@/components/ScreenErrorFa
 
 export default function Stats() {
   return (
-    <TimeframeProvider>
-      <Layout useScrollView={false}>
-        {/* Sits ABOVE StatisticsContent, so the timeframe selector + period
-            navigator (which StatisticsContent pins with `position: absolute;
-            top: 0` inside its own flex:1 box) pin directly under the title
-            rather than under a navigator header bar. Rendering it here — not
-            inside StatisticsContent — also keeps the title on screen through
-            the loading and empty-state branches. */}
-        <PageHeader
-          title="Statistics"
-          style={pageHeaderFullHeightInset}
-          icon={p => <Ionicons name="stats-chart-outline" {...p} />}
-        />
-        <StatisticsContent />
-      </Layout>
-    </TimeframeProvider>
+    <Layout useScrollView={false}>
+      {/* Sits ABOVE StatisticsContent, so the timeframe selector + period
+          navigator (which StatisticsContent pins with `position: absolute;
+          top: 0` inside its own flex:1 box) pin directly under the title
+          rather than under a navigator header bar. Rendering it here — not
+          inside StatisticsContent — also keeps the title on screen through
+          the loading and empty-state branches. */}
+      <PageHeader
+        title="Statistics"
+        style={pageHeaderFullHeightInset}
+        icon={p => <Ionicons name="stats-chart-outline" {...p} />}
+      />
+      <StatisticsContent />
+    </Layout>
   );
 }

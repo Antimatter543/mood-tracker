@@ -15,7 +15,9 @@ import {
     ENTRIES_FOR_ACTIVITY,
     ENTRIES_FOR_ACTIVITY_IN_RANGE,
     CO_OCCURRING_ACTIVITIES,
+    CO_OCCURRING_ACTIVITIES_IN_RANGE,
     ACTIVITY_ENTRY_COUNTS,
+    ACTIVITY_ENTRY_COUNTS_IN_RANGE,
 } from '@/components/visualisations/queries';
 
 import { describeSqlite, openSqlite } from '@/testing/realSqlite';

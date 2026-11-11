@@ -20,6 +20,7 @@ import { reconcileReminders } from "@/lib/notifications";
 import { enabledReminders, parseReminders } from "@/lib/reminders";
 import { OverlayProvider } from "@/context/OverlayHost";
 import { buildTabBarStyle } from "@/lib/tabBarStyle";
+import { TimeframeProvider } from "@/context/TimeframeContext";
 
 export default function RootLayout() {
     // The app-wide "a write happened → reload" trigger. It bumps the external
@@ -37,15 +38,17 @@ export default function RootLayout() {
         <SQLiteProvider databaseName={DATABASE_NAME} onInit={initializeDatabase}>
             <DataProvider value={{ refetchEntries }}>
                 <SettingsProvider>
-                    {/* OverlayProvider hosts our in-tree native-<Modal> replacement.
-                        It MUST sit inside SQLite/Data/Settings so the overlays it
-                        mounts (entry form, settings dropdown) can read those
-                        contexts, and its overlay slots render after <Tabs> so they
-                        paint above the floating tab bar. See context/OverlayHost.tsx. */}
-                    <OverlayProvider>
-                        <NotificationReArm />
-                        <TabNavigator />
-                    </OverlayProvider>
+                    <TimeframeProvider>
+                        {/* OverlayProvider hosts our in-tree native-<Modal> replacement.
+                            It MUST sit inside SQLite/Data/Settings so the overlays it
+                            mounts (entry form, settings dropdown) can read those
+                            contexts, and its overlay slots render after <Tabs> so they
+                            paint above the floating tab bar. See context/OverlayHost.tsx. */}
+                        <OverlayProvider>
+                            <NotificationReArm />
+                            <TabNavigator />
+                        </OverlayProvider>
+                    </TimeframeProvider>
                 </SettingsProvider>
             </DataProvider>
         </SQLiteProvider>

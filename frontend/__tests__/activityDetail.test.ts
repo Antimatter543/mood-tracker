@@ -260,9 +260,9 @@ describe('sparklinePoints', () => {
 
 describe('topCoOccurring', () => {
     const rows: CoOccurringRow[] = [
-        { id: 3, name: 'Gym', icon_family: 'Feather', icon_name: 'activity', n: 5 },
-        { id: 2, name: 'Work', icon_family: 'Feather', icon_name: 'briefcase', n: 2 },
-        { id: 9, name: 'Empty', icon_family: 'Feather', icon_name: 'circle', n: 0 },
+        { id: 3, group_id: 1, name: 'Gym', icon_family: 'Feather', icon_name: 'activity', n: 5, position: 1 },
+        { id: 2, group_id: 1, name: 'Work', icon_family: 'Feather', icon_name: 'briefcase', n: 2, position: 2 },
+        { id: 9, group_id: 1, name: 'Empty', icon_family: 'Feather', icon_name: 'circle', n: 0, position: 3 },
     ];
 
     it('drops zero-count rows and caps to the limit', () => {

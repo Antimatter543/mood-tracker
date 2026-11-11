@@ -20,11 +20,10 @@ import { Card } from '@/components/Card';
 import { ActivityIcon } from '@/components/activityIcon';
 import { Activity } from '@/components/types';
 import { moodColor } from '@/components/timeline/moodColor';
-import { startOfLocalDay, endOfLocalDay } from '@/databases/dateHelpers';
 import {
-    ENTRIES_FOR_ACTIVITY,
     WEEKLY_MOOD_AVERAGES,
-    CO_OCCURRING_ACTIVITIES,
+    ENTRIES_FOR_ACTIVITY_IN_RANGE,
+    CO_OCCURRING_ACTIVITIES_IN_RANGE,
 } from '@/components/visualisations/queries';
 import { NUM_BUCKETS } from '@/components/visualisations/transforms/scatter';
 import {
@@ -38,8 +37,7 @@ import {
     type VariabilityKind,
     type CoOccurringRow,
 } from '@/components/visualisations/transforms/activityDetail';
-import { now } from '@/lib/clock';
-import { getActivity } from '@/databases/activities';
+import { useTimeframe } from '@/context/TimeframeContext';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
@@ -85,23 +83,24 @@ export const ActivityInsightsDetail: React.FC<{
     const fmtDate = (iso: string): string => format(iso, 'medium');
     const insets = useSafeAreaInsets();
     const db = useSQLiteContext();
-    const styles = useMemo(() => makeStyles(colors), [colors]);
     const [data, setData] = useState<DetailData | null>(null);
+    const { periodWindow } = useTimeframe();
+    const styles = useMemo(() => makeStyles(colors), [colors]);
 
     const load = useCallback(() => {
         let active = true;
         (async () => {
             try {
                 // All-time bounds for the "vs usual" split (all entries).
-                const start = startOfLocalDay(new Date(0));
-                const end = endOfLocalDay(now());
+                const queryStart = periodWindow.start;
+                const queryEnd = periodWindow.end;
                 const [activityRows, allRows, coRows] = await Promise.all([
-                    db.getAllAsync<EntryRow>(ENTRIES_FOR_ACTIVITY, [currentActivity.id]),
-                    db.getAllAsync<{ date: string; mood: number }>(WEEKLY_MOOD_AVERAGES, [
-                        start,
-                        end,
-                    ]),
-                    db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES, [currentActivity.id]),
+                    db.getAllAsync<EntryRow>(ENTRIES_FOR_ACTIVITY_IN_RANGE,
+                        [currentActivity.id, queryStart, queryEnd,]),
+                    db.getAllAsync<{ date: string; mood: number }>(WEEKLY_MOOD_AVERAGES,
+                        [queryStart, queryEnd,]),
+                    db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES_IN_RANGE,
+                        [currentActivity.id, queryStart, queryEnd]),
                 ]);
                 if (active) setData({ activityRows, allRows, coRows });
             } catch (e) {
@@ -112,7 +111,7 @@ export const ActivityInsightsDetail: React.FC<{
         return () => {
             active = false;
         };
-    }, [db, currentActivity.id]);
+    }, [db, currentActivity.id, periodWindow]);
     useDataRefresh(load, [db, currentActivity.id]);
 
     const model = useMemo(() => {
@@ -196,6 +195,11 @@ export const ActivityInsightsDetail: React.FC<{
               : colors.accent;
 
     const rangeText =
+        periodWindow.start && periodWindow.end
+            ? fmtDate(periodWindow.start) === fmtDate(periodWindow.end)
+                ? fmtDate(periodWindow.start)
+                : `${fmtDate(periodWindow.start)} – ${fmtDate(periodWindow.end)}`
+            :
         model.firstDate && model.lastDate
             ? fmtDate(model.firstDate) === fmtDate(model.lastDate)
                 ? fmtDate(model.firstDate)
@@ -212,7 +216,7 @@ export const ActivityInsightsDetail: React.FC<{
                 showsVerticalScrollIndicator={false}
             >
                 {/* (a) Header — icon, name, count, date range */}
-                <Card>
+                <Card key={currentActivity.id}>
                     <View style={styles.headerRow}>
                         <View style={[styles.iconChip, { backgroundColor: colors.accentLight }]}>
                             <ActivityIcon
@@ -348,10 +352,10 @@ export const ActivityInsightsDetail: React.FC<{
                             {model.co.map((c) => (
                                 <Pressable
                                     key={'button-' + c.id}
-                                    onPress={() => setActivity(getActivity(db, c.id)!)}
+                                    onPress={() => setActivity(c)}
                                     style={({ pressed }) => [pressed && styles.chipPressed]}
                                     accessibilityRole="button"
-                                    accessibilityLabel={`Open ${activity.name} insights`}
+                                    accessibilityLabel={`Open ${c.name} insights`}
                                 >
                                     <View key={c.id} style={styles.pairChip}>
                                         <ActivityIcon
@@ -577,7 +581,6 @@ const makeStyles = (colors: ThemeColors) =>
             color: colors.text,
             textAlign: 'right',
         },
-
         histRow: {
             flexDirection: 'row',
             alignItems: 'flex-end',

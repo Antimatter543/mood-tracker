@@ -261,13 +261,31 @@ export const ENTRIES_FOR_ACTIVITY_IN_RANGE = `
 // Caller supplies `?activityId`.
 // -----------------------------------------------------------------------------
 export const CO_OCCURRING_ACTIVITIES = `
-  SELECT a2.id, a2.name, a2.icon_family, a2.icon_name, COUNT(*) AS n
+  SELECT a2.id, a2.group_id, a2.name, a2.icon_name, a2.icon_family, COUNT(*) AS n
   FROM entry_activities ea1
   JOIN entries e ON e.id = ea1.entry_id
   JOIN entry_activities ea2
     ON ea2.entry_id = ea1.entry_id AND ea2.activity_id <> ea1.activity_id
   JOIN activities a2 ON a2.id = ea2.activity_id
   WHERE e.deleted_at IS NULL AND ea1.activity_id = ?
+  GROUP BY a2.id
+  ORDER BY n DESC, a2.name
+`;
+
+// Windowed variant of CO_OCCURRING_ACTIVITIES: same shape, additionally range-
+// filtered on the raw instant with parameterised UTC ISO bounds (?start, ?end
+// from startOfLocalDay / endOfLocalDay / computeWindow).
+//
+// Caller supplies `?activityId`, `?start`, `?end.
+// -----------------------------------------------------------------------------
+export const CO_OCCURRING_ACTIVITIES_IN_RANGE = `
+  SELECT a2.id, a2.group_id, a2.name, a2.icon_name, a2.icon_family, COUNT(*) AS n
+  FROM entry_activities ea1
+  JOIN entries e ON e.id = ea1.entry_id
+  JOIN entry_activities ea2
+    ON ea2.entry_id = ea1.entry_id AND ea2.activity_id <> ea1.activity_id
+  JOIN activities a2 ON a2.id = ea2.activity_id
+  WHERE e.deleted_at IS NULL AND ea1.activity_id = ? AND e.date BETWEEN ? AND ?
   GROUP BY a2.id
   ORDER BY n DESC, a2.name
 `;
@@ -288,5 +306,19 @@ export const ACTIVITY_ENTRY_COUNTS = `
   FROM entry_activities ea
   JOIN entries e ON e.id = ea.entry_id
   WHERE e.deleted_at IS NULL
+  GROUP BY ea.activity_id
+`;
+
+// Windowed variant of ACTIVITY_ENTRY_COUNTS_IN_RANGE: same shape, additionally range-
+// filtered on the raw instant with parameterised UTC ISO bounds (?start, ?end
+// from startOfLocalDay / endOfLocalDay / computeWindow).
+//
+// Caller supplies `?start`, `?end.
+// -----------------------------------------------------------------------------
+export const ACTIVITY_ENTRY_COUNTS_IN_RANGE = `
+  SELECT ea.activity_id, COUNT(*) AS n
+  FROM entry_activities ea
+  JOIN entries e ON e.id = ea.entry_id
+  WHERE e.deleted_at IS NULL AND e.date BETWEEN ? AND ?
   GROUP BY ea.activity_id
 `;
