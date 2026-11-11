@@ -206,7 +206,18 @@ export const ActivityInsightsDetail: React.FC<{
                 : `${fmtDate(model.firstDate)} – ${fmtDate(model.lastDate)}`
             : '';
 
-    const maxFreq = Math.max(1, ...model.buckets);
+    const maxFrequency = Math.max(1, ...model.buckets);
+
+    const getBarHeight = (count: number) => {
+        if (maxFrequency === 0) return 0;
+        return (count / maxFrequency) * HISTOGRAM_HEIGHT;
+    };
+
+    // Generate y-axis labels
+    const yAxisLabels = Array.from(
+        { length: 5 },
+        (_, i) => Math.round(maxFrequency * (4 - i) / 4)
+    );
 
     return (
         <View style={styles.screen}>
@@ -259,11 +270,11 @@ export const ActivityInsightsDetail: React.FC<{
 
                 {/* (b) Mood when doing X — vs your usual */}
                 <Card>
-                    <Text style={styles.cardTitle}>Mood when doing {currentActivity.name}</Text>
+                    <Text style={styles.cardTitle}>Mood when logging {currentActivity.name}</Text>
                     {imp.isMeaningful && imp.withAvg !== null && imp.withoutAvg !== null ? (
                         <>
                             <Text style={styles.cardBody}>
-                                On {currentActivity.name} your mood averages{' '}
+                                When you log {currentActivity.name}, your mood averages{' '}
                                 <Text style={styles.emphasis}>{imp.withAvg.toFixed(1)}</Text> —
                                 that's{' '}
                                 <Text
@@ -308,7 +319,7 @@ export const ActivityInsightsDetail: React.FC<{
                             {imp.withAvg !== null
                                 ? ` (averaging ${imp.withAvg.toFixed(1)})`
                                 : ''}
-                            . Log it a few more times — and few times without it — to compare it to
+                            . Log it a few more times — and a few times without it — to compare it to
                             your usual mood.
                         </Text>
                     )}
@@ -320,28 +331,75 @@ export const ActivityInsightsDetail: React.FC<{
                     <Text style={styles.cardBody}>
                         How often your mood on {currentActivity.name} lands at each level.
                     </Text>
-                    <View style={styles.histRow}>
-                        {model.buckets.map((count, i) => (
-                            <View key={i} style={styles.histCol}>
-                                {count > 0 && <Text style={styles.histCount}>{count}</Text>}
-                                <View
-                                    style={[
-                                        styles.histBar,
-                                        {
-                                            height: Math.max(2, (count / maxFreq) * HISTOGRAM_HEIGHT),
-                                            backgroundColor: moodColor(
-                                                i + 0.5,
-                                                colors.accent,
-                                                colors.overlays.tag,
-                                            ),
-                                        },
-                                    ]}
-                                />
-                                <Text style={styles.histAxis}>{i}</Text>
+
+                    <View style={styles.distributionContainer}>
+                        {/* Y-axis title */}
+                        <View style={styles.yAxisTitleContainer}>
+                            <Text style={[styles.axisTitle, styles.yAxisTitle]}>Frequency</Text>
+                        </View>
+
+                        {/* Y-axis labels and plot area */}
+                        <View style={styles.plotContainer}>
+                            {/* Y-axis labels */}
+                            <View style={styles.yAxis}>
+                                {yAxisLabels.map((label, index) => (
+                                    <Text key={index} style={[styles.yAxisLabel, {top: (index * HISTOGRAM_HEIGHT) / 4 - 8,}]}>
+                                        {label}
+                                    </Text>
+                                ))}
                             </View>
-                        ))}
+
+                            {/* Plot area */}
+                            <View style={styles.plotArea}>
+                                {/* Grid lines */}
+                                {yAxisLabels.map((_, index) => (
+                                    <View
+                                        key={index}
+                                        style={[
+                                            styles.gridLine,
+                                            {
+                                                top: (index * HISTOGRAM_HEIGHT) / 4,
+                                            }
+                                        ]}
+                                    />
+                                ))}
+
+                                {/* Bars */}
+                                <View style={styles.barsContainer}>
+                                    {model.buckets.map((count, index) => (
+                                        <View key={index} style={styles.barWrapper}>
+                                            <View
+                                                style={[
+                                                    styles.bar,
+                                                    {
+                                                        height: getBarHeight(count),
+                                                    }
+                                                ]}
+                                            />
+                                            {count > 0 && (
+                                                <Text style={styles.freqLabel}>{count}</Text>
+                                            )}
+                                        </View>
+                                    ))}
+                                </View>
+                            </View>
+                        </View>
                     </View>
-                    <Text style={styles.axisCaption}>Mood rating (0–{NUM_BUCKETS - 1})</Text>
+
+                    {/* X-axis container with labels */}
+                    <View style={styles.xAxisContainer}>
+                        {/* Tick marks and numbers */}
+                        <View style={styles.xAxisLabels}>
+                            {Array.from({ length: NUM_BUCKETS }, (_, i) => (
+                                <Text key={i} style={styles.xAxisLabel}>
+                                    {i}
+                                </Text>
+                            ))}
+                        </View>
+
+                        {/* X-axis title */}
+                        <Text style={[styles.axisTitle, styles.xAxisTitle]}>Mood rating</Text>
+                    </View>
                 </Card>
 
                 {/* (e) Often paired with */}
@@ -581,37 +639,100 @@ const makeStyles = (colors: ThemeColors) =>
             color: colors.text,
             textAlign: 'right',
         },
-        histRow: {
+        distributionContainer: {
+            flexDirection: 'row',
+            marginTop: 30,
+        },
+        yAxisTitleContainer: {
+            width: 16,
+            height: HISTOGRAM_HEIGHT,
+            justifyContent: 'center',
+        },
+        plotContainer: {
+            flex: 1,
+            flexDirection: 'row',
+        },
+        yAxis: {
+            width: 30,
+            height: HISTOGRAM_HEIGHT,
+            alignItems: 'flex-end',
+            paddingRight: 8,
+        },
+        yAxisLabel: {
+            position: 'absolute',
+            color: colors.textSecondary,
+            fontSize: 12,
+            paddingRight: 8,
+        },
+        plotArea: {
+            flex: 1,
+            height: HISTOGRAM_HEIGHT,
+            position: 'relative',
+        },
+        gridLine: {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            height: 1,
+            backgroundColor: colors.overlays.tag,
+        },
+        barsContainer: {
+            flex: 1,
             flexDirection: 'row',
             alignItems: 'flex-end',
-            height: HISTOGRAM_HEIGHT + 34,
-            marginTop: 14,
+            height: HISTOGRAM_HEIGHT,
         },
-        histCol: {
+        barWrapper: {
             flex: 1,
             alignItems: 'center',
             justifyContent: 'flex-end',
         },
-        histCount: {
-            fontSize: 10,
-            color: colors.textSecondary,
-            marginBottom: 2,
-        },
-        histBar: {
-            width: '72%',
+        bar: {
+            width: '80%',
+            backgroundColor: colors.accent,
             borderTopLeftRadius: 4,
             borderTopRightRadius: 4,
+            minHeight: 1,
         },
-        histAxis: {
-            fontSize: 11,
+        freqLabel: {
+            position: 'absolute',
+            top: -20,
             color: colors.textSecondary,
+            fontSize: 10,
+        },
+        xAxisContainer: {
+            height: 30,
+            marginLeft: 45,
             marginTop: 6,
+            marginBottom: 8,
         },
-        axisCaption: {
-            fontSize: 12,
+        xAxisLabels: {
+            flexDirection: 'row',
+            justifyContent: 'flex-end',
+            width: '100%',
+        },
+        xAxisLabel: {
+            flex: 1,
             color: colors.textSecondary,
+            fontSize: 12,
             textAlign: 'center',
-            marginTop: 4,
+            width: '100%',
+        },
+        axisTitle: {
+            color: colors.textSecondary,
+            fontSize: 14,
+            fontWeight: '500',
+        },
+        yAxisTitle: {
+            transform: [{ rotate: '-90deg' }],
+            width: HISTOGRAM_HEIGHT,
+            textAlign: 'center',
+            position: 'absolute',
+            left: -HISTOGRAM_HEIGHT / 2 + 10,
+        },
+        xAxisTitle: {
+            textAlign: 'center',
+            marginTop: 0,
         },
         chipWrap: {
             flexDirection: 'row',
