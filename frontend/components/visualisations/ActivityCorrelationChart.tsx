@@ -296,7 +296,7 @@ const ActivityCorrelationChart = () => {
 
   const renderRow = (item: ActivityCorrelationResult) => (
     <CorrelationRow
-      key={item.activity_name}
+      key={item.activity_id}
       item={item}
       colors={colors}
       styles={styles}
