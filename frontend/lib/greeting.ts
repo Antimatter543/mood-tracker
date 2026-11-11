@@ -1,3 +1,4 @@
+import { bucketForHour } from '@/components/visualisations/transforms/timeOfDay';
 import type Ionicons from '@expo/vector-icons/Ionicons';
 
 /**
@@ -13,14 +14,20 @@ export type IoniconName = keyof typeof Ionicons.glyphMap;
 
 /** Greeting for a local hour (0–23). */
 export const greetingForHour = (hour: number): string => {
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
+    // Ensure the very same bracketing is used as elsewhere
+    const timeOfDay = bucketForHour(hour);
+    if (timeOfDay == 'night') return 'Good night'
+    if (timeOfDay == 'morning') return 'Good morning';
+    if (timeOfDay == 'afternoon') return 'Good afternoon';
     return 'Good evening';
 };
 
 /** Glyph for the same hour, switching on the SAME boundaries as the greeting. */
 export const greetingIconForHour = (hour: number): IoniconName => {
-    if (hour < 12) return 'sunny-outline';
-    if (hour < 18) return 'partly-sunny-outline';
-    return 'moon-outline';
+    // Ensure the very same bracketing is used as elsewhere
+    const timeOfDay = bucketForHour(hour);
+    if (timeOfDay == 'night') return 'moon-outline'
+    if (timeOfDay == 'morning') return 'sunny-outline';
+    if (timeOfDay == 'afternoon') return 'partly-sunny-outline';
+    return 'cloudy-night-outline'
 };
