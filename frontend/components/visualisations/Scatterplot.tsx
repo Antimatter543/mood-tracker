@@ -31,7 +31,7 @@ const MoodHistogram = () => {
             marginVertical: 20,
         },
         yAxisTitleContainer: {
-            width: 20,
+            width: 16,
             height: PLOT_HEIGHT,
             justifyContent: 'center',
         },
@@ -40,15 +40,16 @@ const MoodHistogram = () => {
             flexDirection: 'row',
         },
         yAxis: {
-            width: 40,
+            width: 30,
             height: PLOT_HEIGHT,
-            justifyContent: 'space-between',
             alignItems: 'flex-end',
             paddingRight: 8,
         },
         yAxisLabel: {
+            position: 'absolute',
             color: colors.textSecondary,
             fontSize: 12,
+            paddingRight: 8,
         },
         plotArea: {
             flex: 1,
@@ -87,8 +88,9 @@ const MoodHistogram = () => {
             fontSize: 10,
         },
         xAxisContainer: {
-            height: 30, // Reduced from 50
-            marginLeft: 60,
+            height: 30,
+            marginLeft: 45,
+            marginBottom: 8,
         },
         xAxisLabels: {
             flexDirection: 'row',
@@ -112,11 +114,11 @@ const MoodHistogram = () => {
             width: PLOT_HEIGHT,
             textAlign: 'center',
             position: 'absolute',
-            left: -PLOT_HEIGHT / 2 + 20,
+            left: -PLOT_HEIGHT / 2 + 10,
         },
         xAxisTitle: {
             textAlign: 'center',
-            marginTop: 8, // Reduced from 16
+            marginTop: 0,
         },
     }), [colors]);
 
@@ -175,7 +177,7 @@ const MoodHistogram = () => {
                     {/* Y-axis labels */}
                     <View style={styles.yAxis}>
                         {yAxisLabels.map((label, index) => (
-                            <Text key={index} style={styles.yAxisLabel}>
+                            <Text key={index} style={[styles.yAxisLabel, {top: (index * PLOT_HEIGHT) / 4 - 8,}]}>
                                 {label}
                             </Text>
                         ))}
@@ -230,6 +232,7 @@ const MoodHistogram = () => {
                 </View>
 
                 {/* X-axis title */}
+                <Text style={[styles.axisTitle, styles.xAxisTitle]}>Mood rating</Text>
             </View>
         </Card>
     );
