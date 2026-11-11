@@ -41,7 +41,7 @@ over installed builds = user data loss).
       node scripts/bump-version.js patch -> commit `release: v1.2.3` -> tag v1.2.3 -> push main + tag.
 - [ ] CI fires on tag -> creates release w/ SoulSync-1.2.3.apk. Watch to completion. Verify gh release view v1.2.3.
 
-## Phase 5 — Device verification (Pixel 3 192.168.1.68:5555, PIN 1337, com.raeduslabs.soulsync)
+## Phase 5 — Device verification (Pixel 3 at the Pixel's adb-tls address (`adb devices`); unlock with ~/bin/astra-pixel-unlock.sh (holds the PIN; private, never commit it); com.raeduslabs.soulsync)
 - [ ] Uninstall dev-client. Install v1.2.2 RELEASE APK fresh. v1.2.2 has OLD native Modal -> can't drive
       form synthetically; just launch + Home-render check.
 - [ ] adb install -r CI-built v1.2.3 OVER v1.2.2 (NO uninstall = parity + update-path proof). INSTALL_FAILED_UPDATE_INCOMPATIBLE => parity failure => blocked.

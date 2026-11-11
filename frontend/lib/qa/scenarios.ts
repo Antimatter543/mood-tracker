@@ -34,6 +34,13 @@ interface ScenarioSpec {
    * further than N days; the plan is over-generated, then trimmed to the window.
    */
   withinDays?: number;
+  /**
+   * Move every entry to this local hour on its own day. The planner spreads a
+   * day's entries across the day on purpose, so it can never produce the one shape
+   * a single-bucket screen needs. The plan is over-generated, because an entry
+   * moved past `now` is dropped: a plan never holds a future entry (SeedPlanEntry.date).
+   */
+  atLocalHour?: number;
 }
 
 const AT_NOW = (now: Date) => now;
@@ -57,6 +64,11 @@ export const SCENARIO_SPECS: Readonly<Record<QaScenario, ScenarioSpec>> = {
   timeline300: { count: 300, seed: 300, anchor: AT_NOW },
   // Entries on both sides of a New Year (heatmap/year-label edge cases).
   yearBoundary: { count: 16, seed: 2026, anchor: yearBoundaryAnchor },
+  // Every entry in the morning: Time of Day with one bucket (bd4d82d). That card
+  // only speaks from 14 entries in the shown period (MIN_ENTRIES_FOR_SIGNAL), far too
+  // many to add through the UI, hence a fixture. 40 entries reach well back past
+  // the start of the anchor's month, so the previous month alone clears the 14.
+  oneBucket: { count: 40, seed: 11, anchor: AT_NOW, atLocalHour: 8 },
 };
 
 export interface ScenarioPlan {
@@ -69,6 +81,18 @@ export function planScenario(name: QaScenario, now: Date): ScenarioPlan {
   const spec = SCENARIO_SPECS[name];
   const rng = seededRng(spec.seed);
   const anchor = spec.anchor(now);
+  if (spec.atLocalHour !== undefined) {
+    const hour = spec.atLocalHour;
+    const plans = planSeedEntries(spec.count * 2, anchor, rng)
+      .map((p) => {
+        const d = new Date(p.date);
+        d.setHours(hour);
+        return { ...p, date: d.toISOString() };
+      })
+      .filter((p) => Date.parse(p.date) <= now.getTime())
+      .slice(0, spec.count);
+    return { plans, rng };
+  }
   if (spec.withinDays === undefined) {
     return { plans: planSeedEntries(spec.count, anchor, rng), rng };
   }
