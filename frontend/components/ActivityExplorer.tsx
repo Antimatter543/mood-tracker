@@ -86,7 +86,7 @@ export const ActivityExplorer: React.FC = () => {
         <Card>
             <Text style={styles.title}>Explore your activities</Text>
             <Text style={styles.subtitle}>
-                Shows activity data from {format(periodWindow.start, "numericShort")} to {format(periodWindow.end, "numericShort")}
+                Shows activity data from {format(periodWindow.start, "numericShort")} to {format(periodWindow.end, "numericShort")}{' '}
                 based on time frame selected on the Statistics tab. Open any activity to see its mood pattern, variability, and
                 what you pair it with.
             </Text>
