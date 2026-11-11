@@ -39,25 +39,19 @@ const CorrelationRow = ({
   item,
   colors,
   styles,
-  svgW,
   positiveColor,
   negativeColor,
   carryover,
-  onLayout,
   onExclude,
 }: {
   item: ActivityCorrelationResult;
   colors: ThemeColors;
   styles: Styles;
-  svgW: number;
   positiveColor: string;
   negativeColor: string;
   carryover: boolean;
-  onLayout: (width: number) => void;
   onExclude: (name: string) => void;
 }) => {
-  const withW = (item.avg_with / MAX_MOOD) * svgW;
-  const withoutW = (item.avg_without / MAX_MOOD) * svgW;
   const deltaPositive = item.delta >= 0;
   return (
     <View style={styles.row}>
@@ -89,51 +83,54 @@ const CorrelationRow = ({
 
       <View
         style={styles.barBlock}
-        onLayout={(e) => onLayout(e.nativeEvent.layout.width)}
       >
         <View style={styles.barRow}>
           <Text style={styles.barLabel}>With</Text>
-          <Svg width={svgW} height={BAR_HEIGHT}>
-            <Rect
-              x={0}
-              y={0}
-              width={svgW}
-              height={BAR_HEIGHT}
-              rx={BAR_HEIGHT / 2}
-              fill={colors.overlays.tag}
-            />
-            <Rect
-              x={0}
-              y={0}
-              width={Math.max(0, withW)}
-              height={BAR_HEIGHT}
-              rx={BAR_HEIGHT / 2}
-              fill={positiveColor}
-            />
-          </Svg>
+          <View style={styles.barGraph}>
+            <Svg height={BAR_HEIGHT} width='100%'>
+              <Rect
+                x={0}
+                y={0}
+                width='100%'
+                height={BAR_HEIGHT}
+                rx={BAR_HEIGHT / 2}
+                fill={colors.overlays.tag}
+              />
+              <Rect
+                x={0}
+                y={0}
+                width={Math.max(0, item.avg_with / MAX_MOOD * 100) + '%'}
+                height={BAR_HEIGHT}
+                rx={BAR_HEIGHT / 2}
+                fill={positiveColor}
+              />
+            </Svg>
+          </View>
           <Text style={styles.barValue}>{item.avg_with.toFixed(1)}</Text>
         </View>
 
         <View style={styles.barRow}>
           <Text style={styles.barLabel}>Without</Text>
-          <Svg width={svgW} height={BAR_HEIGHT}>
-            <Rect
-              x={0}
-              y={0}
-              width={svgW}
-              height={BAR_HEIGHT}
-              rx={BAR_HEIGHT / 2}
-              fill={colors.overlays.tag}
-            />
-            <Rect
-              x={0}
-              y={0}
-              width={Math.max(0, withoutW)}
-              height={BAR_HEIGHT}
-              rx={BAR_HEIGHT / 2}
-              fill={colors.textSecondary}
-            />
-          </Svg>
+          <View style={styles.barGraph}>
+            <Svg height={BAR_HEIGHT} width='100%'>
+              <Rect
+                x={0}
+                y={0}
+                width='100%'
+                height={BAR_HEIGHT}
+                rx={BAR_HEIGHT / 2}
+                fill={colors.overlays.tag}
+              />
+              <Rect
+                x={0}
+                y={0}
+                width={Math.max(0, item.avg_without / MAX_MOOD * 100) + '%'}
+                height={BAR_HEIGHT}
+                rx={BAR_HEIGHT / 2}
+                fill={colors.textSecondary}
+              />
+            </Svg>
+          </View>
           <Text style={styles.barValue}>{item.avg_without.toFixed(1)}</Text>
         </View>
       </View>
@@ -154,7 +151,6 @@ const ActivityCorrelationChart = () => {
   const { settings } = useSettings();
   const carryover = settings.activity_carryover;
   const [meaningful, setMeaningful] = useState<ActivityCorrelationResult[]>([]);
-  const [barWidth, setBarWidth] = useState(0);
   const [excluded, setExcluded] = useState<string[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
@@ -251,12 +247,8 @@ const ActivityCorrelationChart = () => {
     );
   }
 
-  const svgW = barWidth > 0 ? barWidth : 1;
   const positiveColor = colors.accent;
   const negativeColor = colors.isDark ? '#FF8A80' : '#E57373';
-  const onRowLayout = (w: number) => {
-    if (w > 0 && Math.abs(w - barWidth) > 1) setBarWidth(w);
-  };
 
   const renderRow = (item: ActivityCorrelationResult) => (
     <CorrelationRow
@@ -264,11 +256,9 @@ const ActivityCorrelationChart = () => {
       item={item}
       colors={colors}
       styles={styles}
-      svgW={svgW}
       positiveColor={positiveColor}
       negativeColor={negativeColor}
       carryover={carryover}
-      onLayout={onRowLayout}
       onExclude={handleExclude}
     />
   );
@@ -444,6 +434,9 @@ const makeStyles = (colors: ThemeColors) =>
       width: 56,
       fontSize: 11,
       color: colors.textSecondary,
+    },
+    barGraph: {
+      flex: 1,
     },
     barValue: {
       width: 30,
