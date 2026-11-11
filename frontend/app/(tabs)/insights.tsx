@@ -54,6 +54,7 @@ import {
 import { getHealthMetricsRange } from '@/databases/health-metrics';
 import { shouldShowHealthConnect } from '@/lib/healthConnectConfig';
 import { now } from '@/lib/clock';
+import { useSettings } from '@/context/SettingsContext';
 
 /**
  * Insights — honest, locally-derived patterns from the user's own entries.
@@ -167,6 +168,8 @@ export default function InsightsScreen() {
     const colors = useThemeColors();
     const styles = useStyles(colors);
     const db = useSQLiteContext();
+    const { settings } = useSettings();
+    const carryover = settings.activity_carryover;
     const [data, setData] = useState<Insights | null>(null);
 
     // Sync loader returning a cleanup: the `active` flag (flipped on
@@ -218,7 +221,7 @@ export default function InsightsScreen() {
                     // in JS (localDateString / aggregate*) — see queries.ts.
                     const dow = buildDowPatternData(aggregateDowRows(dowRawRows));
                     const corr = computeActivityCorrelation(
-                        aggregateActivityCorrelation(activityRawRows)
+                        aggregateActivityCorrelation(activityRawRows, { carryover })
                     );
                     // Most uplifting activities = largest positive, meaningful deltas
                     // (top 3). Empty when none lift mood, which drives the empty state.
