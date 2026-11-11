@@ -137,6 +137,8 @@ const Sparkline: React.FC<{ values: {date: string, mood: number}[]; color: strin
     color,
     styles,
 }) => {
+    const colors = useThemeColors();
+    const negativeColor = colors.isDark ? '#FF8A80' : '#E57373';
     const [width, setWidth] = useState(0);
     const points = sparklineDatePoints(values, width, SPARK_HEIGHT);
     const grid =[0, 2, 4, 6, 8, 10].map((value) =>(
@@ -163,7 +165,7 @@ const Sparkline: React.FC<{ values: {date: string, mood: number}[]; color: strin
                                 y1={g.y}
                                 x2={width}
                                 y2={g.y}
-                                stroke={Number.parseInt(g.label) <= 4 ? "red" : "lightgray"}
+                                stroke={Number.parseInt(g.label) <= 4 ? negativeColor : colors.border}
                                 strokeOpacity={0.8}
                                 strokeWidth={1.3}
                             />
