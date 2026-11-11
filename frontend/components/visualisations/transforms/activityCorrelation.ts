@@ -147,11 +147,11 @@ export const aggregateActivityCorrelation = (
 
     // In-window entries, de-duped by id: id -> { t, mood, day }.
     const entries = new Map<number, { t: number; mood: number; day: string }>();
-    // Activity name -> set of LOCAL days it appears on (ALL rows: pre + in-window).
-    const activityDays = new Map<string, Set<string>>();
-    // Activity name -> instance timestamps (ALL rows), keyed by entry id so each
+    // Activity id -> set of LOCAL days it appears on (ALL rows: pre + in-window).
+    const activityDays = new Map<number, Set<string>>();
+    // Activity id -> instance timestamps (ALL rows), keyed by entry id so each
     // (entry × activity) contributes at most one instant.
-    const activityInstances = new Map<string, Map<number, number>>();
+    const activityInstances = new Map<number, Map<number, number>>();
     const activityIds = new Map<number, string>();
 
     for (const row of rows ?? []) {
@@ -173,17 +173,17 @@ export const aggregateActivityCorrelation = (
         if (row.activity_name != null && row.activity_id != null) {
             activityIds.set(row.activity_id, row.activity_name);
 
-            let days = activityDays.get(row.activity_name);
+            let days = activityDays.get(row.activity_id);
             if (!days) {
                 days = new Set<string>();
-                activityDays.set(row.activity_name, days);
+                activityDays.set(row.activity_id, days);
             }
             days.add(day);
 
-            let inst = activityInstances.get(row.activity_name);
+            let inst = activityInstances.get(row.activity_id);
             if (!inst) {
                 inst = new Map<number, number>();
-                activityInstances.set(row.activity_name, inst);
+                activityInstances.set(row.activity_id, inst);
             }
             if (!inst.has(row.entry_id)) inst.set(row.entry_id, t);
         }
@@ -212,17 +212,17 @@ export const aggregateActivityCorrelation = (
     const allDays = [...dayMood.keys()];
 
     // Ascending instance timestamps per activity — only needed with carryover on.
-    const sortedInstances = new Map<string, number[]>();
+    const sortedInstances = new Map<number, number[]>();
     if (carryover) {
-        for (const [name, inst] of activityInstances) {
-            sortedInstances.set(name, [...inst.values()].sort((a, b) => a - b));
+        for (const [id, inst] of activityInstances) {
+            sortedInstances.set(id, [...inst.values()].sort((a, b) => a - b));
         }
     }
 
     const out: ActivityCorrelationRow[] = [];
     for (const [ id, name ] of activityIds.entries()) {
-        const withDays = activityDays.get(name);
-        const instances = sortedInstances.get(name) ?? EMPTY_INSTANCES;
+        const withDays = activityDays.get(id);
+        const instances = sortedInstances.get(id) ?? EMPTY_INSTANCES;
 
         let sumWith = 0; // Σ dayExposure · dayMood
         let sumWithout = 0; // Σ (1 − dayExposure) · dayMood
