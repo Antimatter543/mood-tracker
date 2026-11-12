@@ -80,21 +80,16 @@ const rateSleep = (minutes: number): Reading => {
     if (h < 6) return { rating: 'poor', note: 'Well under the 7–9 hours adults need. Short nights drain energy and mood.' };
     if (h < 7) return { rating: 'fair', note: 'A little under the 7–9 hours adults need.' };
     if (h <= 9) return { rating: 'good', note: 'Within the 7–9 hours adults need.' };
-    if (h <= 10) return { rating: 'fair', note: 'A bit more than usual. Fine now and then, e.g. to catch up.' };
-    return { rating: 'poor', note: 'Much longer than usual. Can be a sign of being run down or unwell.' };
+    if (h <= 10) return { rating: 'fair', note: 'A bit over the 7–9 hours. Fine now and then, e.g. to catch up.' };
+    return { rating: 'poor', note: 'Well over the 7–9 hours. Often a sign of being run down or unwell.' };
 };
 
 const rateRestingHr = (bpm: number): Reading => {
     if (bpm < 40) return { rating: 'fair', note: 'Very low. Normal for well-trained people, otherwise unusual.' };
-    if (bpm <= 65) return { rating: 'good', note: 'A calm, well-rested heart.' };
-    if (bpm <= 80) return { rating: 'fair', note: 'Normal, but stress, little sleep or a cold can push it up.' };
-    return { rating: 'poor', note: 'High for rest. Stress, illness, alcohol or little sleep raise it.' };
-};
-
-const rateHrv = (ms: number): Reading => {
-    if (ms >= 40) return { rating: 'good', note: 'Your body is recovering well.' };
-    if (ms >= 20) return { rating: 'fair', note: 'Some strain. Stress, poor sleep or alcohol lower it. Your own usual value matters most.' };
-    return { rating: 'poor', note: 'Low: your body is under strain. Your own usual value matters most.' };
+    // 60-100 bpm is the usual adult range at rest (some medications raise it).
+    if (bpm <= 80) return { rating: 'good', note: 'Within the usual range for adults at rest.' };
+    if (bpm <= 100) return { rating: 'fair', note: 'A bit high for rest. Stress, little sleep, caffeine or a cold can push it up.' };
+    return { rating: 'poor', note: 'Above the usual range for rest. Illness, stress, alcohol or little sleep raise it.' };
 };
 
 /** The figures of a day, in a fixed order, skipping the ones it lacks. */
@@ -119,7 +114,16 @@ export const dayHealthItems = (h: DayHealth): DayHealthItem[] => {
     }
     if (h.avgHrvMillis !== null) {
         const ms = Math.round(h.avgHrvMillis);
-        items.push({ key: 'hrv', icon: 'pulse-outline', label: 'Heart rate variability', value: `${ms} ms`, ...rateHrv(ms) });
+        // Not rated: HRV varies a lot between people and with age, so a fixed band
+        // can't say how this person is doing. Only their own usual value can.
+        items.push({
+            key: 'hrv',
+            icon: 'pulse-outline',
+            label: 'Heart rate variability',
+            value: `${ms} ms`,
+            rating: null,
+            note: 'Varies a lot from person to person. Compare with your own usual value: lower than usual often means stress, poor sleep or alcohol.',
+        });
     }
     return items;
 };

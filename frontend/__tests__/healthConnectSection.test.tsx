@@ -17,7 +17,7 @@
  * file guards that each phase renders the right user-facing copy/button.
  */
 import React from 'react';
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { render, waitFor, act, fireEvent } from '@testing-library/react-native';
 
 // Render on Android (the section is gated off elsewhere) at a supported API level
@@ -176,6 +176,25 @@ describe('HealthConnectSection — daily sync toggle', () => {
     );
     const view = await render(<HealthConnectSection />);
     await waitFor(() => expect(dailyToggle(view).props.on).toBe(true));
+  });
+
+  it('turns daily sync off with "Turn off & delete data", so reconnecting later does not quietly resume it', async () => {
+    settings.getSetting.mockImplementation(async (_db: unknown, key: string) =>
+      key === 'health_connect_opt_in' || key === 'health_daily_sync' ? 'true' : ''
+    );
+    const alert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
+    try {
+      const view = await render(<HealthConnectSection />);
+      await waitFor(() => expect(dailyToggle(view).props.on).toBe(true));
+      await fireEvent.press(view.getByText('Turn off & delete data'));
+      const buttons = alert.mock.calls.find((c) => c[0] === 'Turn off Health Connect')![2]!;
+      await act(async () => {
+        await buttons.find((btn) => btn.text === 'Turn off')!.onPress!();
+      });
+      expect(settings.updateSetting).toHaveBeenCalledWith(expect.anything(), 'health_daily_sync', 'false');
+    } finally {
+      alert.mockRestore();
+    }
   });
 
   it('is not offered before connecting', async () => {

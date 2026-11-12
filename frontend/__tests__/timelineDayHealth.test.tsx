@@ -72,12 +72,12 @@ describe('dayHealth', () => {
         expect([...dayHealthByDay([empty, metric('2026-09-21')]).keys()]).toEqual(['2026-09-21']);
     });
 
-    it('lists only the figures the day has, in a fixed order, each rated except the average', () => {
+    it('lists only the figures the day has, in a fixed order, rating sleep and resting heart rate only', () => {
         expect(dayHealthItems(full).map((i) => [i.value, i.rating])).toEqual([
             ['7h 25m', 'good'],
             ['57 bpm', 'good'],
             ['72 bpm', null],
-            ['41 ms', 'good'],
+            ['41 ms', null],
         ]);
         expect(
             dayHealthItems({ sleepMinutes: null, restingHeartRate: null, avgHeartRate: 64, avgHrvMillis: null }).map(
@@ -96,9 +96,29 @@ describe('dayHealth', () => {
         expect(dayHealthItems({ ...full, sleepMinutes: minutes })[0].rating).toBe(rating);
     });
 
+    // 60-100 bpm is the usual adult range at rest; a resting 84 is not a red day.
+    it.each([
+        [38, 'fair'],
+        [57, 'good'],
+        [80, 'good'],
+        [84, 'fair'],
+        [100, 'fair'],
+        [101, 'poor'],
+    ])('rates a resting heart rate of %i bpm as %s', (bpm, rating) => {
+        expect(dayHealthItems({ ...full, restingHeartRate: bpm })[1].rating).toBe(rating);
+    });
+
+    // HRV differs a lot between people and with age, so a fixed band cannot judge it.
+    it.each([12, 25, 60])('never rates an HRV of %i ms, so it cannot colour the day', (ms) => {
+        const hrv = dayHealthItems({ ...full, avgHrvMillis: ms }).find((i) => i.key === 'hrv')!;
+        expect(hrv.rating).toBeNull();
+        expect(hrv.note).not.toMatch(/your body/i);
+        expect(dayHealthRating({ ...full, avgHrvMillis: ms })).toBe('good');
+    });
+
     it('rates the day by the mean of its rated figures', () => {
         expect(dayHealthRating(full)).toBe('good');
-        expect(dayHealthRating({ ...full, avgHrvMillis: 15 })).toBe('fair');
+        expect(dayHealthRating({ ...full, sleepMinutes: 390, restingHeartRate: 90 })).toBe('fair');
         expect(dayHealthRating({ ...full, sleepMinutes: 300, restingHeartRate: 90, avgHrvMillis: 30 })).toBe('poor');
         expect(dayHealthRating({ sleepMinutes: null, restingHeartRate: null, avgHeartRate: 64, avgHrvMillis: null })).toBeNull();
     });
@@ -149,7 +169,7 @@ describe('DayHeader health', () => {
     });
 
     it('colours the pulse in the mood pill by the day and opens a card with every figure and its reading', async () => {
-        const view = await render(header({ ...full, avgHrvMillis: 15 }));
+        const view = await render(header({ ...full, sleepMinutes: 390, restingHeartRate: 90, avgHrvMillis: 15 }));
         const button = view.getByTestId('day-health-2026-09-27');
         expect(button.props.accessibilityLabel).toBe('Average mood 6.5, health fair, show details');
         expect(view.queryByTestId('day-average')).toBeNull();
@@ -158,10 +178,15 @@ describe('DayHeader health', () => {
         await fireEvent.press(button);
         expect(view.getByTestId('day-health-card')).toBeTruthy();
         expect(view.getByText('Sunday, 2026-09-27 · average mood 6.5')).toBeTruthy();
-        for (const text of ['Sleep', '7h 25m', 'Resting heart rate', '57 bpm', 'Average heart rate', '72 bpm', '15 ms']) {
+        for (const text of ['Sleep', '6h 30m', 'Resting heart rate', '90 bpm', 'Average heart rate', '72 bpm', '15 ms']) {
             expect(view.getByText(text)).toBeTruthy();
         }
-        expect(view.getByText('Low: your body is under strain. Your own usual value matters most.')).toBeTruthy();
+        expect(view.getByText('A bit high for rest. Stress, little sleep, caffeine or a cold can push it up.')).toBeTruthy();
+        expect(
+            view.getByText(
+                'Varies a lot from person to person. Compare with your own usual value: lower than usual often means stress, poor sleep or alcohol.'
+            )
+        ).toBeTruthy();
 
         await fireEvent.press(view.getByLabelText('Close'));
         expect(view.queryByTestId('day-health-card')).toBeNull();

@@ -218,6 +218,9 @@ export const HealthConnectSection = () => {
               await clearAllHealthMetrics(db);
               await updateSetting(db, HEALTH_OPT_IN_SETTING_KEY, 'false');
               await updateSetting(db, HEALTH_LAST_SYNCED_SETTING_KEY, '');
+              // Reconnecting later starts with daily sync off again.
+              await updateSetting(db, HEALTH_DAILY_SYNC_SETTING_KEY, 'false');
+              setDailySync(false);
               setConnected(false);
               setLastSynced(null);
               refetchEntries();
