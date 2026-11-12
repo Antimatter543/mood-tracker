@@ -27,6 +27,7 @@ import {
   formatDuration,
   keepRestoredEncryptionMessage,
   profileForAdoptedParams,
+  adoptableParams,
 } from '@/lib/backupKdfProfiles';
 
 const MiB = 1024;
@@ -177,5 +178,21 @@ describe('taking over a restored backup', () => {
         'Keep this password and protection for new backups?'
     );
     expect(keepRestoredEncryptionMessage(standard, 300)).toMatch(/^The backup's password has standard protection/);
+  });
+
+  it('adopts only params this app would write (OWASP minimum, whole MiB)', () => {
+    expect(adoptableParams(standard)).toEqual(standard);
+    expect(adoptableParams(strong)).toEqual(strong);
+    expect(adoptableParams({ name: 'argon2id', memoryKiB: 19 * 1024, iterations: 2, parallelism: 4 })).not.toBeNull();
+    // What a crafted file may say: valid for a FILE, weaker than any writer.
+    expect(adoptableParams({ name: 'argon2id', memoryKiB: 64, iterations: 1, parallelism: 1 })).toBeNull();
+    expect(adoptableParams({ name: 'argon2id', memoryKiB: 8, iterations: 7, parallelism: 1 })).toBeNull();
+    expect(adoptableParams({ name: 'argon2id', memoryKiB: 32 * 1024, iterations: 1, parallelism: 4 })).toBeNull();
+  });
+
+  it('never calls weak params strong', () => {
+    expect(keepRestoredEncryptionMessage({ name: 'argon2id', memoryKiB: 8, iterations: 7, parallelism: 1 }, 1)).toBe(
+      'Keep encrypting new backups with this password?'
+    );
   });
 });

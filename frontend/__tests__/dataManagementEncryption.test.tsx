@@ -457,7 +457,8 @@ describe('restoring an encrypted backup from elsewhere', () => {
   });
 
   it("on a phone without encryption, offers the backup's password and protection with its unlock time (Yes)", async () => {
-    const alerts = await restoreFromOtherPhone({ 'Data restored': 'Yes' });
+    const STANDARD = { name: 'argon2id', memoryKiB: 32 * 1024, iterations: 2, parallelism: 4 } as const;
+    const alerts = await restoreFromOtherPhone({ 'Data restored': 'Yes' }, STANDARD);
     await fireEvent.changeText(screen.getByLabelText('Backup password'), 'other phone pass');
     await fireEvent.press(screen.getByLabelText('Unlock and restore'));
 
@@ -473,7 +474,25 @@ describe('restoring an encrypted backup from elsewhere', () => {
     await waitFor(() => expect(encryptionSwitch().props.value).toBe(true));
     const stored = (await getBackupKey())!;
     // The backup's params, under a fresh salt.
-    expect(stored.kdf).toMatchObject(OTHER_KDF);
+    expect(stored.kdf).toMatchObject(STANDARD);
+    expect(JSON.parse(SecureStoreMock.__dump().backup_encryption_key_v1).profile).toBe('compatibility');
+  });
+
+  it('never takes over params weaker than this app writes: calibrates on this phone instead', async () => {
+    // 64 KiB x 1 pass: a file may say this, the app never writes it.
+    const alerts = await restoreFromOtherPhone({ 'Data restored': 'Yes' });
+    await fireEvent.changeText(screen.getByLabelText('Backup password'), 'other phone pass');
+    await fireEvent.press(screen.getByLabelText('Unlock and restore'));
+
+    await waitFor(() =>
+      expect(alerts).toHaveBeenCalledWith(
+        'Data restored',
+        expect.stringMatching(/Keep encrypting new backups with this password\?$/),
+        expect.any(Array)
+      )
+    );
+    await waitFor(() => expect(encryptionSwitch().props.value).toBe(true));
+    expect((await getBackupKey())!.kdf.memoryKiB).toBe(48 * 1024);
     expect(JSON.parse(SecureStoreMock.__dump().backup_encryption_key_v1).profile).toBe('compatibility');
   });
 

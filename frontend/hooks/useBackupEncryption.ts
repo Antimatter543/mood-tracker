@@ -12,6 +12,7 @@ import {
   KdfProfile,
   ceilingsForProfile,
   deviceTotalMemory,
+  adoptableParams,
   profileForAdoptedParams,
 } from '@/lib/backupKdfProfiles';
 import {
@@ -394,8 +395,11 @@ export function useBackupEncryption({ onBackupNow }: { onBackupNow: () => void }
 
   const keepPassword = async ({ password, kdf }: AcceptedBackupPassword) => {
     try {
-      // The backup's params under a fresh salt.
-      await setBackupPassword(password, kdf, profileForAdoptedParams(kdf));
+      // The backup's params under a fresh salt, unless they are weaker than
+      // anything this app writes: then calibrate on this phone, as before.
+      const adopted = adoptableParams(kdf);
+      if (adopted) await setBackupPassword(password, adopted, profileForAdoptedParams(adopted));
+      else await setBackupPassword(password);
       await refresh();
     } catch (error) {
       console.error('Error keeping backup password:', error);
