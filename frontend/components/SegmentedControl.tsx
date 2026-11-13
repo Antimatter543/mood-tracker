@@ -27,7 +27,7 @@ export type SegmentedControlProps<T extends string> = {
     value: T | null;
     onChange: (value: T) => void;
     /** `'md'` is the full-width screen row; `'sm'` fits inside a card. */
-    size?: 'md' | 'sm';
+    size?: 'md' | 'sm' | 'xs';
     /** Base testID; each option gets `${testID}-${option.value}`. */
     testID?: string;
 };
@@ -35,6 +35,7 @@ export type SegmentedControlProps<T extends string> = {
 const SIZES = {
     md: { paddingVertical: 8, paddingHorizontal: 16, fontSize: 14, radius: 20, inner: 16 },
     sm: { paddingVertical: 6, paddingHorizontal: 14, fontSize: 13, radius: 18, inner: 14 },
+    xs: { paddingVertical: 6, paddingHorizontal: 10, fontSize: 13, radius: 18, inner: 14 },
 } as const;
 
 export function SegmentedControl<T extends string>({

@@ -18,17 +18,10 @@ import MoodCalendar from '@/components/visualisations/MoodCalendar';
 import TimeOfDayChart from '@/components/visualisations/TimeOfDayChart';
 import ActivityCorrelationChart from '@/components/visualisations/ActivityCorrelationChart';
 import MonthOverMonthCard from '@/components/visualisations/MonthOverMonthCard';
-import TimeframeSelector from '@/components/TimeframeSelector';
-import PeriodNavigator from '@/components/PeriodNavigator';
 import PeriodSwipe from '@/components/PeriodSwipe';
-import { useTimeframe } from '@/context/TimeframeContext';
 import { useThemeColors } from '@/styles/global';
 
-/** Fallback used until the sticky header reports its real height via onLayout. */
-const DEFAULT_HEADER_HEIGHT = 96;
-
 const StatisticsContent = () => {
-  const { timeframe, setTimeframe, isCustom } = useTimeframe();
   const colors = useThemeColors();
   const db = useSQLiteContext();
   // Whole-DB empty check. `null` = still loading (render nothing to avoid a
@@ -55,17 +48,6 @@ const StatisticsContent = () => {
     };
   }, [db]);
   useDataRefresh(loadHasEntries, [db]);
-  // Measure the sticky header instead of hardcoding paddingTop: 120 — the
-  // header height varies with font scaling / description length.
-  const [headerHeight, setHeaderHeight] = useState(DEFAULT_HEADER_HEIGHT);
-
-  const onHeaderLayout = useCallback(
-    (e: { nativeEvent: { layout: { height: number } } }) => {
-      const h = e.nativeEvent.layout.height;
-      if (h > 0 && Math.abs(h - headerHeight) > 1) setHeaderHeight(h);
-    },
-    [headerHeight],
-  );
 
   const styles = useMemo(
     () =>
@@ -76,38 +58,20 @@ const StatisticsContent = () => {
         scrollView: {
           flex: 1,
         },
-        stickyHeader: {
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          backgroundColor: colors.background,
-          paddingTop: 12,
-          paddingBottom: 12,
-          zIndex: 1000,
-          borderBottomWidth: 1,
-          borderBottomColor: colors.border,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.15,
-          shadowRadius: 4,
-          elevation: 6,
-          alignItems: 'center',
-        },
         content: {
           // Same gutter as the page title above it and as every scrolling
           // screen's content (Layout's scrollContent padding) — see
           // styles/layout.ts.
           paddingHorizontal: LAYOUT_CONTENT_PADDING,
           // Measured header height + a small gap, instead of a magic 120.
-          paddingTop: headerHeight + 12,
+          paddingTop: 12,
           paddingBottom: LAYOUT_FAB_CLEARANCE,
         },
         chartsContainer: {
           gap: 4,
         },
       }),
-    [colors, headerHeight],
+    [colors],
   );
 
   // Still counting — render nothing briefly to avoid flashing empty charts.
@@ -128,22 +92,6 @@ const StatisticsContent = () => {
 
   return (
     <View style={styles.container}>
-      {/* Sticky header positioned above the ScrollView */}
-      <View style={styles.stickyHeader} onLayout={onHeaderLayout}>
-        {/* No pill is lit under a custom range: `timeframe` still reports a
-            LENGTH-equivalent preset for the charts' bucketing (see
-            TimeframeContext), and lighting that pill would claim the user picked
-            it. Tapping any pill clears the range. */}
-        <TimeframeSelector
-          selectedTimeframe={isCustom ? null : timeframe}
-          onTimeframeChange={setTimeframe}
-        />
-        {/* Steps through periods of the selected length. Replaces the old
-            static "Past month" line — that text couldn't stay truthful once the
-            user can page backwards, so the header now shows the real range. */}
-        <PeriodNavigator />
-      </View>
-
       {/* The charts scroll vertically and PAGE horizontally: a swipe right steps
           to the previous period, left to the next — the same two moves as the
           chevrons above, which stay the accessible path. Deliberately wraps only

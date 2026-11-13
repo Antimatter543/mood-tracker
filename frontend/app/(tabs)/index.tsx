@@ -180,7 +180,8 @@ const WeeklyChartCard = memo(function WeeklyChartCard({ data }: { data: (number 
 // Monthly Overview Card Component — the "Overview" idiom (open StatTiles, no
 // box-inside-box). Three stats in the proven 2x2 grid (Avg / Total / Best Day),
 // the fourth cell intentionally empty.
-const MonthlyOverviewCard = memo(function MonthlyOverviewCard({ stats }: {
+export const MonthlyOverviewCard = memo(function MonthlyOverviewCard({ stats, title }: {
+    title: string,
     stats: {
         average: number | null;
         totalEntries: number;
@@ -207,7 +208,7 @@ const MonthlyOverviewCard = memo(function MonthlyOverviewCard({ stats }: {
 
     return (
         <Card>
-            <Text style={styles.cardTitle}>Last 30 days</Text>
+            <Text style={styles.cardTitle}>{title}</Text>
             <View style={styles.tileGrid}>
                 {tiles.map((tile) => (
                     <View key={tile.label} style={styles.tileCell}>
@@ -584,7 +585,7 @@ export default function Home() {
                 <TodaysMoodCard mood={todaysMood} streak={streak} />
                 <WeeklyChartCard data={weeklyData} />
                 {totalEntries === 0 && <FirstEntryNudge />}
-                <MonthlyOverviewCard stats={monthlyStats} />
+                <MonthlyOverviewCard stats={monthlyStats} title='Last 30 days'/>
                 <RecentActivitiesCard activities={recentActivities} />
                 {/* Explore your activities — search + tap-through to per-activity
                     insights. Lives at the very bottom of Home (moved off Stats).

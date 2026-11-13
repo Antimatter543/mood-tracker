@@ -4,7 +4,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 
 import { useCallback, useMemo, useEffect, useRef } from "react";
-import { AppState, AppStateStatus, View } from "react-native";
+import { AppState, AppStateStatus, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as SystemUI from "expo-system-ui";
 import { DataProvider } from "../../context/DataContext";
@@ -20,7 +20,7 @@ import { reconcileReminders } from "@/lib/notifications";
 import { enabledReminders, parseReminders } from "@/lib/reminders";
 import { OverlayProvider } from "@/context/OverlayHost";
 import { buildTabBarStyle } from "@/lib/tabBarStyle";
-import { TimeframeProvider } from "@/context/TimeframeContext";
+import { TimeframeProvider, useTimeframe } from "@/context/TimeframeContext";
 import { TAB_BUTTON_TEST_IDS } from "@/lib/tabTestIds";
 import { now } from "@/lib/clock";
 import { runDailyHealthSyncIfDue } from "@/lib/healthDailySync";
@@ -162,6 +162,8 @@ function TabNavigator() {
         });
     }, [colors.background]);
 
+    const { periodLabel } = useTimeframe();
+
     // Memoize the screen options to prevent unnecessary re-renders
     const screenOptions = useMemo(() => ({
         // NO navigator header on ANY tab. Every screen instead opens with the
@@ -220,12 +222,22 @@ function TabNavigator() {
             }}
             />
 
+            <Tabs.Screen name="periodwindow" options={{
+                tabBarLabel: ({ color, focused }) => (
+                    <Text style={{textAlign: 'center', fontSize: 11, fontWeight: 500, color: color, marginTop: -1,}}>{periodLabel}</Text>
+                ),
+                tabBarButtonTestID: TAB_BUTTON_TEST_IDS.periodwindow,
+                tabBarIcon: ({ color, focused }) => (
+                    <Ionicons name={focused ? 'calendar' : 'calendar-outline'} color={color} size={24} />),
+            }} />
+
             <Tabs.Screen name="stats" options={{
                 title: 'Statistics',
                 tabBarButtonTestID: TAB_BUTTON_TEST_IDS.stats,
                 tabBarIcon: ({ color, focused }) => (
                     <Ionicons name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} size={24} />),
             }} />
+
             <Tabs.Screen name="timeline" options={{
                 title: 'Timeline',
                 tabBarButtonTestID: TAB_BUTTON_TEST_IDS.timeline,
