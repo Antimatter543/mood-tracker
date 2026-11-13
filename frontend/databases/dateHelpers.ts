@@ -81,32 +81,6 @@ export function convertStringToDate(date: Date | string): Date {
 }
 
 /**
- * Accepts either a Date or an ISO string and returns a Date.
- * String is parsed in either UTC time zone (ends with 'Z') or
- * local time zone. If the string doesn't include time part,
- * midnight (UTC or local) is assumed.
- */
-export function convertStringToDate(date: Date | string): Date {
-  if (typeof date === 'string') {
-    if (DATETIME_FORMAT_RE.test(date)) {
-      return date.endsWith('Z') && !date.includes('T')
-              // Date only string in UTC
-              ? new Date(date.slice(0, date.length - 1) + 'T00:00:00Z')
-              : (
-                  // Date only string in local TZ
-                  !date.includes('T')
-                    ? new Date(date + 'T00:00:00')
-                    // Date-time string in UTC or local TZ
-                    : new Date(date)
-                );
-    } else {
-      return new Date(Number.NaN);
-    }
-  } else
-    return date;
-}
-
-/**
  * Returns the local-timezone date as `YYYY-MM-DD`. Accepts either a Date or
  * an ISO string (which will be parsed as UTC or local TZ, depending on
  * whether the string ends with Z, and then formatted in local TZ).

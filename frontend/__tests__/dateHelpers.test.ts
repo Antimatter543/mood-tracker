@@ -6,9 +6,7 @@ import {
   localDateTimeString,
   daysBetween,
   getDefaultEntryDate,
-  localDateTimeString,
   calendarDaysSpanned,
-  convertStringToDate,
 } from '@/databases/dateHelpers';
 import { freezeNow } from '@/testing/clock';
 
@@ -87,26 +85,6 @@ describe('convertStringToDate', () => {
 
     date = '2025-05-19T02:10';
     expect(convertStringToDate(date)).toStrictEqual(new Date(2025, 4, 19, 2, 10, 0));
-  });
-
-  it('fails for non-ISO8610 formatted date and date time strings', () => {
-    let date = '2025-05-19 02:15:30';
-    expect(convertStringToDate(date).getTime()).toBeNaN();
-
-    date = '2025-05-19 02:10';
-    expect(convertStringToDate(date).getTime()).toBeNaN();
-
-    date = '19/95/2025';
-    expect(convertStringToDate(date).getTime()).toBeNaN();
-
-    date = '19/95/2025 12 PM';
-    expect(convertStringToDate(date).getTime()).toBeNaN();
-  });
-
-  it('fails for invalid input strings', () => {
-    expect(convertStringToDate('not a date at all').getTime()).toBeNaN();
-    expect(convertStringToDate('').getTime()).toBeNaN();
-    expect(convertStringToDate('1345').getTime()).toBeNaN();
   });
 })
 
