@@ -21,7 +21,7 @@ import React from 'react';
 import { Alert, StyleSheet } from 'react-native';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
-import { ENTRIES_FOR_ACTIVITY } from '@/components/visualisations/queries';
+import { ENTRIES_FOR_ACTIVITY_IN_RANGE } from '@/components/visualisations/queries';
 import type { Activity, ActivityGroup } from '@/components/types';
 import { freezeNow } from '@/testing/clock';
 import { makeDb, resetWriteLayer, type MockDb } from '@/testing/fakeDb';
@@ -89,7 +89,7 @@ function readActivity(params: unknown[]): Activity | null {
 function installDb(): MockDb {
     const db = makeDb();
     db.getAllAsync.mockImplementation(async (sql: string) => {
-        if (sql === ENTRIES_FOR_ACTIVITY) return entryRows;
+        if (sql === ENTRIES_FOR_ACTIVITY_IN_RANGE) return entryRows;
         if (/FROM activity_groups/.test(sql)) return groups;
         return [];
     });
@@ -164,7 +164,7 @@ afterEach(() => {
 describe('ActivityInsightsDetail: edit from the detail page', () => {
     it('(a) with entries it renders the page and no bare text outside a <Text>', async () => {
         await renderDetail();
-        await waitFor(() => expect(screen.getByText('Mood when doing Walk')).toBeTruthy());
+        await waitFor(() => expect(screen.getByText('Mood when logging Walk')).toBeTruthy());
 
         expect(bareStrings(screen.toJSON())).toEqual([]);
     });
@@ -212,7 +212,7 @@ describe('ActivityInsightsDetail: edit from the detail page', () => {
 
     it('(d) delete: the detail page closes', async () => {
         const { onClose } = await renderDetail();
-        await waitFor(() => expect(screen.getByText('Mood when doing Walk')).toBeTruthy());
+        await waitFor(() => expect(screen.getByText('Mood when logging Walk')).toBeTruthy());
 
         await act(async () => {
             fireEvent.press(editButton());

@@ -22,6 +22,11 @@ import {
   type ActivityCorrelationRawRow,
   type ActivityCorrelationResult,
 } from './transforms/activityCorrelation';
+import { OverlayModal } from '../OverlayModal';
+import ActivityInsightsDetail from '../ActivityInsightsDetail';
+import { getActivity } from '@/databases/activities';
+import { Feather } from '@expo/vector-icons';
+import { Activity } from '../types';
 
 const BAR_HEIGHT = 12;
 const MAX_MOOD = 10;
@@ -59,8 +64,25 @@ const CorrelationRow = ({
   const withW = (item.avg_with / MAX_MOOD) * svgW;
   const withoutW = (item.avg_without / MAX_MOOD) * svgW;
   const deltaPositive = item.delta >= 0;
+  const db = useSQLiteContext();
+  const [selected, setSelected] = useState<Activity | null>(null);
+
+  const onSelectActivity = async (id: number) => {
+      const activity = await getActivity(db, id);
+      setSelected(activity);
+  };
+  
   return (
     <View style={styles.row}>
+      <Pressable
+          key={item.activity_id}
+          onPress={() => onSelectActivity(item.activity_id)}
+          style={({ pressed }) => [
+              pressed && styles.rowPressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${item.activity_name} insights`}
+      >
       <View style={styles.rowHeader}>
         <View style={styles.nameWrap}>
           <Text style={styles.activityName}>{item.activity_name}</Text>
@@ -84,6 +106,11 @@ const CorrelationRow = ({
           >
             <Ionicons name="eye-off-outline" size={16} color={colors.textSecondary} />
           </Pressable>
+            <Feather
+                name="chevron-right"
+                size={18}
+                color={colors.textSecondary}
+            />
         </View>
       </View>
 
@@ -137,12 +164,26 @@ const CorrelationRow = ({
           <Text style={styles.barValue}>{item.avg_without.toFixed(1)}</Text>
         </View>
       </View>
+      </Pressable>
 
       <Text style={styles.sample}>
         {carryover
           ? `n ≈ ${Math.round(item.count_with)} with / ${Math.round(item.count_without)} without`
           : `n = ${item.count_with} with / ${item.count_without} without`}
       </Text>
+
+      <OverlayModal
+          visible={selected !== null}
+          onClose={() => setSelected(null)}
+          fullScreen
+      >
+          {selected && (
+              <ActivityInsightsDetail
+                  activity={selected}
+                  onClose={() => setSelected(null)}
+              />
+          )}
+      </OverlayModal>
     </View>
   );
 };
@@ -260,7 +301,7 @@ const ActivityCorrelationChart = () => {
 
   const renderRow = (item: ActivityCorrelationResult) => (
     <CorrelationRow
-      key={item.activity_name}
+      key={item.activity_id}
       item={item}
       colors={colors}
       styles={styles}
@@ -403,6 +444,9 @@ const makeStyles = (colors: ThemeColors) =>
     },
     row: {
       marginBottom: 18,
+    },
+    rowPressed: {
+        opacity: 0.6,
     },
     rowHeader: {
       flexDirection: 'row',

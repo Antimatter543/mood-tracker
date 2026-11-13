@@ -9,7 +9,7 @@ import { Card } from '@/components/Card';
 import { ActivityIcon } from '@/components/activityIcon';
 import { Activity, ActivityGroup } from '@/components/types';
 import { getActivities } from '@/databases/activities';
-import { ACTIVITY_ENTRY_COUNTS } from '@/components/visualisations/queries';
+import { ACTIVITY_ENTRY_COUNTS_IN_RANGE } from '@/components/visualisations/queries';
 import {
     withEntryCounts,
     visibleActivities,
@@ -18,6 +18,7 @@ import {
 } from '@/components/visualisations/transforms/activityDetail';
 import { OverlayModal } from '@/components/OverlayModal';
 import { ActivityInsightsDetail } from '@/components/ActivityInsightsDetail';
+import { useTimeframe } from '@/context/TimeframeContext';
 import { AddActivityModal } from './forms/ActivityAddModal';
 import { getActivityGroups } from '@/databases/groups';
 
@@ -42,6 +43,7 @@ export const ActivityExplorer: React.FC = () => {
     const [query, setQuery] = useState('');
     const [expanded, setExpanded] = useState(false);
     const [selected, setSelected] = useState<Activity | null>(null);
+    const { periodLabel, periodWindow } = useTimeframe();
     const [groups, setGroups] = useState<ActivityGroup[] | null>(null);
     const [addActivityVisible, setAddActivityVisible] = useState(false);
 
@@ -51,7 +53,10 @@ export const ActivityExplorer: React.FC = () => {
             try {
                 const [activities, countRows, groups] = await Promise.all([
                     getActivities(db),
-                    db.getAllAsync<{ activity_id: number; n: number }>(ACTIVITY_ENTRY_COUNTS),
+                    db.getAllAsync<{ activity_id: number; n: number }>(
+                        ACTIVITY_ENTRY_COUNTS_IN_RANGE,
+                        [periodWindow.start, periodWindow.end]
+                    ),
                     getActivityGroups(db),
                 ]);
                 if (active) {
@@ -66,15 +71,15 @@ export const ActivityExplorer: React.FC = () => {
         return () => {
             active = false;
         };
-    }, [db]);
-    useDataRefresh(load, [db]);
+    }, [db, periodWindow]);
+    useDataRefresh(load, [db, periodWindow]);
 
     // The rows to render: search wins over the cap; otherwise the collapsed
     // view is the top 10 and `expanded` reveals the rest. (items is pre-ranked
     // by withEntryCounts — most-logged first.)
     const visible = useMemo(
         () => visibleActivities(items, { query, expanded }),
-        [items, query, expanded],
+        [items, query, expanded, periodWindow],
     );
     // The "See all (N) / Show less" toggle only makes sense while browsing
     // (no active query) and only when there are more than the cap.
@@ -87,6 +92,7 @@ export const ActivityExplorer: React.FC = () => {
         <Card>
             <Text style={styles.title}>Explore your activities</Text>
             <Text style={styles.subtitle}>
+                Shows activity data for {periodLabel}. You can change the period on time window tab.
                 Open any activity to see its mood pattern, variability, and what you pair it with.
             </Text>
 
