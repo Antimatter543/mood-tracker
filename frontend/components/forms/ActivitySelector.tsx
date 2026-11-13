@@ -1011,7 +1011,6 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
                         setAddTarget(null);
                     }}
                     onAdd={loadActivities}
-                    groupName={groups.find(g => g.id === addTarget.id)?.name || ""}
                     groupId={addTarget.id}
                     groups={groups}
                     db={db}
