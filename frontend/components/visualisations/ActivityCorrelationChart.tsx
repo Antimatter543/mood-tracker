@@ -281,12 +281,15 @@ const ActivityCorrelationChart = () => {
       <InfoBubble
         text={
           (perEntry
-            ? "Compares your mood entries you logged an activity ('with') against you didn't ('without'). A positive delta means the activity lines up with better mood — and we only show activities with enough entries on each side to be meaningful. By default you see the top few that lift and weigh on your mood; tap the eye to hide an activity (the next-strongest takes its place), or expand to see them all."
-            : ("Compares your average mood on days you logged an activity ('with') against days you didn't ('without'). A positive delta means the activity lines up with better days — and we only show activities with enough days on each side to be meaningful. By default you see the top few that lift and weigh on your mood; tap the eye to hide an activity (the next-strongest takes its place), or expand to see them all." +
-                (carryover
-                  ? " Activity Carryover is on, so an activity also counts toward your later entries and the next day with a fading weight — the 'with' amounts are effective (approximate) counts."
-                  : '')
-              )
+            ? "Compares your mood on entries you logged an activity ('with') against those you didn't ('without'). A positive delta means the activity lines up with better mood — and we only show activities with enough entries on each side to be meaningful. " +
+              "By default you see the top few that lift and weigh on your mood; tap the eye to hide an activity (the next-strongest takes its place), or expand to see them all. " +
+              "A few busy days with many entries can look like a strong pattern, although that is not necessarily the case."
+            : "Compares your average mood on days you logged an activity ('with') against days you didn't ('without'). A positive delta means the activity lines up with better days — and we only show activities with enough days on each side to be meaningful. " +
+              "By default you see the top few that lift and weigh on your mood; tap the eye to hide an activity (the next-strongest takes its place), or expand to see them all."
+          ) +
+          (carryover
+            ? " Activity Carryover is on, so an activity also counts toward your later entries and the next day with a fading weight — the 'with' amounts are effective (approximate) counts."
+            : ''
           )
         }
         position="top-right"
