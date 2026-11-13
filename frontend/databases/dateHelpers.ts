@@ -63,29 +63,19 @@ export function endOfLocalDay(date: Date | string): string {
   return local.toISOString();
 }
 
+/** A bare local day key, the shape `localDateString` returns. */
+const YMD_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
- * Accepts either a Date or an ISO string and returns a Date.
- * String is parsed in either UTC time zone (ends with 'Z') or 
- * local time zone. If the string doesn't include time part,
- * midnight (UTC or local) is assumed.
+ * Accepts a Date or a string and returns a Date. A bare `YYYY-MM-DD` day key
+ * is LOCAL midnight (the same rule as lib/dateFormat.ts); every other string
+ * parses exactly as `new Date(date)`, as it did before this helper existed,
+ * so stored UTC instants and SQLite `YYYY-MM-DD HH:MM:SS` stamps keep their
+ * old meaning everywhere `localDateString` is used.
  */
 export function convertStringToDate(date: Date | string): Date {
-  return typeof date === 'string' 
-      // Handle strings
-      ? (
-          date.endsWith('Z') && !date.includes('T')
-            // Date only string in UTC
-            ? new Date(date.slice(0, date.length - 1) + 'T00:00:00Z')
-            : (
-                // Date only string in local TZ
-                !date.includes('T')
-                  ? new Date(date + 'T00:00:00')
-                  // Date-time string in UTC or local TZ
-                  : new Date(date)
-              )
-        )
-      // Use date objects as is  
-      : date;
+  if (typeof date !== 'string') return date;
+  return new Date(YMD_ONLY.test(date) ? `${date}T00:00:00` : date);
 }
 
 /**
@@ -128,9 +118,9 @@ export function localDateTimeString(date: Date | string): string {
 }
 
 /**
- * Returns the integer number of calendar days between two ISO timestamps
- * in local TZ or UTC (if the string ends with Z). Sign indicates direction
- * (`localDaysBetween(earlier, later)` is positive).
+ * Returns the integer number of *local-timezone calendar days* between two
+ * ISO timestamps. Sign indicates direction (`daysBetween(earlier, later)`
+ * is positive).
  *
  * "Calendar days" means we ignore time-of-day — two timestamps one minute
  * apart but on different sides of local midnight count as 1 day apart.
@@ -138,18 +128,21 @@ export function localDateTimeString(date: Date | string): string {
  * correctly handles DST transitions where a calendar day is 23 or 25 hours
  * long.
  */
-export function daysBetween(a: string, b: string, inclusive: boolean=false): number {
+export function daysBetween(a: string, b: string): number {
   const dayA = new Date(localDateString(a) + 'T00:00:00');
   const dayB = new Date(localDateString(b) + 'T00:00:00');
-
   // Round to handle DST 23h/25h days — the difference will be very close
   // to an integer multiple of 86_400_000 but not exact across DST.
   const MS_PER_DAY = 86_400_000;
-  const days = Math.round((dayB.getTime() - dayA.getTime()) / MS_PER_DAY);
-  if (!inclusive)
-    return days;
-  else
-    return days + (days != 0 ? Math.sign(days) * 1 : 1);
+  return Math.round((dayB.getTime() - dayA.getTime()) / MS_PER_DAY);
+}
+
+/**
+ * How many local calendar days a span touches, counting both ends: the same
+ * day is 1, today and tomorrow are 2. Order does not matter.
+ */
+export function calendarDaysSpanned(a: string, b: string): number {
+  return Math.abs(daysBetween(a, b)) + 1;
 }
 
 /**
