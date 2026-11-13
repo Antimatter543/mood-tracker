@@ -110,8 +110,8 @@ export const ActivityInsightsDetail: React.FC<{
                     getActivityGroups(db),
                 ]);
                 if (active) {
-                    const group = groups.find((g) => g.id == currentActivity.group_id);
-                    setData({ activityRows, allRows, coRows, groups, group});
+                    const group = groups.find((g) => g.id === currentActivity.group_id);
+                    setData({ activityRows, allRows, coRows, groups, group });
                 }
             } catch (e) {
                 console.error('Error loading activity insights:', e);
@@ -139,43 +139,50 @@ export const ActivityInsightsDetail: React.FC<{
         };
     }, [data, currentActivity.name]);
 
-    const onEdit = () => setEditorVisible(true);
-    const onCloseEdit = () => setEditorVisible(false);
+    // Re-read the activity after the edit dialog saved or deleted it: gone means
+    // it was deleted, so this screen closes; otherwise show the new name/group.
     const onUpdate = async () => {
-        // Handle possible deletion. Otherwise update the current activity.
-        const activity = getActivity(db, currentActivity.id);
-        if (activity == null) {
+        const updated = await getActivity(db, currentActivity.id);
+        if (updated === null) {
             onClose();
-            return;
+        } else {
+            setCurrentActivity(updated);
         }
-        else
-            setCurrentActivity(activity);
-    }
+    };
 
+    // Title, then the pencil right beside it (it edits the name and group shown
+    // there), then the close X pinned to the right edge. The title block may
+    // shrink and its lines ellipsize, so a long name never pushes the pencil or
+    // the X off the row; the spacer keeps a clear gap before the X.
     const header = (
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-            <View>
+            <View style={styles.titleBlock}>
                 <Text style={styles.topTitle} numberOfLines={1}>
                     {currentActivity.name}
                 </Text>
                 {data?.group && (
-                    <Text style={styles.topSubtitle}>
-                        {data?.group?.name}
+                    <Text style={styles.topSubtitle} numberOfLines={1}>
+                        {data.group.name}
                     </Text>
                 )}
             </View>
 
-            <View style={styles.editBtnContainer}>
-                <Pressable
-                    onPress={onEdit}
-                    hitSlop={16}
-                    style={styles.editBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel="Edit the activity"
-                >
-                    <Feather name="edit-2" size={20} color={colors.text} />
-                </Pressable>
-            </View>
+            <Pressable
+                testID="activity-detail-edit"
+                onPress={() => setEditorVisible(true)}
+                disabled={data === null}
+                style={({ pressed }) => [
+                    styles.editBtn,
+                    (pressed || data === null) && styles.editBtnDimmed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Edit activity name and group"
+                accessibilityState={{ disabled: data === null }}
+            >
+                <Feather name="edit-2" size={20} color={colors.text} />
+            </Pressable>
+
+            <View style={styles.headerSpacer} />
 
             <Pressable
                 onPress={onClose}
@@ -187,6 +194,20 @@ export const ActivityInsightsDetail: React.FC<{
                 <Feather name="x" size={24} color={colors.text} />
             </Pressable>
         </View>
+    );
+
+    // The edit dialog belongs to EVERY state below (loading, never logged, the
+    // full view), so the pencil also works on an activity with no entries yet,
+    // e.g. one just added from the Explorer.
+    const editModal = editorVisible && data !== null && (
+        <ActivityEditModal
+            visible
+            activity={currentActivity}
+            groups={data.groups}
+            onClose={() => setEditorVisible(false)}
+            onUpdate={onUpdate}
+            db={db}
+        />
     );
 
     // Still loading.
@@ -221,6 +242,7 @@ export const ActivityInsightsDetail: React.FC<{
                         show up here.
                     </Text>
                 </View>
+                {editModal}
             </View>
         );
     }
@@ -418,17 +440,7 @@ export const ActivityInsightsDetail: React.FC<{
                     </Card>
                 )}
             </ScrollView>
-
-            {editorVisible && (
-                <ActivityEditModal
-                    visible={editorVisible}
-                    activity={currentActivity}
-                    groups={data.groups}
-                    onClose={onCloseEdit}
-                    onUpdate={onUpdate}
-                    db={db}
-                />
-            )};
+            {editModal}
         </View>
     );
 };
@@ -522,14 +534,31 @@ const makeStyles = (colors: ThemeColors) =>
             fontSize: 13,
             color: colors.textSecondary,
         },
-        editBtnContainer: {
-            flex: 1,
+        // Shrinks (never grows) so a long name ellipsizes instead of pushing the
+        // pencil and the X off the row.
+        titleBlock: {
+            flexShrink: 1,
+            minWidth: 0,
         },
+        // A 44dp target with the glyph centred: the visible pencil sits ~16dp
+        // after the name.
         editBtn: {
-            padding: 4,
-            marginLeft: 16,
-            marginRight: 8,
-        },        
+            width: 44,
+            height: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginLeft: 4,
+            flexShrink: 0,
+        },
+        editBtnDimmed: {
+            opacity: 0.5,
+        },
+        // Takes the free width between the pencil and the X; never less than a
+        // clear gap, so the two buttons are not easy to mis-tap.
+        headerSpacer: {
+            flex: 1,
+            minWidth: 16,
+        },
         closeBtn: {
             padding: 4,
             marginLeft: 8,
