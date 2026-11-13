@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Card } from '@/components/Card';
-import InfoBubble from '@/components/InfoBubble';
+import Feather from '@expo/vector-icons/Feather';
 import { OverlayModal } from '@/components/OverlayModal';
 import RecoveryEpisodeDetails from '@/components/RecoveryEpisodeDetails';
 import { ThemeColors, useThemeColors } from '@/styles/global';
@@ -47,6 +47,7 @@ const RecoveryAnalysisCard = () => {
     const db = useSQLiteContext();
     const [analysis, setAnalysis] = useState<RecoveryAnalysis | null>(null);
     const [selected, setSelected] = useState<RecoveryEpisode | null>(null);
+    const [explainerOpen, setExplainerOpen] = useState(false);
 
     const load = useCallback(async () => {
         try {
@@ -74,8 +75,29 @@ const RecoveryAnalysisCard = () => {
 
     return (
         <Card>
-            {/* InfoBubble is absolutely positioned (top-right) by the component. */}
-            <InfoBubble text={LOW_STRETCH_EXPLAINER} />
+            {/* Same (?) button as InfoBubble, but the explanation opens INLINE so the
+                card grows to fit it. InfoBubble's absolute popup is clipped by the
+                Card's overflow:hidden, and this explainer is longer than a card
+                with one row is tall (cut off mid-sentence on the Pixel, 2026-11-13). */}
+            <Pressable
+                testID="low-stretch-explainer-toggle"
+                onPress={() => setExplainerOpen((open) => !open)}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={explainerOpen ? 'Hide how low stretches are counted' : 'How low stretches are counted'}
+                accessibilityState={{ expanded: explainerOpen }}
+                style={({ pressed }) => [
+                    styles.infoButton,
+                    { backgroundColor: colors.overlays.tag, borderColor: colors.overlays.tagBorder },
+                    pressed && styles.pressed,
+                ]}
+            >
+                {explainerOpen ? (
+                    <Ionicons name="close" color={colors.text} size={18} />
+                ) : (
+                    <Feather name="help-circle" size={18} color={colors.text} />
+                )}
+            </Pressable>
 
             <View style={styles.headerRow}>
                 <View style={[styles.iconCircle, { backgroundColor: colors.accentLight }]}>
@@ -83,6 +105,12 @@ const RecoveryAnalysisCard = () => {
                 </View>
                 <Text style={styles.title}>After low days</Text>
             </View>
+
+            {explainerOpen && (
+                <View testID="low-stretch-explainer" style={styles.explainer}>
+                    <Text style={styles.explainerText}>{LOW_STRETCH_EXPLAINER}</Text>
+                </View>
+            )}
 
             <Text style={styles.body} testID="low-stretch-summary">
                 {summaryLine(analysis.episodeCount)}
@@ -164,8 +192,32 @@ const useThemedStyles = (colors: ThemeColors) =>
                     alignItems: 'center',
                     gap: 12,
                     marginBottom: 12,
-                    // leave room for the absolutely-positioned InfoBubble
+                    // leave room for the absolutely-positioned (?) button
                     paddingRight: 36,
+                },
+                infoButton: {
+                    position: 'absolute',
+                    top: 4,
+                    right: 4,
+                    zIndex: 1,
+                    width: 32,
+                    height: 32,
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                },
+                explainer: {
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    padding: 12,
+                    marginBottom: 12,
+                },
+                explainerText: {
+                    fontSize: 14,
+                    lineHeight: 20,
+                    color: colors.text,
                 },
                 iconCircle: {
                     width: 40,

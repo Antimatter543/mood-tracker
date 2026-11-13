@@ -16,7 +16,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
 import { RECOVERY_ENTRY_ACTIVITIES } from '@/components/visualisations/queries';
-import type { RecoveryRawRow } from '@/components/visualisations/transforms/recoveryPatterns';
+import { LOW_STRETCH_EXPLAINER, type RecoveryRawRow } from '@/components/visualisations/transforms/recoveryPatterns';
 import { freezeNow } from '@/testing/clock';
 import { FIXED_DAY, FIXED_NOW, addDays, localIso } from '@/testing/builders';
 import { code } from '@/testing/sourceScan';
@@ -226,10 +226,42 @@ describe('the card and its detail page', () => {
         expect(screen.getByTestId('low-stretch-detail-status')).toHaveTextContent('4 days so far');
     });
 
+    // Device QA 2026-11-13: the shared InfoBubble draws its text in an absolute
+    // popup, which the Card's overflow:hidden clipped mid-sentence on a card
+    // with one row. The explanation now opens in the card's own flow, so the
+    // card grows to fit it.
+    it('opens its explanation inside the card, not in a popup the card can clip', async () => {
+        recoveryRows = [entry(30, 3), entry(29, 7), entry(28, 7)]; // one ended row: the short card
+        const view = await render(<RecoveryAnalysisCard />);
+        await screen.findByText('After low days');
+        expect(screen.queryByTestId('low-stretch-explainer')).toBeNull();
+
+        const toggle = screen.getByTestId('low-stretch-explainer-toggle');
+        expect(toggle.props.accessibilityLabel).toBe('How low stretches are counted');
+        await fireEvent.press(toggle);
+
+        const box = screen.getByTestId('low-stretch-explainer');
+        expect(box).toHaveTextContent(LOW_STRETCH_EXPLAINER);
+        // Nothing between the card and the text is taken out of the layout flow.
+        const absolute: unknown[] = [];
+        walkTree(view.toJSON(), (node) => {
+            const flat = [node.props?.style].flat(Infinity).filter(Boolean);
+            const hasText = JSON.stringify(node).includes(LOW_STRETCH_EXPLAINER.slice(0, 40));
+            if (hasText && flat.some((st: { position?: string }) => st?.position === 'absolute')) {
+                absolute.push(node.props?.testID ?? node.type);
+            }
+        });
+        expect(absolute).toEqual([]);
+
+        await fireEvent.press(screen.getByTestId('low-stretch-explainer-toggle'));
+        expect(screen.queryByTestId('low-stretch-explainer')).toBeNull();
+    });
+
     it('uses none of the retired words anywhere a user can see or hear', async () => {
         recoveryRows = WITH_LOWS();
         const view = await render(<RecoveryAnalysisCard />);
         await screen.findByText('After low days');
+        await fireEvent.press(screen.getByTestId('low-stretch-explainer-toggle'));
         const words = allWords(view.toJSON());
         await fireEvent.press(screen.getByTestId('low-stretch-row-0'));
         words.push(...allWords(view.toJSON()));
