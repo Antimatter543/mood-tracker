@@ -153,9 +153,7 @@ const ActivityCorrelationChart = () => {
   const { periodWindow } = useTimeframe();
   const { settings } = useSettings();
   const perEntry = settings.activity_per_entry;
-  // Carry over is mutually exclusive with per entry analysis to avoid including
-  // entries outside the active time window.
-  const carryover = settings.activity_carryover && !perEntry;
+  const carryover = settings.activity_carryover;
   const [meaningful, setMeaningful] = useState<ActivityCorrelationResult[]>([]);
   const [barWidth, setBarWidth] = useState(0);
   const [excluded, setExcluded] = useState<string[]>([]);
@@ -246,7 +244,7 @@ const ActivityCorrelationChart = () => {
         <Text style={styles.title}>Activity Correlation</Text>
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>
-            Not enough data yet. Log activities across more {perEntry ? 'entries' : 'days'}
+            Not enough data yet. Log activities across more {perEntry ? 'entries' : 'days'}{' '}
             (at least 5 with and 5 without each activity) or try a longer timeframe.
           </Text>
         </View>
