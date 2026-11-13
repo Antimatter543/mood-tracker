@@ -14,7 +14,8 @@
  */
 import { QA_FROZEN_NOW_SETTING_KEY, QA_MAX_LINK_LENGTH, QA_SCENARIOS, QA_SEEDED_SETTING_KEY } from '@/lib/qa';
 import { parseSeedLink, parseUtcInstant, isSeedLink, type SeedLinkError } from '@/lib/qa/seedLink';
-import { planScenario, seededRng, yearBoundaryAnchor, SCENARIO_SPECS } from '@/lib/qa/scenarios';
+import { planScenario, planScenarioHealth, seededRng, yearBoundaryAnchor, SCENARIO_SPECS } from '@/lib/qa/scenarios';
+import { dayHealthFromMetric, dayHealthRating } from '@/components/timeline/dayHealth';
 import { aggregateTimeOfDay, timeOfDayCallout } from '@/components/visualisations/transforms/timeOfDay';
 import { restoreFrozenClock, runSeed, __resetRunSeedForTests } from '@/lib/qa/runSeed';
 import { now } from '@/lib/clock';
@@ -225,6 +226,26 @@ describe('planScenario', () => {
     expect(plans.every((p) => Date.parse(p.date) <= earlyMorning.getTime())).toBe(true);
   });
 
+  it('weekHealth: one health row per finished day of the week, covering every rating and an unrated day', () => {
+    for (const now of NOWS) {
+      const rows = planScenarioHealth('weekHealth', now);
+      const today = localDateString(now);
+      const days = rows.map((r) => r.date);
+      expect(new Set(days).size).toBe(rows.length);
+      for (const d of days) expect(d < today).toBe(true);
+      const entryDays = new Set(planScenario('weekHealth', now).plans.map((p) => localDateString(new Date(p.date))));
+      expect(days.filter((d) => entryDays.has(d)).length).toBeGreaterThanOrEqual(3);
+      const ratings = new Set(rows.map((r) => dayHealthRating(dayHealthFromMetric(r)!)));
+      expect(ratings).toEqual(new Set(['good', 'fair', 'poor', null]));
+    }
+  });
+
+  it('only weekHealth carries health rows', () => {
+    for (const name of QA_SCENARIOS) {
+      expect(planScenarioHealth(name, NOWS[0]).length > 0).toBe(name === 'weekHealth');
+    }
+  });
+
   it('seededRng: deterministic, in [0, 1), seed-dependent', () => {
     const a = seededRng(42);
     const b = seededRng(42);
@@ -274,6 +295,7 @@ describeSqlite('runSeed (real SQLite, shipped schema)', () => {
     const { plans } = planScenario(scenario, new Date(NOW));
     const photos = plans.reduce((n, p) => n + p.photoCount, 0);
     expect(countRows(db, 'entry_media')).toBe(photos);
+    expect(countRows(db, 'health_metrics')).toBe(planScenarioHealth(scenario, new Date(NOW)).length);
     // Photos only touch the disk when the plan has any.
     expect((FileSystem.writeAsStringAsync as jest.Mock).mock.calls.length > 0).toBe(photos > 0);
   });

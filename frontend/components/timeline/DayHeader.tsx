@@ -8,7 +8,7 @@ import { formatSectionTitle } from './dateHeader';
 import { moodColor } from './moodColor';
 import type { DaySummary } from './timelineRows';
 import { DayHealthCard } from './DayHealthCard';
-import { HEALTH_RATING_COLORS, HEALTH_RATING_LABELS, dayHealthRating, type DayHealth } from './dayHealth';
+import { HEALTH_RATING_LABELS, healthRatingColor, dayHealthRating, type DayHealth } from './dayHealth';
 import { now } from '@/lib/clock';
 
 type DayHeaderProps = DaySummary & {
@@ -178,7 +178,7 @@ const DayHeaderImpl: React.FC<DayHeaderProps> = ({
                             <Ionicons
                                 name="pulse"
                                 size={16}
-                                color={healthRating ? HEALTH_RATING_COLORS[healthRating] : colors.textSecondary}
+                                color={healthRating ? healthRatingColor(healthRating, colors) : colors.textSecondary}
                             />
                         </Pressable>
                     ) : averageMood != null ? (
@@ -192,7 +192,8 @@ const DayHeaderImpl: React.FC<DayHeaderProps> = ({
                 <DayHealthCard
                     visible={healthOpen}
                     onClose={closeHealth}
-                    title={averageMood != null ? `${title} · average mood ${averageMood.toFixed(1)}` : title}
+                    title={title}
+                    averageMood={averageMood}
                     health={health}
                     colors={colors}
                 />

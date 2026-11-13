@@ -46,7 +46,7 @@ CI backs this with `.github/workflows/future-clock.yml`. It reruns the whole sui
 
 ## The QA seed link
 
-QA builds only (`EXPO_PUBLIC_QA=1`) accept `myapp://qa/seed?scenario=<empty|week|timeline300|yearBoundary|oneBucket>&now=<UTC instant>`. It wipes the DB, seeds the scenario, and optionally freezes the app clock, so a flow sees the same data and the same "today" every run. Smoke flows reach it through `openLink` in `.maestro/smoke/subflows/launch.yaml` and then wait on testID `qa-seed-status`. Why: a seed link is deterministic and fast; tapping through entry forms is neither.
+QA builds only (`EXPO_PUBLIC_QA=1`) accept `myapp://qa/seed?scenario=<empty|week|timeline300|yearBoundary|oneBucket|weekHealth>&now=<UTC instant>`. It wipes the DB, seeds the scenario, and optionally freezes the app clock, so a flow sees the same data and the same "today" every run. Smoke flows reach it through `openLink` in `.maestro/smoke/subflows/launch.yaml` and then wait on testID `qa-seed-status`. Why: a seed link is deterministic and fast; tapping through entry forms is neither.
 
 It must never ship. Release-absence is proved three ways:
 
