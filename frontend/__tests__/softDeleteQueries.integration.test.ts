@@ -45,6 +45,7 @@ const PARAMS: Record<string, unknown[]> = {
   ENTRIES_FOR_ACTIVITY_IN_RANGE: [ACTIVITY_ID, START, END],
   CO_OCCURRING_ACTIVITIES: [ACTIVITY_ID],
   ACTIVITY_ENTRY_COUNTS: [],
+  RECOVERY_ENTRY_ACTIVITIES: [START],
 };
 
 /**
@@ -62,7 +63,8 @@ const SCHEMA = `
   CREATE TABLE activity_groups (id INTEGER PRIMARY KEY, name TEXT);
   CREATE TABLE activities (
     id INTEGER PRIMARY KEY, name TEXT, group_id INTEGER,
-    icon_family TEXT DEFAULT 'Feather', icon_name TEXT DEFAULT 'circle'
+    icon_family TEXT DEFAULT 'Feather', icon_name TEXT DEFAULT 'circle',
+    position INTEGER DEFAULT 0
   );
   CREATE TABLE entries (
     id INTEGER PRIMARY KEY, mood REAL, notes TEXT, date TEXT, starred_at TEXT, deleted_at TEXT
