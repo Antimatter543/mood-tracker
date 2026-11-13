@@ -38,7 +38,6 @@ import {
     type CoOccurringRow,
 } from '@/components/visualisations/transforms/activityDetail';
 import { useTimeframe } from '@/context/TimeframeContext';
-import { now } from '@/lib/clock';
 import { getActivityGroups } from '@/databases/groups';
 import { ActivityEditModal } from './forms/ActivityEditModal';
 import { getActivity } from '@/databases/activities';
@@ -90,7 +89,7 @@ export const ActivityInsightsDetail: React.FC<{
     const insets = useSafeAreaInsets();
     const db = useSQLiteContext();
     const [data, setData] = useState<DetailData | null>(null);
-    const { periodWindow } = useTimeframe();
+    const { periodLabel, periodWindow } = useTimeframe();
     const [currentActivity, setCurrentActivity] = useState(activity);
     const [editorVisible, setEditorVisible] = useState<boolean>(false);
 
@@ -237,7 +236,7 @@ export const ActivityInsightsDetail: React.FC<{
                             size={30}
                         />
                     </View>
-                    <Text style={styles.emptyTitle}>No {currentActivity.name} entries yet</Text>
+                    <Text style={styles.emptyTitle}>No {currentActivity.name} entries for {periodLabel}</Text>
                     <Text style={styles.emptyBody}>
                         Log {currentActivity.name} alongside your mood a few times and its pattern will
                         show up here.
@@ -259,18 +258,6 @@ export const ActivityInsightsDetail: React.FC<{
             : v.kind === 'insufficient'
               ? colors.textSecondary
               : colors.accent;
-
-    const rangeText =
-        periodWindow.start && periodWindow.end
-            ? fmtDate(periodWindow.start) === fmtDate(periodWindow.end)
-                ? fmtDate(periodWindow.start)
-                : `${fmtDate(periodWindow.start)} – ${fmtDate(periodWindow.end)}`
-            :
-        model.firstDate && model.lastDate
-            ? fmtDate(model.firstDate) === fmtDate(model.lastDate)
-                ? fmtDate(model.firstDate)
-                : `${fmtDate(model.firstDate)} – ${fmtDate(model.lastDate)}`
-            : '';
 
     const maxFrequency = Math.max(1, ...model.buckets);
 
@@ -307,8 +294,10 @@ export const ActivityInsightsDetail: React.FC<{
                         <View style={styles.grow}>
                             <Text style={styles.activityTitle}>{currentActivity.name}</Text>
                             <Text style={styles.activitySub}>
+                                {periodLabel}
+                            </Text>
+                            <Text style={styles.activitySub}>
                                 {s.count} {s.count === 1 ? 'entry' : 'entries'}
-                                {rangeText ? ` · ${rangeText}` : ''}
                             </Text>
                         </View>
                     </View>

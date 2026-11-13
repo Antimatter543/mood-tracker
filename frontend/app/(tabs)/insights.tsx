@@ -56,6 +56,8 @@ import { getHealthMetricsRange } from '@/databases/health-metrics';
 import { shouldShowHealthConnect } from '@/lib/healthConnectConfig';
 import { now } from '@/lib/clock';
 import { useSettings } from '@/context/SettingsContext';
+import { useTimeframe } from '@/context/TimeframeContext';
+import SectionHeader from '@/components/SectionHeader';
 
 /**
  * Insights — honest, locally-derived patterns from the user's own entries.
@@ -169,6 +171,7 @@ export default function InsightsScreen() {
     const colors = useThemeColors();
     const styles = useStyles(colors);
     const db = useSQLiteContext();
+    const { periodLabel, periodWindow } = useTimeframe();
     const { settings } = useSettings();
     const carryover = settings.activity_carryover;
     const [data, setData] = useState<Insights | null>(null);
@@ -181,8 +184,8 @@ export default function InsightsScreen() {
             (async () => {
                 try {
                     // All-time window: from the epoch up to the end of today (local).
-                    const start = startOfLocalDay(new Date(0));
-                    const end = endOfLocalDay(now());
+                    const start = periodWindow.start;
+                    const end = periodWindow.end;
                     const today = localDateString(now());
                     // Health Connect cards only exist on Android behind the flag;
                     // skip the read entirely elsewhere. Bounds are day-strings
@@ -231,7 +234,7 @@ export default function InsightsScreen() {
                         .sort((a, b) => b.delta - a.delta)
                         .slice(0, 3);
 
-                    // 2-axis "how you've been" state over all recorded local days,
+                    // 2-axis "how you've been" state over the recorded period,
                     // and the state-conditioned forward-looking drivers (reusing
                     // the SAME raw activity rows already fetched above).
                     const dailyMoods = aggregateDailyAverages(moodRawRows);
@@ -302,10 +305,10 @@ export default function InsightsScreen() {
                 active = false;
             };
         // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
-        }, [db]);
+        }, [db, periodWindow]);
     // Focus-aware refetch (replaces useEffect([db, refreshCount])): always
     // reloads when this tab regains focus AND live-updates while focused.
-    useDataRefresh(load, [db]);
+    useDataRefresh(load, [db, periodWindow]);
 
     if (data && data.totalEntries === 0) {
         return (
@@ -321,6 +324,8 @@ export default function InsightsScreen() {
     return (
         <Layout>
             {INSIGHTS_HEADER}
+
+            <SectionHeader label={`Insights for ${periodLabel}`} />
 
             {/* How you've been — 2-axis mood state (only once classified) */}
             {d.moodState.state === 'classified' && (

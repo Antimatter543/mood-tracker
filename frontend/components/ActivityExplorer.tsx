@@ -19,7 +19,6 @@ import {
 import { OverlayModal } from '@/components/OverlayModal';
 import { ActivityInsightsDetail } from '@/components/ActivityInsightsDetail';
 import { useTimeframe } from '@/context/TimeframeContext';
-import { useDateFormat } from '@/hooks/useDateFormat';
 import { AddActivityModal } from './forms/ActivityAddModal';
 import { getActivityGroups } from '@/databases/groups';
 
@@ -44,8 +43,7 @@ export const ActivityExplorer: React.FC = () => {
     const [query, setQuery] = useState('');
     const [expanded, setExpanded] = useState(false);
     const [selected, setSelected] = useState<Activity | null>(null);
-    const { periodWindow } = useTimeframe();
-    const { format } = useDateFormat();
+    const { periodLabel, periodWindow } = useTimeframe();
     const [groups, setGroups] = useState<ActivityGroup[] | null>(null);
     const [addActivityVisible, setAddActivityVisible] = useState(false);
 
@@ -94,9 +92,8 @@ export const ActivityExplorer: React.FC = () => {
         <Card>
             <Text style={styles.title}>Explore your activities</Text>
             <Text style={styles.subtitle}>
-                Shows activity data from {format(periodWindow.start, "numericShort")} to {format(periodWindow.end, "numericShort")}{' '}
-                based on time frame selected on the Statistics tab. Open any activity to see its mood pattern, variability, and
-                what you pair it with.
+                Shows activity data for {periodLabel}. You can change the period on time window tab.
+                Open any activity to see its mood pattern, variability, and what you pair it with.
             </Text>
 
             {items.length === 0 ? (
