@@ -126,13 +126,15 @@ export const ActivityExplorer: React.FC = () => {
                         </View>
 
                         <Pressable
-                            style={styles.addButton}
                             onPress={() => setAddActivityVisible(true)}
-                            hitSlop={10}
+                            style={({ pressed }) => [
+                                styles.addButton,
+                                pressed && styles.rowPressed,
+                            ]}
                             accessibilityRole="button"
-                            accessibilityLabel="Add new activity"
+                            accessibilityLabel="Add activity"
                         >
-                            <Feather name="plus" size={20} color={colors.textSecondary} />
+                            <Feather name="plus" size={20} color={colors.accent} />
                         </Pressable>
                     </View>
 
@@ -218,7 +220,6 @@ export const ActivityExplorer: React.FC = () => {
                     visible={addActivityVisible}
                     onClose={() => setAddActivityVisible(false)}
                     onAdd={() => {}}
-                    groupName={null}
                     groupId={null}
                     groups={groups}
                     db={db}
@@ -255,9 +256,13 @@ const makeStyles = (colors: ThemeColors) =>
             marginBottom: 14,
             lineHeight: 19,
         },
+        // Search pill + a square Add button of the same height, surface and
+        // radius, so the two read as one control row.
         searchBar: {
             flexDirection: 'row',
-            alignItems: 'center',
+            alignItems: 'stretch',
+            gap: 8,
+            marginBottom: 4,
         },
         searchField: {
             flex: 1,
@@ -270,19 +275,22 @@ const makeStyles = (colors: ThemeColors) =>
             paddingVertical: 10,
             borderWidth: StyleSheet.hairlineWidth,
             borderColor: colors.border,
-            marginBottom: 4,
         },
         searchInput: {
+            flex: 1,
             fontSize: 15,
             color: colors.text,
             padding: 0,
         },
         addButton: {
-            paddingLeft: 12,
-        },
-        buttonLabel: {
-            fontSize: 13,
-            color: colors.textSecondary,
+            width: 44,
+            minHeight: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: colors.secondaryBackground,
+            borderRadius: 12,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: colors.border,
         },
         list: {
             marginTop: 6,
