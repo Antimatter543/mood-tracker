@@ -63,6 +63,21 @@ export function endOfLocalDay(date: Date | string): string {
   return local.toISOString();
 }
 
+/** A bare local day key, the shape `localDateString` returns. */
+const YMD_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Accepts a Date or a string and returns a Date. A bare `YYYY-MM-DD` day key
+ * is LOCAL midnight (the same rule as lib/dateFormat.ts); every other string
+ * parses exactly as `new Date(date)`, as it did before this helper existed,
+ * so stored UTC instants and SQLite `YYYY-MM-DD HH:MM:SS` stamps keep their
+ * old meaning everywhere `localDateString` is used.
+ */
+export function convertStringToDate(date: Date | string): Date {
+  if (typeof date !== 'string') return date;
+  return new Date(YMD_ONLY.test(date) ? `${date}T00:00:00` : date);
+}
+
 /**
  * Returns the local-timezone date as `YYYY-MM-DD`. Accepts either a Date or
  * an ISO string (which will be parsed and then formatted in local TZ).
@@ -70,8 +85,8 @@ export function endOfLocalDay(date: Date | string): string {
  * This is what you'd use as a key when grouping entries by day for display.
  */
 export function localDateString(date: Date | string): string {
-  const d = typeof date === 'string' ? new Date(date) : date;
-  if (isNaN(d.getTime())) {
+  const d = convertStringToDate(date);
+  if (!d || isNaN(d.getTime())) {
     throw new Error(`Invalid date passed to localDateString: ${date}`);
   }
   // Use local getters (NOT getUTC*) so the date reflects the user's TZ.
@@ -79,6 +94,27 @@ export function localDateString(date: Date | string): string {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+/**
+ * Returns the local-timezone date as `YYYY-MM-DDTHH:mm[:ss[.sss]]`.
+ * Accepts either a Date or an ISO string (which will be parsed in
+ * either local or UTC time depending on whether it ends with 'Z'),
+ * and then formatted in local TZ.
+ */
+export function localDateTimeString(date: Date | string): string {
+  const d = convertStringToDate(date);
+  if (!d || isNaN(d.getTime())) {
+    throw new Error(`Invalid date passed to localDateTimeString: ${date}`);
+  }
+  // Use local getters (NOT getUTC*) so the date reflects the user's TZ.
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const hours = String(d.getHours()).padStart(2, '0');
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const seconds = String(d.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 }
 
 /**
@@ -99,6 +135,14 @@ export function daysBetween(a: string, b: string): number {
   // to an integer multiple of 86_400_000 but not exact across DST.
   const MS_PER_DAY = 86_400_000;
   return Math.round((dayB.getTime() - dayA.getTime()) / MS_PER_DAY);
+}
+
+/**
+ * How many local calendar days a span touches, counting both ends: the same
+ * day is 1, today and tomorrow are 2. Order does not matter.
+ */
+export function calendarDaysSpanned(a: string, b: string): number {
+  return Math.abs(daysBetween(a, b)) + 1;
 }
 
 /**
