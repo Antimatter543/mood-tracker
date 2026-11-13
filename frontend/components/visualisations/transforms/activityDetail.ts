@@ -15,13 +15,16 @@
 // `localDateString` / `aggregateDailyAverages` (the one authority), never a
 // SQL date() bucket — see databases/dateHelpers.ts READ CONTRACT.
 
-import { localDateString, localDateTimeString } from '@/databases/dateHelpers';
+import { localDateTimeString } from '@/databases/dateHelpers';
 import {
     aggregateDailyAverages,
-    dailyAverageMap,
     type InstantValueRow,
 } from './dailyAverages';
-import { MIN_SAMPLES } from './activityCorrelation';
+import {
+    ActivityCorrelationRawRow,
+    aggregateActivityCorrelation,
+    MIN_SAMPLES
+} from './activityCorrelation';
 
 // Re-export so consumers can `bucketMoodHistogram` the activity's moods from one
 // import surface without reimplementing the distribution (the histogram uses the
@@ -228,49 +231,37 @@ export type ActivityMoodImpact = {
  * present in the data that this activity was NOT on.
  */
 export const activityMoodImpact = (
-    allEntries: InstantValueRow[],
-    activityEntries: InstantValueRow[],
+    activityId: number,
+    allEntries: ActivityCorrelationRawRow[],
     minSamples: number = MIN_SAMPLES,
     perEntry: boolean = false,
+    carryover: boolean = false,
+    windowStart: string | undefined = undefined,
 ): ActivityMoodImpact => {
-    const entries = !perEntry ? dailyAverageMap(allEntries) : new Map(allEntries.map((e) => [localDateTimeString(e.date), e.mood]));
+    const filteredEntries = allEntries.map((r) =>
+        (r.activity_id != activityId ?
+            {...r, activity_id: null, activity_name: null} : r));
 
-    const withSet = new Set<string>();
-    for (const row of activityEntries ?? []) {
-        if (!row || typeof row.date !== 'string') continue;
-        if (Number.isNaN(new Date(row.date).getTime())) continue;
-        if (!perEntry)
-            withSet.add(localDateString(row.date));
-        else
-            withSet.add(localDateTimeString(row.date));
-    }
+    const correlations = aggregateActivityCorrelation(filteredEntries, { carryover, perEntry, windowStart })
+    if (correlations.length == 0)
+        return {
+            withAvg: null, withoutAvg: null,
+            delta: null,  isMeaningful: false,
+            withCount: 0, withoutCount: 0,
+        };
 
-    let sumWith = 0;
-    let countWith = 0;
-    let sumWithout = 0;
-    let countWithout = 0;
-    for (const [date, value] of entries) {
-        if (withSet.has(date)) {
-            sumWith += value;
-            countWith += 1;
-        } else {
-            sumWithout += value;
-            countWithout += 1;
-        }
-    }
-
-    const withAvg = countWith > 0 ? round1(sumWith / countWith) : null;
-    const withoutAvg = countWithout > 0 ? round1(sumWithout / countWithout) : null;
-    const delta =
-        withAvg !== null && withoutAvg !== null ? round1(withAvg - withoutAvg) : null;
+    const corr = correlations[0];
+    const delta = corr.avg_with !== null && corr.avg_without !== null
+        ? round1(corr.avg_with - corr.avg_without) : null;
+    const meaningful = corr.count_with >= minSamples && corr.count_without >= minSamples
 
     return {
-        withAvg,
-        withoutAvg,
-        delta,
-        withCount: countWith,
-        withoutCount: countWithout,
-        isMeaningful: countWith >= minSamples && countWithout >= minSamples,
+        withAvg: corr.avg_with,
+        withoutAvg: corr.avg_without,
+        delta: delta,
+        withCount: corr.count_with,
+        withoutCount: corr.count_without,
+        isMeaningful: meaningful,
     };
 };
 

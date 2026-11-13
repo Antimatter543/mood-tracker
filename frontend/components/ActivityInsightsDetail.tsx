@@ -22,9 +22,9 @@ import { Activity } from '@/components/types';
 import { moodColor } from '@/components/timeline/moodColor';
 import { startOfLocalDay, endOfLocalDay } from '@/databases/dateHelpers';
 import {
-    ENTRIES_FOR_ACTIVITY,
-    WEEKLY_MOOD_AVERAGES,
     CO_OCCURRING_ACTIVITIES,
+    ACTIVITY_CORRELATION,
+    ENTRIES_FOR_ACTIVITY_IN_RANGE,
 } from '@/components/visualisations/queries';
 import { NUM_BUCKETS } from '@/components/visualisations/transforms/scatter';
 import {
@@ -40,7 +40,7 @@ import {
 } from '@/components/visualisations/transforms/activityDetail';
 import { now } from '@/lib/clock';
 import { useSettings } from '@/context/SettingsContext';
-import { MIN_SAMPLES } from './visualisations/transforms/activityCorrelation';
+import { ActivityCorrelationRawRow, MIN_SAMPLES } from './visualisations/transforms/activityCorrelation';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
@@ -49,10 +49,9 @@ const MIN_TREND_VALUES = 6;
 const SPARK_HEIGHT = 48;
 const HISTOGRAM_HEIGHT = 132;
 
-type EntryRow = { id: number; date: string; mood: number };
 type DetailData = {
-    activityRows: EntryRow[];
-    allRows: { date: string; mood: number }[];
+    activityRows: ActivityCorrelationRawRow[];
+    allRows: ActivityCorrelationRawRow[];
     coRows: CoOccurringRow[];
 };
 const EMPTY_DATA: DetailData = { activityRows: [], allRows: [], coRows: [] };
@@ -88,6 +87,7 @@ export const ActivityInsightsDetail: React.FC<{
     const styles = useMemo(() => makeStyles(colors), [colors]);
     const { settings } = useSettings();
     const perEntry = settings.activity_perEntry;
+    const carryover = settings.activity_carryover;
     const [data, setData] = useState<DetailData | null>(null);
 
     const load = useCallback(() => {
@@ -98,11 +98,10 @@ export const ActivityInsightsDetail: React.FC<{
                 const start = startOfLocalDay(new Date(0));
                 const end = endOfLocalDay(now());
                 const [activityRows, allRows, coRows] = await Promise.all([
-                    db.getAllAsync<EntryRow>(ENTRIES_FOR_ACTIVITY, [activity.id]),
-                    db.getAllAsync<{ date: string; mood: number }>(WEEKLY_MOOD_AVERAGES, [
-                        start,
-                        end,
-                    ]),
+                    db.getAllAsync<ActivityCorrelationRawRow>(ENTRIES_FOR_ACTIVITY_IN_RANGE,
+                        [activity.id, start, end]),
+                    db.getAllAsync<ActivityCorrelationRawRow>(ACTIVITY_CORRELATION,
+                        [start, end]),
                     db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES, [activity.id]),
                 ]);
                 if (active) setData({ activityRows, allRows, coRows });
@@ -123,7 +122,7 @@ export const ActivityInsightsDetail: React.FC<{
         return {
             stats: activityMoodStats(moods),
             variability: classifyVariability(moods, { label: activity.name }),
-            impact: activityMoodImpact(d.allRows, d.activityRows, MIN_SAMPLES, perEntry),
+            impact: activityMoodImpact(activity.id, d.allRows, MIN_SAMPLES, perEntry, carryover),
             buckets: bucketMoodHistogram(d.activityRows),
             trend: moodTrendForActivity(d.activityRows, perEntry),
             co: topCoOccurring(d.coRows),
@@ -210,6 +209,7 @@ export const ActivityInsightsDetail: React.FC<{
         <View style={styles.screen}>
             {header}
             <ScrollView
+                key={activity.id}
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
             >
@@ -257,11 +257,11 @@ export const ActivityInsightsDetail: React.FC<{
 
                 {/* (b) Mood when doing X — vs your usual */}
                 <Card>
-                    <Text style={styles.cardTitle}>Mood when doing {activity.name}</Text>
+                    <Text style={styles.cardTitle}>Mood when logging {activity.name}</Text>
                     {imp.isMeaningful && imp.withAvg !== null && imp.withoutAvg !== null ? (
                         <>
                             <Text style={styles.cardBody}>
-                                On {activity.name} {!perEntry ? "days" : "entries"} your mood averages{' '}
+                                When you log {activity.name}, your mood averages{' '}
                                 <Text style={styles.emphasis}>{imp.withAvg.toFixed(1)}</Text> —
                                 that's{' '}
                                 <Text
@@ -278,7 +278,7 @@ export const ActivityInsightsDetail: React.FC<{
                                     {(imp.delta ?? 0) >= 0 ? '+' : ''}
                                     {(imp.delta ?? 0).toFixed(1)}
                                 </Text>{' '}
-                                vs {imp.withoutAvg.toFixed(1)} without.
+                                vs {imp.withoutAvg.toFixed(1)} without it.
                             </Text>
                             <View style={styles.compare}>
                                 <CompareBar
@@ -289,7 +289,7 @@ export const ActivityInsightsDetail: React.FC<{
                                     colors={colors}
                                 />
                                 <CompareBar
-                                    label={"Other " + (!perEntry ? "days" : "entries")}
+                                    label="Ẁithout"
                                     value={imp.withoutAvg}
                                     fill={colors.textSecondary}
                                     styles={styles}
@@ -306,7 +306,7 @@ export const ActivityInsightsDetail: React.FC<{
                             {imp.withAvg !== null
                                 ? ` (averaging ${imp.withAvg.toFixed(1)})`
                                 : ''}
-                            . Log it a few more times — and some without it — to compare it to
+                            . Log it a few more times — and a few times without it — to compare it to
                             your usual mood.
                         </Text>
                     )}

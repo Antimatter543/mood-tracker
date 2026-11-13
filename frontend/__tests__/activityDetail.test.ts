@@ -21,13 +21,29 @@ import {
 } from '@/components/visualisations/transforms/activityDetail';
 import { localDateTimeIso, localIso } from '@/testing/builders';
 
+let nextId = 1;
+
 // A local-noon instant for a given 'YYYY-MM-DD', so day-keying is TZ-robust under the
 // non-UTC jest pin (jest.globalSetup.js = Australia/Brisbane). Mirrors dailyAverages tests.
-const at = (day: string, mood: number) => ({ date: localIso(day), mood });
+const at = (day: string, mood: number, activity_id: number | null = null) => (
+    {
+        entry_id: nextId++,
+        date: localIso(day),
+        mood,
+        activity_id,
+        activity_name: activity_id ? "Activity" : null
+    });
 
 // A local instant for a given 'YYYY-MM-DD('T'HH:mm:ss)?', so day-keying is TZ-robust under the
 // non-UTC jest pin (jest.globalSetup.js = Australia/Brisbane).
-const atTime = (date: string, mood: number) => ({ date: localDateTimeIso(date), mood });
+const atTime = (date: string, mood: number, activity_id: number | null = null) => (
+    {
+        entry_id: nextId++,
+        date: localDateTimeIso(date),
+        mood,
+        activity_id,
+        activity_name: activity_id ? "Activity" : null
+    });
 
 describe('activityMoodStats', () => {
     it('is all-zeros (never NaN) on empty input', () => {
@@ -169,15 +185,13 @@ describe('classifyVariability', () => {
 describe('activityMoodImpact', () => {
     it('splits with-vs-without by local date and gates on sample size', () => {
         // 12 days total. Activity logged on 6 of them, all high (8); the other 6 low (2).
-        const activityEntries = [
-            at('2026-01-01', 8),
-            at('2026-01-02', 8),
-            at('2026-01-03', 8),
-            at('2026-01-04', 8),
-            at('2026-01-05', 8),
-            at('2026-01-06', 8),
-        ];
-        const otherEntries = [
+        const all = [
+            at('2026-01-01', 8, 1),
+            at('2026-01-02', 8, 1),
+            at('2026-01-03', 8, 1),
+            at('2026-01-04', 8, 1),
+            at('2026-01-05', 8, 1),
+            at('2026-01-06', 8, 1),
             at('2026-01-07', 2),
             at('2026-01-08', 2),
             at('2026-01-09', 2),
@@ -185,8 +199,7 @@ describe('activityMoodImpact', () => {
             at('2026-01-11', 2),
             at('2026-01-12', 2),
         ];
-        const all = [...activityEntries, ...otherEntries];
-        const r = activityMoodImpact(all, activityEntries);
+        const r = activityMoodImpact(1, all);
         expect(r.withAvg).toBe(8);
         expect(r.withoutAvg).toBe(2);
         expect(r.delta).toBe(6);
@@ -196,12 +209,14 @@ describe('activityMoodImpact', () => {
     });
 
     it('returns per-DAY averages (a busy day counts once), when perEntry is false or missing', () => {
-        const activityEntries = [atTime('2026-02-02T09:00:00', 8), atTime('2026-02-02T18:00:00', 10)];
         const all = [
-            atTime('2026-02-01T09:00:00', 3), atTime('2026-02-01T12:00:00', 4), atTime('2026-02-01T15:00:00', 2),
-            atTime('2026-02-02T09:00:00', 8), atTime('2026-02-02T18:00:00', 10)
+            atTime('2026-02-01T09:00:00', 3),
+            atTime('2026-02-01T12:00:00', 4),
+            atTime('2026-02-01T15:00:00', 2),
+            atTime('2026-02-02T09:00:00', 8, 1),
+            atTime('2026-02-02T18:00:00', 10, 1)
         ];
-        const r = activityMoodImpact(all, activityEntries);
+        const r = activityMoodImpact(1, all);
         expect(r.withAvg).toBe(9);
         expect(r.withoutAvg).toBe(3); // (2+4)/2, one day
         expect(r.withCount).toBe(1);
@@ -210,12 +225,16 @@ describe('activityMoodImpact', () => {
     });
 
     it('returns all entries when perEntry is true', () => {
-        const activityEntries = [atTime('2026-02-02T09:00:00', 8), atTime('2026-02-02T18:00:00', 10)];
         const all = [
-            atTime('2026-02-01T09:00:00', 3), atTime('2026-02-01T12:00:00', 4), atTime('2026-02-01T15:00:00', 2),
-            atTime('2026-02-02T09:00:00', 8), atTime('2026-02-02T18:00:00', 10)
+            // Activity not logged
+            atTime('2026-02-01T09:00:00', 3),
+            atTime('2026-02-01T12:00:00', 4),
+            atTime('2026-02-01T15:00:00', 2),
+            // Activity logged
+            atTime('2026-02-02T09:00:00', 8, 1),
+            atTime('2026-02-02T18:00:00', 10, 1)
         ];
-        const r = activityMoodImpact(all, activityEntries, MIN_SAMPLES, true);
+        const r = activityMoodImpact(1, all, MIN_SAMPLES, true);
         expect(r.withAvg).toBe(9);
         expect(r.withoutAvg).toBe(3);
         expect(r.withCount).toBe(2);
@@ -224,14 +243,26 @@ describe('activityMoodImpact', () => {
     });
 
     it('is null-safe when a side is empty', () => {
-        const only = [at('2026-03-01', 7)];
-        let r = activityMoodImpact(only, only); // every day is a "with" day
+        const only = [at('2026-03-01', 7, 1)];
+        let r = activityMoodImpact(1, only); // every day is a "with" day
         expect(r.withAvg).toBe(7);
         expect(r.withoutAvg).toBeNull();
         expect(r.delta).toBeNull();
         expect(r.isMeaningful).toBe(false);
 
-        r = activityMoodImpact(only, only, MIN_SAMPLES, true); // every day is a "with" day
+        r = activityMoodImpact(1, only, MIN_SAMPLES, true, false); // every day is a "with" day
+        expect(r.withAvg).toBe(7);
+        expect(r.withoutAvg).toBeNull();
+        expect(r.delta).toBeNull();
+        expect(r.isMeaningful).toBe(false);
+
+        r = activityMoodImpact(1, only, MIN_SAMPLES, true, true); // every day is a "with" day
+        expect(r.withAvg).toBe(7);
+        expect(r.withoutAvg).toBeNull();
+        expect(r.delta).toBeNull();
+        expect(r.isMeaningful).toBe(false);
+
+        r = activityMoodImpact(1, only, MIN_SAMPLES, false, true); // every day is a "with" day
         expect(r.withAvg).toBe(7);
         expect(r.withoutAvg).toBeNull();
         expect(r.delta).toBeNull();
@@ -239,11 +270,17 @@ describe('activityMoodImpact', () => {
     });    
 
     it('does not throw on empty input', () => {
-        expect(() => activityMoodImpact([], [])).not.toThrow();
-        expect(activityMoodImpact([], []).withAvg).toBeNull();
+        expect(() => activityMoodImpact(1, [])).not.toThrow();
+        expect(activityMoodImpact(1, []).withAvg).toBeNull();
 
-        expect(() => activityMoodImpact([], [], MIN_SAMPLES, true)).not.toThrow();
-        expect(activityMoodImpact([], []).withAvg).toBeNull();
+        expect(() => activityMoodImpact(1, [], MIN_SAMPLES, true, false)).not.toThrow();
+        expect(activityMoodImpact(1, []).withAvg).toBeNull();
+
+        expect(() => activityMoodImpact(1, [], MIN_SAMPLES, true, true)).not.toThrow();
+        expect(activityMoodImpact(1, []).withAvg).toBeNull();
+
+        expect(() => activityMoodImpact(1, [], MIN_SAMPLES, false, true)).not.toThrow();
+        expect(activityMoodImpact(1, []).withAvg).toBeNull();
     });
 });
 

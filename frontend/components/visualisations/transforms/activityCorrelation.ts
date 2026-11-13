@@ -21,6 +21,7 @@ import { localDateString } from '@/databases/dateHelpers';
 import type { Window } from './windowHelpers';
 
 export type ActivityCorrelationRow = {
+    activity_id: number;
     activity_name: string;
     avg_with: number | null; // AVG(mood) when the activity was logged
     avg_without: number | null; // AVG(mood) when the activity was NOT logged
@@ -149,15 +150,15 @@ export const aggregateActivityCorrelation = (
         typeof opts.windowStart === 'string' && !Number.isNaN(new Date(opts.windowStart).getTime())
             ? new Date(opts.windowStart).getTime()
             : Number.NEGATIVE_INFINITY;
-
+   
     // In-window entries, de-duped by id: id -> { t, mood, key: string }().
     const entries = new Map<number, { t: number; mood: number; key: string }>();
-    // Activity name -> set of LOCAL days or entry_ids it appears on (ALL rows: pre + in-window).
-    const withActivity = new Map<string, Set<string>>();
-    // Activity name -> instance timestamps (ALL rows), keyed by entry id so each
+    // Activity id -> set of LOCAL days or entry_ids it appears on (ALL rows: pre + in-window).
+    const withActivity = new Map<number, Set<string>>();
+    // Activity id -> instance timestamps or entry_ids (ALL rows), keyed by entry id so each
     // (entry × activity) contributes at most one instant.
-    const activityInstances = new Map<string, Map<number, number>>();
-    const activityNames = new Set<string>();
+    const activityInstances = new Map<number, Map<number, number>>();
+    const activityIds = new Map<number, string>();
 
     for (const row of rows ?? []) {
         if (!row || typeof row.date !== 'string') continue;
@@ -176,19 +177,19 @@ export const aggregateActivityCorrelation = (
 
         // Activity day-membership + forward-decay instances: ALL rows.
         if (row.activity_name != null && row.activity_id != null) {
-            activityNames.add(row.activity_name);
+            activityIds.set(row.activity_id, row.activity_name);
 
-            let withEntries = withActivity.get(row.activity_name);
+            let withEntries = withActivity.get(row.activity_id);
             if (!withEntries) {
                 withEntries = new Set<string>();
-                withActivity.set(row.activity_name, withEntries);
+                withActivity.set(row.activity_id, withEntries);            
             }
-            withEntries.add(key);
+            withEntries.add(key);            
 
-            let inst = activityInstances.get(row.activity_name);
+            let inst = activityInstances.get(row.activity_id);
             if (!inst) {
                 inst = new Map<number, number>();
-                activityInstances.set(row.activity_name, inst);
+                activityInstances.set(row.activity_id, inst);
             }
             if (!inst.has(row.entry_id)) inst.set(row.entry_id, t);
         }
@@ -218,17 +219,17 @@ export const aggregateActivityCorrelation = (
     const allEntries = [...moods.keys()];
 
     // Ascending instance timestamps per activity — only needed with carryover on.
-    const sortedInstances = new Map<string, number[]>();
+    const sortedInstances = new Map<number, number[]>();
     if (carryover) {
-        for (const [name, inst] of activityInstances) {
-            sortedInstances.set(name, [...inst.values()].sort((a, b) => a - b));
+        for (const [id, inst] of activityInstances) {
+            sortedInstances.set(id, [...inst.values()].sort((a, b) => a - b));
         }
     }
 
     const out: ActivityCorrelationRow[] = [];
-    for (const name of activityNames) {
-        const withEntries = withActivity.get(name);
-        const instances = sortedInstances.get(name) ?? EMPTY_INSTANCES;
+    for (const [ id, name ] of activityIds.entries()) {
+        const withEntries = withActivity.get(id);
+        const instances = sortedInstances.get(id) ?? EMPTY_INSTANCES;
 
         let sumWith = 0; // Σ exposure · mood
         let sumWithout = 0; // Σ (1 − exposure) · mood
@@ -240,7 +241,7 @@ export const aggregateActivityCorrelation = (
             const sameEntry = withEntries?.has(entry) ? 1 : 0;
             let exposure: number;
             if (!carryover) {
-                // Binary same-day or same-entry membership.
+                // Binary same-day or same-entry membership
                 exposure = sameEntry;
             } else {
                 // Mean over the day's entries of max(sameDayTerm, forwardTerm), when perEntry is false.
@@ -259,6 +260,7 @@ export const aggregateActivityCorrelation = (
         }
 
         out.push({
+            activity_id: id,
             activity_name: name,
             avg_with: weightWith > 0 ? Math.round((sumWith / weightWith) * 100) / 100 : null,
             avg_without:
@@ -292,6 +294,7 @@ export const carryoverQueryBounds = (
 };
 
 export type ActivityCorrelationResult = {
+    activity_id: number;
     activity_name: string;
     avg_with: number;
     avg_without: number;
@@ -331,6 +334,7 @@ export const computeActivityCorrelation = (
         const countWith = num(r.count_with);
         const countWithout = num(r.count_without);
         return {
+            activity_id: r.activity_id,
             activity_name: r.activity_name,
             avg_with: avgWith,
             avg_without: avgWithout,
