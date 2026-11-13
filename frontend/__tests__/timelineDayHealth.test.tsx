@@ -4,10 +4,12 @@
  * figure and what it means. Today (not over yet) and days without data get none.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
 
 import {
     HEALTH_RATING_COLORS,
+    healthRatingColor,
     dayHealthByDay,
     dayHealthFromMetric,
     dayHealthItems,
@@ -173,12 +175,17 @@ describe('DayHeader health', () => {
         const button = view.getByTestId('day-health-2026-09-27');
         expect(button.props.accessibilityLabel).toBe('Average mood 6.5, health fair, show details');
         expect(view.queryByTestId('day-average')).toBeNull();
-        expect(JSON.stringify(view.toJSON())).toContain(HEALTH_RATING_COLORS.fair);
+        expect(JSON.stringify(view.toJSON())).toContain(healthRatingColor('fair', THEME));
 
         await fireEvent.press(button);
         expect(view.getByTestId('day-health-card')).toBeTruthy();
-        expect(view.getByText('Sunday, 2026-09-27 · average mood 6.5')).toBeTruthy();
-        for (const text of ['Sleep', '6h 30m', 'Resting heart rate', '90 bpm', 'Average heart rate', '72 bpm', '15 ms']) {
+        expect(view.getAllByText('Sunday, 2026-09-27')).toHaveLength(2); // header + card
+        expect(view.getByText('Average mood 6.5')).toBeTruthy();
+        // Large text on a small phone: the figures scroll inside a card capped below the screen height.
+        const card = view.getByTestId('day-health-card');
+        expect(StyleSheet.flatten(card.props.style).maxHeight).toBe('85%');
+        expect(view.getByTestId('day-health-card-body').type).toBe('RCTScrollView');
+        for (const text of ['Sleep (night before)', '6h 30m', 'Resting heart rate', '90 bpm', 'Average heart rate', '72 bpm', '15 ms']) {
             expect(view.getByText(text)).toBeTruthy();
         }
         expect(view.getByText('A bit high for rest. Stress, little sleep, caffeine or a cold can push it up.')).toBeTruthy();
@@ -196,5 +203,36 @@ describe('DayHeader health', () => {
         expect(dayHealthButtonLabel(null, { sleepMinutes: null, restingHeartRate: null, avgHeartRate: 64, avgHrvMillis: null })).toBe(
             'Health, show details'
         );
+    });
+});
+
+// A 16 px pulse and an 8 px dot are graphics: WCAG 1.4.11 wants 3:1 against what
+// they sit on. The pulse sits on the page background, the dot on the card.
+describe('health rating colours', () => {
+    const { themeColors } = jest.requireActual('@/styles/global') as typeof import('@/styles/global');
+    const luminance = (hex: string) => {
+        const [r, g, b] = [1, 3, 5]
+            .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+            .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const contrast = (a: string, b: string) => {
+        const [x, y] = [luminance(a), luminance(b)];
+        return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+    };
+    const cases = Object.entries(themeColors).flatMap(([name, theme]) =>
+        (['good', 'fair', 'poor'] as const).flatMap((rating) =>
+            (['background', 'cardBackground'] as const).map((surface) => ({ name, theme, rating, surface }))
+        )
+    );
+
+    it.each(cases)('$rating on the $name theme $surface is at least 3:1', ({ theme, rating, surface }) => {
+        expect(contrast(healthRatingColor(rating, theme), theme[surface])).toBeGreaterThanOrEqual(3);
+    });
+
+    it('keeps the three ratings apart in each mode', () => {
+        for (const mode of ['dark', 'light'] as const) {
+            expect(new Set(Object.values(HEALTH_RATING_COLORS[mode])).size).toBe(3);
+        }
     });
 });

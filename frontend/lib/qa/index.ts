@@ -36,7 +36,7 @@ export const QA_SEED_PATH = 'qa/seed';
 export const QA_LINK_SCHEME = 'myapp';
 
 /** Allowlisted fixtures. Anything else is rejected before any I/O. */
-export const QA_SCENARIOS = ['empty', 'week', 'timeline300', 'yearBoundary', 'oneBucket'] as const;
+export const QA_SCENARIOS = ['empty', 'week', 'timeline300', 'yearBoundary', 'oneBucket', 'weekHealth'] as const;
 export type QaScenario = (typeof QA_SCENARIOS)[number];
 
 /**

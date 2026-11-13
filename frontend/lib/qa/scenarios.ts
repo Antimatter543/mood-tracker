@@ -1,5 +1,7 @@
 import { planSeedEntries, type SeedPlanEntry } from '@/components/generateData';
 import type { QaScenario } from './index';
+import type { DailyHealthMetrics } from '@/lib/healthConnectPure';
+import { localDateString } from '@/databases/dateHelpers';
 
 /**
  * The QA seed fixtures, as PURE plans. Each scenario is a fixed (count, RNG
@@ -41,6 +43,8 @@ interface ScenarioSpec {
    * moved past `now` is dropped: a plan never holds a future entry (SeedPlanEntry.date).
    */
   atLocalHour?: number;
+  /** Also store Health Connect figures for the window's past days (see planScenarioHealth). */
+  health?: boolean;
 }
 
 const AT_NOW = (now: Date) => now;
@@ -69,7 +73,38 @@ export const SCENARIO_SPECS: Readonly<Record<QaScenario, ScenarioSpec>> = {
   // many to add through the UI, hence a fixture. 40 entries reach well back past
   // the start of the anchor's month, so the previous month alone clears the 14.
   oneBucket: { count: 40, seed: 11, anchor: AT_NOW, atLocalHour: 8 },
+  // `week` plus stored Health Connect figures, so the Timeline's day health
+  // (a good, a fair, a poor and an unrated day) can be seen without a wearable.
+  weekHealth: { count: 10, seed: 7, anchor: AT_NOW, withinDays: 7, health: true },
 };
+
+type HealthFigures = Pick<DailyHealthMetrics, 'sleepTotalMinutes' | 'avgHeartRate' | 'minHeartRate' | 'restingHeartRate' | 'avgHrvMillis'>;
+
+/** One finished day each, newest first: good, fair, poor, unrated, good, good-with-a-long-night. */
+const HEALTH_DAYS: readonly HealthFigures[] = [
+  { sleepTotalMinutes: 450, avgHeartRate: 72, minHeartRate: 52, restingHeartRate: 58, avgHrvMillis: 45 },
+  { sleepTotalMinutes: 380, avgHeartRate: 80, minHeartRate: 60, restingHeartRate: 84, avgHrvMillis: 28 },
+  { sleepTotalMinutes: 320, avgHeartRate: 95, minHeartRate: 70, restingHeartRate: 104, avgHrvMillis: 18 },
+  { sleepTotalMinutes: null, avgHeartRate: 70, minHeartRate: null, restingHeartRate: null, avgHrvMillis: null },
+  { sleepTotalMinutes: 500, avgHeartRate: 68, minHeartRate: 50, restingHeartRate: 62, avgHrvMillis: 52 },
+  { sleepTotalMinutes: 590, avgHeartRate: 70, minHeartRate: 55, restingHeartRate: 66, avgHrvMillis: 40 },
+];
+
+/**
+ * The scenario's stored health rows: one per local day BEFORE the anchor's day
+ * (the Timeline never shows today's), newest first. Empty for scenarios without
+ * `health`. Pure and fixed, so goldens hold still.
+ */
+export function planScenarioHealth(name: QaScenario, now: Date): DailyHealthMetrics[] {
+  if (!SCENARIO_SPECS[name].health) return [];
+  const anchor = SCENARIO_SPECS[name].anchor(now);
+  return HEALTH_DAYS.map((figures, i) => {
+    const day = new Date(anchor);
+    day.setHours(12, 0, 0, 0);
+    day.setDate(day.getDate() - (i + 1));
+    return { date: localDateString(day), sleepStages: {}, ...figures };
+  });
+}
 
 export interface ScenarioPlan {
   plans: SeedPlanEntry[];
