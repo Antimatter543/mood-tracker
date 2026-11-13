@@ -266,7 +266,7 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   such button: for the Pixel pass load `node scripts/make-demo-data.js --days 300` through Settings -> Restore.
   **Scripted/CI seeding = the QA deep link** (QA builds ONLY, `EXPO_PUBLIC_QA=1`, e.g. the e2e emulator
   workflow): `adb shell am start -a android.intent.action.VIEW -d 'myapp://qa/seed?scenario=week&now=2026-06-15T12:00:00Z'`
-  (Maestro: `openLink`). Scenarios `empty | week | timeline300 | yearBoundary | oneBucket`; optional `now` (strict UTC,
+  (Maestro: `openLink`). Scenarios `empty | week | timeline300 | yearBoundary | oneBucket | weekHealth` (`weekHealth` = `week` plus stored Health Connect rows for the Timeline day health); optional `now` (strict UTC,
   `YYYY-MM-DDTHH:MM:SS(.sss)Z`) freezes the app clock (`lib/clock.ts`) and anchors the data, and survives a
   relaunch. It WIPES the DB first, and refuses (`error foreign-data`) when the DB holds entries no seed wrote.
   Wait on testID `qa-seed-status` = `QA seed: ok <scenario> (<n>)`. Settings loads once per launch, so relaunch

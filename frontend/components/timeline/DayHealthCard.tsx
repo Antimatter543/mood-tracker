@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { OverlayModal } from '@/components/OverlayModal';
 import { ThemeColors } from '@/styles/global';
-import { HEALTH_RATING_COLORS, HEALTH_RATING_LABELS, dayHealthItems, type DayHealth } from './dayHealth';
+import { HEALTH_RATING_LABELS, healthRatingColor, dayHealthItems, type DayHealth } from './dayHealth';
 
 type DayHealthCardProps = {
     visible: boolean;
@@ -78,7 +78,7 @@ export const DayHealthCard: React.FC<DayHealthCardProps> = ({ visible, onClose, 
                             {item.rating ? (
                                 <View style={styles.rating}>
                                     <View
-                                        style={[styles.ratingDot, { backgroundColor: HEALTH_RATING_COLORS[item.rating] }]}
+                                        style={[styles.ratingDot, { backgroundColor: healthRatingColor(item.rating, colors) }]}
                                     />
                                     <Text style={styles.ratingText}>{HEALTH_RATING_LABELS[item.rating]}</Text>
                                 </View>

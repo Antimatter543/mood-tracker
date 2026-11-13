@@ -25,11 +25,20 @@ export type DayHealthItem = {
     note: string;
 };
 
-export const HEALTH_RATING_COLORS: Record<HealthRating, string> = {
-    good: '#43A047',
-    fair: '#F9A825',
-    poor: '#E53935',
+/**
+ * The rating colours per theme mode. A 16 px pulse is a graphic, so it needs 3:1
+ * against what it sits on (the page background in the Timeline, the card in the
+ * health card). The bright amber is about 2:1 on the light themes, so light
+ * themes get darker shades. `__tests__/timelineDayHealth.test.tsx` checks every
+ * theme against both surfaces.
+ */
+export const HEALTH_RATING_COLORS: Record<'dark' | 'light', Record<HealthRating, string>> = {
+    dark: { good: '#43A047', fair: '#F9A825', poor: '#E53935' },
+    light: { good: '#2E7D32', fair: '#B26A00', poor: '#C62828' },
 };
+
+export const healthRatingColor = (rating: HealthRating, theme: { isDark: boolean }): string =>
+    HEALTH_RATING_COLORS[theme.isDark ? 'dark' : 'light'][rating];
 
 export const HEALTH_RATING_LABELS: Record<HealthRating, string> = {
     good: 'Good',
@@ -96,7 +105,7 @@ const rateRestingHr = (bpm: number): Reading => {
 export const dayHealthItems = (h: DayHealth): DayHealthItem[] => {
     const items: DayHealthItem[] = [];
     if (h.sleepMinutes !== null) {
-        items.push({ key: 'sleep', icon: 'moon-outline', label: 'Sleep', value: formatSleep(h.sleepMinutes), ...rateSleep(h.sleepMinutes) });
+        items.push({ key: 'sleep', icon: 'moon-outline', label: 'Sleep (night before)', value: formatSleep(h.sleepMinutes), ...rateSleep(h.sleepMinutes) });
     }
     if (h.restingHeartRate !== null) {
         const bpm = Math.round(h.restingHeartRate);

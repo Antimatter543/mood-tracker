@@ -7,7 +7,7 @@ import { withWriteLock, withWriteTransaction } from '@/databases/writeTransactio
 import { now as clockNow, __setFrozenNowForQa } from '@/lib/clock';
 import { QA_FROZEN_NOW_SETTING_KEY, QA_SEEDED_SETTING_KEY, type QaScenario } from './index';
 import { parseUtcInstant } from './seedLink';
-import { planScenario } from './scenarios';
+import { planScenario, planScenarioHealth } from './scenarios';
 import type { SeedCommand } from './seedLink';
 
 /**
@@ -110,6 +110,14 @@ export async function runSeed(
         const activities = await getActivities(txn);
         if (plans.length > 0 && activities.length === 0) return false;
         await insertSeedPlans(txn, plans, activities, photoPaths, rng, now.toISOString());
+        for (const h of planScenarioHealth(command.scenario, now)) {
+          await txn.runAsync(
+            `INSERT INTO health_metrics
+               (date, sleep_total_minutes, sleep_stages, avg_heart_rate, min_heart_rate, resting_heart_rate, avg_hrv_millis, source, synced_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [h.date, h.sleepTotalMinutes, null, h.avgHeartRate, h.minHeartRate, h.restingHeartRate, h.avgHrvMillis, 'qa-seed', now.toISOString()]
+          );
+        }
         await txn.runAsync('INSERT OR REPLACE INTO user_settings (key, value) VALUES (?, ?)', [
           QA_SEEDED_SETTING_KEY,
           command.scenario,
