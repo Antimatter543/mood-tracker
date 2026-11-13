@@ -48,7 +48,7 @@ const baseSettings: Settings = {
     mood_precision: 'low',
     show_mood_benchmarks: true,
     activity_carryover: false,
-    activity_perEntry: false,
+    activity_per_entry: false,
     date_format: 'system',
     reminders: '[]',
 };

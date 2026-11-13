@@ -171,7 +171,7 @@ export default function InsightsScreen() {
     const [data, setData] = useState<Insights | null>(null);
     const { settings } = useSettings();
     const carryover = settings.activity_carryover;
-    const perEntry = settings.activity_perEntry;
+    const perEntry = settings.activity_per_entry;
 
     // Sync loader returning a cleanup: the `active` flag (flipped on
     // blur/unmount by useDataRefresh) gates setData so a late all-time query

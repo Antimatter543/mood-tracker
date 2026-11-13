@@ -152,7 +152,7 @@ const ActivityCorrelationChart = () => {
   const db = useSQLiteContext();
   const { periodWindow } = useTimeframe();
   const { settings } = useSettings();
-  const perEntry = settings.activity_perEntry;
+  const perEntry = settings.activity_per_entry;
   // Carry over is mutually exclusive with per entry analysis to avoid including
   // entries outside the active time window.
   const carryover = settings.activity_carryover && !perEntry;

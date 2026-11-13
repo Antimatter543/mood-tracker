@@ -86,7 +86,7 @@ export const ActivityInsightsDetail: React.FC<{
     const db = useSQLiteContext();
     const styles = useMemo(() => makeStyles(colors), [colors]);
     const { settings } = useSettings();
-    const perEntry = settings.activity_perEntry;
+    const perEntry = settings.activity_per_entry;
     const carryover = settings.activity_carryover;
     const [data, setData] = useState<DetailData | null>(null);
 
