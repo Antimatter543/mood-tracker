@@ -84,7 +84,8 @@ async function renderAdd(groupId: number | null = 1) {
 
 async function typeName(view: Awaited<ReturnType<typeof renderAdd>>['view'], name: string) {
     await act(async () => {
-        fireEvent.changeText(view.getByLabelText('Activity name'), name);
+        // By placeholder: the label is asserted once, in the layout test below.
+        fireEvent.changeText(view.getByPlaceholderText('Activity Name'), name);
     });
 }
 
