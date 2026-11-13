@@ -110,6 +110,7 @@ function SelectOverlay({
             keyExtractor={(item) => item.value}
             renderItem={({ item }) => (
               <TouchableOpacity
+                testID={`setting-option-${item.value}`}
                 style={[
                   styles.optionItem,
                   item.value === value && styles.selectedOption,
@@ -248,6 +249,7 @@ function SettingRow({ config, value, onValueChange }: SettingRowProps) {
       
       {config.type === 'select' && (
         <TouchableOpacity
+          testID={`setting-select-${config.key}`}
           style={styles.selectButton}
           onPress={() => setModalVisible(true)}
         >

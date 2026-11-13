@@ -41,6 +41,7 @@ import {
 } from '@/components/visualisations/transforms/moodDrivers';
 import TopActivitiesCard, { type TopActivity } from '@/components/visualisations/TopActivitiesCard';
 import MoodDriversCard from '@/components/visualisations/MoodDriversCard';
+import RecoveryAnalysisCard from '@/components/visualisations/RecoveryPatterns';
 import HealthMoodPagerCard from '@/components/visualisations/HealthMoodPagerCard';
 import MoodMetricOverlayCard from '@/components/visualisations/MoodMetricOverlayCard';
 import {
@@ -408,6 +409,10 @@ export default function InsightsScreen() {
 
             {/* State-conditioned, forward-looking drivers */}
             <MoodDriversCard data={d.drivers} />
+
+            {/* Low stretches in the last 90 days and how they ended. Loads its
+                own window and renders nothing when there are none. */}
+            <RecoveryAnalysisCard />
 
             {/* Health Connect: ONE swipeable card cycling sleep / heart-rate /
                 resting-HR / HRV ↔ mood (Android + opt-in only). Only metrics

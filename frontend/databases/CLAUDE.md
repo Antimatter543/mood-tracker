@@ -53,6 +53,12 @@ await withWriteTransaction(async (txn) => {
 concurrency) AND inside `resetDatabase`'s held write lock, and nesting a
 `BEGIN IMMEDIATE` inside it would break. The invariant test excludes it explicitly.
 
+A migration awaits its statements **one at a time, never `Promise.all`**, and a helper
+that reports failure by returning it must have that result checked, or the failure
+commits. Failing any statement must roll the whole batch back. Enforced over every
+migration by `__tests__/migrationAtomicity.integration.test.ts`; why it matters is in
+`tasks/lessons.md` 2026-11-04.
+
 ### Single-statement settings upserts stay on the read connection
 
 `user-settings.ts` (`updateSetting`, `initializeSettingsTable`) issue ONE autocommit

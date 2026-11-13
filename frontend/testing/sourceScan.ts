@@ -150,13 +150,22 @@ export function code(rel: string): string {
  * `__tests__`: a test's own SQL/imports are what does the asserting.
  */
 export function listSourceFiles(dirs: readonly string[]): string[] {
+  return listAppFiles(dirs, name => /\.tsx?$/.test(name) && !name.endsWith('.d.ts'));
+}
+
+/**
+ * Every file under the given `frontend/` subfolders whose NAME passes `keep`, as
+ * sorted posix paths relative to `frontend/`. Same skips as `listSourceFiles`.
+ * For non-TS scan targets, e.g. `listAppFiles(['.maestro'], n => n.endsWith('.yaml'))`.
+ */
+export function listAppFiles(dirs: readonly string[], keep: (name: string) => boolean): string[] {
   const out: string[] = [];
   const walk = (rel: string) => {
     for (const entry of readdirSync(resolveInside(APP_ROOT, rel), { withFileTypes: true })) {
       const child = `${rel}/${entry.name}`;
       if (entry.isDirectory()) {
         if (entry.name !== 'node_modules' && entry.name !== '__tests__') walk(child);
-      } else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith('.d.ts')) {
+      } else if (keep(entry.name)) {
         out.push(child);
       }
     }

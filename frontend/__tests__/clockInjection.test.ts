@@ -40,8 +40,6 @@ const WALL_CLOCK_ALLOWED: Record<string, string> = {
     'lib/clock.ts': 'the clock itself',
     'databases/mediaHelpers.ts':
         'buildMediaFilename uses Date.now() as a uniqueness stamp, not as "the time": a frozen QA clock would collide filenames',
-    'app/(tabs)/_layout.tsx':
-        'owned by the parallel QA lanes (F/G) at the time of the sweep; move its todayKey to now() and drop this entry',
 };
 
 const QA_SETTER_ALLOWED = (file: string) => file === 'lib/clock.ts' || file.startsWith('lib/qa/');

@@ -1,182 +1,279 @@
-import React, { useCallback, useState, useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Card } from '@/components/Card';
-import { useThemeColors } from '@/styles/global';
+import Feather from '@expo/vector-icons/Feather';
+import { OverlayModal } from '@/components/OverlayModal';
+import RecoveryEpisodeDetails from '@/components/RecoveryEpisodeDetails';
+import { ThemeColors, useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useDateFormat } from '@/hooks/useDateFormat';
-import InfoBubble from '../InfoBubble';
+import { addDays, localDateString, startOfLocalDay } from '@/databases/dateHelpers';
+import { now } from '@/lib/clock';
+import { RECOVERY_ENTRY_ACTIVITIES } from './queries';
 import {
-  analyseRecoveryPatterns,
-  type MoodActivityRow,
-  type RecoveryEpisode,
+    analyseRecoveryPatterns,
+    groupRecoveryRows,
+    LOW_STRETCH_EXPLAINER,
+    type RecoveryAnalysis,
+    type RecoveryEpisode,
+    type RecoveryRawRow,
 } from './transforms/recoveryPatterns';
 import {
-  startOfLocalDay,
-  addDays,
-  localDateString,
-} from './transforms/dateHelpers';
-import { now } from '@/lib/clock';
+    daysLabel,
+    daysSoFar,
+    moodRangeLine,
+    statusLabel,
+    summaryLine,
+    typicalLine,
+} from './transforms/lowStretchCopy';
 
-const RecoveryAnalysis = () => {
+/** How far back the card looks. The copy says "last 90 days". */
+const WINDOW_DAYS = 90;
+/** Ended stretches listed on the card; the rest are counted in the summary. */
+const MAX_ROWS = 5;
+
+/**
+ * "After low days": low stretches in the last 90 days and how they ended.
+ *
+ * Self-loading (its own 90-day query), and renders NOTHING until there is at
+ * least one low stretch: no card, no empty message, no (i).
+ */
+const RecoveryAnalysisCard = () => {
     const colors = useThemeColors();
+    const styles = useThemedStyles(colors);
     const { format: formatDate } = useDateFormat();
     const db = useSQLiteContext();
-    const [currentEpisode, setCurrentEpisode] = useState<RecoveryEpisode | null>(null);
-    const [historicalEpisodes, setHistoricalEpisodes] = useState<RecoveryEpisode[]>([]);
-    const [successRate, setSuccessRate] = useState<number>(0);
-    const [avgDuration, setAvgDuration] = useState<number>(0);
-  
-    const styles = useMemo(() => StyleSheet.create({
-      title: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: colors.text,
-        marginBottom: 16,
-      },
-      subtitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: colors.text,
-        marginBottom: 8,
-      },
-      currentEpisode: {
-        padding: 12,
-        backgroundColor: colors.overlays.tag,
-        borderRadius: 8,
-        marginBottom: 16,
-      },
-      stats: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        marginVertical: 16,
-      },
-      statItem: {
-        alignItems: 'center',
-      },
-      statLabel: {
-        fontSize: 14,
-        color: colors.textSecondary,
-        marginBottom: 4,
-      },
-      statValue: {
-        fontSize: 24,
-        fontWeight: 'bold',
-        color: colors.accent,
-      },
-      statDetail: {
-        fontSize: 12,
-        color: colors.textSecondary,
-      },
-      history: {
-        marginTop: 16,
-      },
-      episodeItem: {
-        padding: 12,
-        backgroundColor: colors.overlays.tag,
-        borderRadius: 8,
-        marginBottom: 8,
-      },
-      text: {
-        color: colors.text,
-        fontSize: 14,
-        marginBottom: 4,
-      },
-    }), [colors]);
+    const [analysis, setAnalysis] = useState<RecoveryAnalysis | null>(null);
+    const [selected, setSelected] = useState<RecoveryEpisode | null>(null);
+    const [explainerOpen, setExplainerOpen] = useState(false);
 
-  const run = useCallback(async () => {
-      try {
-        // Last 30 days of entries with activity names. The lower bound is now a
-        // parameterised LOCAL-time UTC ISO string (start of 30 days ago in the
-        // user's timezone) rather than SQLite's UTC date('now', '-30 days'),
-        // which silently dropped late-evening entries for users east of UTC.
-        const start = startOfLocalDay(
-          addDays(localDateString(now()), -30)
-        );
-        const entries = await db.getAllAsync<MoodActivityRow>(`
-          WITH MoodActivities AS (
-            SELECT
-              e.date,
-              e.mood,
-              GROUP_CONCAT(a.name) as activity_names
-            FROM entries e
-            LEFT JOIN entry_activities ea ON e.id = ea.entry_id
-            LEFT JOIN activities a ON ea.activity_id = a.id
-            WHERE e.deleted_at IS NULL AND e.date >= ?
-            GROUP BY e.date
-            ORDER BY e.date DESC
-          )
-          SELECT * FROM MoodActivities
-        `, [start]);
-
-        const result = analyseRecoveryPatterns(entries);
-        setSuccessRate(result.successRate);
-        setAvgDuration(result.avgDuration);
-        setHistoricalEpisodes(result.historicalEpisodes);
-        setCurrentEpisode(result.currentEpisode);
-      } catch (error) {
-        console.error('Error analyzing recovery patterns:', error);
-      }
+    const load = useCallback(async () => {
+        try {
+            // LOCAL start of the day 90 days ago, as a UTC instant bound.
+            const start = startOfLocalDay(addDays(localDateString(now()), -WINDOW_DAYS));
+            const raw = await db.getAllAsync<RecoveryRawRow>(RECOVERY_ENTRY_ACTIVITIES, [start]);
+            setAnalysis(analyseRecoveryPatterns(groupRecoveryRows(raw ?? [])));
+        } catch (error) {
+            console.error('Error loading low stretches:', error);
+        }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
     }, [db]);
-  // Focus-aware refetch (replaces useEffect([db, refreshCount])).
-  useDataRefresh(run, [db]);
+    useDataRefresh(load, [db]);
 
-  return (
-    <Card>
-      <InfoBubble 
-          text="Recovery analysis tracks how you bounce back from low moods. It shows your recovery patterns, duration, and success rate. A recovery is completed once two days exceed an average mood of 6 (after having delved below 4)."
-          position="top-right"
-      />
-      <Text style={styles.title}>Recovery Analysis</Text>
-      
-      {currentEpisode && (
-        <View style={styles.currentEpisode}>
-          <Text style={styles.subtitle}>Current Recovery Episode</Text>
-          <Text style={styles.text}>
-            Started: {formatDate(currentEpisode.startDate, 'numeric')}
-          </Text>
-          <Text style={styles.text}>
-            Duration: {currentEpisode.durationDays} days
-          </Text>
-          <Text style={styles.text}>
-            Progress: {currentEpisode.startMood.toFixed(1)} → {currentEpisode.currentMood.toFixed(1)}
-          </Text>
-        </View>
-      )}
+    if (!analysis || analysis.episodeCount === 0) return null;
 
-      <View style={styles.stats}>
-        <View style={styles.statItem}>
-          <Text style={styles.statLabel}>Success Rate</Text>
-          <Text style={styles.statValue}>{successRate.toFixed(0)}%</Text>
-          <Text style={styles.statDetail}>full recovery</Text>
-        </View>
+    const dateRange = (episode: RecoveryEpisode) =>
+        `${formatDate(episode.startDate, 'mediumNoYear')} – ${
+            episode.endDate ? formatDate(episode.endDate, 'mediumNoYear') : 'now'
+        }`;
 
-        <View style={styles.statItem}>
-          <Text style={styles.statLabel}>Average Duration</Text>
-          <Text style={styles.statValue}>{avgDuration.toFixed(1)}</Text>
-          <Text style={styles.statDetail}>days to recover</Text>
-        </View>
-      </View>
+    const current = analysis.currentEpisode;
+    const typical = typicalLine(analysis);
+    const today = localDateString(now());
 
-      {historicalEpisodes.length > 0 && (
-        <View style={styles.history}>
-          <Text style={styles.subtitle}>Recent Episodes</Text>
-          {historicalEpisodes.slice(0, 3).map((episode, index) => (
-            <View key={index} style={styles.episodeItem}>
-              <Text style={styles.text}>
-                {formatDate(episode.startDate, 'numeric')} - 
-                {episode.endDate ? formatDate(episode.endDate, 'numeric') : 'Ongoing'}
-              </Text>
-              <Text style={styles.text}>
-                Duration: {episode.durationDays} days
-              </Text>
+    return (
+        <Card>
+            {/* Same (?) button as InfoBubble, but the explanation opens INLINE so the
+                card grows to fit it. InfoBubble's absolute popup is clipped by the
+                Card's overflow:hidden, and this explainer is longer than a card
+                with one row is tall (cut off mid-sentence on the Pixel, 2026-11-13). */}
+            <Pressable
+                testID="low-stretch-explainer-toggle"
+                onPress={() => setExplainerOpen((open) => !open)}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={explainerOpen ? 'Hide how low stretches are counted' : 'How low stretches are counted'}
+                accessibilityState={{ expanded: explainerOpen }}
+                style={({ pressed }) => [
+                    styles.infoButton,
+                    { backgroundColor: colors.overlays.tag, borderColor: colors.overlays.tagBorder },
+                    pressed && styles.pressed,
+                ]}
+            >
+                {explainerOpen ? (
+                    <Ionicons name="close" color={colors.text} size={18} />
+                ) : (
+                    <Feather name="help-circle" size={18} color={colors.text} />
+                )}
+            </Pressable>
+
+            <View style={styles.headerRow}>
+                <View style={[styles.iconCircle, { backgroundColor: colors.accentLight }]}>
+                    <Ionicons name="partly-sunny-outline" size={20} color={colors.accent} />
+                </View>
+                <Text style={styles.title}>After low days</Text>
             </View>
-          ))}
-        </View>
-      )}
-    </Card>
-  );
+
+            {explainerOpen && (
+                <View testID="low-stretch-explainer" style={styles.explainer}>
+                    <Text style={styles.explainerText}>{LOW_STRETCH_EXPLAINER}</Text>
+                </View>
+            )}
+
+            <Text style={styles.body} testID="low-stretch-summary">
+                {summaryLine(analysis.episodeCount)}
+            </Text>
+            {typical && (
+                <Text style={styles.body} testID="low-stretch-typical">
+                    {typical}
+                </Text>
+            )}
+
+            {current && (
+                <Pressable
+                    testID="low-stretch-current"
+                    style={({ pressed }) => [styles.row, styles.currentRow, pressed && styles.pressed]}
+                    onPress={() => setSelected(current)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Low stretch since ${formatDate(current.startDate, 'mediumNoYear')}, ${daysLabel(daysSoFar(current.startDate, today))} so far. Opens details.`}
+                >
+                    <View style={styles.grow}>
+                        <Text style={styles.rowTitle} numberOfLines={1}>
+                            Since {formatDate(current.startDate, 'mediumNoYear')}
+                        </Text>
+                        <Text style={styles.rowSub} numberOfLines={1}>
+                            {daysLabel(daysSoFar(current.startDate, today))} so far
+                        </Text>
+                        <Text style={styles.rowSub} numberOfLines={1}>
+                            {moodRangeLine(current)}
+                        </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                </Pressable>
+            )}
+
+            {analysis.historicalEpisodes.length > 0 && (
+                <View style={styles.list}>
+                    {analysis.historicalEpisodes.slice(0, MAX_ROWS).map((episode, index) => (
+                        <Pressable
+                            key={`${episode.startDate}-${index}`}
+                            testID={`low-stretch-row-${index}`}
+                            style={({ pressed }) => [
+                                styles.row,
+                                index > 0 && styles.divider,
+                                pressed && styles.pressed,
+                            ]}
+                            onPress={() => setSelected(episode)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Low stretch ${dateRange(episode).replace('–', 'to')}, ${statusLabel(episode).toLowerCase()}. Opens details.`}
+                        >
+                            <Text style={[styles.rowTitle, styles.grow]} numberOfLines={1}>
+                                {dateRange(episode)}
+                            </Text>
+                            <Text style={styles.status} numberOfLines={1}>
+                                {statusLabel(episode)}
+                            </Text>
+                            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                        </Pressable>
+                    ))}
+                </View>
+            )}
+
+            <OverlayModal visible={selected !== null} onClose={() => setSelected(null)} fullScreen>
+                {selected && (
+                    <RecoveryEpisodeDetails episode={selected} onClose={() => setSelected(null)} />
+                )}
+            </OverlayModal>
+        </Card>
+    );
 };
 
-export default RecoveryAnalysis;
+export default RecoveryAnalysisCard;
+
+// Header/title/body mirror MoodDriversCard, the neighbour above on Insights.
+const useThemedStyles = (colors: ThemeColors) =>
+    useMemo(
+        () =>
+            StyleSheet.create({
+                headerRow: {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                    marginBottom: 12,
+                    // leave room for the absolutely-positioned (?) button
+                    paddingRight: 36,
+                },
+                infoButton: {
+                    position: 'absolute',
+                    top: 4,
+                    right: 4,
+                    zIndex: 1,
+                    width: 32,
+                    height: 32,
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                },
+                explainer: {
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    padding: 12,
+                    marginBottom: 12,
+                },
+                explainerText: {
+                    fontSize: 14,
+                    lineHeight: 20,
+                    color: colors.text,
+                },
+                iconCircle: {
+                    width: 40,
+                    height: 40,
+                    borderRadius: 20,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                },
+                title: {
+                    fontSize: 16,
+                    fontWeight: '700',
+                    color: colors.text,
+                    flex: 1,
+                },
+                body: {
+                    fontSize: 15,
+                    lineHeight: 22,
+                    color: colors.textSecondary,
+                },
+                grow: { flex: 1, minWidth: 0 },
+                row: {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                    minHeight: 48,
+                    paddingVertical: 10,
+                },
+                currentRow: {
+                    marginTop: 12,
+                    paddingHorizontal: 12,
+                    borderRadius: 16,
+                    backgroundColor: colors.accentLight,
+                },
+                list: {
+                    marginTop: 8,
+                },
+                divider: {
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                    borderTopColor: colors.overlays.border,
+                },
+                pressed: { opacity: 0.6 },
+                rowTitle: {
+                    fontSize: 15,
+                    fontWeight: '600',
+                    color: colors.text,
+                },
+                rowSub: {
+                    fontSize: 14,
+                    lineHeight: 20,
+                    color: colors.textSecondary,
+                },
+                status: {
+                    fontSize: 14,
+                    color: colors.textSecondary,
+                    flexShrink: 0,
+                },
+            }),
+        [colors]
+    );

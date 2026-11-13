@@ -23,6 +23,7 @@ import { EntryFormData, EntryFormModal } from './forms/EntryForm';
 import { EmptyState } from './EmptyState';
 import { EntryCard } from './timeline/EntryCard';
 import { DayHeader } from './timeline/DayHeader';
+import { useTimelineHealth } from './timeline/useTimelineHealth';
 import { TimelineFooter, footerStateFor } from './timeline/TimelineFooter';
 import { BackToTopPill, shouldShowBackToTop } from './timeline/BackToTopPill';
 import { TimelineSearchBar } from './timeline/TimelineSearchBar';
@@ -347,7 +348,8 @@ export function DatabaseViewer() {
 
     // Rows for the list. `hasMore` feeds the summary of the LAST day, which may
     // continue on the page that hasn't loaded yet.
-    const rows = useMemo(() => buildTimelineRows(entries, hasMore), [entries, hasMore]);
+    const health = useTimelineHealth(db, entries);
+    const rows = useMemo(() => buildTimelineRows(entries, hasMore, health), [entries, hasMore, health]);
     const rowsRef = useRef(rows);
     rowsRef.current = rows;
     const stickyHeaderIndices = useMemo(() => stickyHeaderIndicesFor(rows), [rows]);
@@ -647,6 +649,7 @@ export function DatabaseViewer() {
                     count={item.count}
                     averageMood={item.averageMood}
                     complete={item.complete}
+                    health={item.health}
                     dateFormatPref={dateFormatPref}
                     colors={colors}
                     sticky={target === 'StickyHeader'}

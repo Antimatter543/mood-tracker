@@ -65,6 +65,21 @@ export function endOfLocalDay(date: Date | string): string {
   return local.toISOString();
 }
 
+/** A bare local day key, the shape `localDateString` returns. */
+const YMD_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Accepts a Date or a string and returns a Date. A bare `YYYY-MM-DD` day key
+ * is LOCAL midnight (the same rule as lib/dateFormat.ts); every other string
+ * parses exactly as `new Date(date)`, as it did before this helper existed,
+ * so stored UTC instants and SQLite `YYYY-MM-DD HH:MM:SS` stamps keep their
+ * old meaning everywhere `localDateString` is used.
+ */
+export function convertStringToDate(date: Date | string): Date {
+  if (typeof date !== 'string') return date;
+  return new Date(YMD_ONLY.test(date) ? `${date}T00:00:00` : date);
+}
+
 /**
  * Accepts either a Date or an ISO string and returns a Date.
  * String is parsed in either UTC time zone (ends with 'Z') or
@@ -131,7 +146,6 @@ export function localDateTimeString(date: Date | string): string {
   return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 }
 
-
 /**
  * Returns the integer number of calendar days between two ISO timestamps
  * in local TZ or UTC (if the string ends with Z). Sign indicates direction
@@ -155,6 +169,14 @@ export function daysBetween(a: string, b: string, inclusive: boolean=false): num
     return days;
   else
     return days + (days != 0 ? Math.sign(days) * 1 : 1);
+}
+
+/**
+ * How many local calendar days a span touches, counting both ends: the same
+ * day is 1, today and tomorrow are 2. Order does not matter.
+ */
+export function calendarDaysSpanned(a: string, b: string): number {
+  return Math.abs(daysBetween(a, b)) + 1;
 }
 
 /**

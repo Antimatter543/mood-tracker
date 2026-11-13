@@ -7,7 +7,7 @@ import { ThemeColors, useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { Card } from '@/components/Card';
 import { ActivityIcon } from '@/components/activityIcon';
-import { Activity } from '@/components/types';
+import { Activity, ActivityGroup } from '@/components/types';
 import { getActivities } from '@/databases/activities';
 import { ACTIVITY_ENTRY_COUNTS } from '@/components/visualisations/queries';
 import {
@@ -18,6 +18,8 @@ import {
 } from '@/components/visualisations/transforms/activityDetail';
 import { OverlayModal } from '@/components/OverlayModal';
 import { ActivityInsightsDetail } from '@/components/ActivityInsightsDetail';
+import { AddActivityModal } from './forms/ActivityAddModal';
+import { getActivityGroups } from '@/databases/groups';
 
 /**
  * "Explore your activities" — a search box + a tappable, entry-count-sorted list
@@ -40,16 +42,22 @@ export const ActivityExplorer: React.FC = () => {
     const [query, setQuery] = useState('');
     const [expanded, setExpanded] = useState(false);
     const [selected, setSelected] = useState<Activity | null>(null);
+    const [groups, setGroups] = useState<ActivityGroup[] | null>(null);
+    const [addActivityVisible, setAddActivityVisible] = useState(false);
 
     const load = useCallback(() => {
         let active = true;
         (async () => {
             try {
-                const [activities, countRows] = await Promise.all([
+                const [activities, countRows, groups] = await Promise.all([
                     getActivities(db),
                     db.getAllAsync<{ activity_id: number; n: number }>(ACTIVITY_ENTRY_COUNTS),
+                    getActivityGroups(db),
                 ]);
-                if (active) setItems(withEntryCounts(activities, countRows));
+                if (active) {
+                    setItems(withEntryCounts(activities, countRows));
+                    setGroups(groups);
+                }
             } catch (e) {
                 console.error('Error loading activity explorer:', e);
                 if (active) setItems([]);
@@ -92,28 +100,42 @@ export const ActivityExplorer: React.FC = () => {
             ) : (
                 <>
                     <View style={styles.searchBar}>
-                        <Feather name="search" size={16} color={colors.textSecondary} />
-                        <TextInput
-                            style={styles.searchInput}
-                            value={query}
-                            onChangeText={setQuery}
-                            placeholder="Search activities"
-                            placeholderTextColor={colors.textSecondary}
-                            autoCapitalize="none"
-                            autoCorrect={false}
-                            returnKeyType="search"
-                            accessibilityLabel="Search activities"
-                        />
-                        {query.length > 0 && (
-                            <Pressable
-                                onPress={() => setQuery('')}
-                                hitSlop={10}
-                                accessibilityRole="button"
-                                accessibilityLabel="Clear search"
-                            >
-                                <Feather name="x" size={16} color={colors.textSecondary} />
-                            </Pressable>
-                        )}
+                        <View style={styles.searchField}>
+                            <Feather name="search" size={16} color={colors.textSecondary} />
+                            <TextInput
+                                style={styles.searchInput}
+                                value={query}
+                                onChangeText={setQuery}
+                                placeholder="Search activities"
+                                placeholderTextColor={colors.textSecondary}
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                                returnKeyType="search"
+                                accessibilityLabel="Search activities"
+                            />
+                            {query.length > 0 && (
+                                <Pressable
+                                    onPress={() => setQuery('')}
+                                    hitSlop={10}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Clear search"
+                                >
+                                    <Feather name="x" size={16} color={colors.textSecondary} />
+                                </Pressable>
+                            )}
+                        </View>
+
+                        <Pressable
+                            onPress={() => setAddActivityVisible(true)}
+                            style={({ pressed }) => [
+                                styles.addButton,
+                                pressed && styles.rowPressed,
+                            ]}
+                            accessibilityRole="button"
+                            accessibilityLabel="Add activity"
+                        >
+                            <Feather name="plus" size={20} color={colors.accent} />
+                        </Pressable>
                     </View>
 
                     {visible.length === 0 ? (
@@ -193,6 +215,17 @@ export const ActivityExplorer: React.FC = () => {
                 </>
             )}
 
+            {addActivityVisible && groups && (
+                <AddActivityModal
+                    visible={addActivityVisible}
+                    onClose={() => setAddActivityVisible(false)}
+                    onAdd={() => {}}
+                    groupId={null}
+                    groups={groups}
+                    db={db}
+                />
+            )}
+
             <OverlayModal
                 visible={selected !== null}
                 onClose={() => setSelected(null)}
@@ -223,7 +256,16 @@ const makeStyles = (colors: ThemeColors) =>
             marginBottom: 14,
             lineHeight: 19,
         },
+        // Search pill + a square Add button of the same height, surface and
+        // radius, so the two read as one control row.
         searchBar: {
+            flexDirection: 'row',
+            alignItems: 'stretch',
+            gap: 8,
+            marginBottom: 4,
+        },
+        searchField: {
+            flex: 1,
             flexDirection: 'row',
             alignItems: 'center',
             gap: 8,
@@ -233,13 +275,22 @@ const makeStyles = (colors: ThemeColors) =>
             paddingVertical: 10,
             borderWidth: StyleSheet.hairlineWidth,
             borderColor: colors.border,
-            marginBottom: 4,
         },
         searchInput: {
             flex: 1,
             fontSize: 15,
             color: colors.text,
             padding: 0,
+        },
+        addButton: {
+            width: 44,
+            minHeight: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: colors.secondaryBackground,
+            borderRadius: 12,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: colors.border,
         },
         list: {
             marginTop: 6,

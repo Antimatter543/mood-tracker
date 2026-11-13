@@ -11,9 +11,13 @@ import { SQLiteDatabase } from 'expo-sqlite';
 import { GROUP_ORDER_BY } from '@/databases/groups';
 import { deriveMediaExt, writeBase64ToMediaDir } from '@/databases/mediaHelpers';
 import { withWriteLock, withWriteTransaction } from '@/databases/writeTransaction';
+import { Argon2UnavailableError } from '@/lib/argon2';
 import {
   BackupDecryptionError,
+  BackupKey,
   EncryptedBackupEnvelope,
+  KdfHeader,
+  KdfParams,
   assertSupportedEnvelope,
   decryptBackup,
   deriveBackupKey,
@@ -21,6 +25,7 @@ import {
   isEncryptedBackup,
   sameKdf,
 } from '@/lib/backupCrypto';
+import { exceedsCompatibility } from '@/lib/backupKdfProfiles';
 import { readBackupKeyState } from '@/lib/backupKeyStore';
 import { daylioImportMessage, isZipHeader, readDaylioFile } from '@/databases/daylio-import';
 import { DaylioFormatError, DaylioImportSummary } from '@/lib/daylioImport';
@@ -32,6 +37,10 @@ import { now } from '@/lib/clock';
  * previous attempt did not open the file, so the prompt can say so.
  */
 export type RequestBackupPassword = (state: { wrongPassword: boolean }) => Promise<string | null>;
+
+/** The password that opened a backup, its params, and how long deriving its key took here. */
+export type AcceptedBackupPassword = { password: string; kdf: KdfParams; deriveMs: number };
+export type OnPasswordAccepted = (accepted: AcceptedBackupPassword) => void;
 
 export interface ImportOptions {
   requestPassword?: RequestBackupPassword;
@@ -47,7 +56,13 @@ export interface ImportOptions {
    * opened silently with this phone's stored key), so the caller can offer to
    * keep encrypting new backups with it.
    */
-  onPasswordAccepted?: (password: string) => void;
+  onPasswordAccepted?: OnPasswordAccepted;
+  /**
+   * Asked before opening an encrypted backup whose settings are stronger
+   * than Compatibility (Security / Manual), i.e. before any key is derived
+   * for it. Resolve false to cancel. Omitted = proceed.
+   */
+  confirmStrongKdf?: (kdf: KdfHeader) => Promise<boolean>;
 }
 
 /** `DatabaseResult.code` when export stopped because the stored key is unreadable. */
@@ -69,6 +84,21 @@ export const SUPPORTED_RESTORE_SOURCES: readonly { app: string; detail: string }
 ];
 
 /**
+ * The key for this backup could not be derived at all (the phone could not
+ * give Argon2 the memory the file asks for, or the header is unusable). That
+ * says nothing about the password, so it must not read as a wrong password,
+ * and the native error text means nothing to the person restoring.
+ */
+class BackupKeyDerivationError extends Error {
+  constructor(
+    message = 'This backup could not be opened. It may be damaged, or it may need more memory than this phone has. Nothing was changed.'
+  ) {
+    super(message);
+    this.name = 'BackupKeyDerivationError';
+  }
+}
+
+/**
  * Decrypt an encrypted backup, transparently when possible: if the file was
  * made with the key this device has stored (same salt and params), it opens
  * with no prompt. Otherwise (another device, an older password, encryption
@@ -78,7 +108,8 @@ export const SUPPORTED_RESTORE_SOURCES: readonly { app: string; detail: string }
 export async function openEncryptedBackup(
   envelope: EncryptedBackupEnvelope,
   requestPassword?: RequestBackupPassword,
-  onPasswordAccepted?: (password: string) => void
+  onPasswordAccepted?: OnPasswordAccepted,
+  confirmStrongKdf?: (kdf: KdfHeader) => Promise<boolean>
 ): Promise<string | null> {
   assertSupportedEnvelope(envelope);
 
@@ -99,14 +130,28 @@ export async function openEncryptedBackup(
     throw new Error('This backup is encrypted and needs its password.');
   }
 
+  // Deriving the key costs what the FILE asks for. Above Compatibility that
+  // may be more than this phone can take: say so first.
+  if (exceedsCompatibility(envelope.kdf) && confirmStrongKdf && !(await confirmStrongKdf(envelope.kdf))) {
+    return null;
+  }
+
   let wrongPassword = false;
   for (;;) {
     const password = await requestPassword({ wrongPassword });
     if (password === null) return null;
-    const key = await deriveBackupKey(password, envelope.kdf);
+    let key: BackupKey;
+    const started = now().getTime();
     try {
+      key = await deriveBackupKey(password, envelope.kdf);
+    } catch (error) {
+      throw new BackupKeyDerivationError(error instanceof Argon2UnavailableError ? error.message : undefined);
+    }
+    try {
+      const deriveMs = now().getTime() - started;
       const plaintext = await decryptBackup(envelope, key);
-      onPasswordAccepted?.(password);
+      const { name, memoryKiB, iterations, parallelism } = envelope.kdf;
+      onPasswordAccepted?.({ password, kdf: { name, memoryKiB, iterations, parallelism }, deriveMs });
       return plaintext;
     } catch (error) {
       if (!(error instanceof BackupDecryptionError)) throw error;
@@ -375,7 +420,12 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
       // (silently with this device's stored key, else by asking for the
       // password) and continue with the decrypted backup.
       if (isEncryptedBackup(importData)) {
-        const decrypted = await openEncryptedBackup(importData, options.requestPassword, options.onPasswordAccepted);
+        const decrypted = await openEncryptedBackup(
+          importData,
+          options.requestPassword,
+          options.onPasswordAccepted,
+          options.confirmStrongKdf
+        );
         if (decrypted === null) {
           return {
             success: false,
@@ -401,6 +451,9 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
           : 'Data imported successfully. Note: photo files are not included in this backup and must be re-added manually.'
       };
     } catch (error) {
+      if (error instanceof BackupKeyDerivationError) {
+        return { success: false, message: error.message };
+      }
       console.error('Error importing data:', error);
       return {
         success: false,

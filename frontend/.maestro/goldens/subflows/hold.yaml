@@ -1,0 +1,15 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Subflow: the last thing before every takeScreenshot. waitForAnimationToEnd alone is
+# not enough: it calls a screen static while Android is still fading a scroll bar out
+# (up to about 1.5 s after a list lays out, and it does not follow the animator scale).
+# Two recordings differed by exactly that bar on the timeline, about 4,000 pixels.
+#
+# Maestro has no sleep. Waiting for text that is never on screen, optional, holds for
+# the timeout and then carries on.
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      text: golden-hold-this-text-is-never-on-screen
+    timeout: 2000
+    optional: true

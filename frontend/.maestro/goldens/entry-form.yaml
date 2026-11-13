@@ -1,0 +1,28 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# The entry form's details step, and the activity grid. Guards 0374bee: long seeded
+# names ("Unmotivated" in group 1) broke mid-word in a chip. Runs on both nav configs:
+# the form owns its bottom inset (floating save button).
+- runFlow:
+    file: ../smoke/subflows/launch.yaml
+    env:
+      SCENARIO: week
+- runFlow:
+    file: subflows/settle.yaml
+- tapOn:
+    id: tab-home
+- tapOn: "Add mood entry"
+- assertVisible: "How were you\\?"
+- tapOn: "Continue"
+- runFlow:
+    file: subflows/hold.yaml
+- takeScreenshot: entry-form-details
+# The first group's grid is whole on the first screen, so this needs no scroll.
+- assertVisible:
+    id: activity-grid-1
+- runFlow:
+    file: subflows/hold.yaml
+- takeScreenshot:
+    path: activity-grid-long-names
+    cropOn:
+      id: activity-grid-1

@@ -3,10 +3,12 @@ jest.mock('@/components/types', () => ({}));
 
 import {
   getActivities,
+  getActivity,
   addActivity,
   updateActivity,
   deleteActivity,
   updateActivityPositions,
+  ACTIVITY_NAME_TAKEN,
 } from '@/databases/activities';
 import { makeDb, resetWriteLayer, sqlCalls } from '@/testing/fakeDb';
 
@@ -57,13 +59,37 @@ describe('addActivity — additional', () => {
     expect(insertCall[1]).not.toContain('  Yoga  ');
   });
 
-  it('returns failure result on DB throw', async () => {
+  it('returns a plain failure on DB throw, never the raw driver error', async () => {
     const db = makeDb();
-    db.getFirstAsync.mockRejectedValue(new Error('boom'));
+    db.getFirstAsync.mockRejectedValue(new Error('database is locked'));
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
     const result = await addActivity(db as any, 'New', 1);
     expect(result.success).toBe(false);
-    expect(result.message).toContain('Error');
+    expect(result.message).toBe('Failed to add activity');
+    expect(result.message).not.toContain('locked');
+    expect(result.code).toBeUndefined();
+    spy.mockRestore();
+  });
+
+  it('rejects a name already used in the same group before inserting', async () => {
+    const db = makeDb({
+      first: [[/SELECT id FROM activities WHERE name = \? AND group_id = \?/, () => ({ id: 7 })]],
+    });
+
+    const result = await addActivity(db as any, '  Walk ', 3);
+    expect(result).toEqual({
+      success: false,
+      code: ACTIVITY_NAME_TAKEN,
+      message: 'An activity with this name already exists in this group',
+    });
+    // The lookup used the trimmed name and the target group...
+    const lookup = db.getFirstAsync.mock.calls.find(([sql]: [string]) =>
+      /WHERE name = \? AND group_id = \?/.test(sql)
+    );
+    expect(lookup?.[1]).toEqual(['Walk', 3]);
+    // ...and nothing was written.
+    expect(sqlCalls(db, /INSERT INTO activities/)).toHaveLength(0);
   });
 
   it('handles null maxPosition (empty group) by starting at 1', async () => {
@@ -194,5 +220,28 @@ describe('updateActivityPositions', () => {
 
     const result = await updateActivityPositions(db as any, []);
     expect(result.success).toBe(false);
+  });
+});
+
+describe('getActivity', () => {
+  it('reads one activity by id', async () => {
+    const db = makeDb({
+      first: [[/FROM activities WHERE id = \?/, ([id]) => ({ id, name: 'Walk', group_id: 1 })]],
+    });
+    const row = await getActivity(db as any, 4);
+    expect(row).toEqual({ id: 4, name: 'Walk', group_id: 1 });
+  });
+
+  it('returns null when the activity is gone (the detail screen closes on it)', async () => {
+    const db = makeDb();
+    expect(await getActivity(db as any, 4)).toBeNull();
+  });
+
+  it('returns null on a read error', async () => {
+    const db = makeDb();
+    db.getFirstAsync.mockRejectedValue(new Error('disk gone'));
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    expect(await getActivity(db as any, 4)).toBeNull();
+    spy.mockRestore();
   });
 });

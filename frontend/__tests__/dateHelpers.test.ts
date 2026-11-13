@@ -6,6 +6,9 @@ import {
   localDateTimeString,
   daysBetween,
   getDefaultEntryDate,
+  localDateTimeString,
+  calendarDaysSpanned,
+  convertStringToDate,
 } from '@/databases/dateHelpers';
 import { freezeNow } from '@/testing/clock';
 
@@ -263,11 +266,13 @@ describe('daysBetween', () => {
     // UTC time
     a = '2025-05-19T12:00:00Z';
     b = '2025-05-22T12:00:00Z';
+
     expect(daysBetween(a, b)).toBe(3);
     expect(daysBetween(b, a)).toBe(-3);
 
     a = '2025-05-19Z';
     b = '2025-05-22Z';
+
     expect(daysBetween(a, b)).toBe(3);
     expect(daysBetween(b, a)).toBe(-3);
   });
@@ -282,6 +287,7 @@ describe('daysBetween', () => {
   it('counts calendar days correctly across a typical week', () => {
     expect(daysBetween('2025-05-12T08:00:00', '2025-05-19T08:00:00')).toBe(7);
     expect(daysBetween('2025-05-12', '2025-05-19')).toBe(7);
+
     // Inclusive
     expect(daysBetween('2025-05-12T08:00:00', '2025-05-19T08:00:00', true)).toBe(8);
     expect(daysBetween('2025-05-12', '2025-05-19', true)).toBe(8);
@@ -299,6 +305,64 @@ describe('daysBetween', () => {
     a = '2025-03-08T12:00:00';
     b = '2025-03-09T12:00:00';
     expect(daysBetween(a, b, true)).toBe(2);
+  });
+});
+
+describe('calendarDaysSpanned', () => {
+  it('counts both ends: the same local day is 1', () => {
+    expect(calendarDaysSpanned('2025-05-18T15:00:00Z', '2025-05-19T12:00:00Z')).toBe(1);
+    expect(calendarDaysSpanned('2025-05-19', '2025-05-19')).toBe(1);
+  });
+
+  it('is 2 for consecutive local days a few minutes apart', () => {
+    expect(calendarDaysSpanned('2025-05-19T23:59:00', '2025-05-20T00:01:00')).toBe(2);
+  });
+
+  it('does not depend on argument order', () => {
+    expect(calendarDaysSpanned('2025-05-19T12:00:00', '2025-05-22T12:00:00')).toBe(4);
+    expect(calendarDaysSpanned('2025-05-22T12:00:00', '2025-05-19T12:00:00')).toBe(4);
+  });
+
+  it('counts a week inclusively, across a DST change', () => {
+    expect(calendarDaysSpanned('2025-05-12', '2025-05-19')).toBe(8);
+    expect(calendarDaysSpanned('2025-03-08T12:00:00', '2025-03-09T12:00:00')).toBe(2);
+  });
+});
+
+describe('convertStringToDate', () => {
+  it('reads a bare day key as LOCAL midnight', () => {
+    const d = convertStringToDate('2025-06-01');
+    expect([d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()]).toEqual([2025, 5, 1, 0]);
+  });
+
+  it('parses every other string exactly like new Date(string)', () => {
+    for (const s of [
+      '2025-06-01T09:00:00',
+      '2025-06-01T09:00:00.000Z',
+      '2025-06-01 09:00:00',
+      '2025-05-31T23:30:00Z',
+    ]) {
+      expect(convertStringToDate(s).getTime()).toBe(new Date(s).getTime());
+    }
+  });
+
+  it('returns a Date unchanged', () => {
+    const d = new Date(2025, 5, 1);
+    expect(convertStringToDate(d)).toBe(d);
+  });
+});
+
+describe('localDateString keeps its meaning for non-day-key strings', () => {
+  it('h5: a SQLite-style "YYYY-MM-DD HH:MM:SS" stamp keys to its local day', () => {
+    expect(localDateString('2025-06-01 09:00:00')).toBe('2025-06-01');
+  });
+
+  it('keys stored UTC instants by the local day, as before', () => {
+    for (const s of ['2025-05-31T23:30:00Z', '2025-06-01T13:59:00.000Z', '2025-06-01T14:00:00.000Z']) {
+      const d = new Date(s);
+      const expected = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      expect(localDateString(s)).toBe(expected);
+    }
   });
 });
 

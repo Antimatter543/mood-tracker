@@ -20,6 +20,9 @@ import { reconcileReminders } from "@/lib/notifications";
 import { enabledReminders, parseReminders } from "@/lib/reminders";
 import { OverlayProvider } from "@/context/OverlayHost";
 import { buildTabBarStyle } from "@/lib/tabBarStyle";
+import { TAB_BUTTON_TEST_IDS } from "@/lib/tabTestIds";
+import { now } from "@/lib/clock";
+import { runDailyHealthSyncIfDue } from "@/lib/healthDailySync";
 
 export default function RootLayout() {
     // The app-wide "a write happened → reload" trigger. It bumps the external
@@ -44,6 +47,7 @@ export default function RootLayout() {
                         paint above the floating tab bar. See context/OverlayHost.tsx. */}
                     <OverlayProvider>
                         <NotificationReArm />
+                        <HealthDailySync />
                         <TabNavigator />
                     </OverlayProvider>
                 </SettingsProvider>
@@ -70,7 +74,7 @@ function NotificationReArm() {
     const reArm = useCallback(async () => {
         try {
             const reminders = parseReminders(settings.reminders);
-            const todayKey = localDateString(new Date());
+            const todayKey = localDateString(now());
 
             // Nothing to arm: reconcile anyway (it cancels anything stale the OS
             // still holds) but skip the streak query — the copy it feeds is only
@@ -114,6 +118,28 @@ function NotificationReArm() {
         });
         return () => sub.remove();
     }, [reArm]);
+
+    return null;
+}
+
+/** Renders nothing: runs the optional daily Health Connect sync on launch and on foreground. */
+function HealthDailySync() {
+    const db = useSQLiteContext();
+    const appState = useRef(AppState.currentState);
+
+    useEffect(() => {
+        const run = () => {
+            runDailyHealthSyncIfDue(db).then((synced) => {
+                if (synced) bumpDataVersion();
+            });
+        };
+        run();
+        const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+            if (appState.current.match(/inactive|background/) && state === 'active') run();
+            appState.current = state;
+        });
+        return () => sub.remove();
+    }, [db]);
 
     return null;
 }
@@ -179,9 +205,12 @@ function TabNavigator() {
         <Tabs screenOptions={screenOptions}>
             {/* `title` here only labels the TAB (headerShown is false for all of
                 them); the on-screen page title lives in each screen's
-                <PageHeader/>. Keep the two in step. */}
+                <PageHeader/>. Keep the two in step. `tabBarButtonTestID` is
+                the button's Android resource-id, which Maestro taps by
+                (`tapOn: id: tab-home`); see lib/tabTestIds.ts. */}
             <Tabs.Screen name="index" options={{
                 title: 'Home',
+                tabBarButtonTestID: TAB_BUTTON_TEST_IDS.index,
                 tabBarIcon: ({ color, focused }) => (
                     <Ionicons name={focused ? 'home-sharp' : 'home-outline'} color={color} size={30} />
                 ),
@@ -190,11 +219,13 @@ function TabNavigator() {
 
             <Tabs.Screen name="stats" options={{
                 title: 'Statistics',
+                tabBarButtonTestID: TAB_BUTTON_TEST_IDS.stats,
                 tabBarIcon: ({ color, focused }) => (
                     <Ionicons name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} size={24} />),
             }} />
             <Tabs.Screen name="timeline" options={{
                 title: 'Timeline',
+                tabBarButtonTestID: TAB_BUTTON_TEST_IDS.timeline,
                 tabBarIcon: ({ color, focused }) => (
                     <MaterialCommunityIcons name={focused ? 'timeline-text' : 'timeline-text-outline'} color={color} size={30} />
                 ),
@@ -202,6 +233,7 @@ function TabNavigator() {
 
             <Tabs.Screen name="insights" options={{
                 title: 'Insights',
+                tabBarButtonTestID: TAB_BUTTON_TEST_IDS.insights,
                 tabBarIcon: ({ color, focused }) => (
                     <Ionicons name={focused ? 'bulb' : 'bulb-outline'} color={color} size={28} />
                 ),
@@ -209,6 +241,7 @@ function TabNavigator() {
 
             <Tabs.Screen name="settings" options={{
                 title: 'Settings',
+                tabBarButtonTestID: TAB_BUTTON_TEST_IDS.settings,
                 tabBarIcon: ({ color, focused }) => (
                     <Ionicons name={focused ? 'settings-sharp' : 'settings-outline'} color={color} size={30} />
                 ),

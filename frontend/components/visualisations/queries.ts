@@ -303,3 +303,30 @@ export const ACTIVITY_ENTRY_COUNTS = `
   WHERE e.deleted_at IS NULL
   GROUP BY ea.activity_id
 `;
+
+// -----------------------------------------------------------------------------
+// Low stretches (the "After low days" card on Insights) — RAW rows.
+//
+// One row per entry x activity (an entry with no activities gives one row with
+// NULL activity columns), oldest first and grouped by entry id, which is the
+// order `groupRecoveryRows` folds them in. `start` is a UTC ISO lower bound
+// (startOfLocalDay of the first local day of the window). Returns the stored
+// instant; JS turns it into a local date-time.
+// -----------------------------------------------------------------------------
+export const RECOVERY_ENTRY_ACTIVITIES = `
+  SELECT
+    e.id AS id,
+    e.date AS date,
+    e.mood AS mood,
+    a.id AS aId,
+    a.name AS aName,
+    a.group_id AS aGroup,
+    a.icon_family AS aIconFamily,
+    a.icon_name AS aIconName,
+    a.position AS aPosition
+  FROM entries e
+  LEFT JOIN entry_activities ea ON e.id = ea.entry_id
+  LEFT JOIN activities a ON ea.activity_id = a.id
+  WHERE e.deleted_at IS NULL AND e.date >= ?
+  ORDER BY e.date, e.id
+`;
