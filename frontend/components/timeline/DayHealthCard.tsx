@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { OverlayModal } from '@/components/OverlayModal';
 import { ThemeColors } from '@/styles/global';
@@ -8,7 +8,10 @@ import { HEALTH_RATING_LABELS, healthRatingColor, dayHealthItems, type DayHealth
 type DayHealthCardProps = {
     visible: boolean;
     onClose: () => void;
+    /** The day, e.g. "Wednesday, 11 November 2026". */
     title: string;
+    /** The day's average mood, shown on its own line under the date. */
+    averageMood?: number | null;
     health: DayHealth;
     colors: ThemeColors;
 };
@@ -22,10 +25,15 @@ const useStyles = (colors: ThemeColors) =>
                     width: '92%',
                     maxWidth: 480,
                     borderRadius: 16,
+                    // Large text on a small phone makes the figures taller than the
+                    // screen: the header stays put and the figures scroll.
+                    maxHeight: '85%',
                     padding: 20,
                     gap: 16,
                 },
-                headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+                body: { flexGrow: 0 },
+                bodyContent: { gap: 16 },
+                headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
                 headerText: { flex: 1 },
                 title: { color: colors.text, fontSize: 20, fontWeight: 'bold' },
                 subtitle: { color: colors.textSecondary, fontSize: 14, marginTop: 2 },
@@ -45,7 +53,7 @@ const useStyles = (colors: ThemeColors) =>
     );
 
 /** All of a day's health figures, each with what it means. */
-export const DayHealthCard: React.FC<DayHealthCardProps> = ({ visible, onClose, title, health, colors }) => {
+export const DayHealthCard: React.FC<DayHealthCardProps> = ({ visible, onClose, title, averageMood, health, colors }) => {
     const styles = useStyles(colors);
     return (
         <OverlayModal visible={visible} onClose={onClose}>
@@ -56,6 +64,9 @@ export const DayHealthCard: React.FC<DayHealthCardProps> = ({ visible, onClose, 
                             Health
                         </Text>
                         <Text style={styles.subtitle}>{title}</Text>
+                        {averageMood != null ? (
+                            <Text style={styles.subtitle}>Average mood {averageMood.toFixed(1)}</Text>
+                        ) : null}
                     </View>
                     <Pressable
                         onPress={onClose}
@@ -67,6 +78,7 @@ export const DayHealthCard: React.FC<DayHealthCardProps> = ({ visible, onClose, 
                         <Ionicons name="close" size={24} color={colors.textSecondary} />
                     </Pressable>
                 </View>
+                <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} testID="day-health-card-body">
                 {dayHealthItems(health).map((item) => (
                     <View key={item.key} style={styles.item} testID={`day-health-item-${item.key}`}>
                         <Ionicons name={item.icon} size={20} color={colors.textSecondary} />
@@ -88,6 +100,7 @@ export const DayHealthCard: React.FC<DayHealthCardProps> = ({ visible, onClose, 
                     </View>
                 ))}
                 <Text style={styles.footnote}>A rough guide for adults, not medical advice.</Text>
+                </ScrollView>
             </View>
         </OverlayModal>
     );

@@ -192,7 +192,8 @@ const DayHeaderImpl: React.FC<DayHeaderProps> = ({
                 <DayHealthCard
                     visible={healthOpen}
                     onClose={closeHealth}
-                    title={averageMood != null ? `${title} · average mood ${averageMood.toFixed(1)}` : title}
+                    title={title}
+                    averageMood={averageMood}
                     health={health}
                     colors={colors}
                 />

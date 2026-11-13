@@ -4,6 +4,7 @@
  * figure and what it means. Today (not over yet) and days without data get none.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
 
 import {
@@ -178,7 +179,12 @@ describe('DayHeader health', () => {
 
         await fireEvent.press(button);
         expect(view.getByTestId('day-health-card')).toBeTruthy();
-        expect(view.getByText('Sunday, 2026-09-27 · average mood 6.5')).toBeTruthy();
+        expect(view.getAllByText('Sunday, 2026-09-27')).toHaveLength(2); // header + card
+        expect(view.getByText('Average mood 6.5')).toBeTruthy();
+        // Large text on a small phone: the figures scroll inside a card capped below the screen height.
+        const card = view.getByTestId('day-health-card');
+        expect(StyleSheet.flatten(card.props.style).maxHeight).toBe('85%');
+        expect(view.getByTestId('day-health-card-body').type).toBe('RCTScrollView');
         for (const text of ['Sleep (night before)', '6h 30m', 'Resting heart rate', '90 bpm', 'Average heart rate', '72 bpm', '15 ms']) {
             expect(view.getByText(text)).toBeTruthy();
         }
