@@ -6,8 +6,10 @@
  * ScrollView stayed full-height (nothing to scroll). The fix is deterministic:
  *   (1) pad the ScrollView contentContainer by the keyboard height (so there's
  *       physical scroll RANGE above the keyboard), and
- *   (2) scrollToEnd when the Notes field focuses / the keyboard opens (so the
- *       focused field + Submit are brought into that padded region).
+ *   (2) scrollToEnd when the Notes field focuses / the keyboard opens while
+ *       Notes is focused (so the focused field + Submit are brought into that
+ *       padded region). A keyboard opened by any other field (the activity
+ *       dialogs autofocus their name field) must NOT drag the form to Notes.
  *
  * Real occlusion is release-APK only; these assert the WIRING: the
  * contentContainer paddingBottom grows by the keyboard height, and focusing
@@ -88,22 +90,75 @@ describe('EntryForm — keyboard handling (deterministic)', () => {
         expect(scrollPadding(withKb)).toBe(basePad + 804);
     });
 
-    it('scrolls to the end when the keyboard opens on the details step', async () => {
-        // Start on details with keyboard hidden.
+    it('scrolls to the end when the keyboard opens for the focused Notes field', async () => {
+        const view = await render(
+            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
+        );
+        await advanceToDetails(view);
+        await act(async () => {
+            fireEvent(view.getByPlaceholderText('How are you feeling?'), 'focus');
+        });
+        animatedScroll.toEnd.mockClear();
+
+        await openKeyboard(view);
+        expect(animatedScroll.toEnd).toHaveBeenCalled();
+    });
+
+    it('stays put when another field opens the keyboard (e.g. the edit-activity dialog)', async () => {
         const view = await render(
             <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
         );
         await advanceToDetails(view);
         animatedScroll.toEnd.mockClear();
 
-        // Keyboard opens (re-render with a height) -> the effect scrolls to end.
-        setKeyboardHeight(804);
+        await openKeyboard(view);
+        expect(animatedScroll.toEnd).not.toHaveBeenCalled();
+    });
+
+    it('stays put once Notes has lost focus', async () => {
+        const view = await render(
+            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
+        );
+        await advanceToDetails(view);
+        const notes = view.getByPlaceholderText('How are you feeling?');
         await act(async () => {
-            await view.rerender(<EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />);
+            fireEvent(notes, 'focus');
         });
-        expect(animatedScroll.toEnd).toHaveBeenCalled();
+        await act(async () => {
+            fireEvent(notes, 'blur');
+        });
+        animatedScroll.toEnd.mockClear();
+
+        await openKeyboard(view);
+        expect(animatedScroll.toEnd).not.toHaveBeenCalled();
+    });
+
+    it('forgets the Notes focus when going Back to the mood step', async () => {
+        const view = await render(
+            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
+        );
+        await advanceToDetails(view);
+        await act(async () => {
+            fireEvent(view.getByPlaceholderText('How are you feeling?'), 'focus');
+        });
+        await act(async () => {
+            fireEvent.press(view.getByText('Back'));
+        });
+        await advanceToDetails(view);
+        animatedScroll.toEnd.mockClear();
+
+        await openKeyboard(view);
+        expect(animatedScroll.toEnd).not.toHaveBeenCalled();
     });
 });
+
+// Keyboard opens: re-render with a height, as useKeyboardHeight would.
+async function openKeyboard(view: any) {
+    setKeyboardHeight(804);
+    await act(async () => {
+        await view.rerender(<EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />);
+    });
+}
 
 // The ScrollView's contentContainerStyle is an array; flatten + read paddingBottom.
 function scrollPadding(view: any): number {

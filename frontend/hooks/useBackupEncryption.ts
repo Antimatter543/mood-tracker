@@ -3,7 +3,7 @@ import { Alert } from 'react-native';
 
 import type { BackupPasswordDialogMode, BackupPasswordInput } from '@/components/BackupPasswordDialog';
 import type { DatabaseResult } from '@/components/types';
-import { BACKUP_KEY_UNREADABLE, RequestBackupPassword } from '@/databases/data-export';
+import { AcceptedBackupPassword, BACKUP_KEY_UNREADABLE, RequestBackupPassword } from '@/databases/data-export';
 import { Argon2UnavailableError, canDeriveBackupKeys } from '@/lib/argon2';
 import { KdfHeader, KdfParams, validateNewBackupPassword } from '@/lib/backupCrypto';
 import { KDF_TARGET_MS, calibrateKdfParams } from '@/lib/backupKdfCalibration';
@@ -12,6 +12,8 @@ import {
   KdfProfile,
   ceilingsForProfile,
   deviceTotalMemory,
+  adoptableParams,
+  profileForAdoptedParams,
 } from '@/lib/backupKdfProfiles';
 import {
   clearBackupPassword,
@@ -71,7 +73,7 @@ export function useBackupEncryption({ onBackupNow }: { onBackupNow: () => void }
   // The mode the key being saved is made in (and, for a mode change, its params).
   const targetProfile = useRef<KdfProfile>(DEFAULT_KDF_PROFILE);
   // The password that opened the backup being restored, if one was typed.
-  const acceptedPassword = useRef<string | null>(null);
+  const acceptedPassword = useRef<AcceptedBackupPassword | null>(null);
 
   const applyState = (state: Awaited<ReturnType<typeof readBackupKeyState>>) => {
     setStatus(state.status);
@@ -367,8 +369,8 @@ export function useBackupEncryption({ onBackupNow }: { onBackupNow: () => void }
       });
     });
 
-  const onPasswordAccepted = (password: string) => {
-    acceptedPassword.current = password;
+  const onPasswordAccepted = (accepted: AcceptedBackupPassword) => {
+    acceptedPassword.current = accepted;
   };
 
   /** Close the unlock dialog once a restore is over (it stays up while importing). */
@@ -383,18 +385,21 @@ export function useBackupEncryption({ onBackupNow }: { onBackupNow: () => void }
    * or null when there is nothing to offer (opened with this phone's key, or
    * encryption is already on).
    */
-  const takeKeepPasswordOffer = async (): Promise<string | null> => {
-    const password = acceptedPassword.current;
+  const takeKeepPasswordOffer = async (): Promise<AcceptedBackupPassword | null> => {
+    const accepted = acceptedPassword.current;
     acceptedPassword.current = null;
-    if (password === null || !canDeriveBackupKeys()) return null;
+    if (accepted === null || !canDeriveBackupKeys()) return null;
     const state = await readBackupKeyState();
-    return state.status === 'on' ? null : password;
+    return state.status === 'on' ? null : accepted;
   };
 
-  const keepPassword = async (password: string) => {
+  const keepPassword = async ({ password, kdf }: AcceptedBackupPassword) => {
     try {
-      // Calibrates on THIS phone and uses a fresh salt.
-      await setBackupPassword(password);
+      // The backup's params under a fresh salt, unless they are weaker than
+      // anything this app writes: then calibrate on this phone, as before.
+      const adopted = adoptableParams(kdf);
+      if (adopted) await setBackupPassword(password, adopted, profileForAdoptedParams(adopted));
+      else await setBackupPassword(password);
       await refresh();
     } catch (error) {
       console.error('Error keeping backup password:', error);

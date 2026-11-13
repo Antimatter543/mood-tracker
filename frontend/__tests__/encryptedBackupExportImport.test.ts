@@ -187,7 +187,11 @@ describe('import of an encrypted backup', () => {
 
     await importDatabaseData(db as any, { requestPassword, onPasswordAccepted });
 
-    expect(onPasswordAccepted.mock.calls).toEqual([['other device pass']]);
+    expect(onPasswordAccepted).toHaveBeenCalledTimes(1);
+    const [accepted] = onPasswordAccepted.mock.calls[0];
+    expect(accepted.password).toBe('other device pass');
+    expect(accepted.kdf).toEqual(FAST_KDF);
+    expect(accepted.deriveMs).toBeGreaterThanOrEqual(0);
   });
 
   it('does not call onPasswordAccepted when the backup opened with the key stored on this phone', async () => {

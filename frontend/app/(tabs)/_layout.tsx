@@ -22,6 +22,7 @@ import { OverlayProvider } from "@/context/OverlayHost";
 import { buildTabBarStyle } from "@/lib/tabBarStyle";
 import { TAB_BUTTON_TEST_IDS } from "@/lib/tabTestIds";
 import { now } from "@/lib/clock";
+import { runDailyHealthSyncIfDue } from "@/lib/healthDailySync";
 
 export default function RootLayout() {
     // The app-wide "a write happened → reload" trigger. It bumps the external
@@ -46,6 +47,7 @@ export default function RootLayout() {
                         paint above the floating tab bar. See context/OverlayHost.tsx. */}
                     <OverlayProvider>
                         <NotificationReArm />
+                        <HealthDailySync />
                         <TabNavigator />
                     </OverlayProvider>
                 </SettingsProvider>
@@ -116,6 +118,28 @@ function NotificationReArm() {
         });
         return () => sub.remove();
     }, [reArm]);
+
+    return null;
+}
+
+/** Renders nothing: runs the optional daily Health Connect sync on launch and on foreground. */
+function HealthDailySync() {
+    const db = useSQLiteContext();
+    const appState = useRef(AppState.currentState);
+
+    useEffect(() => {
+        const run = () => {
+            runDailyHealthSyncIfDue(db).then((synced) => {
+                if (synced) bumpDataVersion();
+            });
+        };
+        run();
+        const sub = AppState.addEventListener('change', (state: AppStateStatus) => {
+            if (appState.current.match(/inactive|background/) && state === 'active') run();
+            appState.current = state;
+        });
+        return () => sub.remove();
+    }, [db]);
 
     return null;
 }

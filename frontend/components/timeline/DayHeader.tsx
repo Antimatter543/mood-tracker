@@ -1,11 +1,14 @@
-import React, { useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { ThemeColors } from '@/styles/global';
 import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
 import type { DateFormatPref } from '@/lib/dateFormat';
 import { formatSectionTitle } from './dateHeader';
 import { moodColor } from './moodColor';
 import type { DaySummary } from './timelineRows';
+import { DayHealthCard } from './DayHealthCard';
+import { HEALTH_RATING_COLORS, HEALTH_RATING_LABELS, dayHealthRating, type DayHealth } from './dayHealth';
 import { now } from '@/lib/clock';
 
 type DayHeaderProps = DaySummary & {
@@ -25,6 +28,16 @@ export const dayHeaderA11yLabel = (title: string, summary: DaySummary): string =
     const parts = [title, entryCountLabel(summary.count)];
     if (summary.averageMood != null) parts.push(`average mood ${summary.averageMood}`);
     return parts.join(', ');
+};
+
+/** Screen-reader label of the mood-and-health button. Exported for tests. */
+export const dayHealthButtonLabel = (averageMood: number | null, health: DayHealth): string => {
+    const rating = dayHealthRating(health);
+    const healthPart = rating ? `health ${HEALTH_RATING_LABELS[rating].toLowerCase()}` : 'health';
+    const label = [averageMood != null ? `average mood ${averageMood}` : null, healthPart, 'show details']
+        .filter(Boolean)
+        .join(', ');
+    return label.charAt(0).toUpperCase() + label.slice(1);
 };
 
 const useStyles = (colors: ThemeColors) =>
@@ -77,6 +90,18 @@ const useStyles = (colors: ThemeColors) =>
                     height: 8,
                     borderRadius: 4,
                 },
+                averageButton: {
+                    borderWidth: StyleSheet.hairlineWidth,
+                    borderColor: colors.overlays.tagBorder,
+                },
+                pressed: {
+                    opacity: 0.6,
+                },
+                divider: {
+                    width: StyleSheet.hairlineWidth,
+                    alignSelf: 'stretch',
+                    backgroundColor: colors.overlays.tagBorder,
+                },
                 averageText: {
                     color: colors.text,
                     fontSize: 13,
@@ -102,12 +127,29 @@ const DayHeaderImpl: React.FC<DayHeaderProps> = ({
     count,
     averageMood,
     complete,
+    health,
     dateFormatPref,
     colors,
     sticky = false,
 }) => {
     const styles = useStyles(colors);
     const title = formatSectionTitle(dayKey, dateFormatPref, now());
+    const [healthOpen, setHealthOpen] = useState(false);
+    const openHealth = useCallback(() => setHealthOpen(true), []);
+    const closeHealth = useCallback(() => setHealthOpen(false), []);
+    const healthRating = health ? dayHealthRating(health) : null;
+    const moodBadge =
+        averageMood != null ? (
+            <>
+                <View
+                    style={[
+                        styles.averageDot,
+                        { backgroundColor: moodColor(averageMood, colors.accent, colors.overlays.tag) },
+                    ]}
+                />
+                <Text style={styles.averageText}>{averageMood.toFixed(1)}</Text>
+            </>
+        ) : null;
     return (
         <View
             style={[styles.header, sticky && styles.stickyEdge]}
@@ -122,18 +164,38 @@ const DayHeaderImpl: React.FC<DayHeaderProps> = ({
             {complete ? (
                 <>
                     <Text style={styles.count}>{entryCountLabel(count)}</Text>
-                    {averageMood != null ? (
-                        <View style={styles.average} testID="day-average">
-                            <View
-                                style={[
-                                    styles.averageDot,
-                                    { backgroundColor: moodColor(averageMood, colors.accent, colors.overlays.tag) },
-                                ]}
+                    {health ? (
+                        <Pressable
+                            onPress={openHealth}
+                            style={({ pressed }) => [styles.average, styles.averageButton, pressed && styles.pressed]}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={dayHealthButtonLabel(averageMood, health)}
+                            testID={`day-health-${dayKey}`}
+                        >
+                            {moodBadge}
+                            {averageMood != null ? <View style={styles.divider} /> : null}
+                            <Ionicons
+                                name="pulse"
+                                size={16}
+                                color={healthRating ? HEALTH_RATING_COLORS[healthRating] : colors.textSecondary}
                             />
-                            <Text style={styles.averageText}>{averageMood.toFixed(1)}</Text>
+                        </Pressable>
+                    ) : averageMood != null ? (
+                        <View style={styles.average} testID="day-average">
+                            {moodBadge}
                         </View>
                     ) : null}
                 </>
+            ) : null}
+            {health ? (
+                <DayHealthCard
+                    visible={healthOpen}
+                    onClose={closeHealth}
+                    title={averageMood != null ? `${title} · average mood ${averageMood.toFixed(1)}` : title}
+                    health={health}
+                    colors={colors}
+                />
             ) : null}
         </View>
     );
