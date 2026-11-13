@@ -27,9 +27,27 @@ export async function getActivities(db: SQLiteDatabase): Promise<Activity[]> {
 }
 
 /**
+ * Fetch one activity by id, or null when it no longer exists (or the read
+ * fails). The detail screen uses the null to close itself after a delete.
+ */
+export async function getActivity(db: SQLiteDatabase, id: number): Promise<Activity | null> {
+  try {
+    return await db.getFirstAsync<Activity>('SELECT * FROM activities WHERE id = ?', [id]);
+  } catch (error) {
+    console.error('Error fetching activity:', error);
+    return null;
+  }
+}
+
+/** `DatabaseResult.code` when an add/rename would duplicate a name in the group. */
+export const ACTIVITY_NAME_TAKEN = 'activity-name-taken';
+
+/**
  * Append a new activity to the end of its group. Rejects empty/whitespace
- * names (mirrors `updateActivity`); duplicate (name, group_id) is caught
- * by the UNIQUE constraint and surfaces as `success: false`.
+ * names and a name already used in the same group (both mirror
+ * `updateActivity`). The duplicate is checked up front, so the UI never has to
+ * read the driver's UNIQUE-constraint text; the constraint stays as the
+ * backstop. Failures carry a plain message, never the raw driver error.
  */
 export async function addActivity(
   db: SQLiteDatabase,
@@ -43,6 +61,18 @@ export async function addActivity(
       return {
         success: false,
         message: 'Activity name cannot be empty',
+      };
+    }
+
+    const existing = await db.getFirstAsync<{ id: number }>(
+      'SELECT id FROM activities WHERE name = ? AND group_id = ?',
+      [name.trim(), groupId]
+    );
+    if (existing?.id != null) {
+      return {
+        success: false,
+        code: ACTIVITY_NAME_TAKEN,
+        message: 'An activity with this name already exists in this group',
       };
     }
 
@@ -70,7 +100,7 @@ export async function addActivity(
     console.error('Error adding activity:', error);
     return {
       success: false,
-      message: `Error adding activity: ${error}`,
+      message: 'Failed to add activity',
     };
   }
 }
@@ -120,6 +150,7 @@ export async function updateActivity(
     if (existingActivity) {
       return {
         success: false,
+        code: ACTIVITY_NAME_TAKEN,
         message: 'An activity with this name already exists in this group',
       };
     }

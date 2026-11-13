@@ -4,7 +4,6 @@ import * as SQLite from "expo-sqlite";
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Feather from "@expo/vector-icons/Feather";
 import MaterialIcons from "@expo/vector-icons/MaterialIcons";
-import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 
 import React, { useMemo, useState, useRef, useCallback } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
@@ -37,7 +36,6 @@ import {
 
 import {
     getActivities,
-    addActivity,
     getActivityGroups,
     addActivityGroup,
     renameActivityGroup,
@@ -48,6 +46,7 @@ import {
     moveActivitiesToGroup,
     type GroupDeletionImpact,
 } from "@/databases/database";
+import { AddActivityModal } from "./ActivityAddModal";
 
 type ActivitySelectorProps = {
     onSelectActivity: (activityId: number) => void;
@@ -59,13 +58,6 @@ type ActivitySelectorProps = {
      * standalone (no scroll integration).
      */
     scrollableRef?: AnimatedRef<Animated.ScrollView>;
-};
-
-type AddActivityModalProps = {
-    visible: boolean;
-    onClose: () => void;
-    onAdd: (name: string, iconFamily: string, iconName: string) => void;
-    groupName: string;
 };
 
 type AddGroupModalProps = {
@@ -405,93 +397,6 @@ const ActivityItem = ({ activity, isSelected, onPress, cellWidth, fontScale }: A
     );
 };
 
-const AddActivityModal = ({ visible, onClose, onAdd, groupName }: AddActivityModalProps) => {
-    const colors = useThemeColors();
-    const styles = useStyles(colors);
-    const [newActivityName, setNewActivityName] = useState("");
-    const [iconPickerVisible, setIconPickerVisible] = useState(false);
-    const [selectedIconFamily, setSelectedIconFamily] = useState<IconFamilyType>('Feather');
-    const [selectedIconName, setSelectedIconName] = useState('circle');
-
-    const handleSubmit = () => {
-        onAdd(newActivityName, selectedIconFamily, selectedIconName);
-        setNewActivityName("");
-        setSelectedIconFamily('Feather');
-        setSelectedIconName('circle');
-    };
-
-    const renderSelectedIcon = () => {
-        // Special case for emojis
-        if (selectedIconFamily === 'Emoji') {
-            return <Text style={{ fontSize: 24 }}>{selectedIconName}</Text>;
-        }
-        
-        // For regular icon libraries
-        const IconComponent = ICON_FAMILIES[selectedIconFamily]?.component;
-        
-        if (!IconComponent) {
-            // Fallback if no valid icon family
-            return <Feather name="circle" size={24} color={colors.text} />;
-        }
-    
-        return (
-            <IconComponent.default 
-                name={selectedIconName as any} 
-                size={24} 
-                color={colors.text} 
-            />
-        );
-    };
-
-    return (
-        <OverlayModal visible={visible} onClose={onClose}>
-                <View style={styles.modalContent}>
-                    <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Add New {groupName} Activity</Text>
-                        <Pressable style={styles.closeButton} onPress={onClose}>
-                            <Ionicons name="close" color={colors.text} size={24} />
-                        </Pressable>
-                    </View>
-                    
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Activity Name"
-                        placeholderTextColor={colors.textSecondary}
-                        value={newActivityName}
-                        onChangeText={setNewActivityName}
-                        autoFocus
-                    />
-
-                    <View style={styles.iconSelectorContainer}>
-                        <Text style={styles.iconSelectorText}>Icon</Text>
-                        <Pressable
-                            style={styles.iconSelector}
-                            onPress={() => setIconPickerVisible(true)}
-                        >
-                            {renderSelectedIcon()}
-                            <Text style={styles.iconSelectorText}>Change Icon</Text>
-                        </Pressable>
-                    </View>
-
-                    <Pressable style={styles.submitButton} onPress={handleSubmit}>
-                        <Text style={styles.submitButtonText}>Add Activity</Text>
-                    </Pressable>
-
-                    <IconPicker
-                        visible={iconPickerVisible}
-                        onClose={() => setIconPickerVisible(false)}
-                        onSelect={(family, name) => {
-                            setSelectedIconFamily(family as IconFamilyType);
-                            setSelectedIconName(name);
-                        }}
-                        currentFamily={selectedIconFamily}
-                        currentIcon={selectedIconName}
-                    />
-                </View>
-        </OverlayModal>
-    );
-};
-
 const AddGroupModal = ({ visible, onClose, onAdd, error }: AddGroupModalProps) => {
     const colors = useThemeColors();
     const styles = useStyles(colors);
@@ -786,7 +691,6 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
 
     const [activities, setActivities] = useState<Activity[]>([]);
     const [groups, setGroups] = useState<ActivityGroup[]>([]);
-    const [currentGroupId, setCurrentGroupId] = useState<number>(0);
     const [error, setError] = useState("");
     const [modals, setModals] = useState({
         addActivity: false,
@@ -794,12 +698,12 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
         edit: false
     });
     const [selectedActivity, setSelectedActivity] = useState<Activity | null>(null);
-    const [newActivityName, setNewActivityName] = useState("");
-    const [newGroupName, setNewGroupName] = useState("");
+    const [addTarget, setAddTarget] = useState<ActivityGroup | null>(null);
+
     // Which group's "..." menu is open (only one at a time — opening another
     // group's menu replaces it). null = none open.
     const [openMenuGroupId, setOpenMenuGroupId] = useState<number | null>(null);
-
+    
     // GROUP MOVE MODE: the whole selector collapses to draggable group-name rows.
     // Entered by holding a group's name (or via the "..." menu).
     const [groupMoveMode, setGroupMoveMode] = useState(false);
@@ -859,37 +763,6 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
         loadActivities();
     }, []);
 
-    const handleAddActivity = async (name: string, iconFamily: string, iconName: string) => {
-        if (!name.trim() || !currentGroupId) return;
-
-        try {
-            const result = await addActivity(
-                db,
-                name.trim(),
-                currentGroupId,
-                iconFamily,
-                iconName
-            );
-
-            if (result.success) {
-                await reloadAfterWrite();
-                setNewActivityName("");
-                setModals({ ...modals, addActivity: false });
-            } else {
-                // Display error message
-                if (result.message.includes('UNIQUE constraint failed')) {
-                  Alert.alert("Activity Already Exists", 
-                    "An activity with this name already exists in this group.");
-                } else {
-                  Alert.alert("Error", result.message);
-                }
-              }
-            } catch (error) {
-              console.error('Error adding activity:', error);
-              Alert.alert("Error", "Failed to add activity. Please try again.");
-            }
-          };
-
     const handleAddGroup = async (name: string) => {
         if (!name.trim()) {
             setError("Please enter a group name");
@@ -900,7 +773,6 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
 
         if (result.success) {
             await reloadAfterWrite();
-            setNewGroupName("");
             setModals({ ...modals, addGroup: false });
             setError("");
         } else {
@@ -1064,7 +936,7 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
                             selectedActivities={selectedActivities}
                             onSelectActivity={onSelectActivity}
                             onAddActivity={() => {
-                                setCurrentGroupId(group.id);
+                                setAddTarget(group);
                                 setModals({ ...modals, addActivity: true });
                             }}
                             onEditActivity={(activity) => {
@@ -1099,13 +971,6 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
                 </View>
             )}
 
-            <AddActivityModal
-                visible={modals.addActivity}
-                onClose={() => setModals({ ...modals, addActivity: false })}
-                onAdd={handleAddActivity}
-                groupName={groups.find(g => g.id === currentGroupId)?.name || ""}
-            />
-
             <AddGroupModal
                 visible={modals.addGroup}
                 onClose={() => {
@@ -1137,6 +1002,20 @@ export function ActivitySelector({ onSelectActivity, selectedActivities, scrolla
                 onClose={closeDeleteDialog}
                 error={deleteError}
             />
+
+            {modals.addActivity && addTarget && (
+                <AddActivityModal
+                    visible={modals.addActivity}
+                    onClose={() => {
+                        setModals({ ...modals, addActivity: false });
+                        setAddTarget(null);
+                    }}
+                    onAdd={loadActivities}
+                    groupId={addTarget.id}
+                    groups={groups}
+                    db={db}
+                />
+            )}
 
             {modals.edit && selectedActivity && ( // Making activityedit only exist when it's required to.
                 <ActivityEditModal

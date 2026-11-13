@@ -15,7 +15,7 @@
  * height, and that it tracks the live keyboard height.
  */
 import React from 'react';
-import { Text, StyleSheet } from 'react-native';
+import { Text, StyleSheet, View } from 'react-native';
 import { fireEvent, render } from '@testing-library/react-native';
 
 // Non-zero bottom inset (3-button nav) so the fullScreen padding is assertable.
@@ -111,6 +111,35 @@ describe('OverlayModal — keyboard avoidance (deterministic JS inset)', () => {
         expect(view.queryByTestId('overlay-card-layer')).toBeNull();
         expect(view.queryByTestId('overlay-fullscreen-inner')).toBeNull();
         expect(view.queryByText('hidden-body')).toBeNull();
+    });
+});
+
+describe('OverlayModal: a tall dialog card fits the room above the keyboard', () => {
+    // #51: a card sized from the window cropped its fields (on Android the
+    // window height leaves out the nav bar, the keyboard height does not).
+    // Instead every wrapper between the padded card layer and the card must be
+    // free to shrink, so a card with flexShrink gets exactly the space left.
+    it('every wrapper between the card layer and the card can shrink', async () => {
+        mockKeyboardHeight.mockReturnValue(300);
+        const view = await renderOverlay(
+            <OverlayModal visible onClose={() => {}}>
+                <View testID="test-card" style={{ flexShrink: 1 }}>
+                    <Text>dialog-body</Text>
+                </View>
+            </OverlayModal>
+        );
+        const layer = view.getByTestId('overlay-card-layer');
+        const wrappers: { type: unknown; flexShrink: unknown }[] = [];
+        let node: any = view.getByTestId('test-card').parent;
+        while (node && node !== layer) {
+            if (typeof node.type === 'string') {
+                wrappers.push({ type: node.type, flexShrink: flatStyle(node).flexShrink });
+            }
+            node = node.parent;
+        }
+        expect(node).toBe(layer);
+        expect(wrappers.length).toBeGreaterThan(0);
+        expect(wrappers.filter((w) => w.flexShrink !== 1)).toEqual([]);
     });
 });
 
