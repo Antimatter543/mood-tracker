@@ -15,9 +15,7 @@ import {
     ENTRIES_FOR_ACTIVITY,
     ENTRIES_FOR_ACTIVITY_IN_RANGE,
     CO_OCCURRING_ACTIVITIES,
-    CO_OCCURRING_ACTIVITIES_IN_RANGE,
     ACTIVITY_ENTRY_COUNTS,
-    ACTIVITY_ENTRY_COUNTS_IN_RANGE,
 } from '@/components/visualisations/queries';
 
 import { describeSqlite, openSqlite } from '@/testing/realSqlite';
@@ -62,10 +60,10 @@ describeSqlite('per-activity detail queries — real SQLite execution', () => {
 
     it('ENTRIES_FOR_ACTIVITY returns exactly the activity\'s entries, oldest→newest', () => {
         const rows = db.prepare(ENTRIES_FOR_ACTIVITY).all(1); // Running
-        expect(rows.map((r: any) => r.id)).toEqual([1, 2, 3, 5]);
+        expect(rows.map((r: any) => r.entry_id)).toEqual([1, 2, 3, 5]);
         expect(rows.map((r: any) => r.mood)).toEqual([4, 8, 3, 9]);
         // Reading's lone entry is excluded.
-        expect(db.prepare(ENTRIES_FOR_ACTIVITY).all(4).map((r: any) => r.id)).toEqual([6]);
+        expect(db.prepare(ENTRIES_FOR_ACTIVITY).all(4).map((r: any) => r.entry_id)).toEqual([6]);
     });
 
     it('ENTRIES_FOR_ACTIVITY_IN_RANGE range-filters on the raw instant', () => {
@@ -73,7 +71,7 @@ describeSqlite('per-activity detail queries — real SQLite execution', () => {
         const rows = db
             .prepare(ENTRIES_FOR_ACTIVITY_IN_RANGE)
             .all(1, '2026-06-02T00:00:00Z', '2026-06-05T23:59:59Z');
-        expect(rows.map((r: any) => r.id)).toEqual([2, 3, 5]);
+        expect(rows.map((r: any) => r.entry_id)).toEqual([2, 3, 5]);
     });
 
     it('CO_OCCURRING_ACTIVITIES ranks other activities by shared entries, excluding itself', () => {

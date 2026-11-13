@@ -16,7 +16,7 @@ const r = (
   countWith: number,
   countWithout: number,
 ): ActivityCorrelationRow => ({
-  activity_id: name.charCodeAt(0), // arbitrary but unique,
+  activity_id: name.charCodeAt(0), // arbitrary but unique for the tests
   activity_name: name,
   avg_with: avgWith,
   avg_without: avgWithout,
@@ -26,8 +26,7 @@ const r = (
 
 /** Build a meaningful ActivityCorrelationResult with only name + delta that matter. */
 const m = (name: string, delta: number): ActivityCorrelationResult => ({
-
-  activity_id: name.charCodeAt(0), // arbitrary but unique
+  activity_id: name.charCodeAt(0), // arbitrary but unique for the tests
   activity_name: name,
   avg_with: 5 + delta,
   avg_without: 5,

@@ -15,13 +15,15 @@
 // `localDateString` / `aggregateDailyAverages` (the one authority), never a
 // SQL date() bucket — see databases/dateHelpers.ts READ CONTRACT.
 
-import { localDateString } from '@/databases/dateHelpers';
 import {
     aggregateDailyAverages,
-    dailyAverageMap,
     type InstantValueRow,
 } from './dailyAverages';
-import { MIN_SAMPLES } from './activityCorrelation';
+import {
+    ActivityCorrelationRawRow,
+    aggregateActivityCorrelation,
+    MIN_SAMPLES
+} from './activityCorrelation';
 import { IconFamilyType } from '@/components/iconRegistry';
 
 // Re-export so consumers can `bucketMoodHistogram` the activity's moods from one
@@ -213,61 +215,51 @@ export type ActivityMoodImpact = {
     withoutAvg: number | null;
     /** withAvg − withoutAvg (null unless both sides exist). */
     delta: number | null;
-    withDays: number;
-    withoutDays: number;
+    withCount: number;
+    withoutCount: number;
     /** Both sides have ≥ minSamples days — enough to state the comparison. */
     isMeaningful: boolean;
 };
 
 /**
- * Compare mood on this activity's days vs all other days.
+ * Compare mood on this activity's vs otherwise.
  *
- * `allEntries` = every entry (raw {date, mood}); `activityEntries` = the subset
- * that logged this activity. Both are day-keyed via localDateString; we average
- * the per-day averages (so a day with many entries counts once, matching
+ * `allEntries` = every entry, day-keyed via localDateString;
+ * we average the per-day averages (so a day with many entries counts once, matching
  * activityCorrelation). "without" days are the local days present in the data
  * that this activity was NOT on.
  */
 export const activityMoodImpact = (
-    allEntries: InstantValueRow[],
-    activityEntries: InstantValueRow[],
+    activityId: number,
+    allEntries: ActivityCorrelationRawRow[],
     minSamples: number = MIN_SAMPLES,
+    carryover: boolean = false,
+    windowStart: string | undefined = undefined,
 ): ActivityMoodImpact => {
-    const dayAvg = dailyAverageMap(allEntries); // Map<localDay, avgMood>
+    const filteredEntries = allEntries.map((r) =>
+        (r.activity_id != activityId ?
+            {...r, activity_id: null, activity_name: null} : r));
 
-    const withDaySet = new Set<string>();
-    for (const row of activityEntries ?? []) {
-        if (!row || typeof row.date !== 'string') continue;
-        if (Number.isNaN(new Date(row.date).getTime())) continue;
-        withDaySet.add(localDateString(row.date));
-    }
+    const correlations = aggregateActivityCorrelation(filteredEntries, { carryover, windowStart })
+    if (correlations.length == 0)
+        return {
+            withAvg: null, withoutAvg: null,
+            delta: null,  isMeaningful: false,
+            withCount: 0, withoutCount: 0,
+        };
 
-    let sumWith = 0;
-    let countWith = 0;
-    let sumWithout = 0;
-    let countWithout = 0;
-    for (const [day, avg] of dayAvg) {
-        if (withDaySet.has(day)) {
-            sumWith += avg;
-            countWith += 1;
-        } else {
-            sumWithout += avg;
-            countWithout += 1;
-        }
-    }
-
-    const withAvg = countWith > 0 ? round1(sumWith / countWith) : null;
-    const withoutAvg = countWithout > 0 ? round1(sumWithout / countWithout) : null;
-    const delta =
-        withAvg !== null && withoutAvg !== null ? round1(withAvg - withoutAvg) : null;
+    const corr = correlations[0];
+    const delta = corr.avg_with !== null && corr.avg_without !== null
+        ? round1(corr.avg_with - corr.avg_without) : null;
+    const meaningful = corr.count_with >= minSamples && corr.count_without >= minSamples
 
     return {
-        withAvg,
-        withoutAvg,
-        delta,
-        withDays: countWith,
-        withoutDays: countWithout,
-        isMeaningful: countWith >= minSamples && countWithout >= minSamples,
+        withAvg: corr.avg_with,
+        withoutAvg: corr.avg_without,
+        delta: delta,
+        withCount: corr.count_with,
+        withoutCount: corr.count_without,
+        isMeaningful: meaningful,
     };
 };
 

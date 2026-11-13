@@ -21,9 +21,9 @@ import { ActivityIcon } from '@/components/activityIcon';
 import { Activity, ActivityGroup } from '@/components/types';
 import { moodColor } from '@/components/timeline/moodColor';
 import {
-    WEEKLY_MOOD_AVERAGES,
     ENTRIES_FOR_ACTIVITY_IN_RANGE,
     CO_OCCURRING_ACTIVITIES_IN_RANGE,
+    ACTIVITY_CORRELATION,
 } from '@/components/visualisations/queries';
 import { NUM_BUCKETS } from '@/components/visualisations/transforms/scatter';
 import {
@@ -42,6 +42,7 @@ import { now } from '@/lib/clock';
 import { getActivityGroups } from '@/databases/groups';
 import { ActivityEditModal } from './forms/ActivityEditModal';
 import { getActivity } from '@/databases/activities';
+import { ActivityCorrelationRawRow } from './visualisations/transforms/activityCorrelation';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
@@ -50,10 +51,9 @@ const MIN_TREND_DAYS = 6;
 const SPARK_HEIGHT = 96;
 const HISTOGRAM_HEIGHT = 132;
 
-type EntryRow = { id: number; date: string; mood: number };
 type DetailData = {
-    activityRows: EntryRow[];
-    allRows: { date: string; mood: number }[];
+    activityRows: ActivityCorrelationRawRow[];
+    allRows: ActivityCorrelationRawRow[];
     coRows: CoOccurringRow[];
     group: ActivityGroup | undefined;
     groups: ActivityGroup[];
@@ -97,17 +97,17 @@ export const ActivityInsightsDetail: React.FC<{
     const load = useCallback(() => {
         let active = true;
         (async () => {
-            try {
+            try {                
                 // All-time bounds for the "vs usual" split (all entries).
                 const queryStart = periodWindow.start;
                 const queryEnd = periodWindow.end;
                 const [activityRows, allRows, coRows, groups] = await Promise.all([
-                    db.getAllAsync<EntryRow>(ENTRIES_FOR_ACTIVITY_IN_RANGE,
-                        [currentActivity.id, queryStart, queryEnd,]),
-                    db.getAllAsync<{ date: string; mood: number }>(WEEKLY_MOOD_AVERAGES,
-                        [queryStart, queryEnd,]),
-                    db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES_IN_RANGE,
+                    db.getAllAsync<ActivityCorrelationRawRow>(ENTRIES_FOR_ACTIVITY_IN_RANGE,
                         [currentActivity.id, queryStart, queryEnd]),
+                    db.getAllAsync<ActivityCorrelationRawRow>(ACTIVITY_CORRELATION,
+                        [queryStart, queryEnd]),
+                    db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES_IN_RANGE,
+                        [queryStart, queryEnd, currentActivity.id]),
                     getActivityGroups(db),
                 ]);
                 if (active) {
@@ -131,7 +131,7 @@ export const ActivityInsightsDetail: React.FC<{
         return {
             stats: activityMoodStats(moods),
             variability: classifyVariability(moods, { label: currentActivity.name }),
-            impact: activityMoodImpact(d.allRows, d.activityRows),
+            impact: activityMoodImpact(currentActivity.id, d.allRows),
             buckets: bucketMoodHistogram(d.activityRows),
             trend: moodTrendForActivity(d.activityRows),
             co: topCoOccurring(d.coRows),
@@ -289,11 +289,12 @@ export const ActivityInsightsDetail: React.FC<{
         <View style={styles.screen}>
             {header}
             <ScrollView
+                key={currentActivity.id}
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
             >
                 {/* (a) Header — icon, name, count, date range */}
-                <Card key={currentActivity.id}>
+                <Card>
                     <View style={styles.headerRow}>
                         <View style={[styles.iconChip, { backgroundColor: colors.accentLight }]}>
                             <ActivityIcon
@@ -380,7 +381,7 @@ export const ActivityInsightsDetail: React.FC<{
                         <Text style={styles.cardBody}>
                             You've logged {currentActivity.name} on{' '}
                             <Text style={styles.emphasis}>
-                                {imp.withDays} {imp.withDays === 1 ? 'day' : 'days'}
+                                {imp.withCount} {imp.withoutCount === 1 ? 'day' : 'days'}
                             </Text>
                             {imp.withAvg !== null
                                 ? ` (averaging ${imp.withAvg.toFixed(1)})`

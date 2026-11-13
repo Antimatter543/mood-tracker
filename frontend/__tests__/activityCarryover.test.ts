@@ -240,8 +240,7 @@ const legacyAggregate = (
   const seenEntry = new Set<number>();
   const daySum = new Map<string, { sum: number; count: number }>();
   const activityDays = new Map<string, Set<string>>();
-  const activityIds = new Map<string, number>();
-  const activityNames = new Set<string>();
+  const activityNames = new Map<number, string>();
   for (const r of rows ?? []) {
     if (!r || typeof r.date !== 'string') continue;
     if (typeof r.mood !== 'number' || !Number.isFinite(r.mood)) continue;
@@ -259,8 +258,7 @@ const legacyAggregate = (
       }
     }
     if (r.activity_name != null && r.activity_id != null) {
-      activityIds.set(r.activity_name, r.activity_id);
-      activityNames.add(r.activity_name);
+      activityNames.set(r.activity_id, r.activity_name);
       let set = activityDays.get(r.activity_name);
       if (!set) {
         set = new Set<string>();
@@ -273,7 +271,7 @@ const legacyAggregate = (
   for (const [day, { sum, count }] of daySum) dayAvg.set(day, sum / count);
   const allDays = [...dayAvg.keys()];
   const out: ActivityCorrelationRow[] = [];
-  for (const name of activityNames) {
+  for (const [id, name] of activityNames.entries()) {
     const withDays = activityDays.get(name) ?? new Set<string>();
     let sumWith = 0;
     let countWith = 0;
@@ -290,7 +288,7 @@ const legacyAggregate = (
       }
     }
     out.push({
-      activity_id: activityIds.get(name)!,
+      activity_id: id,
       activity_name: name,
       avg_with: countWith > 0 ? Math.round((sumWith / countWith) * 100) / 100 : null,
       avg_without: countWithout > 0 ? Math.round((sumWithout / countWithout) * 100) / 100 : null,
