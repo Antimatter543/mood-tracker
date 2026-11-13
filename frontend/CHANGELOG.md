@@ -3,6 +3,19 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.16.2] - 2026-11-08
+
+### Fixed
+- **Calendar day card:** it now shows a day's entries in full, and the list scrolls when there are more. Thanks to makusuko!
+
+## [2.16.1] - 2026-11-05
+
+### Added
+- **Encrypted backups:** choose the password hashing strength (Compatibility, Security or Manual) under Technical details. Thanks to JamesCullum!
+
+### Fixed
+- **Crash on first launch:** a new install could rarely crash while setting up its database. Resetting the database could fail the same way.
+
 ## [2.16.0] - 2026-11-02
 
 ### Added

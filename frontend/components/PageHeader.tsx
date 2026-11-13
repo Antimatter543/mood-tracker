@@ -18,9 +18,8 @@ import { LAYOUT_CONTENT_PADDING } from '@/styles/layout';
  * responsibility: `components/PageContainer.tsx` (`Layout`) applies it, so
  * always render this INSIDE a `<Layout>`.
  *
- * Drift guard: `__tests__/pageHeaderUniformity.test.ts` fails the build if a
- * tab screen stops using this component or if a screen re-enables the
- * navigator header.
+ * Drift guard: the `tab-*` golden screenshots (`.maestro/goldens/tabs-week.yaml`)
+ * go red if a tab's header moves or a screen brings the navigator header back.
  */
 
 /** Size every page-header glyph renders at. Owned here, never by the screen. */
@@ -36,8 +35,7 @@ export const PAGE_HEADER_ICON_SIZE = 26;
  * full-height screen that only restores the horizontal gutter draws its title
  * `LAYOUT_CONTENT_PADDING` px HIGHER than Home / Insights (the 2026-09-04
  * "Timeline sits higher than Insights" drift). The top padding here keeps every
- * page title on one vertical line; `__tests__/pageHeaderUniformity.test.ts`
- * pins it.
+ * page title on one vertical line; the `tab-*` goldens pin it.
  */
 export const pageHeaderFullHeightInset = StyleSheet.create({
     inset: {

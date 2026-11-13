@@ -366,7 +366,7 @@ const formatTime = (instant: string): string =>
     minute: '2-digit',
   });
 
-const DaySummaryCard = ({
+export const DaySummaryCard = ({
   summary,
   onClose,
   styles,
@@ -409,28 +409,38 @@ const DaySummaryCard = ({
         <Text style={styles.summaryEmptyText}>Nothing logged on this day.</Text>
       </View>
     ) : (
-      <ScrollView style={styles.summaryList} contentContainerStyle={styles.summaryListContent}>
-        {summary.entries.map((entry) => (
-          <View key={entry.id} style={styles.summaryRow}>
-            <View style={styles.summaryMoodPill}>
-              <Text style={styles.summaryMoodValue}>{entry.mood}</Text>
-            </View>
-            <View style={styles.summaryRowBody}>
-              <Text style={styles.summaryTime}>{formatTime(entry.instant)}</Text>
-              {entry.activities.length > 0 && (
-                <Text style={styles.summaryActivities} numberOfLines={2}>
-                  {entry.activities.join(' · ')}
-                </Text>
-              )}
-            </View>
+      <View style={styles.summaryListContainer}>
+        <ScrollView
+            showsVerticalScrollIndicator
+            persistentScrollbar
+            contentContainerStyle={styles.summaryListContent}
+        >
+          {/* Catches the touch for the whole list, gaps included, so a drag that starts anywhere
+              in it scrolls instead of landing on the card's Pressable (seen on a Fairphone 5). */}
+          <View testID="day-summary-rows" style={styles.summaryRows} onStartShouldSetResponder={() => true}>
+            {summary.entries.map((entry) => (
+              <View key={entry.id} style={styles.summaryRow}>
+                <View style={styles.summaryMoodPill}>
+                  <Text style={styles.summaryMoodValue}>{entry.mood}</Text>
+                </View>
+                <View style={styles.summaryRowBody}>
+                  <Text style={styles.summaryTime}>{formatTime(entry.instant)}</Text>
+                  {entry.activities.length > 0 && (
+                    <Text style={styles.summaryActivities} numberOfLines={2}>
+                      {entry.activities.join(' · ')}
+                    </Text>
+                  )}
+                </View>
+              </View>
+            ))}
           </View>
-        ))}
-      </ScrollView>
+        </ScrollView>
+      </View>
     )}
   </View>
 );
 
-const makeStyles = (colors: ThemeColors) =>
+export const makeStyles = (colors: ThemeColors) =>
   StyleSheet.create({
     title: {
       fontSize: 18,
@@ -489,7 +499,6 @@ const makeStyles = (colors: ThemeColors) =>
       backgroundColor: colors.cardBackground,
       width: '90%',
       maxWidth: 420,
-      maxHeight: '80%',
       borderRadius: 20,
       padding: 20,
       borderWidth: 1,
@@ -527,10 +536,16 @@ const makeStyles = (colors: ThemeColors) =>
       fontSize: 14,
       color: colors.textSecondary,
     },
-    summaryList: {
-      flexGrow: 0,
+    summaryListContainer: {
+      // Three rows plus part of a fourth: rows sit 50 apart (40 pill + 10 gap), and the half row
+      // is the hint that the list scrolls. At exactly 3 * 50 the cut lands in the gap.
+      maxHeight: 3 * 50 + 20,
+      marginBottom: 6,
     },
     summaryListContent: {
+      flexGrow: 1,
+    },
+    summaryRows: {
       gap: 10,
     },
     summaryRow: {

@@ -1,0 +1,65 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Smoke 04: the full-screen "Recently deleted" panel swallows every tap that
+# misses its own controls, and Restore brings the entry back.
+# Guards 7fade96: the panel's opaque surface stopped short of the window's bottom
+# edge by the safe-area inset, leaving a strip where the screen BEHIND it (tab
+# bar, FAB, Timeline cards) stayed visible and tappable.
+# A seeded week fills the Timeline behind the panel, so a leaked tap has cards to hit.
+- runFlow:
+    file: subflows/launch.yaml
+    env:
+      SCENARIO: week
+- runFlow:
+    file: subflows/add-entry.yaml
+    env:
+      NOTE: smoke-bin
+- tapOn:
+    id: tab-timeline
+- assertVisible: "smoke-bin"
+# The top card is the one just added (see subflows/add-entry.yaml).
+- tapOn:
+    id: entry-more
+    index: 0
+- tapOn:
+    id: entry-delete
+- tapOn:
+    id: timeline-open-bin
+# The panel is identified by its close button, never by the text "Recently
+# deleted": the Timeline's bin button carries that exact accessibility label
+# whenever the bin is empty, so the text stays "visible" after the panel closes
+# (CI run 41655548352 failed on that).
+- assertVisible:
+    id: bin-close
+- assertVisible: "smoke-bin"
+- takeScreenshot: 04-bin-open
+
+# The strip itself: the bottom safe-area inset, over the Home tab's button. No
+# testID can address it: the point is that NOTHING of ours is there any more.
+# (e2e-smoke.sh pins gesture navigation, so the app, not a system nav button,
+# owns this strip.) If the tap leaks, the app switches to Home under the panel.
+# e2e-lint: point-ok (taps the inset strip under the overlay; no element to target)
+- tapOn:
+    point: 10%, 99%
+# The FAB's own spot, if it is still in the hierarchy under the panel.
+- tapOn:
+    text: "Add mood entry"
+    optional: true
+- assertNotVisible: "How were you\\?"
+- assertVisible:
+    id: bin-close
+- takeScreenshot: 04-after-stray-taps
+
+- tapOn:
+    id: "bin-restore-.*"
+- tapOn:
+    id: bin-close
+- assertNotVisible:
+    id: bin-close
+# Still on the Timeline (a leaked tap would have switched to Home), and the
+# restored entry is back in the list.
+- assertNotVisible: "Good (morning|afternoon|evening)"
+- assertVisible:
+    id: timeline-open-bin
+- assertVisible: "smoke-bin"
+- takeScreenshot: 04-restored

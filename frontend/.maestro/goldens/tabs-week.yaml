@@ -1,0 +1,38 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Every tab, seeded with a week, on the default dark theme. Two jobs:
+#   - every tab's page header lines up (db73a35, 55a0ad2: the header sat differently
+#     per screen),
+#   - the layout under each nav config (91b9554, #20: broken by a top notch and by
+#     soft navigation buttons), which is why this flow runs on both configs.
+- runFlow:
+    file: ../smoke/subflows/launch.yaml
+    env:
+      SCENARIO: week
+- runFlow:
+    file: subflows/settle.yaml
+- tapOn:
+    id: tab-home
+- runFlow:
+    file: subflows/hold.yaml
+- takeScreenshot: tab-home
+- tapOn:
+    id: tab-stats
+- runFlow:
+    file: subflows/hold.yaml
+- takeScreenshot: tab-stats
+- tapOn:
+    id: tab-timeline
+- runFlow:
+    file: subflows/hold.yaml
+- takeScreenshot: tab-timeline
+- tapOn:
+    id: tab-insights
+- runFlow:
+    file: subflows/hold.yaml
+- takeScreenshot: tab-insights
+- tapOn:
+    id: tab-settings
+- runFlow:
+    file: subflows/hold.yaml
+- takeScreenshot: tab-settings

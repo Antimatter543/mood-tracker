@@ -23,7 +23,7 @@
 // mock is never actually used to run SQL.
 jest.mock('@/databases/lifecycle', () => ({
   createInitialSchema: jest.fn(),
-  seedActivitiesV1: jest.fn(),
+  seedActivitiesV1: jest.fn().mockResolvedValue({ success: true }),
 }));
 jest.mock('@/databases/user-settings', () => ({
   initializeSettingsTable: jest.fn(),
