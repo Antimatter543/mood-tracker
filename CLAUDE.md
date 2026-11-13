@@ -10,6 +10,12 @@ device-QA'd on the Pixel 3, data-survival update-path verified. See `frontend/do
 
 Public repo: `Antimatter543/mood-tracker` (Anti's). Releases: GitHub Releases (APK).
 
+## Features go through Anti; bug fixes do not (Anti, 2026-11-13)
+
+- **Bug fixes** (ours, or a community PR/issue): judge it, fix it, merge, release. No ask needed.
+- **Anything feature-like** (a new feature, setting, screen or option, a deliberate behaviour change, a feature-request issue, a community PR that adds one, or our own idea): **never build or merge it without Anti's yes.** Send him a Telegram the same session (`~/bin/astra-telegram-send.py`): "Potential feature request for SoulSync", one line on what it adds, and the PR/issue links. Log it in `~/ops/WAITING.md` and leave it open.
+- Reviewing, running CI and telling the contributor the owner is deciding are fine. A PR that mixes a fix with a feature: the feature part waits. Unsure whether it is a bug or a feature: treat it as a feature.
+
 ## Releasing & Versioning — DETERMINISTIC
 
 **Single source of truth: `frontend/app.json` `expo.version`** (semver). Everything else is derived.
