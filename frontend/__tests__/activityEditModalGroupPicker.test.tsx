@@ -9,7 +9,10 @@
  *    moveActivityToGroup validates the NEW name against the target group);
  *  - pressing Update without changing the group never calls moveActivityToGroup;
  *  - a failing updateActivity never calls moveActivityToGroup;
- *  - a failing moveActivityToGroup surfaces its message and does not close.
+ *  - a failing moveActivityToGroup surfaces its message and does not close;
+ *  - keyboard closed: Delete / Update are pinned below the scrolling fields;
+ *    keyboard open: they move to the end of the scrolling fields, so the name
+ *    field gets the whole card (#51 device QA, 360x640 at font 1.3).
  *
  * `@/components/OverlayModal` is mocked to a plain visible/hidden passthrough
  * (same pattern as dbViewerEntryFormMount.test.tsx) so neither the top-level
@@ -20,7 +23,8 @@
  * every render() and fireEvent.*() below is awaited.
  */
 import React from 'react';
-import { render, act, fireEvent } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
+import { render, act, fireEvent, within } from '@testing-library/react-native';
 
 jest.mock('@/components/OverlayModal', () => {
     const ReactActual = require('react') as typeof React;
@@ -51,6 +55,8 @@ jest.mock('@/context/DataContext', () => ({
 }));
 
 import { ActivityEditModal } from '@/components/forms/ActivityEditModal';
+import { OverlayProvider } from '@/context/OverlayHost';
+import { INSETS, setInsets, setKeyboardHeight } from '@/testing/platform';
 import type { Activity, ActivityGroup } from '@/components/types';
 
 const runningActivity: Activity = {
@@ -84,7 +90,8 @@ const renderModal = async (overrides: Partial<React.ComponentProps<typeof Activi
             db={mockDb}
             groups={groups}
             {...overrides}
-        />
+        />,
+        { wrapper: OverlayProvider }
     );
     return { view, onClose, onUpdate };
 };
@@ -215,5 +222,47 @@ describe('ActivityEditModal — group picker', () => {
         expect(onUpdate).toHaveBeenCalled();
         // ...but the dialog stays open so the user sees the group didn't change.
         expect(onClose).not.toHaveBeenCalled();
+    });
+});
+
+describe('ActivityEditModal: fits any screen, keyboard up or down', () => {
+    it('lets the card shrink (no window-computed cap) and scrolls the fields with taps kept', async () => {
+        setInsets(INSETS.THREE_BUTTON_NAV);
+        const { view } = await renderModal();
+        const card = StyleSheet.flatten(view.getByTestId('activity-edit-dialog').props.style);
+        expect(card.flexShrink).toBe(1);
+        expect(card.maxHeight).toBeUndefined();
+        expect(card.marginTop).toBe(24 + 16);
+        expect(card.marginBottom).toBe(48 + 16);
+        expect(view.getByTestId('activity-edit-fields').props.keyboardShouldPersistTaps).toBe('handled');
+    });
+
+    it('keyboard closed: Delete and Update are pinned below the scrolling fields', async () => {
+        setKeyboardHeight(0);
+        const { view } = await renderModal();
+        const fields = view.getByTestId('activity-edit-fields');
+        expect(within(fields).getByLabelText('Activity name')).toBeTruthy();
+        expect(within(fields).queryByText('Update')).toBeNull();
+        expect(within(fields).queryByText('Delete')).toBeNull();
+        expect(view.getByText('Update')).toBeTruthy();
+    });
+
+    it('keyboard open: Delete and Update scroll with the fields; the title stays pinned', async () => {
+        setInsets(INSETS.THREE_BUTTON_NAV);
+        setKeyboardHeight(300);
+        const { view, onClose } = await renderModal();
+        const fields = view.getByTestId('activity-edit-fields');
+        expect(within(fields).getByText('Update')).toBeTruthy();
+        expect(within(fields).getByText('Delete')).toBeTruthy();
+        expect(within(fields).queryByText('Edit Activity')).toBeNull();
+        expect(view.getAllByText('Update')).toHaveLength(1);
+        expect(StyleSheet.flatten(view.getByTestId('activity-edit-dialog').props.style).marginBottom).toBe(16);
+
+        // Update still saves from inside the scroll.
+        await act(async () => {
+            fireEvent.press(within(fields).getByText('Update'));
+        });
+        expect(mockUpdateActivity).toHaveBeenCalledTimes(1);
+        expect(onClose).toHaveBeenCalled();
     });
 });

@@ -67,11 +67,16 @@ const CorrelationRow = ({
   const db = useSQLiteContext();
   const [selected, setSelected] = useState<Activity | null>(null);
 
+  const onSelectActivity = async (id: number) => {
+      const activity = await getActivity(db, id);
+      setSelected(activity);
+  };
+  
   return (
     <View style={styles.row}>
       <Pressable
           key={item.activity_id}
-          onPress={() => setSelected(getActivity(db, item.activity_id))}
+          onPress={() => onSelectActivity(item.activity_id)}
           style={({ pressed }) => [
               pressed && styles.rowPressed,
           ]}

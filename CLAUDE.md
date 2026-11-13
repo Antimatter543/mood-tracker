@@ -10,6 +10,12 @@ device-QA'd on the Pixel 3, data-survival update-path verified. See `frontend/do
 
 Public repo: `Antimatter543/mood-tracker` (Anti's). Releases: GitHub Releases (APK).
 
+## Features go through Anti; bug fixes do not (Anti, 2026-11-13)
+
+- **Bug fixes** (ours, or a community PR/issue): judge it, fix it, merge, release. No ask needed.
+- **Anything feature-like** (a new feature, setting, screen or option, a deliberate behaviour change, a feature-request issue, a community PR that adds one, or our own idea): **never build or merge it without Anti's yes.** Send him a Telegram the same session (`~/bin/astra-telegram-send.py`): "Potential feature request for SoulSync", one line on what it adds, and the PR/issue links. Log it in `~/ops/WAITING.md` and leave it open.
+- Reviewing, running CI and telling the contributor the owner is deciding are fine. A PR that mixes a fix with a feature: the feature part waits. Unsure whether it is a bug or a feature: treat it as a feature.
+
 ## Releasing & Versioning — DETERMINISTIC
 
 **Single source of truth: `frontend/app.json` `expo.version`** (semver). Everything else is derived.
@@ -260,7 +266,7 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   such button: for the Pixel pass load `node scripts/make-demo-data.js --days 300` through Settings -> Restore.
   **Scripted/CI seeding = the QA deep link** (QA builds ONLY, `EXPO_PUBLIC_QA=1`, e.g. the e2e emulator
   workflow): `adb shell am start -a android.intent.action.VIEW -d 'myapp://qa/seed?scenario=week&now=2026-06-15T12:00:00Z'`
-  (Maestro: `openLink`). Scenarios `empty | week | timeline300 | yearBoundary | oneBucket`; optional `now` (strict UTC,
+  (Maestro: `openLink`). Scenarios `empty | week | timeline300 | yearBoundary | oneBucket | weekHealth` (`weekHealth` = `week` plus stored Health Connect rows for the Timeline day health); optional `now` (strict UTC,
   `YYYY-MM-DDTHH:MM:SS(.sss)Z`) freezes the app clock (`lib/clock.ts`) and anchors the data, and survives a
   relaunch. It WIPES the DB first, and refuses (`error foreign-data`) when the DB holds entries no seed wrote.
   Wait on testID `qa-seed-status` = `QA seed: ok <scenario> (<n>)`. Settings loads once per launch, so relaunch

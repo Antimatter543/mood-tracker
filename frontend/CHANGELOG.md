@@ -3,6 +3,19 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.17.0] - 2026-11-13
+
+### Added
+- **Day health on the Timeline:** with Health Connect on, tap a day's dot to see sleep and heart rate next to your mood.
+- **After low days** on Insights: how long you took to get back to 6+, and what you logged.
+- **Edit an activity from its page**, and add one from "Explore your activities".
+
+### Fixed
+- **Activity dialogs** stay readable with the keyboard up on small phones.
+- **Long entries** scroll properly.
+
+Thanks to JamesCullum and makusuko!
+
 ## [2.16.2] - 2026-11-08
 
 ### Fixed

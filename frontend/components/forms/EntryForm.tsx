@@ -273,6 +273,7 @@ const DetailsStep = ({
     onToggleActivity,
     onNotesChange,
     onNotesFocus,
+    onNotesBlur,
     onAddPhoto,
     onRemovePhoto,
     onBack,
@@ -289,6 +290,7 @@ const DetailsStep = ({
     onNotesChange: (notes: string) => void;
     /** Fired when the Notes input focuses — the form scrolls it above the keyboard. */
     onNotesFocus?: () => void;
+    onNotesBlur?: () => void;
     onAddPhoto: (uri: string) => void;
     onRemovePhoto: (uri: string) => void;
     onBack: () => void;
@@ -319,6 +321,7 @@ const DetailsStep = ({
                 value={notes}
                 onChangeText={onNotesChange}
                 onFocus={onNotesFocus}
+                onBlur={onNotesBlur}
                 placeholder="How are you feeling?"
                 placeholderTextColor={colors.textSecondary}
                 multiline
@@ -596,11 +599,25 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         });
     }, [scrollRef]);
 
-    // When the keyboard opens while on the details step, scroll to the bottom so
-    // the focused Notes field clears it. (onFocus also triggers this for instant
-    // feedback the moment the field is tapped, before the keyboard finishes.)
+    // Other fields open the keyboard too (the activity and group dialogs
+    // autofocus their name field); only Notes may pull the form down.
+    const notesFocused = useRef(false);
+    const handleNotesFocus = useCallback(() => {
+        notesFocused.current = true;
+        scrollToBottom();
+    }, [scrollToBottom]);
+    const handleNotesBlur = useCallback(() => {
+        notesFocused.current = false;
+    }, []);
+    const goToMoodStep = useCallback(() => {
+        notesFocused.current = false;
+        setCurrentStep(1);
+    }, []);
+
+    // When the keyboard opens for Notes, scroll to the bottom so it clears the
+    // keyboard. (onFocus also scrolls, before the keyboard finishes opening.)
     useEffect(() => {
-        if (keyboardHeight > 0 && currentStep === 2) {
+        if (keyboardHeight > 0 && currentStep === 2 && notesFocused.current) {
             scrollToBottom();
         }
     }, [keyboardHeight, currentStep, scrollToBottom]);
@@ -642,10 +659,11 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                         photos={draft.photos}
                         onToggleActivity={toggleActivity}
                         onNotesChange={setNotes}
-                        onNotesFocus={scrollToBottom}
+                        onNotesFocus={handleNotesFocus}
+                        onNotesBlur={handleNotesBlur}
                         onAddPhoto={addPhoto}
                         onRemovePhoto={removePhoto}
-                        onBack={() => setCurrentStep(1)}
+                        onBack={goToMoodStep}
                         onSubmit={handleSubmit}
                         onButtonRowLayout={handleButtonRowLayout}
                         submitDisabled={submitDisabled}
@@ -665,7 +683,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                             { bottom: floatingBottom },
                             floatingOffsets.back,
                         ]}
-                        onPress={() => setCurrentStep(1)}
+                        onPress={goToMoodStep}
                         accessibilityRole="button"
                         accessibilityLabel="Back to mood"
                     >

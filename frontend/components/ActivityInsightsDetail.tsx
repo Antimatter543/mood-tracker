@@ -18,7 +18,7 @@ import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useDateFormat } from '@/hooks/useDateFormat';
 import { Card } from '@/components/Card';
 import { ActivityIcon } from '@/components/activityIcon';
-import { Activity } from '@/components/types';
+import { Activity, ActivityGroup } from '@/components/types';
 import { moodColor } from '@/components/timeline/moodColor';
 import {
     WEEKLY_MOOD_AVERAGES,
@@ -38,6 +38,10 @@ import {
     type CoOccurringRow,
 } from '@/components/visualisations/transforms/activityDetail';
 import { useTimeframe } from '@/context/TimeframeContext';
+import { now } from '@/lib/clock';
+import { getActivityGroups } from '@/databases/groups';
+import { ActivityEditModal } from './forms/ActivityEditModal';
+import { getActivity } from '@/databases/activities';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
@@ -51,8 +55,10 @@ type DetailData = {
     activityRows: EntryRow[];
     allRows: { date: string; mood: number }[];
     coRows: CoOccurringRow[];
+    group: ActivityGroup | undefined;
+    groups: ActivityGroup[];
 };
-const EMPTY_DATA: DetailData = { activityRows: [], allRows: [], coRows: [] };
+const EMPTY_DATA: DetailData = { activityRows: [], allRows: [], coRows: [], group: undefined, groups: [] };
 
 const VARIABILITY_ICON: Record<VariabilityKind, FeatherName> = {
     insufficient: 'clock',
@@ -76,8 +82,8 @@ export const ActivityInsightsDetail: React.FC<{
     activity: Activity;
     onClose: () => void;
 }> = ({ activity, onClose }) => {
-    const [currentActivity, setActivity] = useState<Activity>(activity);
     const colors = useThemeColors();
+    const styles = useMemo(() => makeStyles(colors), [colors]);
     const { format } = useDateFormat();
     /** "18 Sep 2026" in the user's chosen order (setting `date_format`). */
     const fmtDate = (iso: string): string => format(iso, 'medium');
@@ -85,7 +91,8 @@ export const ActivityInsightsDetail: React.FC<{
     const db = useSQLiteContext();
     const [data, setData] = useState<DetailData | null>(null);
     const { periodWindow } = useTimeframe();
-    const styles = useMemo(() => makeStyles(colors), [colors]);
+    const [currentActivity, setCurrentActivity] = useState(activity);
+    const [editorVisible, setEditorVisible] = useState<boolean>(false);
 
     const load = useCallback(() => {
         let active = true;
@@ -94,15 +101,19 @@ export const ActivityInsightsDetail: React.FC<{
                 // All-time bounds for the "vs usual" split (all entries).
                 const queryStart = periodWindow.start;
                 const queryEnd = periodWindow.end;
-                const [activityRows, allRows, coRows] = await Promise.all([
+                const [activityRows, allRows, coRows, groups] = await Promise.all([
                     db.getAllAsync<EntryRow>(ENTRIES_FOR_ACTIVITY_IN_RANGE,
                         [currentActivity.id, queryStart, queryEnd,]),
                     db.getAllAsync<{ date: string; mood: number }>(WEEKLY_MOOD_AVERAGES,
                         [queryStart, queryEnd,]),
                     db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES_IN_RANGE,
                         [currentActivity.id, queryStart, queryEnd]),
+                    getActivityGroups(db),
                 ]);
-                if (active) setData({ activityRows, allRows, coRows });
+                if (active) {
+                    const group = groups.find((g) => g.id === currentActivity.group_id);
+                    setData({ activityRows, allRows, coRows, groups, group });
+                }
             } catch (e) {
                 console.error('Error loading activity insights:', e);
                 if (active) setData(EMPTY_DATA);
@@ -111,8 +122,8 @@ export const ActivityInsightsDetail: React.FC<{
         return () => {
             active = false;
         };
-    }, [db, currentActivity.id, periodWindow]);
-    useDataRefresh(load, [db, currentActivity.id]);
+    }, [db, currentActivity.id, currentActivity.group_id, periodWindow]);
+    useDataRefresh(load, [db, currentActivity.id, currentActivity.group_id, periodWindow]);
 
     const model = useMemo(() => {
         const d = data ?? EMPTY_DATA;
@@ -129,11 +140,51 @@ export const ActivityInsightsDetail: React.FC<{
         };
     }, [data, currentActivity.name]);
 
+    // Re-read the activity after the edit dialog saved or deleted it: gone means
+    // it was deleted, so this screen closes; otherwise show the new name/group.
+    const onUpdate = async () => {
+        const updated = await getActivity(db, currentActivity.id);
+        if (updated === null) {
+            onClose();
+        } else {
+            setCurrentActivity(updated);
+        }
+    };
+
+    // Title, then the pencil right beside it (it edits the name and group shown
+    // there), then the close X pinned to the right edge. The title block may
+    // shrink and its lines ellipsize, so a long name never pushes the pencil or
+    // the X off the row; the spacer keeps a clear gap before the X.
     const header = (
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-            <Text style={styles.topTitle} numberOfLines={1}>
-                {currentActivity.name}
-            </Text>
+            <View style={styles.titleBlock}>
+                <Text style={styles.topTitle} numberOfLines={1}>
+                    {currentActivity.name}
+                </Text>
+                {data?.group && (
+                    <Text style={styles.topSubtitle} numberOfLines={1}>
+                        {data.group.name}
+                    </Text>
+                )}
+            </View>
+
+            <Pressable
+                testID="activity-detail-edit"
+                onPress={() => setEditorVisible(true)}
+                disabled={data === null}
+                style={({ pressed }) => [
+                    styles.editBtn,
+                    (pressed || data === null) && styles.editBtnDimmed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Edit activity name and group"
+                accessibilityState={{ disabled: data === null }}
+            >
+                <Feather name="edit-2" size={20} color={colors.text} />
+            </Pressable>
+
+            <View style={styles.headerSpacer} />
+
             <Pressable
                 onPress={onClose}
                 hitSlop={16}
@@ -144,6 +195,20 @@ export const ActivityInsightsDetail: React.FC<{
                 <Feather name="x" size={24} color={colors.text} />
             </Pressable>
         </View>
+    );
+
+    // The edit dialog belongs to EVERY state below (loading, never logged, the
+    // full view), so the pencil also works on an activity with no entries yet,
+    // e.g. one just added from the Explorer.
+    const editModal = editorVisible && data !== null && (
+        <ActivityEditModal
+            visible
+            activity={currentActivity}
+            groups={data.groups}
+            onClose={() => setEditorVisible(false)}
+            onUpdate={onUpdate}
+            db={db}
+        />
     );
 
     // Still loading.
@@ -178,6 +243,7 @@ export const ActivityInsightsDetail: React.FC<{
                         show up here.
                     </Text>
                 </View>
+                {editModal}
             </View>
         );
     }
@@ -410,7 +476,7 @@ export const ActivityInsightsDetail: React.FC<{
                             {model.co.map((c) => (
                                 <Pressable
                                     key={'button-' + c.id}
-                                    onPress={() => setActivity(c)}
+                                    onPress={() => setCurrentActivity(c)}
                                     style={({ pressed }) => [pressed && styles.chipPressed]}
                                     accessibilityRole="button"
                                     accessibilityLabel={`Open ${c.name} insights`}
@@ -447,6 +513,7 @@ export const ActivityInsightsDetail: React.FC<{
                     </Card>
                 )}
             </ScrollView>
+            {editModal}
         </View>
     );
 };
@@ -528,11 +595,42 @@ const makeStyles = (colors: ThemeColors) =>
             backgroundColor: colors.background,
         },
         topTitle: {
-            flex: 1,
             fontSize: 20,
             fontWeight: '800',
             color: colors.text,
             letterSpacing: -0.4,
+            paddingBottom: 0,
+        },
+        topSubtitle: {
+            marginTop: -3,
+            padding: 0,
+            fontSize: 13,
+            color: colors.textSecondary,
+        },
+        // Shrinks (never grows) so a long name ellipsizes instead of pushing the
+        // pencil and the X off the row.
+        titleBlock: {
+            flexShrink: 1,
+            minWidth: 0,
+        },
+        // A 44dp target with the glyph centred: the visible pencil sits ~16dp
+        // after the name.
+        editBtn: {
+            width: 44,
+            height: 44,
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginLeft: 4,
+            flexShrink: 0,
+        },
+        editBtnDimmed: {
+            opacity: 0.5,
+        },
+        // Takes the free width between the pencil and the X; never less than a
+        // clear gap, so the two buttons are not easy to mis-tap.
+        headerSpacer: {
+            flex: 1,
+            minWidth: 16,
         },
         closeBtn: {
             padding: 4,

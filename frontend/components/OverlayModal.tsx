@@ -185,7 +185,7 @@ const OverlayModalContent: React.FC<{
                     in the top/bottom margins fall through to the backdrop and close;
                     the X button and Android hardware-back are the always-available
                     close affordances. */}
-                <Pressable style={styles.cardPress} onPress={() => {}}>
+                <Pressable testID="overlay-card-press" style={styles.cardPress} onPress={() => {}}>
                     {children}
                 </Pressable>
             </View>
@@ -209,9 +209,19 @@ const styles = StyleSheet.create({
     // The card's touch responder. Full width (`alignSelf: 'stretch'`) so it does
     // NOT shrink-wrap the card (which would collapse the card's `%` width); it only
     // hugs the card's height and centers it. Swallows taps on the card.
+    //
+    // `flexShrink: 1`: when the card is taller than the layer's space (the window
+    // minus the keyboard padding), this box shrinks to that space instead of
+    // overflowing it. A card that also sets `flexShrink: 1` (with a scrolling
+    // body) then fits exactly above the keyboard, with no height arithmetic: a
+    // `maxHeight` computed from useWindowDimensions was wrong on Android, where
+    // the window height leaves out the nav bar but the keyboard height does not
+    // (the Add / Edit activity cards collapsed to their floor at 360x640, #51).
+    // No effect on a card that fits.
     cardPress: {
         alignSelf: 'stretch',
         alignItems: 'center',
+        flexShrink: 1,
     },
     // Fill-the-window wrapper for the fullScreen variant. `flex: 1` covers the
     // window so the child panel fills it; its paddingBottom (safe-area inset +

@@ -17,6 +17,7 @@ import {
   BackupKey,
   EncryptedBackupEnvelope,
   KdfHeader,
+  KdfParams,
   assertSupportedEnvelope,
   decryptBackup,
   deriveBackupKey,
@@ -37,6 +38,10 @@ import { now } from '@/lib/clock';
  */
 export type RequestBackupPassword = (state: { wrongPassword: boolean }) => Promise<string | null>;
 
+/** The password that opened a backup, its params, and how long deriving its key took here. */
+export type AcceptedBackupPassword = { password: string; kdf: KdfParams; deriveMs: number };
+export type OnPasswordAccepted = (accepted: AcceptedBackupPassword) => void;
+
 export interface ImportOptions {
   requestPassword?: RequestBackupPassword;
   /**
@@ -51,7 +56,7 @@ export interface ImportOptions {
    * opened silently with this phone's stored key), so the caller can offer to
    * keep encrypting new backups with it.
    */
-  onPasswordAccepted?: (password: string) => void;
+  onPasswordAccepted?: OnPasswordAccepted;
   /**
    * Asked before opening an encrypted backup whose settings are stronger
    * than Compatibility (Security / Manual), i.e. before any key is derived
@@ -103,7 +108,7 @@ class BackupKeyDerivationError extends Error {
 export async function openEncryptedBackup(
   envelope: EncryptedBackupEnvelope,
   requestPassword?: RequestBackupPassword,
-  onPasswordAccepted?: (password: string) => void,
+  onPasswordAccepted?: OnPasswordAccepted,
   confirmStrongKdf?: (kdf: KdfHeader) => Promise<boolean>
 ): Promise<string | null> {
   assertSupportedEnvelope(envelope);
@@ -136,14 +141,17 @@ export async function openEncryptedBackup(
     const password = await requestPassword({ wrongPassword });
     if (password === null) return null;
     let key: BackupKey;
+    const started = now().getTime();
     try {
       key = await deriveBackupKey(password, envelope.kdf);
     } catch (error) {
       throw new BackupKeyDerivationError(error instanceof Argon2UnavailableError ? error.message : undefined);
     }
     try {
+      const deriveMs = now().getTime() - started;
       const plaintext = await decryptBackup(envelope, key);
-      onPasswordAccepted?.(password);
+      const { name, memoryKiB, iterations, parallelism } = envelope.kdf;
+      onPasswordAccepted?.({ password, kdf: { name, memoryKiB, iterations, parallelism }, deriveMs });
       return plaintext;
     } catch (error) {
       if (!(error instanceof BackupDecryptionError)) throw error;

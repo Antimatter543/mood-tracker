@@ -193,3 +193,34 @@ export function sameParams(a: KdfParams, b: KdfParams): boolean {
 export function exceedsCompatibility(kdf: KdfParams): boolean {
   return kdf.memoryKiB > COMPATIBILITY_CEILINGS.memoryKiB || kdf.iterations > COMPATIBILITY_CEILINGS.iterations;
 }
+
+/**
+ * A restored backup's params, if they are ones this app would write itself
+ * (whole MiB, at least OWASP's minimum, within the file limits); null means
+ * "calibrate on this phone instead". A backup file is outside input: it must
+ * never set the protection of every future backup below what we write.
+ */
+export function adoptableParams(kdf: KdfParams): KdfParams | null {
+  const input = { memoryMiB: kdf.memoryKiB / 1024, iterations: kdf.iterations, parallelism: kdf.parallelism };
+  return validateManualKdf(input) === null ? kdf : null;
+}
+
+/** The mode to store for params taken over from a restored backup. */
+export function profileForAdoptedParams(kdf: KdfParams): KdfProfile {
+  return exceedsCompatibility(kdf) ? 'manual' : 'compatibility';
+}
+
+/** "700 ms" / "1.2 s". */
+export function formatDuration(ms: number): string {
+  return ms < 1000 ? `${Math.max(1, Math.round(ms))} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
+
+/** The question after a restore: keep this backup's password and protection for new backups? */
+export function keepRestoredEncryptionMessage(kdf: KdfParams, deriveMs: number): string {
+  if (!adoptableParams(kdf)) return 'Keep encrypting new backups with this password?';
+  const strength = exceedsCompatibility(kdf) ? 'strong' : 'standard';
+  return (
+    `The backup's password has ${strength} protection: unlocking it took ${formatDuration(deriveMs)} on this phone.` +
+    '\n\nKeep this password and protection for new backups?'
+  );
+}

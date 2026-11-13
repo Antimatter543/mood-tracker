@@ -24,6 +24,10 @@ import {
   manualParams,
   sameParams,
   validateManualKdf,
+  formatDuration,
+  keepRestoredEncryptionMessage,
+  profileForAdoptedParams,
+  adoptableParams,
 } from '@/lib/backupKdfProfiles';
 
 const MiB = 1024;
@@ -150,5 +154,45 @@ describe('exceedsCompatibility', () => {
     expect(exceedsCompatibility(kdf(19, 2))).toBe(false);
     expect(exceedsCompatibility(kdf(129, 2))).toBe(true);
     expect(exceedsCompatibility(kdf(64, 7))).toBe(true);
+  });
+});
+
+describe('taking over a restored backup', () => {
+  const standard = { name: 'argon2id', memoryKiB: 64 * 1024, iterations: 3, parallelism: 4 } as const;
+  const strong = { name: 'argon2id', memoryKiB: 256 * 1024, iterations: 2, parallelism: 4 } as const;
+
+  it('keeps params within Compatibility as Compatibility, stronger ones as Manual', () => {
+    expect(profileForAdoptedParams(standard)).toBe('compatibility');
+    expect(profileForAdoptedParams(strong)).toBe('manual');
+  });
+
+  it('formats the unlock time in ms, then seconds', () => {
+    expect(formatDuration(0.2)).toBe('1 ms');
+    expect(formatDuration(699.6)).toBe('700 ms');
+    expect(formatDuration(1234)).toBe('1.2 s');
+  });
+
+  it('names the protection and the time in plain words', () => {
+    expect(keepRestoredEncryptionMessage(strong, 700)).toBe(
+      "The backup's password has strong protection: unlocking it took 700 ms on this phone.\n\n" +
+        'Keep this password and protection for new backups?'
+    );
+    expect(keepRestoredEncryptionMessage(standard, 300)).toMatch(/^The backup's password has standard protection/);
+  });
+
+  it('adopts only params this app would write (OWASP minimum, whole MiB)', () => {
+    expect(adoptableParams(standard)).toEqual(standard);
+    expect(adoptableParams(strong)).toEqual(strong);
+    expect(adoptableParams({ name: 'argon2id', memoryKiB: 19 * 1024, iterations: 2, parallelism: 4 })).not.toBeNull();
+    // What a crafted file may say: valid for a FILE, weaker than any writer.
+    expect(adoptableParams({ name: 'argon2id', memoryKiB: 64, iterations: 1, parallelism: 1 })).toBeNull();
+    expect(adoptableParams({ name: 'argon2id', memoryKiB: 8, iterations: 7, parallelism: 1 })).toBeNull();
+    expect(adoptableParams({ name: 'argon2id', memoryKiB: 32 * 1024, iterations: 1, parallelism: 4 })).toBeNull();
+  });
+
+  it('never calls weak params strong', () => {
+    expect(keepRestoredEncryptionMessage({ name: 'argon2id', memoryKiB: 8, iterations: 7, parallelism: 1 }, 1)).toBe(
+      'Keep encrypting new backups with this password?'
+    );
   });
 });
