@@ -1,0 +1,12 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Subflow: pick ${THEME} (a value of SETTINGS_REGISTRY.theme.options) on the Settings
+# tab, through the real control. Ends on Settings with the overlay closed.
+- tapOn:
+    id: tab-settings
+- tapOn:
+    id: setting-select-theme
+- tapOn:
+    id: "setting-option-${THEME}"
+- assertNotVisible:
+    id: "setting-option-${THEME}"

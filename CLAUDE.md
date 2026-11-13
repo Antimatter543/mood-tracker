@@ -10,6 +10,12 @@ device-QA'd on the Pixel 3, data-survival update-path verified. See `frontend/do
 
 Public repo: `Antimatter543/mood-tracker` (Anti's). Releases: GitHub Releases (APK).
 
+## Features go through Anti; bug fixes do not (Anti, 2026-11-13)
+
+- **Bug fixes** (ours, or a community PR/issue): judge it, fix it, merge, release. No ask needed.
+- **Anything feature-like** (a new feature, setting, screen or option, a deliberate behaviour change, a feature-request issue, a community PR that adds one, or our own idea): **never build or merge it without Anti's yes.** Send him a Telegram the same session (`~/bin/astra-telegram-send.py`): "Potential feature request for SoulSync", one line on what it adds, and the PR/issue links. Log it in `~/ops/WAITING.md` and leave it open.
+- Reviewing, running CI and telling the contributor the owner is deciding are fine. A PR that mixes a fix with a feature: the feature part waits. Unsure whether it is a bug or a feature: treat it as a feature.
+
 ## Releasing & Versioning — DETERMINISTIC
 
 **Single source of truth: `frontend/app.json` `expo.version`** (semver). Everything else is derived.
@@ -156,13 +162,18 @@ Ref: `~/ops/references/play-console-cli.md`.
 ## Build / test / gates
 ```bash
 cd frontend
-npm run check        # tsc --noEmit + lint + jest  (the pre-ship gate, light on CPU)
-npx jest             # tests (pure transforms, hooks, db layer all unit-tested)
+npx tsc --noEmit                     # L0, every commit
+npx jest __tests__/<name>.test.ts    # scoped tests for the files you touched, every commit
 ```
+**Which layer a change owes, and why: `frontend/docs/TESTING.md`** (routing table L0-L6, the injected clock,
+the QA seed link, the rule that a device-found bug also gets a cheaper test). **The full suite runs in CI
+only** (`pr-checks.yml`), never on the laptop; `npm run check` and bare `npx jest` run it, so don't. Emulator
+runs and golden recording are CI-only too. Shared test helpers: `frontend/testing/README.md`.
 **Tests are systematic (Anti, 2026-06-13): every feature/fix ships WITH matching jest tests** — bugfix =>
 regression test, new behavior => new tests, prefer class-level invariant tests (e.g. validate the whole icon
-catalog, not one icon). The suite only grows. **Device/manual QA is BATCHED**: one consolidated Expo Go walk +
-one release-APK pass per multi-feature batch, never per individual fix (manual testing takes ages).
+catalog, not one icon). The suite only grows. **Device/manual QA is BATCHED**: Expo Go for iteration, then ONE
+release pass per release from the fixed checklist `frontend/docs/device-qa-checklist.md` (only what an emulator
+can't do), never per individual fix and never a fresh prose walk.
 **NEVER run a LOCAL native build** (`npx expo run:android`, `gradlew`, prebuild compiles). They peg the
 CPU to 100%+ and lag Anti's interactive machine (he is ON this box). **Builds go to the FREE GitHub Actions
 CI lane**: `v*` tag push (via `scripts/release.sh`) = production release; `gh workflow run release-apk.yml
@@ -175,8 +186,7 @@ APK is optimized: `eas.json` preview profile = **arm-only ABIs** (via `plugins/w
 drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-properties`). ~45MB, not ~98MB.
 
 ## On-device QA (the only reliable way to verify UI on this app)
-- Pixel 3 via adb-tls (`adb devices` for the current 192.168.1.68:<port>, the port rotates), app `com.raeduslabs.soulsyncapp`, **device PIN `1337`**
-  (unlock: `adb shell input keyevent KEYCODE_WAKEUP && adb shell input swipe 540 1600 540 300 && adb shell input text 1337 && adb shell input keyevent 66`).
+- Pixel 3 via adb-tls (`adb devices` for the current adb-tls address, the port rotates), app `com.raeduslabs.soulsyncapp`, **unlock with ~/bin/astra-pixel-unlock.sh (holds the PIN; private, never commit it)**.
 - **Iteration loop = Expo Go (Anti-directed, 2026-06-12).** Expo Go 56.0.1 is installed on the Pixel and
   version-matches the project (SDK 56+). This app is vanilla CNG with NO custom native modules, so Go runs
   it faithfully (new-arch/Fabric, gesture-handler/reanimated/sortables/sqlite all bundled or pure-JS;
@@ -188,7 +198,8 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   Dismiss the dev menu on first launch if it overlays.
 - **Ship gate = CI release APK** (`gh workflow run release-apk.yml --ref <branch>`), then `adb install`.
   R8/proguard/release shape + the signed artifact are only exercised there — every batch gets ONE release-APK
-  QA pass before merge, even when Go iteration looked perfect. (There is no dev-client build and no
+  QA pass before merge, even when Go iteration looked perfect; the pass is `frontend/docs/device-qa-checklist.md`,
+  briefed to `device-tester` as is. (There is no dev-client build and no
   `eas update` wiring for this app; EAS itself is quota-bound — the CI lane is the build path.)
 - **NO native `<Modal>` in this app (since v1.2.3) — use in-tree overlays.** Native `<Modal>` on RN 0.76
   Fabric routes into a second native window whose touch dispatch is broken (every in-modal control dead to a
@@ -202,18 +213,60 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
   adb/Maestro QA of the entry form + dropdowns is valid. (See frontend/tasks/lessons.md top entry.)
 - **Use Maestro, not blind adb taps** (`~/.maestro/bin/maestro`; flows in `frontend/.maestro/`). RN/Fabric does
   NOT expose tab-bar labels or react-navigation text to uiautomator, so:
-  - Tap tabs by **point**: `point: X%, 89%` (Home 10 / Stats 30 / Timeline 50 / Insights 70 / Settings 90).
+  - Tap tabs by **testID**: `tapOn: id: tab-home` (`tab-stats` / `tab-timeline` / `tab-insights` /
+    `tab-settings`, from `lib/tabTestIds.ts`). Never by point: the lint below fails it.
   - The FAB has no text — tap it by its accessibility label: `tapOn: text: "Add mood entry"`.
   - Dismiss the expo dev menu with an optional `tapOn: text: "Continue"` after `launchApp`.
-  - Screen-content Text (headers, buttons like "Continue") IS matchable; tab labels are NOT.
+  - Screen-content Text (headers, buttons like "Continue") IS matchable; tab labels are NOT. Maestro text is a
+    full-match REGEX: escape `?`, `+`, `.` (`"How were you\\?"`).
+  - **Flow lint** (`__tests__/maestroFlowLint.test.ts`, in the jest gate): every flow's `appId` must equal
+    app.json `expo.android.package` (`com.raeduslabs.soulsyncapp`), a `point:` tap needs a
+    `# e2e-lint: point-ok <reason>` line above it, and every `id:` must be a testID the app renders.
+- **CI e2e smoke** (`.github/workflows/e2e.yml`): QA APK -> API 34 emulator -> `frontend/.maestro/smoke/*`
+  via `frontend/scripts/e2e-smoke.sh` (~20 min). Runs on main pushes touching frontend/, on dispatch
+  (`gh workflow run e2e.yml --ref <branch> -f flows=03-timeline-delete-undo`), and on PRs labelled `run-e2e`.
+  New smoke flow = add the yaml AND its name to `SMOKE_FLOWS` in the script (the lint checks they agree).
+  The harness is tested device-free by `frontend/scripts/test-e2e-smoke.sh` (pr-checks). Never run
+  e2e-smoke.sh locally: it drives whatever adb device is attached.
+  Every smoke flow starts with `runFlow: subflows/launch.yaml` + `env: SCENARIO: <scenario>`: clearState,
+  the QA seed link with a frozen `now`, then a wait on `qa-seed-status`. The lint checks both and parses the
+  link with the app's own parser. The cached AVD snapshot restores whatever was on screen when it was
+  saved: a poisoned cache (e.g. a baked-in ANR dialog) = bump `AVD_KEY` in e2e.yml (lessons 2026-11-03).
+- **CI golden screenshots** (same workflow, a step after smoke): `frontend/.maestro/goldens/*` via
+  `frontend/scripts/e2e-goldens.sh` on two device configs (gesture; 3-button + tall cutout), judged by
+  `frontend/scripts/golden-diff.mjs` against `frontend/e2e/goldens/<config>/<name>.png`. Budget and status-bar
+  crop: `frontend/e2e/goldens/budgets.json`. A miss turns the job red; the job summary lists each image and
+  the `e2e-out` artifact holds `goldens/diff/<config>/<name>.{expected,actual,delta}.png`.
+  - **A golden changes legitimately** only when the PR means to change those pixels. Look at the delta first,
+    then say in the PR body which image changed and why. Never raise a budget to get a run green: a screen
+    that will not hold still is a source to fix, or a screen to drop from the set with the reason in the PR.
+  - **Re-record, on CI only, never on the laptop:** `gh workflow run e2e.yml -R Antimatter543/mood-tracker
+    --ref <branch> -f record=true`, then `gh run download <run-id> -R Antimatter543/mood-tracker -n
+    goldens-recorded -D frontend/e2e/goldens`, then look at the changed PNGs (`git status`) and commit only
+    the ones you meant to change. The workflow has no write permission and never pushes. A record run skips
+    smoke and the verdict, and fails on a Maestro failure so a half-finished set can't be committed.
+  - **New golden** = a yaml in `.maestro/goldens/` that starts with `launch.yaml` then `subflows/settle.yaml`,
+    `subflows/hold.yaml` right before each `takeScreenshot`, and its name in a `GOLDEN_FLOWS_*` list in the
+    script; each image should name the bug it guards. Scroll only with `subflows/slow-scroll.yaml`, never
+    `scrollUntilVisible` (where it stops depends on timing), and `cropOn` an element that ends up clear of
+    the FAB and any sticky bar. The lint checks all of this, and that a golden exists for every shot.
+  - Harness and verdict are tested device-free in pr-checks: `scripts/test-e2e-goldens.sh`,
+    `node --test scripts/test-golden-diff.mjs`.
+  - **The PR gate does not run goldens.** A PR that moves pixels needs the `run-e2e` label before merge, or the
+    next push to main goes red (`release.sh` gates on `pr-checks.yml` only, so a release is not blocked). A
+    fork's head can't be dispatched on: push it to a temporary branch here to record.
+  - **Red with goldens at 24/24 and a flow stuck in `launch.yaml`:** grep logcat in `e2e-out` for
+    `GuardedPoolAllocator::deallocate` before anything else. It is a known startup crash on the x86_64 emulator
+    that hits about 11% of runs; re-run the job (`frontend/tasks/lessons.md`, 2026-11-06).
 - Sideload installs may hit Play Protect: `adb shell settings put global verifier_verify_adb_installs 0`,
   then `adb install -r -g <apk>`. EAS-signed release vs debug-signed dev build differ → uninstall before swapping.
 - Seed test data: Settings has `__DEV__`-only "Generate 50 Sample Entries" and "Generate 300 Timeline QA
   Entries" buttons (dev build / Expo Go only). The 300 seed clusters entries by day with mixed note lengths,
-  photos and stars: use it for any Timeline scroll/fling QA (`.maestro/timeline-fling.yaml`).
+  photos and stars: use it for any Timeline scroll/fling QA (`.maestro/timeline-fling.yaml`). A release APK has no
+  such button: for the Pixel pass load `node scripts/make-demo-data.js --days 300` through Settings -> Restore.
   **Scripted/CI seeding = the QA deep link** (QA builds ONLY, `EXPO_PUBLIC_QA=1`, e.g. the e2e emulator
   workflow): `adb shell am start -a android.intent.action.VIEW -d 'myapp://qa/seed?scenario=week&now=2026-06-15T12:00:00Z'`
-  (Maestro: `openLink`). Scenarios `empty | week | timeline300 | yearBoundary`; optional `now` (strict UTC,
+  (Maestro: `openLink`). Scenarios `empty | week | timeline300 | yearBoundary | oneBucket`; optional `now` (strict UTC,
   `YYYY-MM-DDTHH:MM:SS(.sss)Z`) freezes the app clock (`lib/clock.ts`) and anchors the data, and survives a
   relaunch. It WIPES the DB first, and refuses (`error foreign-data`) when the DB holds entries no seed wrote.
   Wait on testID `qa-seed-status` = `QA seed: ok <scenario> (<n>)`. Settings loads once per launch, so relaunch
@@ -274,4 +327,4 @@ drops x86/x86_64 emulator libs) **+ R8 minify + resource shrink** (`expo-build-p
 - `frontend/lib/notifications.ts` — local daily-reminder scheduling (pure + testable).
 - `frontend/databases/` — SQLite facade, migrations, CRUD, mediaHelpers, entry-media, `writeTransaction.ts`
   (the write primitive). **Read `frontend/databases/CLAUDE.md` before touching any write path.**
-- `frontend/.maestro/` — device QA flows. `frontend/tasks/lessons.md` — project lessons. `frontend/docs/` — RELEASING.md + exec plans.
+- `frontend/.maestro/` — device QA flows. `frontend/tasks/lessons.md` — project lessons. `frontend/docs/` — TESTING.md, device-qa-checklist.md, RELEASING.md + exec plans.

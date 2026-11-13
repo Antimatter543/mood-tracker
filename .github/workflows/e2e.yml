@@ -1,0 +1,392 @@
+name: E2E smoke + goldens (emulator + Maestro)
+
+# Builds a QA APK on a free runner, boots an API 34 emulator and runs the Maestro smoke set
+# (frontend/.maestro/smoke, driven by frontend/scripts/e2e-smoke.sh). It catches what jest can't:
+# a control that renders but can't be pressed, an overlay that lets taps through, a screen that
+# never re-reads after a write. Then the golden screenshots, on a fresh boot of the same image
+# (frontend/.maestro/goldens, frontend/scripts/e2e-goldens.sh, judged by golden-diff.mjs): what a
+# flow can't see, like a layout shift or a contrast change. Too slow for every PR push:
+#   - every push to main that touches frontend/ (the release tree always has a run),
+#   - workflow_dispatch (any ref; `flows` input runs a subset of smoke and skips the goldens;
+#     `record` records new goldens as a run artifact and skips smoke and the verdict),
+#   - a PR labelled `run-e2e` (re-runs on each push while the label stays on).
+# The harness logic itself is tested device-free in the PR gate (pr-checks.yml, test-e2e-smoke.sh).
+#
+# Security shape (public repo):
+#   - `pull_request`, NEVER `pull_request_target`: a fork PR runs with a read-only token and no
+#     secrets, and only a maintainer can add the label.
+#   - NO repo secrets anywhere. The APK is signed with a keystore GENERATED in the job (public
+#     password), so it can never be mistaken for, or update over, a release build. It is a
+#     short-lived run artifact only, never a release asset.
+#   - Caches: written only by main pushes and manual dispatches; a PR run only reads them.
+#   - permissions: contents: read. Every action pinned to a full commit SHA (tag in the comment).
+#   - Recording never pushes. `record` only uploads the PNGs; a person (or agent) commits them from
+#     the artifact in a reviewable PR, so this workflow needs no write permission at all.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/e2e.yml'
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, labeled]
+  workflow_dispatch:
+    inputs:
+      flows:
+        description: 'Comma-separated subset of the smoke flows (blank = all). Set = no goldens.'
+        required: false
+        default: ''
+      record:
+        description: 'Record new goldens as the goldens-recorded artifact (no smoke, no verdict)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  # Supersede stale PR pushes; never cancel a main run (each main commit needs its own result).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Cache writes only from trusted events (see the header).
+  CACHE_WRITE: ${{ github.event_name != 'pull_request' }}
+
+jobs:
+  build-qa-apk:
+    # On PRs: only with the run-e2e label, and a `labeled` event only for THAT label (adding any
+    # other label must not start a 20-minute run).
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'run-e2e') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'run-e2e'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      build_s: ${{ steps.apk.outputs.build_s }}
+      gradle_s: ${{ steps.apk.outputs.gradle_s }}
+      apk_bytes: ${{ steps.apk.outputs.apk_bytes }}
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      # The QA build flag (QA-only code paths, e.g. the seed deep link, key off it).
+      EXPO_PUBLIC_QA: '1'
+    steps:
+      - name: Start timer
+        working-directory: .
+        run: echo "JOB_T0=$(date +%s)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+        with:
+          # The Expo prebuild ships its own wrapper; don't fail on its checksum.
+          validate-wrappers: false
+          # Caches the Gradle user home (deps, wrapper, and the build cache that --build-cache fills).
+          cache-read-only: ${{ env.CACHE_WRITE != 'true' }}
+
+      - run: npm ci
+
+      - name: Prebuild (CNG)
+        run: npx expo prebuild --platform android --no-install
+
+      # EXPO_PUBLIC_* values are NOT part of Metro's transform cache key, and the cache root
+      # outlives prebuild. A bundle transformed without EXPO_PUBLIC_QA=1 would silently ship
+      # without the seed channel (CLAUDE.md "METRO-CACHE TRAP"). Fresh runners start empty;
+      # this keeps it true if a Metro cache is ever restored. The bundle check below proves it.
+      - name: Wipe Metro caches
+        run: rm -rf "${TMPDIR:-/tmp}/metro-cache" "${TMPDIR:-/tmp}"/haste-map-* node_modules/.cache/metro
+
+      - name: Generate a throwaway signing keystore (no repo secrets)
+        working-directory: .
+        run: |
+          keytool -genkeypair -keystore "$RUNNER_TEMP/qa.keystore" -storepass android \
+            -alias qa -keypass android -keyalg RSA -keysize 2048 -validity 3650 \
+            -dname "CN=SoulSync QA (CI throwaway),O=QA,C=US" -noprompt
+
+      - name: assembleRelease (x86_64 only)
+        working-directory: frontend/android
+        # -PreactNativeArchitectures overrides the arm-only value withReleaseAbis.js writes, so only
+        # this QA build carries x86_64. --build-cache reuses task outputs across runs (restored by
+        # setup-gradle); the native CMake builds are not cacheable and dominate a cold build.
+        run: |
+          T=$(date +%s)
+          ./gradlew assembleRelease \
+            -PreactNativeArchitectures=x86_64 \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/qa.keystore" \
+            -Pandroid.injected.signing.store.password=android \
+            -Pandroid.injected.signing.key.alias=qa \
+            -Pandroid.injected.signing.key.password=android \
+            --build-cache --no-daemon
+          echo "GRADLE_S=$(( $(date +%s) - T ))" >> "$GITHUB_ENV"
+
+      - name: Locate APK, assert x86_64, record size
+        id: apk
+        run: |
+          set -euo pipefail
+          SRC=$(find android/app/build/outputs/apk/release -name '*.apk' | head -1)
+          [ -n "$SRC" ] || { echo "::error::no release APK found"; exit 1; }
+          cp "$SRC" "$RUNNER_TEMP/soulsync-qa.apk"
+          # The emulator cannot load arm-only libs: prove the ABI override took.
+          LIBS=$(unzip -l "$SRC" | grep -o 'lib/[^/]*/' | sort -u | tr '\n' ' ')
+          echo "native lib dirs: $LIBS"
+          echo "$LIBS" | grep -q 'lib/x86_64/' || { echo "::error::APK has no lib/x86_64"; exit 1; }
+          if echo "$LIBS" | grep -q 'lib/arm'; then echo "::error::APK still carries arm libs"; exit 1; fi
+          # Positive control: the flows open the QA seed link, so the shipped Hermes bundle
+          # must carry the seed channel (frontend/lib/qa). Without it every flow would time
+          # out on "QA seed: ok" 20 minutes from now; fail here instead, in seconds.
+          unzip -p "$SRC" assets/index.android.bundle > "$RUNNER_TEMP/qa-index.android.bundle"
+          ../.github/scripts/qa-seed-bundle-check.sh "$RUNNER_TEMP/qa-index.android.bundle" present
+          {
+            echo "apk_bytes=$(stat -c%s "$SRC")"
+            echo "gradle_s=$GRADLE_S"
+            echo "build_s=$(( $(date +%s) - JOB_T0 ))"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: soulsync-qa-apk
+          path: ${{ runner.temp }}/soulsync-qa.apk
+          if-no-files-found: error
+          retention-days: 3
+
+  emulator-maestro:
+    needs: build-qa-apk
+    runs-on: ubuntu-latest
+    # Smoke ~9 min + goldens, plus a cold AVD when the cache misses.
+    timeout-minutes: 55
+    env:
+      E2E_OUT: e2e-out
+      E2E_FLOWS: ${{ github.event.inputs.flows }}
+      # Pinned by version AND checksum: the zip comes straight from the GitHub release (no
+      # curl|bash installer). sha256 is the release asset's published digest.
+      MAESTRO_VERSION: '2.12.1'
+      MAESTRO_SHA256: 54dbb0716425626604973cbb374c585ca30272375d9ce15177a1152765ddd9d7
+      # Everything that shapes the AVD. Change any emulator input below => bump this key.
+      # v1 was retired: its snapshot was saved with a Pixel Launcher ANR dialog on screen
+      # (frozen into every restore). v2 snapshots come from `e2e-smoke.sh --snapshot`.
+      AVD_KEY: avd-v2-api34-x86_64-google_apis-pixel_3-c3-r4096
+    steps:
+      - name: Start timer
+        run: echo "JOB_T0=$(date +%s)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: soulsync-qa-apk
+          path: qa-apk
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Maestro ${{ env.MAESTRO_VERSION }} (pinned + checksum)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/maestro.zip" \
+            "https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"
+          echo "${MAESTRO_SHA256}  $RUNNER_TEMP/maestro.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/maestro/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/maestro/bin/maestro" --version
+
+      # Per android-emulator-runner's README: without this the emulator cannot open /dev/kvm on
+      # the ubuntu runners and falls back to software emulation (unusably slow).
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Mark emulator step start
+        run: echo "EMU_T0=$(date +%s)" >> "$GITHUB_ENV"
+
+      # AVD snapshot cache (android-emulator-runner README recipe): a warm run cold-boots from a
+      # saved snapshot instead of a full first boot. Restore always; save only from trusted events.
+      - name: Restore AVD snapshot
+        id: avd-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: ${{ env.AVD_KEY }}
+
+      # Only when the snapshot will be SAVED: it costs one extra boot. A read-only run with a miss
+      # skips it and lets the smoke step create the AVD and do a plain full boot.
+      - name: Create AVD + snapshot (cache miss)
+        if: steps.avd-cache.outputs.cache-hit != 'true' && env.CACHE_WRITE == 'true'
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_3
+          cores: 3
+          ram-size: 4096M
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: false
+          # Settle first boot and close any system error dialog BEFORE the state is saved:
+          # whatever is on screen here is restored by every later run.
+          script: E2E_OUT=e2e-out/snapshot bash frontend/scripts/e2e-smoke.sh --snapshot
+
+      - name: Save AVD snapshot
+        if: steps.avd-cache.outputs.cache-hit != 'true' && env.CACHE_WRITE == 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: ${{ env.AVD_KEY }}
+
+      - name: Mark smoke step start
+        run: echo "SMOKE_T0=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Emulator + Maestro smoke (API 34 x86_64 google_apis)
+        if: github.event.inputs.record != 'true'
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          EMU_T0: ${{ env.SMOKE_T0 }}
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          # A real phone geometry (1080x2160 @ 440dpi, the bench Pixel 3), not the tiny default skin,
+          # so the tab bar and insets lay out as on the device.
+          profile: pixel_3
+          cores: 3
+          ram-size: 4096M
+          force-avd-creation: false
+          # -no-snapshot-save: boot from the cached snapshot, never write this run's state back.
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash frontend/scripts/e2e-smoke.sh qa-apk/soulsync-qa.apk
+
+      # A fresh boot of the same snapshot, not the smoke step's emulator: the images must not
+      # depend on what the smoke flows left behind (about a minute, and it isolates the two).
+      # Runs after a smoke failure too: it is a separate verdict, and often the explanation.
+      - name: Mark goldens step start
+        if: ${{ !cancelled() && github.event.inputs.flows == '' }}
+        run: echo "GOLDENS_T0=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Emulator + Maestro golden screenshots
+        if: ${{ !cancelled() && github.event.inputs.flows == '' }}
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          E2E_OUT: e2e-out/goldens
+          E2E_RECORD: ${{ github.event.inputs.record == 'true' && '1' || '0' }}
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_3
+          cores: 3
+          ram-size: 4096M
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash frontend/scripts/e2e-goldens.sh qa-apk/soulsync-qa.apk
+
+      - name: Record end of the goldens step
+        if: ${{ !cancelled() && github.event.inputs.flows == '' }}
+        run: echo "GOLDENS_STEP_S=$(( $(date +%s) - GOLDENS_T0 ))" >> "$GITHUB_ENV"
+
+      # The verdict runs even when a flow failed: whatever images exist still get their deltas,
+      # and the missing ones are listed as misses. Node only here: pngjs + pixelmatch from the
+      # lockfile, with no lifecycle scripts (nothing in this step needs them).
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' }}
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the diff's dependencies
+        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' }}
+        working-directory: frontend
+        run: npm ci
+
+      - name: Compare against the goldens
+        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' }}
+        run: node frontend/scripts/golden-diff.mjs --goldens frontend/e2e/goldens --actual e2e-out/goldens/actual --out e2e-out/goldens/diff
+
+      - name: Upload the recorded goldens
+        if: ${{ success() && github.event.inputs.record == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: goldens-recorded
+          path: e2e-out/goldens/actual/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Summary
+        if: always()
+        env:
+          BUILD_S: ${{ needs.build-qa-apk.outputs.build_s }}
+          GRADLE_S: ${{ needs.build-qa-apk.outputs.gradle_s }}
+          APK_BYTES: ${{ needs.build-qa-apk.outputs.apk_bytes }}
+          AVD_HIT: ${{ steps.avd-cache.outputs.cache-hit }}
+        run: |
+          f="$E2E_OUT/result.env"
+          get() { sed -n "s/^$1=//p" "$f" 2>/dev/null | tail -1; }
+          emu_job=$(( $(date +%s) - JOB_T0 ))
+          total=$(( ${BUILD_S:-0} + emu_job ))
+          m() { [ -n "$1" ] && awk -v s="$1" 'BEGIN{printf "%.1f", s/60}' || echo n/a; }
+          g="$E2E_OUT/goldens/result.env"
+          gget() { sed -n "s/^$1=//p" "$g" 2>/dev/null | tail -1; }
+          {
+            echo "## E2E smoke: $(get RESULT)"
+            echo
+            echo "| build job | gradle | AVD cache | boot* | install | flows | emulator job | total (jobs) | APK |"
+            echo "|---|---|---|---|---|---|---|---|---|"
+            echo "| $(m "$BUILD_S") min | $(m "$GRADLE_S") min | ${AVD_HIT:-false} | $(get BOOT_S)s | $(get INSTALL_S)s | $(get FLOWS_S)s | $(m "$emu_job") min | $(m "$total") min | $(( ${APK_BYTES:-0} / 1048576 )) MB |"
+            echo
+            echo "*boot = smoke-step start to adb-ready (snapshot restore or full boot)."
+            echo
+            cat "$E2E_OUT/summary.md" 2>/dev/null || echo "(no flow table: setup failed: $(get REASON))"
+            echo
+            echo "nav mode: $(get NAV_MODE) (2 = gesture) | clock: $(get CLOCK_AFTER_PIN) | system dialogs closed: $(get SYSTEM_DIALOGS) | seed retries: $(get SEED_RETRIES)"
+            echo
+            echo "## Golden screenshots: $(gget RESULT)"
+            echo
+            echo "goldens step: $(m "$GOLDENS_STEP_S") min (boot included) | flows: $(gget GOLDENS_S)s | images: $(gget IMAGES) | seed retries: $(gget SEED_RETRIES) | system dialogs closed: $(gget SYSTEM_DIALOGS)"
+            echo "status bar: gesture $(gget STATUS_BAR_gesture) px, threebutton-cutout $(gget STATUS_BAR_threebutton-cutout) px"
+            gget CROP_MISMATCH_gesture
+            gget CROP_MISMATCH_threebutton-cutout
+            echo
+            cat "$E2E_OUT/goldens/summary.md" 2>/dev/null || echo "(goldens did not run or setup failed: $(gget REASON))"
+            echo
+            cat "$E2E_OUT/goldens/diff/summary.md" 2>/dev/null || echo "(no pixel verdict in this run)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload screenshots, logcat, Maestro output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-out
+          path: e2e-out/
+          if-no-files-found: warn
+          retention-days: 14

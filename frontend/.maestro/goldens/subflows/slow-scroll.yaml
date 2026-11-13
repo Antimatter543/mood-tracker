@@ -1,0 +1,16 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Subflow: scroll a page down by a fixed distance, the only way a golden flow scrolls.
+#
+# scrollUntilVisible is not usable here. Its swipes fling, so where it stops depends on
+# timing, and centerElement gives up after a few tries with the element wherever it
+# landed. One gate run in six stopped with the Stats sticky period bar over the
+# crop. This swipe ends below Android's fling velocity (about 137 px/s on this density),
+# so the page stops where the finger stops, the same place on every run.
+#
+# It runs in the page gutter (x = 3%), because the mood chart's scrub gesture takes a
+# drag that starts on it.
+- swipe:
+    start: 3%, 60%
+    end: 3%, 39%
+    duration: 5000

@@ -187,7 +187,11 @@ describe('import of an encrypted backup', () => {
 
     await importDatabaseData(db as any, { requestPassword, onPasswordAccepted });
 
-    expect(onPasswordAccepted.mock.calls).toEqual([['other device pass']]);
+    expect(onPasswordAccepted).toHaveBeenCalledTimes(1);
+    const [accepted] = onPasswordAccepted.mock.calls[0];
+    expect(accepted.password).toBe('other device pass');
+    expect(accepted.kdf).toEqual(FAST_KDF);
+    expect(accepted.deriveMs).toBeGreaterThanOrEqual(0);
   });
 
   it('does not call onPasswordAccepted when the backup opened with the key stored on this phone', async () => {
@@ -226,6 +230,35 @@ describe('import of an encrypted backup', () => {
 
     expect(result).toEqual({ success: false, message: 'Import cancelled' });
     expect(db.runAsync).not.toHaveBeenCalled();
+  });
+
+  it('a backup with stronger settings than Compatibility asks confirmStrongKdf first; "no" cancels before the password', async () => {
+    const key = await createBackupKey('other device pass', FAST_KDF);
+    const envelope = JSON.parse(await encryptBackup(JSON.stringify(PLAIN_BACKUP), key));
+    // Only the header matters here: the check runs before any key is derived.
+    envelope.kdf.memoryKiB = 512 * 1024;
+    pickFileWithContents(JSON.stringify(envelope));
+    const db = makeDb();
+    const requestPassword = jest.fn(async () => 'other device pass');
+    const confirmStrongKdf = jest.fn(async () => false);
+
+    const result = await importDatabaseData(db as any, { requestPassword, confirmStrongKdf });
+
+    expect(confirmStrongKdf).toHaveBeenCalledWith(expect.objectContaining({ memoryKiB: 512 * 1024 }));
+    expect(requestPassword).not.toHaveBeenCalled();
+    expect(result).toEqual({ success: false, message: 'Import cancelled' });
+    expect(db.runAsync).not.toHaveBeenCalled();
+  });
+
+  it('does not ask confirmStrongKdf for a backup within Compatibility', async () => {
+    const key = await createBackupKey('other device pass', FAST_KDF);
+    pickFileWithContents(await encryptBackup(JSON.stringify(PLAIN_BACKUP), key));
+    const confirmStrongKdf = jest.fn(async () => true);
+
+    const result = await importDatabaseData(makeDb() as any, { requestPassword: jest.fn().mockResolvedValueOnce('other device pass').mockResolvedValue(null), confirmStrongKdf });
+
+    expect(result.success).toBe(true);
+    expect(confirmStrongKdf).not.toHaveBeenCalled();
   });
 
   it('fails cleanly when a password is needed but no prompt is available', async () => {

@@ -16,6 +16,13 @@
  *  - Every 14 days a backup first asks to confirm the password (skippable).
  *  - An unreadable stored key never produces a plain backup.
  *  - A build without native Argon2 refuses to turn encryption on.
+ *  - "Technical details" switches the strength mode (Compatibility,
+ *    Security, Manual); the key is derived again after the current password.
+ *    Manual shows "Run benchmark" until a benchmark of exactly those params
+ *    succeeded, then "Save" (confirmed when slower than 500 ms). A password
+ *    change keeps the mode.
+ *  - Restoring a backup made with stronger settings than Compatibility
+ *    warns first (it may freeze or crash a weaker phone).
  *  - Restoring an encrypted backup from elsewhere opens the unlock dialog,
  *    re-asks with an error (the field keeping focus) after a wrong
  *    password, closes on success, and offers to keep the password.
@@ -61,11 +68,12 @@ jest.mock('@/databases/writeTransaction', () => ({
 }));
 jest.mock('expo-document-picker');
 jest.mock('expo-file-system/legacy', () => require('../__mocks__/expo-file-system'));
-const mockCalibrate = jest.fn(async () => ({
+const mockCalibrate = jest.fn(async (..._args: unknown[]) => ({
   params: { name: 'argon2id', memoryKiB: 48 * 1024, iterations: 2, parallelism: 4 },
 }));
 jest.mock('@/lib/backupKdfCalibration', () => ({
-  calibrateKdfParams: () => mockCalibrate(),
+  ...jest.requireActual('@/lib/backupKdfCalibration'),
+  calibrateKdfParams: (...args: unknown[]) => mockCalibrate(...args),
 }));
 // The calibrated params above are what the UI must describe; deriving with
 // them for real would cost seconds per test, so key derivation runs with cheap
@@ -82,11 +90,22 @@ jest.mock('@/lib/backupCrypto', () => {
       return { kdf: { ...params, salt: key.kdf.salt }, key: key.key };
     },
     deriveBackupKey: async (password: string, kdf: any) => {
-      const key = await actual.deriveBackupKey(password, kdf.memoryKiB === 48 * 1024 ? cheap(kdf) : kdf);
+      // Every header createBackupKey stores here is >= 1 MiB (calibrated or
+      // Manual params); files from "another phone" use real 64 KiB params.
+      const key = await actual.deriveBackupKey(password, kdf.memoryKiB >= 1024 ? cheap(kdf) : kdf);
       return { kdf: { ...kdf }, key: key.key };
     },
   };
 });
+// A 12 GB phone: "Security" may use up to the 1 GiB file limit.
+jest.mock('expo-device', () => ({ totalMemory: 12 * 1024 ** 3 }));
+// The Manual benchmark: a real derivation with the typed params would take
+// seconds in jest, so its result is set per test.
+const mockBenchmark = jest.fn();
+jest.mock('@/lib/backupKdfProfiles', () => ({
+  ...jest.requireActual('@/lib/backupKdfProfiles'),
+  benchmarkKdf: (params: unknown) => mockBenchmark(params),
+}));
 const mockCanDerive = jest.fn(() => true);
 jest.mock('@/lib/argon2', () => ({
   ...jest.requireActual('@/lib/argon2'),
@@ -95,7 +114,7 @@ jest.mock('@/lib/argon2', () => ({
 
 import { DataManagementSection, describeKdf } from '@/components/DataManagementSection';
 import * as dataExport from '@/databases/data-export';
-import { createBackupKey, encryptBackup } from '@/lib/backupCrypto';
+import { createBackupKey, encryptBackup, type KdfParams } from '@/lib/backupCrypto';
 import { getBackupKey, getPasswordConfirmedAt, markPasswordConfirmed } from '@/lib/backupKeyStore';
 import { freezeNow } from '@/testing/clock';
 
@@ -211,10 +230,7 @@ describe('Encrypt backups switch', () => {
     // The parameters are behind "Technical details", not in the hint.
     expect(screen.queryByText(/Argon2id/)).toBeNull();
     await fireEvent.press(screen.getByLabelText('Backup encryption technical details'));
-    expect(alerts).toHaveBeenLastCalledWith(
-      'Technical details',
-      expect.stringContaining('Argon2id, 48 MiB × 2 passes, 4 lanes')
-    );
+    expect(screen.getByText(/Compatibility, Argon2id, 48 MiB × 2 passes, 4 lanes/)).toBeTruthy();
     expect(alerts).toHaveBeenCalledWith('Backups are encrypted', expect.stringMatching(/cannot be shown again/));
     expect(JSON.stringify(SecureStoreMock.__dump())).not.toContain('a long passphrase');
   });
@@ -403,8 +419,10 @@ describe('stored key unreadable', () => {
 });
 
 describe('restoring an encrypted backup from elsewhere', () => {
-  async function restoreFromOtherPhone(alerts: Record<string, string>) {
-    const key = await createBackupKey('other phone pass', { name: 'argon2id', memoryKiB: 64, iterations: 1, parallelism: 1 });
+  const OTHER_KDF = { name: 'argon2id', memoryKiB: 64, iterations: 1, parallelism: 1 } as const;
+
+  async function restoreFromOtherPhone(alerts: Record<string, string>, kdf: KdfParams = OTHER_KDF) {
+    const key = await createBackupKey('other phone pass', kdf);
     const file = await encryptBackup(
       JSON.stringify({ version: 3, data: { activityGroups: [], activities: [], entries: [], settings: [] } }),
       key
@@ -438,7 +456,30 @@ describe('restoring an encrypted backup from elsewhere', () => {
     expect(mockRefetchEntries).toHaveBeenCalled();
   });
 
-  it('on a phone without encryption, offers to keep encrypting with that password (Yes)', async () => {
+  it("on a phone without encryption, offers the backup's password and protection with its unlock time (Yes)", async () => {
+    const STANDARD = { name: 'argon2id', memoryKiB: 32 * 1024, iterations: 2, parallelism: 4 } as const;
+    const alerts = await restoreFromOtherPhone({ 'Data restored': 'Yes' }, STANDARD);
+    await fireEvent.changeText(screen.getByLabelText('Backup password'), 'other phone pass');
+    await fireEvent.press(screen.getByLabelText('Unlock and restore'));
+
+    await waitFor(() =>
+      expect(alerts).toHaveBeenCalledWith(
+        'Data restored',
+        expect.stringMatching(
+          /standard protection: unlocking it took \d+ ms on this phone\.\n\nKeep this password and protection for new backups\?$/
+        ),
+        expect.any(Array)
+      )
+    );
+    await waitFor(() => expect(encryptionSwitch().props.value).toBe(true));
+    const stored = (await getBackupKey())!;
+    // The backup's params, under a fresh salt.
+    expect(stored.kdf).toMatchObject(STANDARD);
+    expect(JSON.parse(SecureStoreMock.__dump().backup_encryption_key_v1).profile).toBe('compatibility');
+  });
+
+  it('never takes over params weaker than this app writes: calibrates on this phone instead', async () => {
+    // 64 KiB x 1 pass: a file may say this, the app never writes it.
     const alerts = await restoreFromOtherPhone({ 'Data restored': 'Yes' });
     await fireEvent.changeText(screen.getByLabelText('Backup password'), 'other phone pass');
     await fireEvent.press(screen.getByLabelText('Unlock and restore'));
@@ -451,8 +492,22 @@ describe('restoring an encrypted backup from elsewhere', () => {
       )
     );
     await waitFor(() => expect(encryptionSwitch().props.value).toBe(true));
-    // A fresh salt on THIS phone, not the other phone's.
     expect((await getBackupKey())!.kdf.memoryKiB).toBe(48 * 1024);
+    expect(JSON.parse(SecureStoreMock.__dump().backup_encryption_key_v1).profile).toBe('compatibility');
+  });
+
+  it('takes over strong protection as Manual, and calls it strong', async () => {
+    const strong = { name: 'argon2id', memoryKiB: 256 * 1024, iterations: 2, parallelism: 4 } as const;
+    const alerts = await restoreFromOtherPhone({ 'Data restored': 'Yes', 'Strong encryption settings': 'Open' }, strong);
+    await fireEvent.changeText(screen.getByLabelText('Backup password'), 'other phone pass');
+    await fireEvent.press(screen.getByLabelText('Unlock and restore'));
+
+    await waitFor(() =>
+      expect(alerts).toHaveBeenCalledWith('Data restored', expect.stringMatching(/strong protection/), expect.any(Array))
+    );
+    await waitFor(() => expect(encryptionSwitch().props.value).toBe(true));
+    expect((await getBackupKey())!.kdf).toMatchObject(strong);
+    expect(JSON.parse(SecureStoreMock.__dump().backup_encryption_key_v1).profile).toBe('manual');
   });
 
   it('No leaves encryption off', async () => {
@@ -474,5 +529,263 @@ describe('describeKdf', () => {
     expect(describeKdf({ name: 'argon2id', memoryKiB: 256 * 1024, iterations: 1, parallelism: 1, salt: '' })).toBe(
       'Argon2id, 256 MiB × 1 pass, 1 lane'
     );
+  });
+});
+
+describe('strength modes (Technical details)', () => {
+  const MiB = 1024;
+  const readMode = () => JSON.parse(SecureStoreMock.__dump().backup_encryption_key_v1).profile;
+
+  async function openDetails() {
+    await fireEvent.press(screen.getByLabelText('Backup encryption technical details'));
+  }
+
+  async function applyWith(password: string) {
+    await waitFor(() => screen.getByLabelText('Apply'));
+    await fireEvent.changeText(screen.getByLabelText('Backup password'), password);
+    await fireEvent.press(screen.getByLabelText('Apply'));
+  }
+
+  async function chooseManual(memoryMiB: string, passes: string, lanes: string) {
+    await fireEvent.press(screen.getByLabelText('Manual'));
+    await fireEvent.changeText(screen.getByLabelText('Memory (MiB)'), memoryMiB);
+    await fireEvent.changeText(screen.getByLabelText('Passes'), passes);
+    await fireEvent.changeText(screen.getByLabelText('Lanes'), lanes);
+  }
+
+  const saveButton = () => screen.getByLabelText('Save encryption settings');
+
+  beforeEach(() => {
+    mockBenchmark.mockReset();
+  });
+
+  it('shows the current mode with the three choices; nothing to save until the mode changes', async () => {
+    await renderWithEncryption();
+    await openDetails();
+
+    expect(screen.getByText(/Compatibility, Argon2id, 48 MiB × 2 passes, 4 lanes/)).toBeTruthy();
+    expect(screen.getByLabelText('Compatibility (default)').props.accessibilityState.selected).toBe(true);
+    expect(screen.getByLabelText('Security')).toBeTruthy();
+    expect(screen.getByLabelText('Manual')).toBeTruthy();
+    expect(saveButton().props.accessibilityState.disabled).toBe(true);
+  });
+
+  it('Security: asks for the password, then calibrates without the caps and stores a new key', async () => {
+    await renderWithEncryption();
+    const before = (await getBackupKey())!.kdf.salt;
+    mockCalibrate.mockClear();
+    const alerts = alertSpy();
+
+    await openDetails();
+    await fireEvent.press(screen.getByLabelText('Security'));
+    await fireEvent.press(saveButton());
+    await applyWith('first passphrase');
+
+    await waitFor(() => expect(alerts).toHaveBeenCalledWith('Encryption settings saved', expect.any(String), expect.any(Array)));
+    // The benchmark ran with the Security ceilings: the 1 GiB / 20-pass file limits on a 12 GB phone.
+    expect(mockCalibrate).toHaveBeenCalledWith(500, undefined, { memoryKiB: 1024 * MiB, iterations: 20 });
+    expect(readMode()).toBe('security');
+    expect((await getBackupKey())!.kdf.salt).not.toBe(before);
+  });
+
+  it('a wrong password keeps the old mode and key', async () => {
+    await renderWithEncryption();
+    const before = (await getBackupKey())!.kdf.salt;
+
+    await openDetails();
+    await fireEvent.press(screen.getByLabelText('Security'));
+    await fireEvent.press(saveButton());
+    await applyWith('not my password');
+
+    await waitFor(() => screen.getByText("That's not your backup password."));
+    expect(readMode()).toBe('compatibility');
+    expect((await getBackupKey())!.kdf.salt).toBe(before);
+  });
+
+  it('Manual: one button, "Run benchmark" until a benchmark of exactly the typed params succeeded, then "Save"', async () => {
+    await renderWithEncryption();
+    mockBenchmark.mockImplementation(async (params: any) => ({ ok: true, params, ms: 320 }));
+
+    await openDetails();
+    await chooseManual('64', '3', '4');
+    expect(screen.getByLabelText('Run benchmark')).toBeTruthy();
+    expect(screen.queryByLabelText('Save encryption settings')).toBeNull();
+
+    await fireEvent.press(screen.getByLabelText('Run benchmark'));
+    await waitFor(() => screen.getByText('Took 320 ms on this phone.'));
+    expect(mockBenchmark).toHaveBeenCalledWith({ name: 'argon2id', memoryKiB: 64 * MiB, iterations: 3, parallelism: 4 });
+    expect(saveButton().props.accessibilityState.disabled).toBe(false);
+    expect(screen.queryByLabelText('Run benchmark')).toBeNull();
+
+    // Editing a value turns it back into "Run benchmark".
+    await fireEvent.changeText(screen.getByLabelText('Passes'), '4');
+    expect(screen.queryByLabelText('Save encryption settings')).toBeNull();
+    expect(screen.getByLabelText('Run benchmark')).toBeTruthy();
+    expect(screen.queryByText(/Took/)).toBeNull();
+  });
+
+  it('Manual: saves the typed params after the password, without calibrating', async () => {
+    await renderWithEncryption();
+    mockBenchmark.mockImplementation(async (params: any) => ({ ok: true, params, ms: 320 }));
+    mockCalibrate.mockClear();
+    const alerts = alertSpy();
+
+    await openDetails();
+    await chooseManual('64', '3', '2');
+    await fireEvent.press(screen.getByLabelText('Run benchmark'));
+    await waitFor(() => screen.getByText('Took 320 ms on this phone.'));
+    await fireEvent.press(saveButton());
+    await applyWith('first passphrase');
+
+    await waitFor(() => expect(alerts).toHaveBeenCalledWith('Encryption settings saved', expect.any(String), expect.any(Array)));
+    expect(readMode()).toBe('manual');
+    expect((await getBackupKey())!.kdf).toMatchObject({ memoryKiB: 64 * MiB, iterations: 3, parallelism: 2 });
+    expect(mockCalibrate).not.toHaveBeenCalled();
+  });
+
+  it('Manual: slower than 500 ms needs a confirmation; Cancel saves nothing', async () => {
+    await renderWithEncryption();
+    mockBenchmark.mockImplementation(async (params: any) => ({ ok: true, params, ms: 1800 }));
+    const alerts = alertSpy({ 'Slow settings': 'Cancel' });
+
+    await openDetails();
+    await chooseManual('512', '4', '4');
+    await fireEvent.press(screen.getByLabelText('Run benchmark'));
+    await waitFor(() => screen.getByText('Took 1.8 s on this phone.'));
+    await fireEvent.press(saveButton());
+
+    expect(alerts).toHaveBeenCalledWith('Slow settings', expect.stringMatching(/took 1\.8 s/), expect.any(Array));
+    expect(screen.queryByLabelText('Apply')).toBeNull();
+    expect(readMode()).toBe('compatibility');
+  });
+
+  it('Manual: "Use anyway" on a slow benchmark goes on to the password', async () => {
+    await renderWithEncryption();
+    mockBenchmark.mockImplementation(async (params: any) => ({ ok: true, params, ms: 1800 }));
+    alertSpy({ 'Slow settings': 'Use anyway' });
+
+    await openDetails();
+    await chooseManual('512', '4', '4');
+    await fireEvent.press(screen.getByLabelText('Run benchmark'));
+    await waitFor(() => screen.getByText(/Took 1\.8 s/));
+    await fireEvent.press(saveButton());
+    await applyWith('first passphrase');
+
+    await waitFor(() => expect(readMode()).toBe('manual'));
+    expect((await getBackupKey())!.kdf).toMatchObject({ memoryKiB: 512 * MiB, iterations: 4 });
+  });
+
+  it('Manual: a failed benchmark says so and keeps "Run benchmark" instead of "Save"', async () => {
+    await renderWithEncryption();
+    mockBenchmark.mockImplementation(async (params: any) => ({ ok: false, params, error: 'Out of memory' }));
+
+    await openDetails();
+    await chooseManual('1024', '2', '4');
+    await fireEvent.press(screen.getByLabelText('Run benchmark'));
+
+    await waitFor(() => screen.getByText('Benchmark failed: Out of memory'));
+    expect(screen.queryByLabelText('Save encryption settings')).toBeNull();
+    expect(screen.getByLabelText('Run benchmark')).toBeTruthy(); // to retry
+  });
+
+  it('Manual: params below the recommended minimum cannot be benchmarked', async () => {
+    await renderWithEncryption();
+
+    await openDetails();
+    await chooseManual('19', '1', '4');
+
+    expect(screen.getByText(/Below the recommended minimum/)).toBeTruthy();
+    expect(screen.getByLabelText('Run benchmark').props.accessibilityState.disabled).toBe(true);
+  });
+
+  it('a password change keeps the mode: Security calibrates with its ceilings again', async () => {
+    await renderWithEncryption();
+    alertSpy();
+    await openDetails();
+    await fireEvent.press(screen.getByLabelText('Security'));
+    await fireEvent.press(saveButton());
+    await applyWith('first passphrase');
+    await waitFor(() => expect(readMode()).toBe('security'));
+    mockCalibrate.mockClear();
+
+    await openChange();
+    expect(mockCalibrate).toHaveBeenCalledWith(500, undefined, { memoryKiB: 1024 * MiB, iterations: 20 });
+    await fillChange('first passphrase', 'second passphrase');
+    await waitFor(() => expect(screen.queryByLabelText('Change password')).toBeNull());
+    expect(readMode()).toBe('security');
+  });
+
+  it('a password change keeps Manual params', async () => {
+    await renderWithEncryption();
+    mockBenchmark.mockImplementation(async (params: any) => ({ ok: true, params, ms: 300 }));
+    alertSpy();
+    await openDetails();
+    await chooseManual('96', '3', '2');
+    await fireEvent.press(screen.getByLabelText('Run benchmark'));
+    await waitFor(() => screen.getByText('Took 300 ms on this phone.'));
+    await fireEvent.press(saveButton());
+    await applyWith('first passphrase');
+    await waitFor(() => expect(readMode()).toBe('manual'));
+    const salt = (await getBackupKey())!.kdf.salt;
+    mockCalibrate.mockClear();
+
+    await openChange();
+    await fillChange('first passphrase', 'second passphrase');
+
+    await waitFor(async () => expect((await getBackupKey())!.kdf.salt).not.toBe(salt));
+    expect(mockCalibrate).not.toHaveBeenCalled();
+    expect(readMode()).toBe('manual');
+    expect((await getBackupKey())!.kdf).toMatchObject({ memoryKiB: 96 * MiB, iterations: 3, parallelism: 2 });
+  });
+});
+
+describe('restoring a backup made with stronger settings', () => {
+  const MiB = 1024;
+  const WARNING = 'Strong encryption settings';
+
+  async function pickBackup(params: { memoryKiB: number; iterations: number }, alerts: Record<string, string>) {
+    const key = await createBackupKey('other phone pass', { name: 'argon2id', parallelism: 4, ...params });
+    const file = await encryptBackup(
+      JSON.stringify({ version: 3, data: { activityGroups: [], activities: [], entries: [], settings: [] } }),
+      key
+    );
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValue({ canceled: false, assets: [{ uri: 'file:///x.json' }] });
+    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue(file);
+    const spy = alertSpy({ 'Import Data': 'Continue', ...alerts });
+    await renderSection();
+    await fireEvent.press(screen.getByText('Restore'));
+    return spy;
+  }
+
+  it('warns that it may freeze or crash the app, then asks for the password on "Open"', async () => {
+    const alerts = await pickBackup({ memoryKiB: 512 * MiB, iterations: 2 }, { [WARNING]: 'Open' });
+
+    await waitFor(() => screen.getByLabelText('Backup password'));
+    expect(alerts).toHaveBeenCalledWith(
+      WARNING,
+      expect.stringMatching(/may freeze or crash.*Only open backups you made yourself/s),
+      expect.any(Array),
+      expect.any(Object)
+    );
+  });
+
+  it('more passes than Compatibility warns too', async () => {
+    const alerts = await pickBackup({ memoryKiB: 64 * MiB, iterations: 8 }, { [WARNING]: 'Open' });
+    await waitFor(() => screen.getByLabelText('Backup password'));
+    expect(alerts.mock.calls.map(c => c[0])).toContain(WARNING);
+  });
+
+  it('"Cancel" stops before any password is asked', async () => {
+    const alerts = await pickBackup({ memoryKiB: 512 * MiB, iterations: 2 }, { [WARNING]: 'Cancel' });
+
+    await waitFor(() => expect(alerts.mock.calls.map(c => c[0])).toContain(WARNING));
+    expect(screen.queryByLabelText('Backup password')).toBeNull();
+    expect(alerts.mock.calls.map(c => c[0])).not.toContain('Import Failed');
+  });
+
+  it('Compatibility-strength backups open without the warning', async () => {
+    const alerts = await pickBackup({ memoryKiB: 128 * MiB, iterations: 6 }, {});
+    await waitFor(() => screen.getByLabelText('Backup password'));
+    expect(alerts.mock.calls.map(c => c[0])).not.toContain(WARNING);
   });
 });

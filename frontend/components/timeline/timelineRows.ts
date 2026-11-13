@@ -15,6 +15,7 @@
 
 import type { MoodEntry } from '../types';
 import { sectionKeyForDate } from './dateHeader';
+import type { DayHealth } from './dayHealth';
 
 /**
  * Rows per SQL page. 50, up from 20: a hard fling on a phone covers several
@@ -39,6 +40,8 @@ export type DaySummary = {
      * present them as the day's totals.
      */
     complete: boolean;
+    /** Health Connect figures of a finished day; absent for today and days without data. */
+    health?: DayHealth;
 };
 
 export type TimelineHeaderRow = { type: 'header'; key: string } & DaySummary;
@@ -57,6 +60,9 @@ export type TimelineRow = TimelineHeaderRow | TimelineEntryRow;
 
 /** Recycling pools. Cells only ever recycle into a cell of the same type. */
 export type TimelineRowType = 'header' | 'entry' | 'entry-photos';
+
+/** Health figures per local day, and today's key: today is not over, so it gets none. */
+export type TimelineHealth = { byDay: ReadonlyMap<string, DayHealth>; todayKey: string };
 
 export const headerKey = (dayKey: string): string => `day:${dayKey}`;
 export const entryKey = (id: number): string => `entry:${id}`;
@@ -85,7 +91,8 @@ export const averageMood = (entries: readonly MoodEntry[]): number | null => {
  */
 export const buildTimelineRows = (
     entries: readonly MoodEntry[],
-    mayContinue: boolean
+    mayContinue: boolean,
+    health?: TimelineHealth
 ): TimelineRow[] => {
     const groups: { dayKey: string; entries: MoodEntry[] }[] = [];
     for (const entry of entries) {
@@ -101,13 +108,17 @@ export const buildTimelineRows = (
         const occurrence = seenDays.get(group.dayKey) ?? 0;
         seenDays.set(group.dayKey, occurrence + 1);
         const isLastGroup = groupIndex === groups.length - 1;
+        const complete = !(isLastGroup && mayContinue);
+        const dayHealth =
+            complete && health && group.dayKey < health.todayKey ? health.byDay.get(group.dayKey) : undefined;
         rows.push({
             type: 'header',
             key: headerKey(occurrence === 0 ? group.dayKey : `${group.dayKey}#${occurrence}`),
             dayKey: group.dayKey,
             count: group.entries.length,
             averageMood: averageMood(group.entries),
-            complete: !(isLastGroup && mayContinue),
+            complete,
+            ...(dayHealth ? { health: dayHealth } : {}),
         });
         group.entries.forEach((entry, i) => {
             rows.push({

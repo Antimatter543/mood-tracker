@@ -48,7 +48,7 @@ main had moved 3 commits past the branch's fork point (`49aab20`): CI lane `cb66
   it as a deliberately-public project guide) was fixed system-side with a narrowly-scoped
   `CLAUDE_MD_PUBLIC_REPOS = {'mood-tracker'}` allowlist.
 
-## DEVICE QA — full gauntlet (BURST 2, Pixel 3 @ 192.168.1.68:5555)
+## DEVICE QA — full gauntlet (BURST 2, Pixel 3 at the Pixel's adb-tls address (`adb devices`))
 
 APK under test = the QA build (`SoulSync-1.2.3.apk` from run 27395665250: 1.2.3 versionName +
 **SDK-56 guts**, targetSdk 36). **Zero app crashes across the entire session** (full logcat sweep).

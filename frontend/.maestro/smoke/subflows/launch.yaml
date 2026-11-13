@@ -1,0 +1,55 @@
+appId: com.raeduslabs.soulsyncapp
+---
+# Subflow: start every smoke flow from the same place. Fresh install state,
+# the QA seed's ${SCENARIO} (empty | week | timeline300 | yearBoundary), and the
+# app clock frozen at one instant, so the greeting, "today" and every date the
+# flow sees are the same on every run.
+#
+# The seed link exists only in QA builds (EXPO_PUBLIC_QA=1; lib/qa). The instant
+# matches the device clock e2e-smoke.sh pins (2026-11-03 10:00 UTC), so the
+# system UI and the app agree on the date. __tests__/maestroFlowLint.test.ts
+# parses this link with the app's own parser for every scenario a flow names.
+- launchApp:
+    clearState: true
+# Cold start of a release build on a CI emulator: generous on purpose.
+- extendedWaitUntil:
+    visible: "Good (morning|afternoon|evening)"
+    timeout: 90000
+- openLink: "myapp://qa/seed?scenario=${SCENARIO}&now=2026-11-03T10:00:00Z"
+- extendedWaitUntil:
+    visible:
+      id: qa-seed-status
+      text: "QA seed: (ok|error).*"
+    timeout: 30000
+# ONE retry from a fresh install when the seed reports an error. CI run
+# 41659037408 hit `error reset-failed` once in 15 seeds: resetDatabase's
+# migrations failed in expo-sqlite ("Cannot use shared object that was already
+# released"), an app-side race that is not this flow's to fix. The screenshot
+# name is the marker e2e-smoke.sh counts as SEED_RETRIES, so a retried pass
+# stays visible in the run summary. The error pill never auto-hides.
+- runFlow:
+    when:
+      visible:
+        id: qa-seed-status
+        text: "QA seed: error.*"
+    commands:
+      - takeScreenshot: seed-retry
+      - launchApp:
+          clearState: true
+      - extendedWaitUntil:
+          visible: "Good (morning|afternoon|evening)"
+          timeout: 90000
+      - openLink: "myapp://qa/seed?scenario=${SCENARIO}&now=2026-11-03T10:00:00Z"
+      - extendedWaitUntil:
+          visible:
+            id: qa-seed-status
+            text: "QA seed: ok.*"
+          timeout: 30000
+# Never wait for the ok pill again out here: it hides after 6 s, and Maestro's
+# evaluation of the skipped `when` above can outlast that (CI run 41662479999
+# failed 4/5 flows on exactly that). The error pill never hides, so its absence
+# is a stable check that the seed (first try or retry) succeeded.
+- assertNotVisible:
+    id: qa-seed-status
+    text: "QA seed: error.*"
+- assertVisible: "Good (morning|afternoon|evening)"

@@ -126,6 +126,9 @@ export const HEALTH_OPT_IN_SETTING_KEY = 'health_connect_opt_in';
 /** `user_settings` key: ISO timestamp of the last successful sync ('' = never). */
 export const HEALTH_LAST_SYNCED_SETTING_KEY = 'health_last_synced_at';
 
+/** `user_settings` key: sync on the first app open of each day ('true'; default off). */
+export const HEALTH_DAILY_SYNC_SETTING_KEY = 'health_daily_sync';
+
 /**
  * Whether the Health Connect Settings section should render at all. Android +
  * feature-flag-on only; on iOS / web / when disabled the section renders
