@@ -15,7 +15,7 @@
 // `localDateString` / `aggregateDailyAverages` (the one authority), never a
 // SQL date() bucket — see databases/dateHelpers.ts READ CONTRACT.
 
-import { localDateTimeString } from '@/databases/dateHelpers';
+import { convertStringToDate, localDateTimeString } from '@/databases/dateHelpers';
 import {
     aggregateDailyAverages,
     type InstantValueRow,
@@ -277,8 +277,13 @@ export const moodTrendForActivity = (
     rows: InstantValueRow[], perEntry: boolean = false
 ): ActivityTrendPoint[] =>
     !perEntry
+        // With per entry off, aggregate entries to daily averages
         ? aggregateDailyAverages(rows).map((d) => ({ day: d.day, avg: d.avg }))
-        : rows.map((d) => ({ day: localDateTimeString(d.date), avg: d.mood }))
+        // Otherwise skip the entries with invalid dates, convert date to
+        // localDateTimeString, use the entry's mood as "avg" and finally
+        // sort the entries based on the date.
+        : rows.filter((d) => !Number.isNaN(convertStringToDate(d.date).getTime()))
+                .map((d) => ({ day: localDateTimeString(d.date), avg: d.mood }))
                 .sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
 
 /**
