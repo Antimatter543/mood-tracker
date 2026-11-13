@@ -1,334 +1,227 @@
-import { useCallback, useState, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Card } from '@/components/Card';
+import InfoBubble from '@/components/InfoBubble';
+import { OverlayModal } from '@/components/OverlayModal';
+import RecoveryEpisodeDetails from '@/components/RecoveryEpisodeDetails';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useDateFormat } from '@/hooks/useDateFormat';
-import InfoBubble from '../InfoBubble';
+import { addDays, localDateString, startOfLocalDay } from '@/databases/dateHelpers';
+import { now } from '@/lib/clock';
+import { RECOVERY_ENTRY_ACTIVITIES } from './queries';
 import {
     analyseRecoveryPatterns,
-    type MoodActivityRow,
+    groupRecoveryRows,
+    LOW_STRETCH_EXPLAINER,
+    type RecoveryAnalysis,
     type RecoveryEpisode,
+    type RecoveryRawRow,
 } from './transforms/recoveryPatterns';
 import {
-    startOfLocalDay,
-    addDays,
-    localDateString,
-    localDateTimeString,
-} from './transforms/dateHelpers';
-import { now } from '@/lib/clock';
-import { Activity } from '../types';
-import { OverlayModal } from '../OverlayModal';
-import RecoveryEpisodeDetails from '../RecoveryEpisodeDetails';
-import { Feather } from '@expo/vector-icons';
-import { IconFamilyType } from '../iconRegistry';
+    daysLabel,
+    daysSoFar,
+    moodRangeLine,
+    statusLabel,
+    summaryLine,
+    typicalLine,
+} from './transforms/lowStretchCopy';
 
-type RawMoodEntry = {
-    id: number;
-    date: string;
-    mood: number;
-    aId: number;
-    aName: string;
-    aGroup: number;
-    aIconFamily: IconFamilyType;
-    aIconName: string;
-    aPosition: number;
- };
+/** How far back the card looks. The copy says "last 90 days". */
+const WINDOW_DAYS = 90;
+/** Ended stretches listed on the card; the rest are counted in the summary. */
+const MAX_ROWS = 5;
 
-const RecoveryAnalysis = () => {
+/**
+ * "After low days": low stretches in the last 90 days and how they ended.
+ *
+ * Self-loading (its own 90-day query), and renders NOTHING until there is at
+ * least one low stretch: no card, no empty message, no (i).
+ */
+const RecoveryAnalysisCard = () => {
     const colors = useThemeColors();
+    const styles = useThemedStyles(colors);
     const { format: formatDate } = useDateFormat();
     const db = useSQLiteContext();
-    const [currentEpisode, setCurrentEpisode] = useState<RecoveryEpisode | null>(null);
-    const [historicalEpisodes, setHistoricalEpisodes] = useState<RecoveryEpisode[]>([]);
-    const [successRate, setSuccessRate] = useState<number>(0);
-    const [avgDuration, setAvgDuration] = useState<number>(0);
-    const [selected, setSelected] = useState<RecoveryEpisode | null>(null);  
-    const styles = useThemedStyles(colors);
-    
-    const run = useCallback(async () => {
+    const [analysis, setAnalysis] = useState<RecoveryAnalysis | null>(null);
+    const [selected, setSelected] = useState<RecoveryEpisode | null>(null);
+
+    const load = useCallback(async () => {
         try {
-            // Last 90 days of entries with activity names. The lower bound is now a
-            // parameterised LOCAL-time UTC ISO string (start of 90 days ago in the
-            // user's timezone) rather than SQLite's UTC date('now', '-90 days'),
-            // which silently dropped late-evening entries for users east of UTC.
-            const start = startOfLocalDay(
-                addDays(localDateString(now()), -90)
-            );
-
-            const rawEntries = await db.getAllAsync<RawMoodEntry>(`
-                WITH MoodActivities AS (
-                  SELECT
-                    e.id AS id,
-                    e.date AS date,
-                    e.mood AS mood,
-                    a.id AS aId,
-                    a.name AS aName,
-                    a.group_id AS aGroup,
-                    a.icon_family AS aIconFamily,
-                    a.icon_name AS aIconName,
-                    a.position AS aPosition
-                  FROM entries e
-                  LEFT JOIN entry_activities ea ON e.id = ea.entry_id
-                  LEFT JOIN activities a ON ea.activity_id = a.id
-                  WHERE e.deleted_at IS NULL AND e.date >= ?
-                  ORDER BY e.date, e.id ASC
-                )
-                SELECT * FROM MoodActivities
-            `, [start]);
-
-            // Process the raw entry + activities rows
-            let lastEntry: MoodActivityRow | null  = null;
-            let entries: MoodActivityRow[] = [];
-            let activityMap = new Map<number, Activity>();
-            for (const raw of rawEntries) {
-                // Get the activity object or create and cache a new one
-                let activity: Activity | undefined = undefined
-                if (raw.aId) {
-                    activity = activityMap.get(raw.aId);
-                    if (!activity) {
-                        activity = {
-                            id: raw.aId,
-                            name: raw.aName,
-                            group_id: raw.aGroup,
-                            icon_family: raw.aIconFamily,
-                            icon_name: raw.aIconName,
-                            position: raw.aPosition,
-                        };
-                        activityMap.set(raw.aId, activity);
-                    }
-                }
-
-                // Entries & activities are ordered by date and then
-                // by the entry id: when id changes, create new entry.
-                if (!lastEntry || lastEntry.id != raw.id) {
-                    lastEntry = {
-                        id: raw.id,
-                        date: localDateTimeString(raw.date),
-                        mood: raw.mood,
-                        activities: [],
-                    };
-                    entries.push(lastEntry);
-                }
-
-                if (activity)
-                    lastEntry.activities.push(activity);
-            }
-
-            const result = analyseRecoveryPatterns(entries);
-            setSuccessRate(result.successRate);
-            setAvgDuration(result.avgDuration);
-            setHistoricalEpisodes(result.historicalEpisodes);
-            setCurrentEpisode(result.currentEpisode);
+            // LOCAL start of the day 90 days ago, as a UTC instant bound.
+            const start = startOfLocalDay(addDays(localDateString(now()), -WINDOW_DAYS));
+            const raw = await db.getAllAsync<RecoveryRawRow>(RECOVERY_ENTRY_ACTIVITIES, [start]);
+            setAnalysis(analyseRecoveryPatterns(groupRecoveryRows(raw ?? [])));
         } catch (error) {
-            console.error('Error analyzing recovery patterns:', error);
+            console.error('Error loading low stretches:', error);
         }
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
-      }, [db]);
-    useDataRefresh(run, [db]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
+    }, [db]);
+    useDataRefresh(load, [db]);
 
-    const episodeEntry = (episode: RecoveryEpisode, key: string) => (
-        <Pressable
-            key={key}
-            style={({ pressed }) => [
-                styles.episodeItem,
-                pressed && styles.episodePressed,
-                key != 'current' && styles.bottomBorder
-            ]}
-            onPress={() => setSelected(episode)}
-            accessibilityRole="button"
-            accessibilityLabel={`Open episode details`}
-        >          
-            <View style={styles.episodeIcon}>
-                <Feather name='calendar' size={18} color={colors.textSecondary}/>
-                <Text style={styles.secondaryText}>{episode.durationDays} days</Text>
-            </View>
-            <View style={styles.grow}>
-                <Text style={styles.text}>
-                    {formatDate(episode.startDate, 'numericShort')} – {episode.endDate ? formatDate(episode.endDate, 'numericShort') : 'ongoing'}
-                </Text>
-                {episode.dips > 1 && (
-                    <Text style={styles.text}>{episode.dips} dips{episode.endDate && (episode.recovered ? ', recovered' : ', not recovered')}</Text>
-                )}
-                {episode.dips == 1 && (
-                    <Text style={styles.text}>{episode.dips} dip{episode.endDate && (episode.recovered ? ', recovered' : ', not recovered')}</Text>
-                )}
-                {episode.dips == 0 && episode.endDate && (
-                    <Text style={styles.text}>{episode.recovered ? 'Recovered' : 'Not recovered'}</Text>
-                )}
-                <Text style={styles.text}>
-                    Mood {episode.worstMood.toFixed(1)} – {episode.currentMood.toFixed(1)} (worst – latest)
-                </Text>
-            </View>
-            <Feather
-                name="chevron-right"
-                size={18}
-                color={colors.textSecondary}
-            />
-        </Pressable>
-    );
-    
-    if (!currentEpisode && historicalEpisodes.length == 0)
-        return (
-            <Card>
-                <InfoBubble 
-                    text="Recovery analysis tracks how you bounce back from low moods. It shows your recovery patterns, duration, and success rate. A recovery is completed once two days exceed an average mood of 6 (after having delved below 4). Episode is marked as non-recovered, if the mood is at least 5 for four days."
-                    position="top-right"
-                />
-                <Text style={styles.title}>Recovery analysis</Text>
-                <View style={styles.emptyState}>
-                    <Text style={styles.emptyText}>
-                        No recovery episodes recognized. Keep on logging moods!
-                    </Text>
-                </View>
-            </Card>
-        )
+    if (!analysis || analysis.episodeCount === 0) return null;
+
+    const dateRange = (episode: RecoveryEpisode) =>
+        `${formatDate(episode.startDate, 'mediumNoYear')} – ${
+            episode.endDate ? formatDate(episode.endDate, 'mediumNoYear') : 'now'
+        }`;
+
+    const current = analysis.currentEpisode;
+    const typical = typicalLine(analysis);
+    const today = localDateString(now());
 
     return (
         <Card>
-            <InfoBubble 
-                text="Recovery analysis tracks how you bounce back from low moods. It shows your recovery patterns, duration, and success rate. A recovery is completed once two days exceed an average mood of 6 (after having delved below 4). Episode is marked as non-recovered, if the mood is at least 5 for four days."
-                position="top-right"
-            />
-            <Text style={styles.title}>Recovery analysis</Text>
-            
-            {currentEpisode != null && (<Text style={styles.subtitle}>Current episode</Text>)}
-            {currentEpisode != null && episodeEntry(currentEpisode!, 'current')}
+            {/* InfoBubble is absolutely positioned (top-right) by the component. */}
+            <InfoBubble text={LOW_STRETCH_EXPLAINER} />
 
-            <View style={styles.stats}>
-                <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Success rate</Text>
-                    <Text style={styles.statValue}>{successRate.toFixed(0)}%</Text>
-                    <Text style={styles.statDetail}>full recovery</Text>
+            <View style={styles.headerRow}>
+                <View style={[styles.iconCircle, { backgroundColor: colors.accentLight }]}>
+                    <Ionicons name="partly-sunny-outline" size={20} color={colors.accent} />
                 </View>
-
-                <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Average duration</Text>
-                    <Text style={styles.statValue}>{avgDuration.toFixed(1)}</Text>
-                    <Text style={styles.statDetail}>days to recover</Text>
-                </View>
+                <Text style={styles.title}>After low days</Text>
             </View>
 
-            {historicalEpisodes.length > 0 && (
-                <View>
-                    <Text style={styles.subtitle}>Recent episodes</Text>
-                    <View style={styles.history}>
-                        {historicalEpisodes.slice(0, 5).map((episode, index) => (
-                            episodeEntry(episode, `episode-${index}`)
-                        ))}
+            <Text style={styles.body} testID="low-stretch-summary">
+                {summaryLine(analysis.episodeCount)}
+            </Text>
+            {typical && (
+                <Text style={styles.body} testID="low-stretch-typical">
+                    {typical}
+                </Text>
+            )}
+
+            {current && (
+                <Pressable
+                    testID="low-stretch-current"
+                    style={({ pressed }) => [styles.row, styles.currentRow, pressed && styles.pressed]}
+                    onPress={() => setSelected(current)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Low stretch since ${formatDate(current.startDate, 'mediumNoYear')}, ${daysLabel(daysSoFar(current.startDate, today))} so far. Opens details.`}
+                >
+                    <View style={styles.grow}>
+                        <Text style={styles.rowTitle} numberOfLines={1}>
+                            Since {formatDate(current.startDate, 'mediumNoYear')}
+                        </Text>
+                        <Text style={styles.rowSub} numberOfLines={1}>
+                            {daysLabel(daysSoFar(current.startDate, today))} so far
+                        </Text>
+                        <Text style={styles.rowSub} numberOfLines={1}>
+                            {moodRangeLine(current)}
+                        </Text>
                     </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                </Pressable>
+            )}
+
+            {analysis.historicalEpisodes.length > 0 && (
+                <View style={styles.list}>
+                    {analysis.historicalEpisodes.slice(0, MAX_ROWS).map((episode, index) => (
+                        <Pressable
+                            key={`${episode.startDate}-${index}`}
+                            testID={`low-stretch-row-${index}`}
+                            style={({ pressed }) => [
+                                styles.row,
+                                index > 0 && styles.divider,
+                                pressed && styles.pressed,
+                            ]}
+                            onPress={() => setSelected(episode)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Low stretch ${dateRange(episode).replace('–', 'to')}, ${statusLabel(episode).toLowerCase()}. Opens details.`}
+                        >
+                            <Text style={[styles.rowTitle, styles.grow]} numberOfLines={1}>
+                                {dateRange(episode)}
+                            </Text>
+                            <Text style={styles.status} numberOfLines={1}>
+                                {statusLabel(episode)}
+                            </Text>
+                            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+                        </Pressable>
+                    ))}
                 </View>
             )}
 
-            {selected && (
-                <OverlayModal
-                    visible={selected !== null}
-                    onClose={() => setSelected(null)}
-                    fullScreen
-                >
-                    {selected && (
-                        <RecoveryEpisodeDetails
-                            episode={selected}
-                            onClose={() => setSelected(null)}
-                        />
-                    )}
-                </OverlayModal>            
-            )}
+            <OverlayModal visible={selected !== null} onClose={() => setSelected(null)} fullScreen>
+                {selected && (
+                    <RecoveryEpisodeDetails episode={selected} onClose={() => setSelected(null)} />
+                )}
+            </OverlayModal>
         </Card>
     );
 };
 
-export default RecoveryAnalysis;
+export default RecoveryAnalysisCard;
 
-
-
-// Themed styles hook
-const useThemedStyles = (colors: ThemeColors) => {
-    return useMemo(() => StyleSheet.create({
-        title: {
-            fontSize: 20,
-            fontWeight: 'bold',
-            color: colors.text,
-            marginBottom: 16,
-        },
-        subtitle: {
-            fontSize: 16,
-            fontWeight: '600',
-            color: colors.text,
-            marginBottom: 8,
-        },
-        stats: {
-            flexDirection: 'row',
-            justifyContent: 'space-around',
-            marginTop: 16,
-            marginBottom: 32,
-        },
-        statItem: {
-            alignItems: 'center',
-        },
-        statLabel: {
-            fontSize: 14,
-            color: colors.textSecondary,
-            marginBottom: 4,
-        },
-        statValue: {
-            fontSize: 24,
-            fontWeight: 'bold',
-            color: colors.accent,
-        },
-        statDetail: {
-            fontSize: 12,
-            color: colors.textSecondary,
-        },
-        history: {
-            marginBottom: 16,
-            borderTopWidth: StyleSheet.hairlineWidth,
-            borderTopColor: colors.overlays.border,
-        },
-        bottomBorder: {
-            borderBottomWidth: StyleSheet.hairlineWidth,
-            borderBottomColor: colors.overlays.border,
-        },
-        episodeItem: {
-            flexDirection: 'row',
-            alignItems: 'flex-start',
-            gap: 12,
-            paddingVertical: 10,
-        },
-        episodePressed: {
-        opacity: 0.6,
-        },
-        episodeIcon: {
-            width: 70,
-            height: 50,
-            color: colors.textSecondary,
-            borderRadius: 25,
-            backgroundColor: colors.accentLight,
-            alignItems: 'center',
-            justifyContent: 'center',
-        },
-        grow: { flex: 1 },
-        text: {
-            color: colors.text,
-            fontSize: 14,
-            marginBottom: 4,
-        },
-        secondaryText: {
-            color: colors.textSecondary,
-            fontSize: 14,
-            marginBottom: 4,
-        },
-        emptyState: {
-            alignItems: 'center',
-            gap: 10,
-            paddingVertical: 20,
-        },
-        emptyText: {
-            fontSize: 14,
-            color: colors.textSecondary,
-            textAlign: 'center',
-            lineHeight: 20,
-        },
-    }), [colors]);
-};
+// Header/title/body mirror MoodDriversCard, the neighbour above on Insights.
+const useThemedStyles = (colors: ThemeColors) =>
+    useMemo(
+        () =>
+            StyleSheet.create({
+                headerRow: {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                    marginBottom: 12,
+                    // leave room for the absolutely-positioned InfoBubble
+                    paddingRight: 36,
+                },
+                iconCircle: {
+                    width: 40,
+                    height: 40,
+                    borderRadius: 20,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                },
+                title: {
+                    fontSize: 16,
+                    fontWeight: '700',
+                    color: colors.text,
+                    flex: 1,
+                },
+                body: {
+                    fontSize: 15,
+                    lineHeight: 22,
+                    color: colors.textSecondary,
+                },
+                grow: { flex: 1, minWidth: 0 },
+                row: {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                    minHeight: 48,
+                    paddingVertical: 10,
+                },
+                currentRow: {
+                    marginTop: 12,
+                    paddingHorizontal: 12,
+                    borderRadius: 16,
+                    backgroundColor: colors.accentLight,
+                },
+                list: {
+                    marginTop: 8,
+                },
+                divider: {
+                    borderTopWidth: StyleSheet.hairlineWidth,
+                    borderTopColor: colors.overlays.border,
+                },
+                pressed: { opacity: 0.6 },
+                rowTitle: {
+                    fontSize: 15,
+                    fontWeight: '600',
+                    color: colors.text,
+                },
+                rowSub: {
+                    fontSize: 14,
+                    lineHeight: 20,
+                    color: colors.textSecondary,
+                },
+                status: {
+                    fontSize: 14,
+                    color: colors.textSecondary,
+                    flexShrink: 0,
+                },
+            }),
+        [colors]
+    );

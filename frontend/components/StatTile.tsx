@@ -22,7 +22,7 @@ export type StatTileProps = {
     /** Feather glyph name. */
     icon: React.ComponentProps<typeof Feather>['name'];
     /** The prominent value, e.g. "7.2 / 10". */
-    value: any;
+    value: string;
     /** The muted caption under the value. */
     label: string;
     /**
