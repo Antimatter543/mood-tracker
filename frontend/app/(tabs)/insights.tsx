@@ -55,6 +55,7 @@ import {
 import { getHealthMetricsRange } from '@/databases/health-metrics';
 import { shouldShowHealthConnect } from '@/lib/healthConnectConfig';
 import { now } from '@/lib/clock';
+import { useSettings } from '@/context/SettingsContext';
 
 /**
  * Insights — honest, locally-derived patterns from the user's own entries.
@@ -169,6 +170,9 @@ export default function InsightsScreen() {
     const styles = useStyles(colors);
     const db = useSQLiteContext();
     const [data, setData] = useState<Insights | null>(null);
+    const { settings } = useSettings();
+    const carryover = settings.activity_carryover;
+    const perEntry = settings.activity_per_entry;
 
     // Sync loader returning a cleanup: the `active` flag (flipped on
     // blur/unmount by useDataRefresh) gates setData so a late all-time query
@@ -219,7 +223,7 @@ export default function InsightsScreen() {
                     // in JS (localDateString / aggregate*) — see queries.ts.
                     const dow = buildDowPatternData(aggregateDowRows(dowRawRows));
                     const corr = computeActivityCorrelation(
-                        aggregateActivityCorrelation(activityRawRows)
+                        aggregateActivityCorrelation(activityRawRows, { carryover, perEntry })
                     );
                     // Most uplifting activities = largest positive, meaningful deltas
                     // (top 3). Empty when none lift mood, which drives the empty state.
@@ -299,10 +303,10 @@ export default function InsightsScreen() {
                 active = false;
             };
         // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
-        }, [db]);
+        }, [db, carryover, perEntry]);
     // Focus-aware refetch (replaces useEffect([db, refreshCount])): always
     // reloads when this tab regains focus AND live-updates while focused.
-    useDataRefresh(load, [db]);
+    useDataRefresh(load, [db, carryover, perEntry]);
 
     if (data && data.totalEntries === 0) {
         return (

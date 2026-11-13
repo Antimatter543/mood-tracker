@@ -152,6 +152,7 @@ const ActivityCorrelationChart = () => {
   const db = useSQLiteContext();
   const { periodWindow } = useTimeframe();
   const { settings } = useSettings();
+  const perEntry = settings.activity_per_entry;
   const carryover = settings.activity_carryover;
   const [meaningful, setMeaningful] = useState<ActivityCorrelationResult[]>([]);
   const [barWidth, setBarWidth] = useState(0);
@@ -213,14 +214,14 @@ const ActivityCorrelationChart = () => {
           periodWindow,
           carryover,
         );
-        // Raw joined rows (one per entry×activity) -> day-key + with/without
+        // Raw joined rows (one per entry×activity) -> key + with/without
         // split in JS (the old SQL keyed days with date(e.date) in UTC).
         const rawRows = await db.getAllAsync<ActivityCorrelationRawRow>(
           ACTIVITY_CORRELATION,
           [queryStart, queryEnd],
         );
         const { meaningful: m } = computeActivityCorrelation(
-          aggregateActivityCorrelation(rawRows, { carryover, windowStart }),
+          aggregateActivityCorrelation(rawRows, { carryover, perEntry, windowStart }),
         );
         setMeaningful(m);
       } catch (error) {
@@ -228,9 +229,9 @@ const ActivityCorrelationChart = () => {
         setMeaningful([]);
       }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads db + periodWindow + carryover; setState identities are stable
-    }, [db, periodWindow, carryover]);
+    }, [db, periodWindow, carryover, perEntry]);
   // Focus-aware refetch (replaces useEffect([db, refreshCount, timeframe])).
-  useDataRefresh(fetchData, [db, periodWindow, carryover]);
+  useDataRefresh(fetchData, [db, periodWindow, carryover, perEntry]);
 
   const view = useMemo(
     () => selectCorrelationView(meaningful, { excluded, expanded }),
@@ -243,8 +244,8 @@ const ActivityCorrelationChart = () => {
         <Text style={styles.title}>Activity Correlation</Text>
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>
-            Not enough data yet. Log activities across more days (at least 5 with
-            and 5 without each activity) or try a longer timeframe.
+            Not enough data yet. Log activities across more {perEntry ? 'entries' : 'days'}{' '}
+            (at least 5 with and 5 without each activity) or try a longer timeframe.
           </Text>
         </View>
       </Card>
@@ -279,10 +280,17 @@ const ActivityCorrelationChart = () => {
     <Card>
       <InfoBubble
         text={
-          "Compares your average mood on days you logged an activity ('with') against days you didn't ('without'). A positive delta means the activity lines up with better days — and we only show activities with enough days on each side to be meaningful. By default you see the top few that lift and weigh on your mood; tap the eye to hide an activity (the next-strongest takes its place), or expand to see them all." +
+          (perEntry
+            ? "Compares your mood on entries you logged an activity ('with') against those you didn't ('without'). A positive delta means the activity lines up with better mood — and we only show activities with enough entries on each side to be meaningful. " +
+              "By default you see the top few that lift and weigh on your mood; tap the eye to hide an activity (the next-strongest takes its place), or expand to see them all. " +
+              "A few busy days with many entries can look like a strong pattern, although that is not necessarily the case."
+            : "Compares your average mood on days you logged an activity ('with') against days you didn't ('without'). A positive delta means the activity lines up with better days — and we only show activities with enough days on each side to be meaningful. " +
+              "By default you see the top few that lift and weigh on your mood; tap the eye to hide an activity (the next-strongest takes its place), or expand to see them all."
+          ) +
           (carryover
             ? " Activity Carryover is on, so an activity also counts toward your later entries and the next day with a fading weight — the 'with' amounts are effective (approximate) counts."
-            : '')
+            : ''
+          )
         }
         position="top-right"
       />
