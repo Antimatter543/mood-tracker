@@ -11,12 +11,17 @@
  *  - success calls onAdd, onClose and refetchEntries;
  *  - closing writes nothing;
  *  - the group picker sets the target group and the title follows it;
- *  - the card is height-capped (a number, so it resolves) and its fields sit in
- *    a ScrollView that keeps taps while the keyboard is up.
+ *  - the card shrinks to the room it gets (flexShrink, no window-computed
+ *    maxHeight) and its fields sit in a ScrollView that keeps taps;
+ *  - keyboard closed: the Add button is pinned below the fields; keyboard open:
+ *    it moves to the end of the scrolling fields, so the name field gets the
+ *    whole card (#51 device QA: at 360x640, font 1.3, the pinned button left the
+ *    name field cut in half).
  *
  * OverlayModal is a plain visible/hidden passthrough (activityEditModalGroupPicker
- * pattern), so the nested pickers render inline. RNTL 14 is async: every
- * render/fireEvent is awaited.
+ * pattern), so the nested pickers render inline. The dialog renders inside the
+ * real OverlayProvider, so setKeyboardHeight (testing/platform) drives the
+ * height the dialog reads. RNTL 14 is async: every render/fireEvent is awaited.
  */
 import React from 'react';
 import { Alert, StyleSheet } from 'react-native';
@@ -42,6 +47,8 @@ jest.mock('@/context/DataContext', () => ({
 }));
 
 import { AddActivityModal } from '@/components/forms/ActivityAddModal';
+import { OverlayProvider } from '@/context/OverlayHost';
+import { INSETS, setInsets, setKeyboardHeight } from '@/testing/platform';
 import { ACTIVITY_NAME_TAKEN } from '@/databases/activities';
 import type { ActivityGroup } from '@/components/types';
 
@@ -77,7 +84,8 @@ async function renderAdd(groupId: number | null = 1) {
             onAdd={onAdd}
             db={mockDb}
             groups={groups}
-        />
+        />,
+        { wrapper: OverlayProvider }
     );
     return { view, onClose, onAdd };
 }
@@ -244,19 +252,58 @@ describe('AddActivityModal: group picker and title', () => {
     });
 });
 
-describe('AddActivityModal: fits a short screen', () => {
-    it('caps the card with a numeric maxHeight and scrolls the fields with taps kept', async () => {
+describe('AddActivityModal: fits any screen, keyboard up or down', () => {
+    it('lets the card shrink (no window-computed cap) and scrolls the fields with taps kept', async () => {
+        setInsets(INSETS.THREE_BUTTON_NAV);
         const { view } = await renderAdd();
-        const card = view.getByTestId('activity-add-dialog');
-        expect(typeof StyleSheet.flatten(card.props.style).maxHeight).toBe('number');
+        const card = StyleSheet.flatten(view.getByTestId('activity-add-dialog').props.style);
+        expect(card.flexShrink).toBe(1);
+        expect(card.maxHeight).toBeUndefined();
+        // Clear of the status bar and, with the keyboard closed, the nav bar.
+        expect(card.marginTop).toBe(24 + 16);
+        expect(card.marginBottom).toBe(48 + 16);
 
         const fields = view.getByTestId('activity-add-fields');
         expect(fields.props.keyboardShouldPersistTaps).toBe('handled');
         expect(within(fields).getByLabelText('Activity name')).toBeTruthy();
-        // The title and the Add button stay outside the scrolling body, so
-        // neither is ever scrolled or clipped out of reach.
+    });
+
+    it('keyboard closed: the Add button is pinned below the scrolling fields', async () => {
+        setKeyboardHeight(0);
+        const { view } = await renderAdd();
+        const fields = view.getByTestId('activity-add-fields');
         expect(within(fields).queryByText('Add Activity')).toBeNull();
         expect(within(fields).queryByText('Add New Exercise Activity')).toBeNull();
         expect(view.getByText('Add Activity')).toBeTruthy();
+    });
+
+    it('keyboard open: the Add button and its error scroll with the fields; the title stays pinned', async () => {
+        setInsets(INSETS.THREE_BUTTON_NAV);
+        setKeyboardHeight(300);
+        mockAddActivity.mockResolvedValue({
+            success: false,
+            message: 'An activity with this name already exists in this group',
+            code: ACTIVITY_NAME_TAKEN,
+        });
+        const { view, onClose } = await renderAdd();
+        const fields = view.getByTestId('activity-add-fields');
+        expect(within(fields).getByText('Add Activity')).toBeTruthy();
+        expect(within(fields).queryByText('Add New Exercise Activity')).toBeNull();
+        expect(view.getAllByText('Add Activity')).toHaveLength(1);
+        // The overlay already lifts the layer by the keyboard, so no nav-bar
+        // inset is added below the card.
+        expect(StyleSheet.flatten(view.getByTestId('activity-add-dialog').props.style).marginBottom).toBe(16);
+
+        // The button still works from inside the scroll, and the inline error
+        // lands next to it rather than below the fold.
+        await typeName(view, 'Running');
+        await pressAdd(view);
+        expect(mockAddActivity).toHaveBeenCalledTimes(1);
+        expect(
+            within(view.getByTestId('activity-add-fields')).getByText(
+                'An activity with this name already exists in this group.'
+            )
+        ).toBeTruthy();
+        expect(onClose).not.toHaveBeenCalled();
     });
 });

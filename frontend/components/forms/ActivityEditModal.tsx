@@ -12,7 +12,7 @@ import { IconFamilyType } from '../iconRegistry';
 import { OverlayModal } from '../OverlayModal';
 import { ActivityIcon } from '../activityIcon';
 import { GroupPickerField } from './GroupPickerField';
-import { useDialogMaxHeight } from './dialogMaxHeight';
+import { useDialogFit } from './dialogFit';
 
 type ActivityEditModalProps = {
     visible: boolean;
@@ -36,7 +36,7 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
     groups
 }) => {
     const colors = useThemeColors();
-    const maxHeight = useDialogMaxHeight();
+    const { keyboardOpen, cardStyle } = useDialogFit();
     const [activityName, setActivityName] = useState(activity?.name || '');
     const [error, setError] = useState('');
     const { refetchEntries } = useDataContext();  // Get refetchEntries from context
@@ -181,8 +181,8 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
         closeButton: {
             padding: 4,
         },
-        // Hugs its fields when they fit, shrinks (and scrolls) when the card hits
-        // its maxHeight.
+        // Hugs its fields when they fit, shrinks (and scrolls) when the card runs
+        // out of room above the keyboard.
         body: {
             flexGrow: 0,
             flexShrink: 1,
@@ -198,6 +198,9 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
             fontSize: 16,
             borderWidth: 1,
             borderColor: colors.overlays.tagBorder,
+        },
+        actions: {
+            gap: 12,
         },
         errorText: {
             color: '#ff4444',
@@ -256,9 +259,39 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
         },
     });
 
+    // Error + Delete / Update. Pinned under the fields while the keyboard is
+    // closed; at the end of the scrolling fields while it is open, so on a short
+    // screen or a large font the fields get the whole card and the name being
+    // typed is never cropped (#51 device QA, 360x640 at font 1.3).
+    const actions = (
+        <View testID="activity-edit-actions" style={styles.actions}>
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            <View style={styles.buttonContainer}>
+                <Pressable
+                    style={[styles.button, styles.deleteButton]}
+                    onPress={checkUsageAndConfirmDelete}
+                    accessibilityRole="button"
+                >
+                    <Text style={[styles.buttonText, styles.deleteButtonText]}>
+                        Delete
+                    </Text>
+                </Pressable>
+
+                <Pressable
+                    style={[styles.button, styles.updateButton]}
+                    onPress={handleUpdate}
+                    accessibilityRole="button"
+                >
+                    <Text style={styles.buttonText}>Update</Text>
+                </Pressable>
+            </View>
+        </View>
+    );
+
     return (
         <OverlayModal visible={visible} onClose={onClose}>
-            <View testID="activity-edit-dialog" style={[styles.modalContent, { maxHeight }]}>
+            <View testID="activity-edit-dialog" style={[styles.modalContent, cardStyle]}>
                 <View style={styles.modalHeader}>
                     <Text style={styles.title}>Edit Activity</Text>
                     <Pressable
@@ -272,9 +305,9 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
                     </Pressable>
                 </View>
 
-                {/* The fields scroll; the header above and the buttons below stay
-                    put, so neither clips behind the keyboard on a short screen
-                    (the card is capped by useDialogMaxHeight). */}
+                {/* The card shrinks to the room the overlay gives it and the
+                    fields scroll. The header always stays put; the actions stay
+                    put only while the keyboard is closed (see useDialogFit). */}
                 <ScrollView
                     testID="activity-edit-fields"
                     style={styles.body}
@@ -322,29 +355,11 @@ export const ActivityEditModal: React.FC<ActivityEditModalProps> = ({
                         triggerLabel="Move activity to another group"
                         optionLabel={(group) => `Move to ${group.name}`}
                     />
+
+                    {keyboardOpen && actions}
                 </ScrollView>
 
-                {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-                <View style={styles.buttonContainer}>
-                    <Pressable
-                        style={[styles.button, styles.deleteButton]}
-                        onPress={checkUsageAndConfirmDelete}
-                        accessibilityRole="button"
-                    >
-                        <Text style={[styles.buttonText, styles.deleteButtonText]}>
-                            Delete
-                        </Text>
-                    </Pressable>
-
-                    <Pressable
-                        style={[styles.button, styles.updateButton]}
-                        onPress={handleUpdate}
-                        accessibilityRole="button"
-                    >
-                        <Text style={styles.buttonText}>Update</Text>
-                    </Pressable>
-                </View>
+                {!keyboardOpen && actions}
             </View>
 
             <IconPicker

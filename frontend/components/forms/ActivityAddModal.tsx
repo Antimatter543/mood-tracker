@@ -13,7 +13,7 @@ import { IconFamilyType } from '../iconRegistry';
 import { OverlayModal } from '../OverlayModal';
 import { ActivityIcon } from '../activityIcon';
 import { GroupPickerField } from './GroupPickerField';
-import { useDialogMaxHeight } from './dialogMaxHeight';
+import { useDialogFit } from './dialogFit';
 
 type AddActivityModalProps = {
     visible: boolean;
@@ -32,7 +32,7 @@ type AddActivityModalProps = {
 export const AddActivityModal = ({ visible, groupId, onClose, onAdd, db, groups }: AddActivityModalProps) => {
     const colors = useThemeColors();
     const styles = useStyles(colors);
-    const maxHeight = useDialogMaxHeight();
+    const { keyboardOpen, cardStyle } = useDialogFit();
     const [error, setError] = useState('');
     const { refetchEntries } = useDataContext();
 
@@ -90,9 +90,27 @@ export const AddActivityModal = ({ visible, groupId, onClose, onAdd, db, groups 
         }
     }
 
+    // Error + Add button. Pinned under the fields while the keyboard is closed;
+    // at the end of the scrolling fields while it is open, so on a short screen
+    // or a large font the fields get the whole card and the name being typed is
+    // never cropped (#51 device QA, 360x640 at font 1.3).
+    const actions = (
+        <View testID="activity-add-actions" style={styles.actions}>
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            <Pressable
+                style={styles.submitButton}
+                onPress={handleAdd}
+                accessibilityRole="button"
+            >
+                <Text style={styles.submitButtonText}>Add Activity</Text>
+            </Pressable>
+        </View>
+    );
+
     return (
         <OverlayModal visible={visible} onClose={onClose}>
-            <View testID="activity-add-dialog" style={[styles.modalContent, { maxHeight }]}>
+            <View testID="activity-add-dialog" style={[styles.modalContent, cardStyle]}>
                 <View style={styles.modalHeader}>
                     <Text style={styles.modalTitle} numberOfLines={2}>
                         Add New{selectedGroupName ? ` ${selectedGroupName}` : ''} Activity
@@ -108,9 +126,9 @@ export const AddActivityModal = ({ visible, groupId, onClose, onAdd, db, groups 
                     </Pressable>
                 </View>
 
-                {/* The fields scroll; the header above and the Add button below
-                    stay put, so neither clips behind the keyboard on a short
-                    screen (the card is capped by useDialogMaxHeight). */}
+                {/* The card shrinks to the room the overlay gives it and the
+                    fields scroll. The header always stays put; the Add button
+                    stays put only while the keyboard is closed (useDialogFit). */}
                 <ScrollView
                     testID="activity-add-fields"
                     style={styles.body}
@@ -156,17 +174,11 @@ export const AddActivityModal = ({ visible, groupId, onClose, onAdd, db, groups 
                         triggerLabel="Select group"
                         optionLabel={(group) => `Add to ${group.name}`}
                     />
+
+                    {keyboardOpen && actions}
                 </ScrollView>
 
-                {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-                <Pressable
-                    style={styles.submitButton}
-                    onPress={handleAdd}
-                    accessibilityRole="button"
-                >
-                    <Text style={styles.submitButtonText}>Add Activity</Text>
-                </Pressable>
+                {!keyboardOpen && actions}
             </View>
 
             <IconPicker
@@ -207,8 +219,8 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
     closeButton: {
         padding: 4,
     },
-    // Hugs its fields when they fit, shrinks (and scrolls) when the card hits
-    // its maxHeight.
+    // Hugs its fields when they fit, shrinks (and scrolls) when the card runs
+    // out of room above the keyboard.
     body: {
         flexGrow: 0,
         flexShrink: 1,
@@ -224,6 +236,9 @@ const useStyles = (colors: ThemeColors) => useMemo(() => StyleSheet.create({
         fontSize: 16,
         borderWidth: 1,
         borderColor: colors.overlays.tagBorder,
+    },
+    actions: {
+        gap: 12,
     },
     submitButton: {
         backgroundColor: colors.accent,
