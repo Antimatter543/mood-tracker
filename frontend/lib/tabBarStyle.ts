@@ -13,7 +13,7 @@
 // the system navigation area below it. The bar's real height is this PLUS the
 // device's bottom safe-area inset, so the content sits ABOVE the Android nav
 // buttons / gesture pill instead of flush under them.
-export const TAB_BAR_CONTENT_HEIGHT = 64;
+export const TAB_BAR_CONTENT_HEIGHT = 72;
 export const TAB_BAR_CONTENT_PADDING_BOTTOM = 8;
 
 /** The subset of theme tokens the tab bar style needs. */
