@@ -64,7 +64,7 @@ afterEach(() => jest.restoreAllMocks());
 describe('EntryForm — keyboard handling (deterministic)', () => {
     it('scrolls to the end when the Notes field focuses (lifts it above the keyboard)', async () => {
         const view = await render(
-            <EntryForm onSubmit={jest.fn().mockResolvedValue(undefined)} onCancel={jest.fn()} />
+            <EntryForm onSubmit={jest.fn().mockResolvedValue(undefined)} onCancel={jest.fn()} onDateChange={jest.fn()} />
         );
         await advanceToDetails(view);
 
@@ -78,21 +78,21 @@ describe('EntryForm — keyboard handling (deterministic)', () => {
     it('pads the scroll content by the keyboard height (gives scroll range)', async () => {
         // Base padding (keyboard hidden).
         const base = await render(
-            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
+            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} onDateChange={jest.fn()} />
         );
         const basePad = scrollPadding(base);
 
         // Keyboard up -> padding grows by exactly the keyboard height.
         setKeyboardHeight(804);
         const withKb = await render(
-            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
+            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} onDateChange={jest.fn()} />
         );
         expect(scrollPadding(withKb)).toBe(basePad + 804);
     });
 
     it('scrolls to the end when the keyboard opens for the focused Notes field', async () => {
         const view = await render(
-            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
+            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} onDateChange={jest.fn()} />
         );
         await advanceToDetails(view);
         await act(async () => {
@@ -106,7 +106,7 @@ describe('EntryForm — keyboard handling (deterministic)', () => {
 
     it('stays put when another field opens the keyboard (e.g. the edit-activity dialog)', async () => {
         const view = await render(
-            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
+            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} onDateChange={jest.fn()} />
         );
         await advanceToDetails(view);
         animatedScroll.toEnd.mockClear();
@@ -117,7 +117,7 @@ describe('EntryForm — keyboard handling (deterministic)', () => {
 
     it('stays put once Notes has lost focus', async () => {
         const view = await render(
-            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
+            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} onDateChange={jest.fn()} />
         );
         await advanceToDetails(view);
         const notes = view.getByPlaceholderText('How are you feeling?');
@@ -135,7 +135,7 @@ describe('EntryForm — keyboard handling (deterministic)', () => {
 
     it('forgets the Notes focus when going Back to the mood step', async () => {
         const view = await render(
-            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />
+            <EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} onDateChange={jest.fn()} />
         );
         await advanceToDetails(view);
         await act(async () => {
@@ -156,7 +156,7 @@ describe('EntryForm — keyboard handling (deterministic)', () => {
 async function openKeyboard(view: any) {
     setKeyboardHeight(804);
     await act(async () => {
-        await view.rerender(<EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />);
+        await view.rerender(<EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} onDateChange={jest.fn()} />);
     });
 }
 
