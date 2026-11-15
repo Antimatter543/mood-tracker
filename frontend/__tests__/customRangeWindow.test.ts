@@ -289,6 +289,7 @@ const LABEL_TABLE: ReadonlyArray<{
     system: string;
     mdy: string;
     dmy: string;
+    'dmy-dot': string;
     ymd: string;
 }> = [
     {
@@ -297,6 +298,7 @@ const LABEL_TABLE: ReadonlyArray<{
         system: 'Aug 23 – 29',
         mdy: 'Aug 23 – 29',
         dmy: '23 – 29 Aug',
+        'dmy-dot': '23 – 29 Aug',
         ymd: '08-23 – 08-29',
     },
     {
@@ -305,6 +307,7 @@ const LABEL_TABLE: ReadonlyArray<{
         system: 'Aug 15 – Sep 13',
         mdy: 'Aug 15 – Sep 13',
         dmy: '15 Aug – 13 Sep',
+        'dmy-dot': '15 Aug – 13 Sep',
         ymd: '08-15 – 09-13',
     },
     {
@@ -313,6 +316,7 @@ const LABEL_TABLE: ReadonlyArray<{
         system: 'Aug 15',
         mdy: 'Aug 15',
         dmy: '15 Aug',
+        'dmy-dot': '15 Aug',
         ymd: '08-15',
     },
     {
@@ -321,6 +325,7 @@ const LABEL_TABLE: ReadonlyArray<{
         system: 'Mar 1 – 10, 2025',
         mdy: 'Mar 1 – 10, 2025',
         dmy: '1 – 10 Mar 2025',
+        'dmy-dot': '1 – 10 Mar 2025',
         ymd: '2025-03-01 – 2025-03-10',
     },
     {
@@ -329,6 +334,7 @@ const LABEL_TABLE: ReadonlyArray<{
         system: 'Jan 5 – Feb 3, 2025',
         mdy: 'Jan 5 – Feb 3, 2025',
         dmy: '5 Jan – 3 Feb 2025',
+        'dmy-dot': '5 Jan – 3 Feb 2025',
         ymd: '2025-01-05 – 2025-02-03',
     },
     {
@@ -337,6 +343,7 @@ const LABEL_TABLE: ReadonlyArray<{
         system: 'Mar 1, 2025',
         mdy: 'Mar 1, 2025',
         dmy: '1 Mar 2025',
+        'dmy-dot': '1 Mar 2025',
         ymd: '2025-03-01',
     },
     {
@@ -345,6 +352,7 @@ const LABEL_TABLE: ReadonlyArray<{
         system: 'Dec 20, 2025 – Jan 5, 2026',
         mdy: 'Dec 20, 2025 – Jan 5, 2026',
         dmy: '20 Dec 2025 – 5 Jan 2026',
+        'dmy-dot': '20 Dec 2025 – 5 Jan 2026',
         ymd: '2025-12-20 – 2026-01-05',
     },
     {
@@ -355,6 +363,7 @@ const LABEL_TABLE: ReadonlyArray<{
         mdy: 'Jun – Aug 2026',
         // A month name carries no day, so day-first has nothing to reorder.
         dmy: 'Jun – Aug 2026',
+        'dmy-dot': 'Jun – Aug 2026',
         ymd: '2026-06 – 2026-08',
     },
     {
@@ -364,6 +373,7 @@ const LABEL_TABLE: ReadonlyArray<{
         system: 'Aug 2026',
         mdy: 'Aug 2026',
         dmy: 'Aug 2026',
+        'dmy-dot': 'Aug 2026',
         ymd: '2026-08',
     },
     {
@@ -373,6 +383,7 @@ const LABEL_TABLE: ReadonlyArray<{
         system: 'Aug 2025 – Aug 2026',
         mdy: 'Aug 2025 – Aug 2026',
         dmy: 'Aug 2025 – Aug 2026',
+        'dmy-dot': 'Aug 2025 – Aug 2026',
         ymd: '2025-08 – 2026-08',
     },
 ];
