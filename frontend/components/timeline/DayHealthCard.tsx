@@ -25,14 +25,15 @@ const useStyles = (colors: ThemeColors) =>
                     width: '92%',
                     maxWidth: 480,
                     borderRadius: 16,
-                    // Large text on a small phone makes the figures taller than the
-                    // screen: the header stays put and the figures scroll.
-                    maxHeight: '85%',
                     padding: 20,
                     gap: 16,
                 },
-                body: { flexGrow: 0 },
-                bodyContent: { gap: 16 },
+                bodyContainer: {
+                    // Three items, each 60 + 16 gap
+                    maxHeight: 3 * 76 + 20,
+                    marginBottom: 6
+                },
+                bodyContent: { flexGrow: 1, gap: 16 },
                 headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
                 headerText: { flex: 1 },
                 title: { color: colors.text, fontSize: 20, fontWeight: 'bold' },
@@ -78,29 +79,37 @@ export const DayHealthCard: React.FC<DayHealthCardProps> = ({ visible, onClose, 
                         <Ionicons name="close" size={24} color={colors.textSecondary} />
                     </Pressable>
                 </View>
-                <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} testID="day-health-card-body">
-                {dayHealthItems(health).map((item) => (
-                    <View key={item.key} style={styles.item} testID={`day-health-item-${item.key}`}>
-                        <Ionicons name={item.icon} size={20} color={colors.textSecondary} />
-                        <View style={styles.itemBody}>
-                            <View style={styles.itemTop}>
-                                <Text style={styles.label}>{item.label}</Text>
-                                <Text style={styles.value}>{item.value}</Text>
-                            </View>
-                            {item.rating ? (
-                                <View style={styles.rating}>
-                                    <View
-                                        style={[styles.ratingDot, { backgroundColor: healthRatingColor(item.rating, colors) }]}
-                                    />
-                                    <Text style={styles.ratingText}>{HEALTH_RATING_LABELS[item.rating]}</Text>
+                <View style={styles.bodyContainer}>
+                    <ScrollView
+                        showsVerticalScrollIndicator
+                        persistentScrollbar
+                        testID="day-health-card-body"
+                    >
+                        <View onStartShouldSetResponder={() => true} style={styles.bodyContent}>
+                        {dayHealthItems(health).map((item) => (
+                            <View key={item.key} style={styles.item} testID={`day-health-item-${item.key}`}>
+                                <Ionicons name={item.icon} size={20} color={colors.textSecondary} />
+                                <View style={styles.itemBody}>
+                                    <View style={styles.itemTop}>
+                                        <Text style={styles.label}>{item.label}</Text>
+                                        <Text style={styles.value}>{item.value}</Text>
+                                    </View>
+                                    {item.rating ? (
+                                        <View style={styles.rating}>
+                                            <View
+                                                style={[styles.ratingDot, { backgroundColor: healthRatingColor(item.rating, colors) }]}
+                                            />
+                                            <Text style={styles.ratingText}>{HEALTH_RATING_LABELS[item.rating]}</Text>
+                                        </View>
+                                    ) : null}
+                                    <Text style={styles.note}>{item.note}</Text>
                                 </View>
-                            ) : null}
-                            <Text style={styles.note}>{item.note}</Text>
+                            </View>
+                        ))}
+                            <Text style={styles.footnote}>A rough guide for adults, not medical advice.</Text>
                         </View>
-                    </View>
-                ))}
-                <Text style={styles.footnote}>A rough guide for adults, not medical advice.</Text>
-                </ScrollView>
+                    </ScrollView>
+                </View>
             </View>
         </OverlayModal>
     );
