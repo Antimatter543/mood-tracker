@@ -213,13 +213,13 @@ export type LabelGranularity = 'day' | 'month';
  * a hardcoded English month-first string — it never went through
  * `toLocaleDateString`, unlike the call sites lib/dateFormat.ts replaced. So
  * "reproduce the old bytes exactly" (the default-user-sees-no-change rule)
- * means month-first here. A non-US user who wants day-first picks 'dmy', which
- * is precisely why the setting exists.
+ * means month-first here. A non-US user who wants day-first picks 'dmy' or
+ * 'dmy-dot', which is precisely why the setting exists.
  */
 type RangeOrder = 'monthFirst' | 'dayFirst' | 'iso';
 
 const rangeOrderFor = (pref: DateFormatPref): RangeOrder =>
-    pref === 'dmy' ? 'dayFirst' : pref === 'ymd' ? 'iso' : 'monthFirst';
+    pref === 'dmy' || pref === 'dmy-dot' ? 'dayFirst' : pref === 'ymd' ? 'iso' : 'monthFirst';
 
 /** `2026-08-15` / `08-15` — mirrors `numericDate` in lib/dateFormat.ts. */
 const isoDay = (year: number, month: number, date: number, withYear: boolean): string =>
@@ -242,7 +242,7 @@ const isoDay = (year: number, month: number, date: number, withYear: boolean): s
  * and a new call site must not be able to silently forget the preference. What
  * each pref produces (with "today" in 2026):
  *
- *   day granularity        system / mdy            dmy                 ymd
+ *   day granularity        system / mdy            dmy / dmy-dot       ymd
  *   same month, this yr    Aug 23 – 29             23 – 29 Aug         08-23 – 08-29
  *   two months, this yr    Aug 15 – Sep 13         15 Aug – 13 Sep     08-15 – 09-13
  *   one day, this yr       Aug 15                  15 Aug              08-15
@@ -251,7 +251,7 @@ const isoDay = (year: number, month: number, date: number, withYear: boolean): s
  *   across new year        Dec 20, 2025 –          20 Dec 2025 –       2025-12-20 – 2026-01-05
  *                            Jan 5, 2026             5 Jan 2026
  *
- *   month granularity      system / mdy / dmy                          ymd
+ *   month granularity      system / mdy / dmy / dmy-dot                ymd
  *   two months, one yr     Jun – Aug 2026                              2026-06 – 2026-08
  *   one month              Aug 2026                                    2026-08
  *   across new year        Aug 2025 – Aug 2026                         2025-08 – 2026-08
@@ -260,7 +260,7 @@ const isoDay = (year: number, month: number, date: number, withYear: boolean): s
  *   1. The shared month is printed ONCE, on the side the ordering puts it —
  *      leading for month-first, trailing for day-first.
  *   2. A shared year trails the WHOLE label and only when it isn't the current
- *      one. `mdy` writes ", 2025" and `dmy` " 2025", which is exactly how
+ *      one. `mdy` writes ", 2025" and `dmy`/`dmy-dot` " 2025", which is exactly how
  *      `formatDate(end, pref, 'medium')` spells that same end date. (Pinned:
  *      a one-day range equals `formatDate` of that day, for all three explicit
  *      prefs and all twelve months.)
