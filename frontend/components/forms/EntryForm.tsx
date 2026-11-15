@@ -766,7 +766,8 @@ const useThemedStyles = (colors: ThemeColors) =>
         },
         modalHeaderTitle: {
             color: colors.text,
-            fontSize: 16,
+            fontSize: 18,
+            fontWeight: 600,
             padding: 8,
         },
         closeButton: {
