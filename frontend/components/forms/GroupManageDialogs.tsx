@@ -57,7 +57,7 @@ export const GroupRenameDialog = ({
 
     return (
         <OverlayModal visible={visible} onClose={onClose}>
-            <View style={styles.card}>
+            <View style={styles.card} testID="group-dialog-card">
                 <View style={styles.headerRow}>
                     <Text style={styles.title}>Rename group</Text>
                     <Pressable
@@ -129,7 +129,7 @@ export const GroupDeleteDialog = ({
 
     return (
         <OverlayModal visible={visible} onClose={onClose}>
-            <View style={styles.card}>
+            <View style={styles.card} testID="group-dialog-card">
                 <View style={styles.headerRow}>
                     <Text style={styles.title} numberOfLines={2}>
                         Delete &ldquo;{group?.name ?? ''}&rdquo;?
@@ -214,7 +214,10 @@ const useStyles = (colors: ThemeColors) =>
                     backgroundColor: colors.cardBackground,
                     width: '92%',
                     maxWidth: 480,
-                    maxHeight: '85%',
+                    // No percentage maxHeight: OverlayModal's wrapper hugs the card, so
+                    // '85%' meant 85% of the card's own height and left the buttons
+                    // hanging below it. flexShrink keeps it within the window instead.
+                    flexShrink: 1,
                     borderRadius: 16,
                     padding: 20,
                     gap: 16,
