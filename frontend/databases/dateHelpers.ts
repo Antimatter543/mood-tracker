@@ -35,7 +35,7 @@
 
 import { now } from '@/lib/clock';
 
-export const DATETIME_FORMAT_RE = /^(\d{4})-(\d{2})-(\d{2})(T(\d{2}):(\d{2})(:(\d{2}))?(\.\d{3})?)?Z?$/;
+export const DATETIME_FORMAT_RE = /^(\d{4})-(\d{2})-(\d{2})([T ](\d{2}):(\d{2})(:(\d{2}))?(\.\d{3})?)?Z?$/;
 
 /**
  * Returns the UTC ISO timestamp for the start of the local-timezone day
@@ -205,8 +205,11 @@ export function isSameLocalDay(a: Date, b: Date): boolean {
  * accidentally roll the calendar.
  */
 export function addDays(date: string, days: number): string {
-  const [y, m, d] = date.split('-').map(Number);
-  const result = new Date(y, m - 1, d);
-  result.setDate(result.getDate() + days);
-  return localDateString(result);
+  const d = convertStringToDate(date);
+  if (!d || isNaN(d.getTime()))
+    throw new Error(`Invalid date passed to addDays: ${date}`);
+
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + days);
+  return localDateString(d);
 }

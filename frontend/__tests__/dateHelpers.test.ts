@@ -7,6 +7,7 @@ import {
   daysBetween,
   getDefaultEntryDate,
   calendarDaysSpanned,
+  addDays,
 } from '@/databases/dateHelpers';
 import { freezeNow } from '@/testing/clock';
 
@@ -189,6 +190,50 @@ describe('localDateTimeString', () => {
 
   it('throws on invalid input', () => {
     expect(() => localDateTimeString('not a date')).toThrow();
+  });
+});
+
+describe('addDays', () => {
+  it('returns the same day when days = 0', () => {
+      expect(addDays('2026-03-01', 0)).toBe('2026-03-01');
+  });
+
+  it('moves the day forward, when days > 0', () => {
+      expect(addDays('2026-03-01', 7)).toBe('2026-03-08');
+      expect(addDays('2026-04-01', 30)).toBe('2026-05-01');
+  });
+
+  it('moves the day backward, when days < 0', () => {
+      expect(addDays('2026-03-15', -7)).toBe('2026-03-08');
+      expect(addDays('2026-04-01', -30)).toBe('2026-03-02');
+  });
+
+  it('steps calendar days across month and year ends', () => {
+      expect(addDays('2026-03-01', -1)).toBe('2026-02-28');
+      expect(addDays('2025-12-31', 1)).toBe('2026-01-01');
+  });
+
+  it('works properly with long time periods', () => {
+      expect(addDays('2026-03-01', -167)).toBe('2025-09-15');
+      expect(addDays('2025-03-01', 365)).toBe('2026-03-01');
+      // Leap year
+      expect(addDays('2024-02-01', 365)).toBe('2025-01-31');
+  });
+
+  it('doesn\'t throw on time containing strings', () => {
+    expect(() => addDays('2026-03-01 12:30', -15)).not.toThrow();
+    expect(() => addDays('2026-03-01T12:30', -15)).not.toThrow();
+    expect(() => addDays('2026-03-01T02:30Z', -15)).not.toThrow();
+  });
+
+  it('throws on invalid strings', () => {
+    expect(() => addDays('not a date', -15)).toThrow('Invalid date passed to addDays: not a date');
+  });
+
+  it('works with time containing strings', () => {
+    expect(addDays('2026-03-01 12:30', -15)).toBe('2026-02-14');
+    expect(addDays('2026-03-01T12:30', -15)).toBe('2026-02-14');
+    expect(addDays('2026-03-01T02:30Z', -15)).toBe('2026-02-14');
   });
 });
 
