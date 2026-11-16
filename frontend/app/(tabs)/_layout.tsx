@@ -24,6 +24,7 @@ import { TimeframeProvider, useTimeframe } from "@/context/TimeframeContext";
 import { TAB_BUTTON_TEST_IDS } from "@/lib/tabTestIds";
 import { now } from "@/lib/clock";
 import { runDailyHealthSyncIfDue } from "@/lib/healthDailySync";
+import PeriodSwipe from '@/components/PeriodSwipe';
 
 export default function RootLayout() {
     // The app-wide "a write happened → reload" trigger. It bumps the external
@@ -224,11 +225,16 @@ function TabNavigator() {
 
             <Tabs.Screen name="periodwindow" options={{
                 tabBarLabel: ({ color, focused }) => (
-                    <Text style={{textAlign: 'center', fontSize: 11, fontWeight: 500, color: color, marginTop: -1,}}>{periodLabel}</Text>
+                    <PeriodSwipe>
+                        <Text style={{textAlign: 'center', fontSize: 11, fontWeight: 500, color: color, marginTop: -1,}}>{periodLabel}</Text>
+                    </PeriodSwipe>
                 ),
                 tabBarButtonTestID: TAB_BUTTON_TEST_IDS.periodwindow,
                 tabBarIcon: ({ color, focused }) => (
-                    <Ionicons name={focused ? 'calendar' : 'calendar-outline'} color={color} size={24} />),
+                    <PeriodSwipe>
+                        <Ionicons name={focused ? 'calendar' : 'calendar-outline'} color={color} size={24} />
+                    </PeriodSwipe>
+                ),
             }} />
 
             <Tabs.Screen name="stats" options={{
