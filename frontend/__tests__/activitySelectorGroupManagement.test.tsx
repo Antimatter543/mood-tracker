@@ -18,6 +18,7 @@
  * render() and fireEvent.*() below is awaited.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { render, act, fireEvent, waitFor } from '@testing-library/react-native';
 
 // ── Sortable.Grid passthrough; captures the LAST grid's props per render pass ──
@@ -329,6 +330,17 @@ describe('DELETE a group — the cascade warning and its escape hatch', () => {
                     'Your entries stay, but those activity tags are gone for good.'
             )
         ).toBeTruthy();
+    });
+
+    it('the card fits its buttons: no percentage maxHeight, shrinks to the window instead', async () => {
+        // OverlayModal's wrapper hugs the card, so maxHeight '85%' was 85% of the card's own
+        // height and left Cancel / Delete group hanging below it.
+        const view = await renderSelector();
+        await openDelete(view);
+
+        const card = StyleSheet.flatten(view.getByTestId('group-dialog-card').props.style);
+        expect(card.maxHeight).toBeUndefined();
+        expect(card.flexShrink).toBe(1);
     });
 
     it('offers moving the activities to every OTHER group as the safe alternative', async () => {

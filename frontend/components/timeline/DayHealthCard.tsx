@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { OverlayModal } from '@/components/OverlayModal';
 import { ThemeColors } from '@/styles/global';
 import { HEALTH_RATING_LABELS, healthRatingColor, dayHealthItems, type DayHealth } from './dayHealth';
@@ -25,15 +26,20 @@ const useStyles = (colors: ThemeColors) =>
                     width: '92%',
                     maxWidth: 480,
                     borderRadius: 16,
+                    // Large text on a small phone makes the figures taller than the
+                    // screen: the header stays put and the figures scroll. The card
+                    // shrinks to the window (flexShrink, see OverlayModal's cardPress)
+                    // and the body shrinks inside it. No percentage maxHeight: the
+                    // overlay's wrapper hugs the card, so '85%' meant 85% of the
+                    // card's own height and always cut off its last lines.
+                    flexShrink: 1,
                     padding: 20,
                     gap: 16,
                 },
-                bodyContainer: {
-                    // Three items, each 60 + 16 gap
-                    maxHeight: 3 * 76 + 20,
-                    marginBottom: 6
-                },
-                bodyContent: { flexGrow: 1, gap: 16 },
+                // Hugs the figures when they fit; without flexShrink the ScrollView keeps
+                // its full content height and the card clips it instead of scrolling.
+                body: { flexGrow: 0, flexShrink: 1 },
+                bodyContent: { gap: 16 },
                 headerRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
                 headerText: { flex: 1 },
                 title: { color: colors.text, fontSize: 20, fontWeight: 'bold' },
@@ -56,9 +62,13 @@ const useStyles = (colors: ThemeColors) =>
 /** All of a day's health figures, each with what it means. */
 export const DayHealthCard: React.FC<DayHealthCardProps> = ({ visible, onClose, title, averageMood, health, colors }) => {
     const styles = useStyles(colors);
+    const insets = useSafeAreaInsets();
     return (
         <OverlayModal visible={visible} onClose={onClose}>
-            <View style={styles.card} testID="day-health-card">
+            <View
+                style={[styles.card, { marginTop: insets.top + 16, marginBottom: insets.bottom + 16 }]}
+                testID="day-health-card"
+            >
                 <View style={styles.headerRow}>
                     <View style={styles.headerText}>
                         <Text style={styles.title} accessibilityRole="header">
@@ -79,13 +89,15 @@ export const DayHealthCard: React.FC<DayHealthCardProps> = ({ visible, onClose, 
                         <Ionicons name="close" size={24} color={colors.textSecondary} />
                     </Pressable>
                 </View>
-                <View style={styles.bodyContainer}>
-                    <ScrollView
-                        showsVerticalScrollIndicator
-                        persistentScrollbar
-                        testID="day-health-card-body"
+                <ScrollView style={styles.body} testID="day-health-card-body">
+                    {/* Claims the touch so a drag here scrolls. Otherwise the plain text
+                        leaves it to OverlayModal's card Pressable, which then holds the
+                        JS responder and the native ScrollView never starts a drag. */}
+                    <View
+                        style={styles.bodyContent}
+                        onStartShouldSetResponder={() => true}
+                        testID="day-health-card-content"
                     >
-                        <View onStartShouldSetResponder={() => true} style={styles.bodyContent}>
                         {dayHealthItems(health).map((item) => (
                             <View key={item.key} style={styles.item} testID={`day-health-item-${item.key}`}>
                                 <Ionicons name={item.icon} size={20} color={colors.textSecondary} />
@@ -106,10 +118,9 @@ export const DayHealthCard: React.FC<DayHealthCardProps> = ({ visible, onClose, 
                                 </View>
                             </View>
                         ))}
-                            <Text style={styles.footnote}>A rough guide for adults, not medical advice.</Text>
-                        </View>
-                    </ScrollView>
-                </View>
+                        <Text style={styles.footnote}>A rough guide for adults, not medical advice.</Text>
+                    </View>
+                </ScrollView>
             </View>
         </OverlayModal>
     );

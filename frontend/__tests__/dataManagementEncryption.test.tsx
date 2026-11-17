@@ -33,7 +33,7 @@
  * the note at the top of remindersSection.test.tsx).
  */
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, StyleSheet } from 'react-native';
 import { render, fireEvent, waitFor, screen } from '@testing-library/react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -231,6 +231,12 @@ describe('Encrypt backups switch', () => {
     expect(screen.queryByText(/Argon2id/)).toBeNull();
     await fireEvent.press(screen.getByLabelText('Backup encryption technical details'));
     expect(screen.getByText(/Compatibility, Argon2id, 48 MiB × 2 passes, 4 lanes/)).toBeTruthy();
+    // Fits the window rather than 85% of its own height, and a drag on its text scrolls
+    // (the text claims the touch instead of leaving it to the card's Pressable).
+    const card = StyleSheet.flatten(screen.getByTestId('backup-strength-card').props.style);
+    expect(card.maxHeight).toBeUndefined();
+    expect(card.flexShrink).toBe(1);
+    expect(screen.getByTestId('backup-strength-content').props.onStartShouldSetResponder()).toBe(true);
     expect(alerts).toHaveBeenCalledWith('Backups are encrypted', expect.stringMatching(/cannot be shown again/));
     expect(JSON.stringify(SecureStoreMock.__dump())).not.toContain('a long passphrase');
   });

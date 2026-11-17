@@ -181,7 +181,19 @@ describe('DayHeader health', () => {
         expect(view.getByTestId('day-health-card')).toBeTruthy();
         expect(view.getAllByText('Sunday, 2026-09-27')).toHaveLength(2); // header + card
         expect(view.getByText('Average mood 6.5')).toBeTruthy();
-        expect(view.getByTestId('day-health-card-body').type).toBe('RCTScrollView');
+        // Large text on a small phone: the card shrinks to the window and the figures scroll.
+        // A percentage maxHeight resolves against the overlay wrapper, which hugs the card,
+        // so it would always clip the last lines.
+        const card = view.getByTestId('day-health-card');
+        const cardStyle = StyleSheet.flatten(card.props.style);
+        expect(cardStyle.maxHeight).toBeUndefined();
+        expect(cardStyle.flexShrink).toBe(1);
+        const body = view.getByTestId('day-health-card-body');
+        expect(body.type).toBe('RCTScrollView');
+        // Without flexShrink the body keeps its content height and is clipped, not scrolled.
+        expect(StyleSheet.flatten(body.props.style)).toMatchObject({ flexGrow: 0, flexShrink: 1 });
+        // Plain text inside must claim the touch, or the card's Pressable keeps it and a drag never scrolls.
+        expect(view.getByTestId('day-health-card-content').props.onStartShouldSetResponder()).toBe(true);
         for (const text of ['Sleep (night before)', '6h 30m', 'Resting heart rate', '90 bpm', 'Average heart rate', '72 bpm', '15 ms']) {
             expect(view.getByText(text)).toBeTruthy();
         }
