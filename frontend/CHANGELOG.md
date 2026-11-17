@@ -3,6 +3,12 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.17.1] - 2026-11-17
+
+### Fixed
+- **Day health card, Rename and Delete group, Technical details:** no longer cut off at the bottom, and they scroll when you drag on the text. Thanks to JamesCullum!
+- **Activity Correlation on Statistics:** the bars stay inside the card and the numbers next to them show again. Thanks to makusuko!
+
 ## [2.17.0] - 2026-11-13
 
 ### Added
