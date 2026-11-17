@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { KdfHeader, KdfParams } from '@/lib/backupCrypto';
 import {
@@ -17,6 +18,7 @@ import {
 } from '@/lib/backupKdfProfiles';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import { OverlayModal } from './OverlayModal';
+import { useOverlayKeyboardHeight } from '@/context/OverlayHost';
 
 /**
  * "Encrypt backups" > "Technical details": what the stored key is made with,
@@ -73,6 +75,9 @@ const parseFields = (fields: ReturnType<typeof toFields>): ManualKdfInput => ({
 export const BackupStrengthDialog = ({ visible, kdf, profile, onClose, onSave }: BackupStrengthDialogProps) => {
   const colors = useThemeColors();
   const styles = useStyles(colors);
+  const insets = useSafeAreaInsets();
+  // With the keyboard up the overlay already ends at it, so only the gap is added.
+  const keyboardHeight = useOverlayKeyboardHeight();
   const [selected, setSelected] = useState<KdfProfile>(profile);
   const [fields, setFields] = useState(() => toFields(kdf));
   const [benchmarking, setBenchmarking] = useState(false);
@@ -154,7 +159,13 @@ export const BackupStrengthDialog = ({ visible, kdf, profile, onClose, onSave }:
 
   return (
     <OverlayModal visible={visible} onClose={close} dismissOnBackdropPress={!benchmarking}>
-      <View style={styles.card}>
+      <View
+        style={[
+          styles.card,
+          { marginTop: insets.top + 16, marginBottom: (keyboardHeight > 0 ? 0 : insets.bottom) + 16 },
+        ]}
+        testID="backup-strength-card"
+      >
         <View style={styles.headerRow}>
           <Ionicons name="shield-checkmark" color={colors.text} size={20} />
           <Text style={styles.title}>Technical details</Text>
@@ -172,7 +183,6 @@ export const BackupStrengthDialog = ({ visible, kdf, profile, onClose, onSave }:
         <ScrollView
           ref={scrollRef}
           style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
           onContentSizeChange={() => {
             if (!revealManual.current) return;
@@ -180,69 +190,78 @@ export const BackupStrengthDialog = ({ visible, kdf, profile, onClose, onSave }:
             scrollRef.current?.scrollToEnd({ animated: true });
           }}
         >
-          <Text style={styles.body}>
-            <Text style={styles.emphasis}>Now: </Text>
-            {`${PROFILE_LABEL[profile]}, ${describeKdf(kdf)}. Encryption: AES-256-GCM. Only a key derived from your password is stored, in this phone's secure storage. The password itself is never stored.`}
-          </Text>
+          {/* Claims the touch so a drag that starts on the text scrolls. Otherwise
+              it goes to OverlayModal's card Pressable, which keeps the JS responder,
+              and only drags starting on an option or field would scroll. */}
+          <View
+            style={styles.scrollContent}
+            onStartShouldSetResponder={() => true}
+            testID="backup-strength-content"
+          >
+            <Text style={styles.body}>
+              <Text style={styles.emphasis}>Now: </Text>
+              {`${PROFILE_LABEL[profile]}, ${describeKdf(kdf)}. Encryption: AES-256-GCM. Only a key derived from your password is stored, in this phone's secure storage. The password itself is never stored.`}
+            </Text>
 
-          <Text style={styles.sectionLabel}>Password hashing strength</Text>
-          {PROFILE_ORDER.map(option => {
-            const isSelected = option === selected;
-            return (
-              <Pressable
-                key={option}
-                style={[styles.option, isSelected && styles.optionSelected]}
-                onPress={() => {
-                  if (option === 'manual' && selected !== 'manual') revealManual.current = true;
-                  setSelected(option);
-                }}
-                disabled={benchmarking}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: isSelected }}
-                accessibilityLabel={KDF_PROFILES[option].title}
-              >
-                <Ionicons
-                  name={isSelected ? 'radio-button-on' : 'radio-button-off'}
-                  color={isSelected ? colors.accent : colors.textSecondary}
-                  size={20}
-                />
-                <View style={styles.optionText}>
-                  <Text style={styles.optionTitle}>{KDF_PROFILES[option].title}</Text>
-                  <Text style={styles.optionSummary}>{KDF_PROFILES[option].summary}</Text>
-                </View>
-              </Pressable>
-            );
-          })}
-
-          {selected === 'manual' ? (
-            <View style={styles.fieldRow}>
-              {(
-                [
-                  ['memoryMiB', 'Memory (MiB)', `${MANUAL_KDF_LIMITS.minMemoryMiB}–${MANUAL_KDF_LIMITS.maxMemoryMiB}`],
-                  ['iterations', 'Passes', `${MANUAL_KDF_LIMITS.minIterations}–${MANUAL_KDF_LIMITS.maxIterations}`],
-                  ['parallelism', 'Lanes', `${MANUAL_KDF_LIMITS.minParallelism}–${MANUAL_KDF_LIMITS.maxParallelism}`],
-                ] as const
-              ).map(([name, label, range]) => (
-                <View key={name} style={styles.field}>
-                  <Text style={styles.fieldLabel}>{label}</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={fields[name]}
-                    onChangeText={setField(name)}
-                    editable={!benchmarking}
-                    keyboardType="number-pad"
-                    placeholder={range}
-                    placeholderTextColor={colors.textSecondary}
-                    accessibilityLabel={label}
+            <Text style={styles.sectionLabel}>Password hashing strength</Text>
+            {PROFILE_ORDER.map(option => {
+              const isSelected = option === selected;
+              return (
+                <Pressable
+                  key={option}
+                  style={[styles.option, isSelected && styles.optionSelected]}
+                  onPress={() => {
+                    if (option === 'manual' && selected !== 'manual') revealManual.current = true;
+                    setSelected(option);
+                  }}
+                  disabled={benchmarking}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected: isSelected }}
+                  accessibilityLabel={KDF_PROFILES[option].title}
+                >
+                  <Ionicons
+                    name={isSelected ? 'radio-button-on' : 'radio-button-off'}
+                    color={isSelected ? colors.accent : colors.textSecondary}
+                    size={20}
                   />
-                </View>
-              ))}
-            </View>
-          ) : null}
+                  <View style={styles.optionText}>
+                    <Text style={styles.optionTitle}>{KDF_PROFILES[option].title}</Text>
+                    <Text style={styles.optionSummary}>{KDF_PROFILES[option].summary}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
 
-          <Text style={styles.footnote}>
-            Saving asks for your backup password. Backups you already made keep their settings.
-          </Text>
+            {selected === 'manual' ? (
+              <View style={styles.fieldRow}>
+                {(
+                  [
+                    ['memoryMiB', 'Memory (MiB)', `${MANUAL_KDF_LIMITS.minMemoryMiB}–${MANUAL_KDF_LIMITS.maxMemoryMiB}`],
+                    ['iterations', 'Passes', `${MANUAL_KDF_LIMITS.minIterations}–${MANUAL_KDF_LIMITS.maxIterations}`],
+                    ['parallelism', 'Lanes', `${MANUAL_KDF_LIMITS.minParallelism}–${MANUAL_KDF_LIMITS.maxParallelism}`],
+                  ] as const
+                ).map(([name, label, range]) => (
+                  <View key={name} style={styles.field}>
+                    <Text style={styles.fieldLabel}>{label}</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={fields[name]}
+                      onChangeText={setField(name)}
+                      editable={!benchmarking}
+                      keyboardType="number-pad"
+                      placeholder={range}
+                      placeholderTextColor={colors.textSecondary}
+                      accessibilityLabel={label}
+                    />
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            <Text style={styles.footnote}>
+              Saving asks for your backup password. Backups you already made keep their settings.
+            </Text>
+          </View>
         </ScrollView>
 
         {/* Outside the scroll area: with the number keyboard up, the benchmark
@@ -297,7 +316,11 @@ const useStyles = (colors: ThemeColors) =>
           backgroundColor: colors.cardBackground,
           width: '92%',
           maxWidth: 520,
-          maxHeight: '85%',
+          // Shrinks to the window (OverlayModal's cardPress) and the scroll area
+          // shrinks inside it. No percentage maxHeight: the overlay's wrapper hugs
+          // the card, so '85%' meant 85% of the card's own height and pushed its
+          // last lines into the scroll area even when everything would fit.
+          flexShrink: 1,
           borderRadius: 16,
           padding: 20,
           gap: 12,
@@ -318,6 +341,7 @@ const useStyles = (colors: ThemeColors) =>
         },
         scroll: {
           flexGrow: 0,
+          flexShrink: 1,
         },
         scrollContent: {
           gap: 12,
