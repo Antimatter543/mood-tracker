@@ -138,7 +138,7 @@ const MoodHistogram = () => {
                 const newBuckets = bucketMoodHistogram(entries);
                 const max = newBuckets.length > 0 ? Math.max(...newBuckets) : 0;
                 setBuckets(newBuckets);
-                setMaxFrequency(max);
+                setMaxFrequency(Math.max(max, 5));
             } catch (error) {
                 console.error('Error fetching mood data:', error);
             }
