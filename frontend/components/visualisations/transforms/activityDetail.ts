@@ -25,6 +25,7 @@ import {
     MIN_SAMPLES
 } from './activityCorrelation';
 import { IconFamilyType } from '@/components/iconRegistry';
+import { ActivityGroup } from '@/components/types';
 
 // Re-export so consumers can `bucketMoodHistogram` the activity's moods from one
 // import surface without reimplementing the distribution (the histogram uses the
@@ -328,10 +329,11 @@ export const topCoOccurring = (
 // count, sorted most-logged first, and a pure case-insensitive name filter.
 // ---------------------------------------------------------------------------
 
-export type ActivityWithCount<T> = T & { entryCount: number };
+export type ActivityWithCount<T> = T & { entryCount: number, group: string | undefined };
 
-export const withEntryCounts = <T extends { id: number; name: string }>(
+export const withEntryCounts = <T extends { id: number; name: string, group_id: number }>(
     activities: T[],
+    groups: ActivityGroup[],
     countRows: { activity_id: number; n: number }[],
 ): ActivityWithCount<T>[] => {
     const counts = new Map<number, number>();
@@ -340,22 +342,25 @@ export const withEntryCounts = <T extends { id: number; name: string }>(
             counts.set(r.activity_id, typeof r.n === 'number' ? r.n : 0);
         }
     }
+
+    const groupMap = new Map(groups.map((g) => [g.id, g.name]));
     return (activities ?? [])
-        .map((a) => ({ ...a, entryCount: counts.get(a.id) ?? 0 }))
+        .map((a) => ({ ...a, group: groupMap.get(a.group_id), entryCount: counts.get(a.id) ?? 0 }))
         .sort(
             (a, b) =>
                 b.entryCount - a.entryCount || a.name.localeCompare(b.name),
         );
 };
 
-export const filterActivitiesByQuery = <T extends { name: string }>(
+export const filterActivitiesByQuery = <T extends { name: string, group: string | undefined }>(
     activities: T[],
     query: string,
 ): T[] => {
     const q = (query ?? '').trim().toLowerCase();
     if (!q) return activities ?? [];
     return (activities ?? []).filter(
-        (a) => typeof a?.name === 'string' && a.name.toLowerCase().includes(q),
+        (a) => typeof a?.name === 'string' && a.name.toLowerCase().includes(q) ||
+               typeof a?.group === 'string' && a.group.toLowerCase().includes(q)
     );
 };
 
@@ -376,7 +381,7 @@ export const DEFAULT_ACTIVITY_BROWSE_CAP = 10;
  * `all` is assumed pre-ranked; this helper never re-sorts. Total on nullish
  * input (never throws).
  */
-export const visibleActivities = <T extends { name: string }>(
+export const visibleActivities = <T extends { name: string, group: string | undefined }>(
     all: T[],
     {
         query,

@@ -103,7 +103,7 @@ describe('classifyVariability', () => {
     it('is insufficient below the sample gate, with calm low-data copy', () => {
         const r = classifyVariability([5, 5, 5, 5], { label }); // 4 < 5
         expect(r.kind).toBe('insufficient');
-        expect(r.headline).toBe('Not enough yet');
+        expect(r.headline).toBe('Not enough entries');
         expect(r.detail).toContain('Gym');
     });
 
@@ -302,31 +302,57 @@ describe('topCoOccurring', () => {
 });
 
 describe('withEntryCounts', () => {
+    const groups = [
+        { id: 1, name: 'Group 1', sort_order: 1, },
+        { id: 2, name: 'Group 2', sort_order: 2, },
+        { id: 3, name: 'Group 3', sort_order: 3, },
+    ];
     const activities = [
-        { id: 1, name: 'Running' },
-        { id: 2, name: 'Work' },
-        { id: 3, name: 'Aardvark' },
+        { id: 1, name: 'Running', group_id: 2 },
+        { id: 2, name: 'Work', group_id: 1 },
+        { id: 3, name: 'Aardvark', group_id: 3 },
     ];
 
-    it('decorates with counts and sorts most-logged first, then name', () => {
-        const out = withEntryCounts(activities, [
+    it('decorates with counts and group, and sorts most-logged first, then name', () => {
+        const out = withEntryCounts(activities, groups, [
             { activity_id: 1, n: 3 },
             { activity_id: 2, n: 3 },
             // id 3 has no count row → 0
         ]);
         // ties (Running 3, Work 3) resolve by name; Aardvark (0) last.
         expect(out.map((a) => a.name)).toEqual(['Running', 'Work', 'Aardvark']);
+        expect(out.map((a) => a.group)).toEqual(['Group 2', 'Group 1', 'Group 3']);
         expect(out.map((a) => a.entryCount)).toEqual([3, 3, 0]);
     });
 
+    it('decorates undefined group, if group is not found or groups is empty ', () => {
+        // Unknown group
+        let out = withEntryCounts(activities.map((a) => ({...a, group_id: 18 })), groups, [
+            { activity_id: 1, n: 3 },
+            { activity_id: 2, n: 3 },
+        ]);
+        expect(out.map((a) => a.group)).toEqual([undefined, undefined, undefined]);
+
+        // Empty groups parameter
+        out = withEntryCounts(activities, [], [
+            { activity_id: 1, n: 3 },
+            { activity_id: 2, n: 3 },
+        ]);
+        expect(out.map((a) => a.group)).toEqual([undefined, undefined, undefined]);
+    });
+
     it('defaults missing counts to 0 and never throws on nullish input', () => {
-        expect(withEntryCounts(activities, [])[0].entryCount).toBe(0);
-        expect(() => withEntryCounts([], [])).not.toThrow();
+        expect(withEntryCounts(activities, groups, [])[0].entryCount).toBe(0);
+        expect(() => withEntryCounts([], [], [])).not.toThrow();
     });
 });
 
 describe('filterActivitiesByQuery', () => {
-    const activities = [{ name: 'Running' }, { name: 'Reading' }, { name: 'Gym' }];
+    const activities = [
+        { name: 'Running', group: 'Activity' },
+        { name: 'Reading', group: 'Activity' },
+        { name: 'Gym', group: 'Emotions' }
+    ];
 
     it('returns all on an empty / whitespace query', () => {
         expect(filterActivitiesByQuery(activities, '')).toHaveLength(3);
@@ -344,6 +370,14 @@ describe('filterActivitiesByQuery', () => {
     it('returns empty when nothing matches', () => {
         expect(filterActivitiesByQuery(activities, 'zzz')).toEqual([]);
     });
+
+    it('filters case-insensitively by group substring', () => {
+        expect(filterActivitiesByQuery(activities, 'activity').map((a) => a.name)).toEqual([
+            'Running',
+            'Reading',
+        ]);
+        expect(filterActivitiesByQuery(activities, 'EMOTIONS').map((a) => a.name)).toEqual(['Gym']);
+    });
 });
 
 describe('visibleActivities (top-N cap + search bypass)', () => {
@@ -351,6 +385,7 @@ describe('visibleActivities (top-N cap + search bypass)', () => {
     // the list it's given). 15 items so we straddle the default cap of 10.
     const many = Array.from({ length: 15 }, (_, i) => ({
         name: `Activity ${String(i + 1).padStart(2, '0')}`,
+        group: i < 5 ? 'Group 1' : i < 10 ? 'Group 2' : 'Group 3',
     }));
     const few = many.slice(0, 4); // fewer than the cap
 
