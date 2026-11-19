@@ -106,11 +106,11 @@ const CorrelationRow = ({
           >
             <Ionicons name="eye-off-outline" size={16} color={colors.textSecondary} />
           </Pressable>
-            <Feather
-                name="chevron-right"
-                size={18}
-                color={colors.textSecondary}
-            />
+          <Feather
+              name="chevron-right"
+              size={18}
+              color={colors.textSecondary}
+          />
         </View>
       </View>
 
@@ -191,7 +191,7 @@ const CorrelationRow = ({
 const ActivityCorrelationChart = () => {
   const colors = useThemeColors();
   const db = useSQLiteContext();
-  const { periodWindow } = useTimeframe();
+  const { periodLabel, periodWindow } = useTimeframe();
   const { settings } = useSettings();
   const carryover = settings.activity_carryover;
   const [meaningful, setMeaningful] = useState<ActivityCorrelationResult[]>([]);
@@ -284,8 +284,8 @@ const ActivityCorrelationChart = () => {
         <Text style={styles.title}>Activity Correlation</Text>
         <View style={styles.emptyState}>
           <Text style={styles.emptyText}>
-            Not enough data yet. Log activities across more days (at least 5 with
-            and 5 without each activity) or try a longer timeframe.
+            Not enough data for {periodLabel}. Change the period or log activities
+            across more days (at least 5 withand 5 without each activity).
           </Text>
         </View>
       </Card>
