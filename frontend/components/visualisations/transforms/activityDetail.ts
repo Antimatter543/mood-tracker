@@ -155,8 +155,8 @@ export const classifyVariability = (
     if (vals.length < minSamples) {
         return {
             kind: 'insufficient',
-            headline: 'Not enough yet',
-            detail: `Log ${label} a few more times to see whether your mood on those days is steady or all over the place.`,
+            headline: 'Not enough entries',
+            detail: `Log ${label} a few more times or change the time period to see whether your mood on those days is steady or all over the place.`,
         };
     }
 
@@ -230,7 +230,7 @@ export type ActivityMoodImpact = {
  * that this activity was NOT on.
  */
 export const activityMoodImpact = (
-    activityId: number,
+    activityId: number | null,
     allEntries: ActivityCorrelationRawRow[],
     minSamples: number = MIN_SAMPLES,
     carryover: boolean = false,

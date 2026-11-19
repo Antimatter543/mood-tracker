@@ -87,6 +87,8 @@ jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule())
 import MonthOverMonthCard from '@/components/visualisations/MonthOverMonthCard';
 import CustomHeatMap from '@/components/visualisations/CustomHeatMap';
 import MoodMetricOverlayCard from '@/components/visualisations/MoodMetricOverlayCard';
+import { computePeriodWindow, formatPeriodLabel, PeriodWindow } from '@/components/visualisations/transforms/periodWindow';
+import { localDateString } from '@/databases/dateHelpers';
 
 type View = Awaited<ReturnType<typeof render>>;
 
@@ -99,8 +101,23 @@ const ALL_TIMERS_BUT_DATE = [
     'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'setImmediate',
     'clearImmediate', 'setInterval', 'clearInterval', 'setTimeout', 'clearTimeout',
 ] as const;
-const pinToday = (today: Date) =>
+
+// Mock the TimeFrameContext based on the mock now() and mockSettings format.
+const mockPeriodWindow = jest.fn<PeriodWindow, []>();
+const mockPeriodLabel = jest.fn<string, []>();
+jest.mock('@/context/TimeframeContext', () => ({
+    useTimeframe: () => ({
+        periodWindow: mockPeriodWindow(),
+        periodLabel: mockPeriodLabel(),
+    }),
+}));
+
+const pinToday = (today: Date) => {
+    mockPeriodWindow.mockReturnValue(computePeriodWindow('month', 0, localDateString(today)));
+    mockPeriodLabel.mockReturnValue(formatPeriodLabel('month', 0, localDateString(today), mockSettings().date_format));
+
     jest.useFakeTimers({ now: today, doNotFake: [...ALL_TIMERS_BUT_DATE] });
+} 
 
 // A simulated device locale. `system` formats call `toLocaleDateString(undefined,
 // ...)`, so substituting a locale for `undefined` is exactly "the phone is set to

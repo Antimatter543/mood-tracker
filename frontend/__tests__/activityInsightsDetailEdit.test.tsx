@@ -21,7 +21,7 @@ import React from 'react';
 import { Alert, StyleSheet } from 'react-native';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 
-import { ENTRIES_FOR_ACTIVITY_IN_RANGE } from '@/components/visualisations/queries';
+import { CO_OCCURRING_ACTIVITIES_IN_RANGE, ENTRIES_FOR_ACTIVITY_IN_RANGE } from '@/components/visualisations/queries';
 import type { Activity, ActivityGroup } from '@/components/types';
 import { freezeNow } from '@/testing/clock';
 import { makeDb, resetWriteLayer, type MockDb } from '@/testing/fakeDb';
@@ -60,7 +60,26 @@ jest.mock('@/context/DataContext', () => ({
     useDataContext: () => ({ refetchEntries: mockRefetchEntries }),
 }));
 
+// Mock the TimeFrameContext based on the mock now() and mockSettings format.
+const mockPeriodWindow = jest.fn<PeriodWindow, []>();
+const mockPeriodLabel = jest.fn<string, []>();
+jest.mock('@/context/TimeframeContext', () => ({
+    useTimeframe: () => ({
+        periodWindow: mockPeriodWindow(),
+        periodLabel: mockPeriodLabel(),
+    }),
+}));
+
+const setTimeFrame = (today: string) => {
+    mockPeriodWindow.mockReturnValue(computePeriodWindow('month', 0, localDateString(today)));
+    mockPeriodLabel.mockReturnValue(formatPeriodLabel('month', 0, localDateString(today), 'ymd'));
+} 
+
 import { ActivityInsightsDetail } from '@/components/ActivityInsightsDetail';
+import { computePeriodWindow, formatPeriodLabel, PeriodWindow } from '@/components/visualisations/transforms/periodWindow';
+import { localDateString } from '@/databases/dateHelpers';
+import { FIXED_DAY } from '@/testing/builders';
+import { CoOccurringRow } from '@/components/visualisations/transforms/activityDetail';
 
 const groups: ActivityGroup[] = [
     { id: 1, name: 'Exercise', sort_order: 1 },
@@ -70,6 +89,7 @@ const groups: ActivityGroup[] = [
 /** The fake database's activities table, mutated by the mocked writes. */
 let rows: Map<number, Activity>;
 let entryRows: { id: number; date: string; mood: number }[];
+let coRows: CoOccurringRow[];
 
 const walk: Activity = {
     id: 5,
@@ -78,6 +98,15 @@ const walk: Activity = {
     position: 1,
     icon_family: 'Feather',
     icon_name: 'activity',
+} as Activity;
+
+const run: Activity = {
+    id: 8,
+    name: 'Run',
+    group_id: 1,
+    position: 2,
+    icon_family: 'Feather',
+    icon_name: 'run',
 } as Activity;
 
 function readActivity(params: unknown[]): Activity | null {
@@ -90,6 +119,7 @@ function installDb(): MockDb {
     const db = makeDb();
     db.getAllAsync.mockImplementation(async (sql: string) => {
         if (sql === ENTRIES_FOR_ACTIVITY_IN_RANGE) return entryRows;
+        if (sql === CO_OCCURRING_ACTIVITIES_IN_RANGE) return coRows;
         if (/FROM activity_groups/.test(sql)) return groups;
         return [];
     });
@@ -136,11 +166,14 @@ beforeEach(() => {
     jest.clearAllMocks();
     resetWriteLayer();
     freezeNow();
+    setTimeFrame(FIXED_DAY);
+
     rows = new Map([[walk.id, { ...walk }]]);
     entryRows = [
         { id: 1, date: '2026-06-10T12:00:00.000Z', mood: 7 },
         { id: 2, date: '2026-06-12T12:00:00.000Z', mood: 8 },
     ];
+    coRows = [];
     mockCurrentDb = installDb();
     mockUpdateActivity.mockImplementation(async (_db, id: number, name: string) => {
         rows.set(id, { ...rows.get(id)!, name });
@@ -161,6 +194,48 @@ afterEach(() => {
     alertSpy.mockRestore();
 });
 
+describe('ActivityInsightsDetail: detail page elements', () => {
+    it('shows the right UI elements when there are zero entries', async () => {
+        entryRows = [];
+        coRows = [];
+        await renderDetail();
+        await waitFor(() => expect(screen.getByTestId('activity-detail-title')?.children[0]?.toString()).toBe('Walk'));
+        await waitFor(() => expect(screen.getByText('Exercise')).toBeTruthy());
+        await waitFor(() => expect(screen.getByText('No Walk entries for 05-17 – 06-15')).toBeTruthy());
+    });
+
+    it('shows the right UI elements when there are many entries', async () => {
+        await render(
+            <ActivityInsightsDetail activity={walk} onClose={jest.fn()} />
+        );
+        await waitFor(() => expect(screen.getByTestId('activity-detail-title')?.children[0]?.toString()).toBe('Walk'));
+        await waitFor(() => expect(screen.getByText('Exercise')).toBeTruthy());
+        await waitFor(() => expect(screen.getByText(`${entryRows.length} entries`)).toBeTruthy());
+        await waitFor(() => expect(screen.getByText('How often your mood on Walk lands at each level.')).toBeTruthy());
+    });
+
+    it('opens the details for co-occurring activities', async () => {
+        coRows = [{...run, n: 5}];
+        await renderDetail();
+        await waitFor(() => expect(screen.getByTestId('activity-detail-title')?.children[0]?.toString()).toBe('Walk'));
+        await waitFor(() => expect(screen.getByText('How often your mood on Walk lands at each level.')).toBeTruthy());
+        await waitFor(() => expect(screen.getByText('Run')).toBeTruthy());        
+
+        await act(async () => {
+            const details = screen.getByRole('button', { name: /^Open Run insights/i})
+            coRows = [];
+            fireEvent.press(details);
+        });
+
+        // Title should be Run now and Walk should not be present (as coRows is empty)
+        await waitFor(() => expect(screen.getByTestId('activity-detail-title')?.children[0]?.toString()).toBe('Run'));
+        await waitFor(() => expect(screen.queryByText('Walk')).toBeFalsy());        
+        await waitFor(() => expect(screen.getByText(`${entryRows.length} entries`)).toBeTruthy());
+        await waitFor(() => expect(screen.getByText('How often your mood on Run lands at each level.')).toBeTruthy());
+    });
+});
+
+
 describe('ActivityInsightsDetail: edit from the detail page', () => {
     it('(a) with entries it renders the page and no bare text outside a <Text>', async () => {
         await renderDetail();
@@ -172,8 +247,8 @@ describe('ActivityInsightsDetail: edit from the detail page', () => {
     it('(b) with 0 entries the pencil opens the editor', async () => {
         entryRows = [];
         await renderDetail();
-        await waitFor(() => expect(screen.getByText('No Walk entries yet')).toBeTruthy());
-
+        await waitFor(() => expect(screen.getByText('No Walk entries for 05-17 – 06-15')).toBeTruthy());
+        
         await act(async () => {
             fireEvent.press(editButton());
         });

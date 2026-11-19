@@ -138,6 +138,10 @@ export const aggregateActivityCorrelation = (
     rows: ActivityCorrelationRawRow[],
     opts: AggregateActivityCorrelationOptions = {}
 ): ActivityCorrelationRow[] => {
+    // If there are no rows, just return empty list
+    if (rows.length == 0)
+        return [];
+
     const carryover = opts.carryover === true;
     // Rows strictly before windowStart are activity instances only (pre-window).
     const windowLowerMs =
