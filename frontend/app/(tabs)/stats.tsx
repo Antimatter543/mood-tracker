@@ -7,7 +7,7 @@ import { PageHeader, pageHeaderFullHeightInset } from '@/components/PageHeader';
 import { LAYOUT_CONTENT_PADDING, LAYOUT_FAB_CLEARANCE } from '@/styles/layout';
 import { EmptyState } from '@/components/EmptyState';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
-import { TOTAL_ENTRIES } from '@/components/visualisations/queries';
+import { TOTAL_ENTRIES_IN_RANGE } from '@/components/visualisations/queries';
 import SectionHeader from '@/components/SectionHeader';
 import StatSummaryCard from '@/components/visualisations/StatSummaryCard';
 import MoodTrendChart from '@/components/visualisations/MoodTrendChart';
@@ -20,10 +20,13 @@ import ActivityCorrelationChart from '@/components/visualisations/ActivityCorrel
 import MonthOverMonthCard from '@/components/visualisations/MonthOverMonthCard';
 import PeriodSwipe from '@/components/PeriodSwipe';
 import { useThemeColors } from '@/styles/global';
+import { useTimeframe } from '@/context/TimeframeContext';
+import { startOfLocalDay } from '@/databases/dateHelpers';
 
 const StatisticsContent = () => {
   const colors = useThemeColors();
   const db = useSQLiteContext();
+  const { periodLabel, periodWindow } = useTimeframe();
   // Whole-DB empty check. `null` = still loading (render nothing to avoid a
   // flash of empty charts before the count returns).
   const [hasEntries, setHasEntries] = useState<boolean | null>(null);
@@ -34,7 +37,10 @@ const StatisticsContent = () => {
   // on blur/unmount so a late query never sets state on a backgrounded screen.
   const loadHasEntries = useCallback(() => {
     let active = true;
-    db.getFirstAsync<{ count: number }>(TOTAL_ENTRIES)
+    const { start, end } = periodWindow;
+    const queryStart = startOfLocalDay(start);
+    const queryEnd = startOfLocalDay(end);
+    db.getFirstAsync<{ count: number }>(TOTAL_ENTRIES_IN_RANGE, [queryStart, queryEnd])
       .then((row) => {
         if (active) setHasEntries((row?.count ?? 0) > 0);
       })
@@ -102,12 +108,12 @@ const StatisticsContent = () => {
         contentStyle={styles.chartsContainer}
       >
         {/* SECTION 1 — OVERVIEW */}
-        <SectionHeader label="Overview" />
+        <SectionHeader label={`Overview for ${periodLabel}`} />
         <StatSummaryCard />
         <MoodTrendChart />
 
         {/* SECTION 2 — PATTERNS */}
-        <SectionHeader label="Patterns" />
+        <SectionHeader label={`Patterns for ${periodLabel}`} />
         <DailyMoodChart />
         <TimeOfDayChart />
         <MoodHistogram />
@@ -115,7 +121,7 @@ const StatisticsContent = () => {
         <MoodCalendar />
 
         {/* SECTION 3 — ACTIVITIES */}
-        <SectionHeader label="Activities" />
+        <SectionHeader label={`Activities for ${periodLabel}`} />
         <ActivityCorrelationChart />
         <MonthOverMonthCard />
         {/* "Explore your activities" (ActivityExplorer) moved to the bottom of

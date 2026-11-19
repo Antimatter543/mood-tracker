@@ -1,10 +1,11 @@
 import React, { useMemo } from 'react';
-import { Text, StyleSheet } from 'react-native';
+import { Text, StyleSheet, StyleProp, TextStyle } from 'react-native';
 import { useThemeColors } from '@/styles/global';
 
 type SectionHeaderProps = {
   /** e.g. "OVERVIEW", "PATTERNS", "ACTIVITIES". Rendered uppercase. */
   label: string;
+  style?: TextStyle;
 };
 
 /**
@@ -12,7 +13,7 @@ type SectionHeaderProps = {
  * Matches the `cardTitle` style from useGlobalStyles (textSecondary colour)
  * so groups of cards read as a single section.
  */
-const SectionHeader: React.FC<SectionHeaderProps> = ({ label }) => {
+const SectionHeader: React.FC<SectionHeaderProps> = ({ label, style }) => {
   const colors = useThemeColors();
 
   const styles = useMemo(
@@ -32,7 +33,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label }) => {
     [colors]
   );
 
-  return <Text style={styles.label}>{label.toUpperCase()}</Text>;
+  return <Text style={[styles.label, style]}>{label.toUpperCase()}</Text>;
 };
 
 export default SectionHeader;
