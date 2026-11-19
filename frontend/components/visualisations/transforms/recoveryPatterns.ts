@@ -37,7 +37,7 @@ export const LOW_STRETCH_EXPLAINER =
     'two days have entries of 6 or more, with nothing lower in between and no ' +
     'entry of 4 or lower that day or the next. If entries stay at 5 or more ' +
     'for four days without that, it ends as steady at 5+. This looks at the ' +
-    'last 90 days. The activity lists show what you logged at those times, ' +
+    'previous 90 days. The activity lists show what you logged at those times, ' +
     'not what caused it.';
 
 export type MoodActivityRow = {
@@ -119,7 +119,8 @@ const leaningActivities = (
  * Gracefully handles 0 data points — no crash, just empty episodes.
  */
 export const analyseRecoveryPatterns = (
-    rows: (MoodActivityRow | null | undefined)[]
+    rows: (MoodActivityRow | null | undefined)[],
+    endDate?: string
 ): RecoveryAnalysis => {
     const entries = (rows ?? []).filter(isUsableRow);
     if (entries.length === 0) {
@@ -210,6 +211,9 @@ export const analyseRecoveryPatterns = (
         const dipping = dipDates.has(localDay) || dipDates.has(addDays(localDay, 1));
 
         const mood = entry.mood;
+
+        if (endDate && entry.date > endDate && !currentEp)
+            break;
 
         if (!currentEp && mood <= DIP_THRESHOLD) {
             currentEp = {

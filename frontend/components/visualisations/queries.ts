@@ -63,6 +63,9 @@ export const MONTHLY_DAILY_AVERAGES = WEEKLY_MOOD_AVERAGES;
 // -----------------------------------------------------------------------------
 export const TOTAL_ENTRIES = `SELECT COUNT(*) as count FROM entries WHERE deleted_at IS NULL`;
 
+// Total entry count in a window. Caller supplies `?start, ?end` (UTC ISO bounds).
+export const TOTAL_ENTRIES_IN_RANGE = `SELECT COUNT(*) as count FROM entries WHERE deleted_at IS NULL AND date BETWEEN ? AND ?`;
+
 // -----------------------------------------------------------------------------
 // The user's earliest entry — the RAW stored instant, never `date(MIN(date))`,
 // so the caller can key it to a LOCAL day via `localDateString` (SQLite's
@@ -359,6 +362,6 @@ export const RECOVERY_ENTRY_ACTIVITIES = `
   FROM entries e
   LEFT JOIN entry_activities ea ON e.id = ea.entry_id
   LEFT JOIN activities a ON ea.activity_id = a.id
-  WHERE e.deleted_at IS NULL AND e.date >= ?
+  WHERE e.deleted_at IS NULL AND e.date BETWEEN ? AND ?
   ORDER BY e.date, e.id
 `;

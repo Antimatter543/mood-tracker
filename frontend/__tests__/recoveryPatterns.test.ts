@@ -287,6 +287,37 @@ describe('analyseRecoveryPatterns', () => {
     expect(r.historicalEpisodes.at(1)?.durationDays).toBe(3);
     expect(r.avgRecoveredDays).toBe(3.5);
   });
+
+  it('doesn\'t include days after the endDate in the analysis', () => {
+    const r = analyseRecoveryPatterns(
+      series(
+        // ep 1
+        ['2025-06-01T09:00:00', 3],
+        ['2025-06-01T18:00:00', 2],
+        ['2025-06-01T21:00:00', 1],
+        ['2025-06-02T12:00:00', 5],
+        ['2025-06-02T18:00:00', 7],
+        ['2025-06-02T21:00:00', 7],
+        ['2025-06-03T12:00:00', 8],
+        // ep 2
+        ['2025-06-07T09:00:00', 3],
+        ['2025-06-07T18:00:00', 0],
+        ['2025-06-07T21:00:00', 3],
+        ['2025-06-08T12:00:00', 4],
+        ['2025-06-09T12:00:00', 5],
+        ['2025-06-10T18:00:00', 7],
+        ['2025-06-10T21:00:00', 7],
+        ['2025-06-11T12:00:00', 9],
+      ),
+      '2025-06-06'
+    );
+    expect(r.historicalEpisodes.length).toBe(1);
+    expect(r.historicalEpisodes.at(0)?.durationDays).toBe(3);
+    expect(r.historicalEpisodes.at(0)?.worstMood).toBe(1);
+    expect(r.historicalEpisodes.at(0)?.currentMood).toBe(8);
+
+    expect(r.currentEpisode).toBeNull();
+  });
 });
 
 // Rows with activities attached: [date, mood, activities].

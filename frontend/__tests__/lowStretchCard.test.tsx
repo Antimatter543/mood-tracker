@@ -18,7 +18,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import { RECOVERY_ENTRY_ACTIVITIES } from '@/components/visualisations/queries';
 import { LOW_STRETCH_EXPLAINER, type RecoveryRawRow } from '@/components/visualisations/transforms/recoveryPatterns';
 import { freezeNow } from '@/testing/clock';
-import { FIXED_DAY, FIXED_NOW, addDays, localIso } from '@/testing/builders';
+import { FIXED_DAY, FIXED_NOW, addDays, dayKey, localIso } from '@/testing/builders';
 import { code } from '@/testing/sourceScan';
 import { walkTree } from '@/testing/rntl';
 import type { Settings } from '@/databases/settings';
@@ -80,6 +80,8 @@ jest.mock('expo-sqlite', () => ({
 
 import InsightsScreen from '@/app/(tabs)/insights';
 import RecoveryAnalysisCard from '@/components/visualisations/RecoveryPatterns';
+import { computePeriodWindow, formatPeriodLabel, PeriodWindow } from '@/components/visualisations/transforms/periodWindow';
+import { useTimeframe } from '@/context/TimeframeContext';
 
 /** No lows at all: moods 5..8 over two weeks. */
 const NO_LOWS = () => [entry(14, 6), entry(10, 5), entry(7, 8), entry(3, 7), entry(1, 6)];
@@ -109,8 +111,19 @@ const allWords = (tree: unknown): string[] => {
 
 const BANNED = /episode|success|%|recovered|worsening|ongoing/i;
 
+const mockPeriodWindow = jest.fn<PeriodWindow, []>();
+const mockPeriodLabel = jest.fn<string, []>();
+jest.mock('@/context/TimeframeContext', () => ({
+    useTimeframe: () => ({
+        periodWindow: mockPeriodWindow(),
+        periodLabel: mockPeriodLabel(),
+    }),
+}));
+
 beforeEach(() => {
     freezeNow(FIXED_NOW);
+    mockPeriodWindow.mockReturnValue(computePeriodWindow('month', 0, FIXED_DAY));
+    mockPeriodLabel.mockReturnValue(formatPeriodLabel('month', 0, FIXED_DAY, 'ymd'));
     nextId = 1;
     mockDb.getAllAsync.mockClear();
 });
@@ -132,16 +145,20 @@ describe('After low days on Insights', () => {
         recoveryRows = WITH_LOWS();
         await render(<InsightsScreen />);
         expect(await screen.findByText('After low days')).toBeTruthy();
-        expect(screen.getByText('3 low stretches in the last 90 days')).toBeTruthy();
+        expect(screen.getByText('You have logged 3 low stretches 16 Feb–15 Jun.')).toBeTruthy();
     });
 
-    it('queries from the local start of the day 90 days ago', async () => {
+    it('queries from the local start of the day 90 days ago and continue 90 days into the future', async () => {
         recoveryRows = [];
         await render(<RecoveryAnalysisCard />);
         await waitFor(() => expect(mockDb.getAllAsync).toHaveBeenCalled());
         const [sql, params] = mockDb.getAllAsync.mock.calls[0] as unknown as [string, string[]];
         expect(sql).toBe(RECOVERY_ENTRY_ACTIVITIES);
-        expect(params).toEqual([localIso(addDays(FIXED_DAY, -90), 0)]);
+
+        const { periodWindow } = useTimeframe();
+        const start = dayKey(new Date(periodWindow.start));
+        const end = dayKey(new Date(periodWindow.end));
+        expect(params).toEqual([addDays(start, -90), addDays(end, 90)]);
     });
 });
 
@@ -176,7 +193,7 @@ describe('the card and its detail page', () => {
         await screen.findByText('After low days');
 
         expect(screen.getByTestId('low-stretch-summary')).toHaveTextContent(
-            '3 low stretches in the last 90 days',
+            'You have logged 3 low stretches 16 Feb–15 Jun.',
         );
         // One stretch got back to 6+, so no "usually".
         expect(screen.getByTestId('low-stretch-typical')).toHaveTextContent('Back to 6+ in 3 days');
@@ -186,8 +203,8 @@ describe('the card and its detail page', () => {
         expect(screen.getByText(/^Lowest 4 . latest 5$/)).toBeTruthy();
 
         // Ended stretches, newest first: dates + status only.
-        expect(screen.getByTestId('low-stretch-row-0')).toHaveTextContent(/26 May – 30 May\s*Steady at 5\+/);
-        expect(screen.getByTestId('low-stretch-row-1')).toHaveTextContent(/16 May – 18 May\s*Back to 6\+/);
+        expect(screen.getByTestId('low-stretch-row-0')).toHaveTextContent(/26 May – 30 May,\s*5 days\s*Steady at 5\+/);
+        expect(screen.getByTestId('low-stretch-row-1')).toHaveTextContent(/16 May – 18 May,\s*3 days\s*Back to 6\+/);
 
         // The row's spoken label carries the dates and the status.
         expect(screen.getByTestId('low-stretch-row-1').props.accessibilityLabel).toBe(
