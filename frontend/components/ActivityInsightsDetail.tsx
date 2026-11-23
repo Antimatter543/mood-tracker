@@ -41,7 +41,8 @@ import { useTimeframe } from '@/context/TimeframeContext';
 import { getActivityGroups } from '@/databases/groups';
 import { ActivityEditModal } from './forms/ActivityEditModal';
 import { getActivity } from '@/databases/activities';
-import { ActivityCorrelationRawRow } from './visualisations/transforms/activityCorrelation';
+import { ActivityCorrelationRawRow, carryoverQueryBounds, MIN_SAMPLES } from './visualisations/transforms/activityCorrelation';
+import { useSettings } from '@/context/SettingsContext';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
@@ -56,8 +57,10 @@ type DetailData = {
     coRows: CoOccurringRow[];
     group: ActivityGroup | undefined;
     groups: ActivityGroup[];
+    windowStart: string | undefined;
 };
-const EMPTY_DATA: DetailData = { activityRows: [], allRows: [], coRows: [], group: undefined, groups: [] };
+const EMPTY_DATA: DetailData = { activityRows: [], allRows: [], coRows: [],
+    group: undefined, groups: [], windowStart: undefined };
 
 const VARIABILITY_ICON: Record<VariabilityKind, FeatherName> = {
     insufficient: 'clock',
@@ -87,28 +90,33 @@ export const ActivityInsightsDetail: React.FC<{
     const db = useSQLiteContext();
     const [data, setData] = useState<DetailData | null>(null);
     const { periodLabel, periodWindow } = useTimeframe();
+    const { settings } = useSettings();
+    const carryover = settings.activity_carryover;
     const [currentActivity, setCurrentActivity] = useState(activity);
     const [editorVisible, setEditorVisible] = useState<boolean>(false);
 
     const load = useCallback(() => {
         let active = true;
         (async () => {
-            try {                
-                // All-time bounds for the "vs usual" split (all entries).
-                const queryStart = periodWindow.start;
-                const queryEnd = periodWindow.end;
+            try {
+                // Fetch data for the active time period.
+                const { queryStart, queryEnd, windowStart } = carryoverQueryBounds(
+                    periodWindow,
+                    carryover,
+                );
+
                 const [activityRows, allRows, coRows, groups] = await Promise.all([
                     db.getAllAsync<ActivityCorrelationRawRow>(ENTRIES_FOR_ACTIVITY_IN_RANGE,
-                        [currentActivity.id, queryStart, queryEnd]),
+                        [currentActivity.id, windowStart ?? queryStart, queryEnd]),
                     db.getAllAsync<ActivityCorrelationRawRow>(ACTIVITY_CORRELATION,
                         [queryStart, queryEnd]),
                     db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES_IN_RANGE,
-                        [queryStart, queryEnd, currentActivity.id]),
+                        [currentActivity.id, windowStart ?? queryStart, queryEnd]),
                     getActivityGroups(db),
                 ]);
                 if (active) {
                     const group = groups.find((g) => g.id == currentActivity.group_id);
-                    setData({ activityRows, allRows, coRows, groups, group });
+                    setData({ activityRows, allRows, coRows, groups, group, windowStart });
                 }
             } catch (e) {
                 console.error('Error loading activity insights:', e);
@@ -127,7 +135,7 @@ export const ActivityInsightsDetail: React.FC<{
         return {
             stats: activityMoodStats(moods),
             variability: classifyVariability(moods, { label: currentActivity.name }),
-            impact: activityMoodImpact(currentActivity.id, d.allRows),
+            impact: activityMoodImpact(currentActivity.id, d.allRows, MIN_SAMPLES, carryover, d.windowStart),
             buckets: bucketMoodHistogram(d.activityRows),
             trend: moodTrendForActivity(d.activityRows),
             co: topCoOccurring(d.coRows),
@@ -382,7 +390,7 @@ export const ActivityInsightsDetail: React.FC<{
                             <Text style={styles.cardBody}>
                                 You've logged {currentActivity.name} on{' '}
                                 <Text style={styles.emphasis}>
-                                    {imp.withCount} {imp.withoutCount === 1 ? 'day' : 'days'}
+                                    {imp.withCount} {imp.withCount === 1 ? 'day' : 'days'}
                                 </Text>
                                 {imp.withAvg !== null
                                     ? ` (averaging ${imp.withAvg.toFixed(1)})`
