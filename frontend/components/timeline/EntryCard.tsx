@@ -225,10 +225,10 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
         <View style={styles.cell} testID={`entry-${entry.id}`}>
             <View style={styles.rail}>
                 {!isFirstOfDay ? (
-                    <View style={[styles.railLine, { top: 0, height: nodeCentre }]} />
+                    <View style={[styles.railLine, { top: -6, height: nodeCentre }]} />
                 ) : null}
                 {!isLastOfDay ? (
-                    <View style={[styles.railLine, { top: nodeCentre, bottom: 0 }]} />
+                    <View style={[styles.railLine, { top: nodeCentre, bottom: -6 }]} />
                 ) : null}
                 <View
                     testID="entry-mood-node"
@@ -258,7 +258,7 @@ const EntryCardImpl: React.FC<EntryCardProps> = ({
                     </View>
                     <ActivityRow activities={entry.activities} colors={colors} />
                     {entry.notes ? (
-                        <Text style={styles.notes} numberOfLines={4}>
+                        <Text style={styles.notes} numberOfLines={actionsOpen ? undefined : 4}>
                             {entry.notes}
                         </Text>
                     ) : null}
