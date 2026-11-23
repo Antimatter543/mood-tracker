@@ -84,7 +84,7 @@ export default function PeriodWindowScreen() {
         <Layout useScrollView={false}>
             <PageHeader
                 style={pageHeaderFullHeightInset}
-                title='Timeframe'
+                title='Time period'
                 subtitle="All data is shown for the period selected here"
                 icon={p => <Ionicons name='calendar-outline' {...p} />}
             />
