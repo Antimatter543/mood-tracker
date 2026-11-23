@@ -11,12 +11,14 @@ const ALL_HOURS = Array.from({ length: 24 }, (_, h) => h);
 
 describe('Home greeting', () => {
     it('greets by time of day', () => {
-        expect(greetingForHour(0)).toBe('Good morning');
+        expect(greetingForHour(0)).toBe('Good night');
+        expect(greetingForHour(6)).toBe('Good morning');
         expect(greetingForHour(11)).toBe('Good morning');
         expect(greetingForHour(12)).toBe('Good afternoon');
-        expect(greetingForHour(17)).toBe('Good afternoon');
+        expect(greetingForHour(16)).toBe('Good afternoon');
         expect(greetingForHour(18)).toBe('Good evening');
-        expect(greetingForHour(23)).toBe('Good evening');
+        expect(greetingForHour(21)).toBe('Good evening');
+        expect(greetingForHour(23)).toBe('Good night');
     });
 
     it('pairs each greeting with one glyph, on the same boundaries', () => {
@@ -31,6 +33,7 @@ describe('Home greeting', () => {
             'Good afternoon',
             'Good evening',
             'Good morning',
+            'Good night',
         ]);
         // Exactly one glyph per greeting == the two functions never disagree.
         for (const [, glyphs] of pairs) expect(glyphs.size).toBe(1);
@@ -38,7 +41,7 @@ describe('Home greeting', () => {
 
     it('uses a distinct glyph per part of the day', () => {
         const glyphs = new Set(ALL_HOURS.map(greetingIconForHour));
-        expect(glyphs.size).toBe(3);
+        expect(glyphs.size).toBe(4);
     });
 
     it('covers every hour (no undefined greeting or glyph)', () => {
