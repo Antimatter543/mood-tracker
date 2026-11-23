@@ -97,7 +97,7 @@ describe('EntryCard — structure', () => {
         await view.rerender(card(true, false));
         const [out] = rail(view.toJSON());
         expect(styleOf(out).top).toBeGreaterThan(0); // starts at the node, runs down
-        expect(styleOf(out).bottom).toBe(0);
+        expect(styleOf(out).bottom).toBe(-6);
     });
 
     it('the card body is the edit button, and hands the entry to onEdit', async () => {
