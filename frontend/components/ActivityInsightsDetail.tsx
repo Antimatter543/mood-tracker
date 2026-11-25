@@ -15,16 +15,15 @@ import { useSQLiteContext } from 'expo-sqlite';
 
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
-import { useDateFormat } from '@/hooks/useDateFormat';
 import { Card } from '@/components/Card';
 import { ActivityIcon } from '@/components/activityIcon';
 import { Activity, ActivityGroup } from '@/components/types';
 import { moodColor } from '@/components/timeline/moodColor';
-import { startOfLocalDay, endOfLocalDay } from '@/databases/dateHelpers';
+import PeriodSwipe from '@/components/PeriodSwipe';
 import {
-    ENTRIES_FOR_ACTIVITY,
-    WEEKLY_MOOD_AVERAGES,
-    CO_OCCURRING_ACTIVITIES,
+    ENTRIES_FOR_ACTIVITY_IN_RANGE,
+    CO_OCCURRING_ACTIVITIES_IN_RANGE,
+    ACTIVITY_CORRELATION,
 } from '@/components/visualisations/queries';
 import { NUM_BUCKETS } from '@/components/visualisations/transforms/scatter';
 import {
@@ -38,27 +37,30 @@ import {
     type VariabilityKind,
     type CoOccurringRow,
 } from '@/components/visualisations/transforms/activityDetail';
-import { now } from '@/lib/clock';
+import { useTimeframe } from '@/context/TimeframeContext';
 import { getActivityGroups } from '@/databases/groups';
 import { ActivityEditModal } from './forms/ActivityEditModal';
 import { getActivity } from '@/databases/activities';
+import { ActivityCorrelationRawRow, carryoverQueryBounds, MIN_SAMPLES } from './visualisations/transforms/activityCorrelation';
+import { useSettings } from '@/context/SettingsContext';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
 /** Minimum distinct logged days before the optional trend sparkline is worth it. */
 const MIN_TREND_DAYS = 6;
-const SPARK_HEIGHT = 48;
+const SPARK_HEIGHT = 96;
 const HISTOGRAM_HEIGHT = 132;
 
-type EntryRow = { id: number; date: string; mood: number };
 type DetailData = {
-    activityRows: EntryRow[];
-    allRows: { date: string; mood: number }[];
+    activityRows: ActivityCorrelationRawRow[];
+    allRows: ActivityCorrelationRawRow[];
     coRows: CoOccurringRow[];
     group: ActivityGroup | undefined;
     groups: ActivityGroup[];
+    windowStart: string | undefined;
 };
-const EMPTY_DATA: DetailData = { activityRows: [], allRows: [], coRows: [], group: undefined, groups: [] };
+const EMPTY_DATA: DetailData = { activityRows: [], allRows: [], coRows: [],
+    group: undefined, groups: [], windowStart: undefined };
 
 const VARIABILITY_ICON: Record<VariabilityKind, FeatherName> = {
     insufficient: 'clock',
@@ -83,35 +85,38 @@ export const ActivityInsightsDetail: React.FC<{
     onClose: () => void;
 }> = ({ activity, onClose }) => {
     const colors = useThemeColors();
-    const { format } = useDateFormat();
-    /** "18 Sep 2026" in the user's chosen order (setting `date_format`). */
-    const fmtDate = (iso: string): string => format(iso, 'medium');
+    const styles = useMemo(() => makeStyles(colors), [colors]);
     const insets = useSafeAreaInsets();
     const db = useSQLiteContext();
-    const styles = useMemo(() => makeStyles(colors), [colors]);
-    const [currentActivity, setCurrentActivity] = useState(activity);
     const [data, setData] = useState<DetailData | null>(null);
+    const { periodLabel, periodWindow } = useTimeframe();
+    const { settings } = useSettings();
+    const carryover = settings.activity_carryover;
+    const [currentActivity, setCurrentActivity] = useState(activity);
     const [editorVisible, setEditorVisible] = useState<boolean>(false);
 
     const load = useCallback(() => {
         let active = true;
         (async () => {
             try {
-                // All-time bounds for the "vs usual" split (all entries).
-                const start = startOfLocalDay(new Date(0));
-                const end = endOfLocalDay(now());
+                // Fetch data for the active time period.
+                const { queryStart, queryEnd, windowStart } = carryoverQueryBounds(
+                    periodWindow,
+                    carryover,
+                );
+
                 const [activityRows, allRows, coRows, groups] = await Promise.all([
-                    db.getAllAsync<EntryRow>(ENTRIES_FOR_ACTIVITY, [currentActivity.id]),
-                    db.getAllAsync<{ date: string; mood: number }>(WEEKLY_MOOD_AVERAGES, [
-                        start,
-                        end,
-                    ]),
-                    db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES, [currentActivity.id]),
+                    db.getAllAsync<ActivityCorrelationRawRow>(ENTRIES_FOR_ACTIVITY_IN_RANGE,
+                        [currentActivity.id, windowStart ?? queryStart, queryEnd]),
+                    db.getAllAsync<ActivityCorrelationRawRow>(ACTIVITY_CORRELATION,
+                        [queryStart, queryEnd]),
+                    db.getAllAsync<CoOccurringRow>(CO_OCCURRING_ACTIVITIES_IN_RANGE,
+                        [currentActivity.id, windowStart ?? queryStart, queryEnd]),
                     getActivityGroups(db),
                 ]);
                 if (active) {
-                    const group = groups.find((g) => g.id === currentActivity.group_id);
-                    setData({ activityRows, allRows, coRows, groups, group });
+                    const group = groups.find((g) => g.id == currentActivity.group_id);
+                    setData({ activityRows, allRows, coRows, groups, group, windowStart });
                 }
             } catch (e) {
                 console.error('Error loading activity insights:', e);
@@ -121,8 +126,8 @@ export const ActivityInsightsDetail: React.FC<{
         return () => {
             active = false;
         };
-    }, [db, currentActivity.id, currentActivity.group_id]);
-    useDataRefresh(load, [db, currentActivity.id, currentActivity.group_id]);
+    }, [db, currentActivity.id, currentActivity.group_id, periodWindow]);
+    useDataRefresh(load, [db, currentActivity.id, currentActivity.group_id, periodWindow]);
 
     const model = useMemo(() => {
         const d = data ?? EMPTY_DATA;
@@ -130,14 +135,14 @@ export const ActivityInsightsDetail: React.FC<{
         return {
             stats: activityMoodStats(moods),
             variability: classifyVariability(moods, { label: currentActivity.name }),
-            impact: activityMoodImpact(d.allRows, d.activityRows),
+            impact: activityMoodImpact(currentActivity.id, d.allRows, MIN_SAMPLES, carryover, d.windowStart),
             buckets: bucketMoodHistogram(d.activityRows),
             trend: moodTrendForActivity(d.activityRows),
             co: topCoOccurring(d.coRows),
-            firstDate: d.activityRows[0]?.date ?? null,
-            lastDate: d.activityRows[d.activityRows.length - 1]?.date ?? null,
+            firstDate: d.activityRows.length > 0 ? d.activityRows[0]?.date ?? null : null,
+            lastDate: d.activityRows.length > 0 ? d.activityRows[d.activityRows.length - 1]?.date ?? null : null,
         };
-    }, [data, currentActivity.name]);
+    }, [data?.activityRows, data?.coRows, data?.allRows, currentActivity.id, currentActivity.name]);
 
     // Re-read the activity after the edit dialog saved or deleted it: gone means
     // it was deleted, so this screen closes; otherwise show the new name/group.
@@ -157,7 +162,7 @@ export const ActivityInsightsDetail: React.FC<{
     const header = (
         <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
             <View style={styles.titleBlock}>
-                <Text style={styles.topTitle} numberOfLines={1}>
+                <Text style={styles.topTitle} numberOfLines={1} testID="activity-detail-title">
                     {currentActivity.name}
                 </Text>
                 {data?.group && (
@@ -215,33 +220,47 @@ export const ActivityInsightsDetail: React.FC<{
         return (
             <View style={styles.screen}>
                 {header}
-                <View style={styles.centerFill}>
-                    <ActivityIndicator color={colors.accent} />
-                </View>
+                <ScrollView
+                    key={currentActivity.id}
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator={false}
+                >
+                    <View style={styles.centerFill}>
+                        <ActivityIndicator color={colors.accent} />
+                    </View>
+                </ScrollView>
             </View>
         );
     }
 
     // Never logged — calm empty state.
-    if (model.stats.count === 0) {
+    if (model && model.stats.count === 0) {
         return (
             <View style={styles.screen}>
                 {header}
-                <View style={styles.centerFill}>
-                    <View style={[styles.iconHalo, { backgroundColor: colors.accentLight }]}>
-                        <ActivityIcon
-                            iconName={currentActivity.icon_name}
-                            iconFamily={currentActivity.icon_family}
-                            color={colors.accent}
-                            size={30}
-                        />
-                    </View>
-                    <Text style={styles.emptyTitle}>No {currentActivity.name} entries yet</Text>
-                    <Text style={styles.emptyBody}>
-                        Log {currentActivity.name} alongside your mood a few times and its pattern will
-                        show up here.
-                    </Text>
-                </View>
+                <ScrollView
+                    key={currentActivity.id}
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator={false}
+                >
+                    <PeriodSwipe>
+                        <View style={styles.centerFill}>
+                            <View style={[styles.iconHalo, { backgroundColor: colors.accentLight }]}>
+                                <ActivityIcon
+                                    iconName={currentActivity.icon_name}
+                                    iconFamily={currentActivity.icon_family}
+                                    color={colors.accent}
+                                    size={30}
+                                />
+                            </View>
+                            <Text style={styles.emptyTitle}>No {currentActivity.name} entries for {periodLabel}</Text>
+                            <Text style={styles.emptyBody}>
+                                Log {currentActivity.name} alongside your mood a few times or change the time period,
+                                and the activity's pattern will show up here.
+                            </Text>
+                        </View>
+                    </PeriodSwipe>
+                </ScrollView>
                 {editModal}
             </View>
         );
@@ -259,186 +278,251 @@ export const ActivityInsightsDetail: React.FC<{
               ? colors.textSecondary
               : colors.accent;
 
-    const rangeText =
-        model.firstDate && model.lastDate
-            ? fmtDate(model.firstDate) === fmtDate(model.lastDate)
-                ? fmtDate(model.firstDate)
-                : `${fmtDate(model.firstDate)} – ${fmtDate(model.lastDate)}`
-            : '';
+    const maxFrequency = Math.max(5, ...model.buckets);
 
-    const maxFreq = Math.max(1, ...model.buckets);
+    const getBarHeight = (count: number) => {
+        if (maxFrequency === 0) return 0;
+        return (count / maxFrequency) * HISTOGRAM_HEIGHT;
+    };
+
+    // Generate y-axis labels
+    const yAxisLabels = Array.from(
+        { length: 5 },
+        (_, i) => Math.round(maxFrequency * (4 - i) / 4)
+    );
 
     return (
         <View style={styles.screen}>
             {header}
             <ScrollView
+                key={currentActivity.id}
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
             >
-                {/* (a) Header — icon, name, count, date range */}
-                <Card>
-                    <View style={styles.headerRow}>
-                        <View style={[styles.iconChip, { backgroundColor: colors.accentLight }]}>
-                            <ActivityIcon
-                                iconName={currentActivity.icon_name}
-                                iconFamily={currentActivity.icon_family}
-                                color={colors.accent}
-                                size={26}
-                            />
-                        </View>
-                        <View style={styles.grow}>
-                            <Text style={styles.activityTitle}>{currentActivity.name}</Text>
-                            <Text style={styles.activitySub}>
-                                {s.count} {s.count === 1 ? 'entry' : 'entries'}
-                                {rangeText ? ` · ${rangeText}` : ''}
-                            </Text>
-                        </View>
-                    </View>
-                </Card>
-
-                {/* (d) Variability callout — the centerpiece, placed prominently up top */}
-                <Card accentTop>
-                    <View style={styles.calloutRow}>
-                        <View style={[styles.iconChip, { backgroundColor: colors.accentLight }]}>
-                            <Feather name={VARIABILITY_ICON[v.kind]} size={22} color={varColor} />
-                        </View>
-                        <View style={styles.grow}>
-                            <Text style={[styles.calloutHeadline, { color: varColor }]}>
-                                {v.headline}
-                            </Text>
-                            <Text style={styles.calloutBody}>{v.detail}</Text>
-                            {v.kind !== 'insufficient' && (
-                                <Text style={styles.calloutStat}>
-                                    Average {s.mean.toFixed(1)} · typical swing ±{s.stdev.toFixed(1)}{' '}
-                                    · range {s.min.toFixed(1)}–{s.max.toFixed(1)}
+                <PeriodSwipe>
+                    {/* (a) Header — icon, name, count, date range */}
+                    <Card>
+                        <View style={styles.headerRow}>
+                            <View style={[styles.iconChip, { backgroundColor: colors.accentLight }]}>
+                                <ActivityIcon
+                                    iconName={currentActivity.icon_name}
+                                    iconFamily={currentActivity.icon_family}
+                                    color={colors.accent}
+                                    size={26}
+                                />
+                            </View>
+                            <View style={styles.grow}>
+                                <Text style={styles.activityTitle}>{currentActivity.name}</Text>
+                                <Text style={styles.activitySub}>
+                                    {periodLabel}
                                 </Text>
-                            )}
+                                <Text style={styles.activitySub}>
+                                    {s.count} {s.count === 1 ? 'entry' : 'entries'}
+                                </Text>
+                            </View>
                         </View>
-                    </View>
-                </Card>
+                    </Card>
 
-                {/* (b) Mood when doing X — vs your usual */}
-                <Card>
-                    <Text style={styles.cardTitle}>Mood when doing {currentActivity.name}</Text>
-                    {imp.isMeaningful && imp.withAvg !== null && imp.withoutAvg !== null ? (
-                        <>
-                            <Text style={styles.cardBody}>
-                                On {currentActivity.name} days your mood averages{' '}
-                                <Text style={styles.emphasis}>{imp.withAvg.toFixed(1)}</Text> —
-                                that's{' '}
-                                <Text
-                                    style={[
-                                        styles.emphasis,
-                                        {
-                                            color:
-                                                (imp.delta ?? 0) >= 0
-                                                    ? colors.accent
-                                                    : varColorForNegative(colors),
-                                        },
-                                    ]}
-                                >
-                                    {(imp.delta ?? 0) >= 0 ? '+' : ''}
-                                    {(imp.delta ?? 0).toFixed(1)}
-                                </Text>{' '}
-                                vs {imp.withoutAvg.toFixed(1)} on your other days.
-                            </Text>
-                            <View style={styles.compare}>
-                                <CompareBar
-                                    label={`With ${currentActivity.name}`}
-                                    value={imp.withAvg}
-                                    fill={colors.accent}
-                                    styles={styles}
-                                    colors={colors}
-                                />
-                                <CompareBar
-                                    label="Without"
-                                    value={imp.withoutAvg}
-                                    fill={colors.textSecondary}
-                                    styles={styles}
-                                    colors={colors}
-                                />
+                    {/* (d) Variability callout — the centerpiece, placed prominently up top */}
+                    <Card accentTop>
+                        <View style={styles.calloutRow}>
+                            <View style={[styles.iconChip, { backgroundColor: colors.accentLight }]}>
+                                <Feather name={VARIABILITY_ICON[v.kind]} size={22} color={varColor} />
                             </View>
-                        </>
-                    ) : (
-                        <Text style={styles.cardBody}>
-                            You've logged {currentActivity.name} on{' '}
-                            <Text style={styles.emphasis}>
-                                {imp.withDays} {imp.withDays === 1 ? 'day' : 'days'}
-                            </Text>
-                            {imp.withAvg !== null
-                                ? ` (averaging ${imp.withAvg.toFixed(1)})`
-                                : ''}
-                            . Log it a few more times — and some days without it — to compare it to
-                            your usual mood.
-                        </Text>
-                    )}
-                </Card>
-
-                {/* (c) Distribution histogram */}
-                <Card>
-                    <Text style={styles.cardTitle}>How those days are distributed</Text>
-                    <Text style={styles.cardBody}>
-                        How often your mood on {currentActivity.name} days lands at each level.
-                    </Text>
-                    <View style={styles.histRow}>
-                        {model.buckets.map((count, i) => (
-                            <View key={i} style={styles.histCol}>
-                                {count > 0 && <Text style={styles.histCount}>{count}</Text>}
-                                <View
-                                    style={[
-                                        styles.histBar,
-                                        {
-                                            height: Math.max(2, (count / maxFreq) * HISTOGRAM_HEIGHT),
-                                            backgroundColor: moodColor(
-                                                i + 0.5,
-                                                colors.accent,
-                                                colors.overlays.tag,
-                                            ),
-                                        },
-                                    ]}
-                                />
-                                <Text style={styles.histAxis}>{i}</Text>
+                            <View style={styles.grow}>
+                                <Text style={[styles.calloutHeadline, { color: varColor }]}>
+                                    {v.headline}
+                                </Text>
+                                <Text style={styles.calloutBody}>{v.detail}</Text>
+                                {v.kind !== 'insufficient' && (
+                                    <Text style={styles.calloutStat}>
+                                        Average {s.mean.toFixed(1)} · typical swing ±{s.stdev.toFixed(1)}{' '}
+                                        · range {s.min.toFixed(1)}–{s.max.toFixed(1)}
+                                    </Text>
+                                )}
                             </View>
-                        ))}
-                    </View>
-                    <Text style={styles.axisCaption}>Mood rating (0–{NUM_BUCKETS - 1})</Text>
-                </Card>
+                        </View>
+                    </Card>
 
-                {/* (e) Often paired with */}
-                {model.co.length > 0 && (
+                    {/* (b) Mood when doing X — vs your usual */}
                     <Card>
-                        <Text style={styles.cardTitle}>Often paired with</Text>
-                        <View style={styles.chipWrap}>
-                            {model.co.map((c) => (
-                                <View key={c.id} style={styles.pairChip}>
-                                    <ActivityIcon
-                                        iconName={c.icon_name}
-                                        iconFamily={c.icon_family}
-                                        color={colors.text}
-                                        size={14}
+                        <Text style={styles.cardTitle}>Mood when logging {currentActivity.name}</Text>
+                        {imp.isMeaningful && imp.withAvg !== null && imp.withoutAvg !== null ? (
+                            <>
+                                <Text style={styles.cardBody}>
+                                    When you log {currentActivity.name}, your mood averages{' '}
+                                    <Text style={styles.emphasis}>{imp.withAvg.toFixed(1)}</Text> —
+                                    that's{' '}
+                                    <Text
+                                        style={[
+                                            styles.emphasis,
+                                            {
+                                                color:
+                                                    (imp.delta ?? 0) >= 0
+                                                        ? colors.accent
+                                                        : varColorForNegative(colors),
+                                            },
+                                        ]}
+                                    >
+                                        {(imp.delta ?? 0) >= 0 ? '+' : ''}
+                                        {(imp.delta ?? 0).toFixed(1)}
+                                    </Text>{' '}
+                                    vs {imp.withoutAvg.toFixed(1)} without it.
+                                </Text>
+                                <View style={styles.compare}>
+                                    <CompareBar
+                                        label="With"
+                                        value={imp.withAvg}
+                                        fill={colors.accent}
+                                        styles={styles}
+                                        colors={colors}
                                     />
-                                    <Text style={styles.pairName}>{c.name}</Text>
-                                    <Text style={styles.pairCount}>×{c.n}</Text>
+                                    <CompareBar
+                                        label="Without"
+                                        value={imp.withoutAvg}
+                                        fill={colors.textSecondary}
+                                        styles={styles}
+                                        colors={colors}
+                                    />
                                 </View>
-                            ))}
+                            </>
+                        ) : (
+                            <Text style={styles.cardBody}>
+                                You've logged {currentActivity.name} on{' '}
+                                <Text style={styles.emphasis}>
+                                    {imp.withCount} {imp.withCount === 1 ? 'day' : 'days'}
+                                </Text>
+                                {imp.withAvg !== null
+                                    ? ` (averaging ${imp.withAvg.toFixed(1)})`
+                                    : ''}
+                                . Log it a few more times — and a few times without it — or
+                                change the time period to compare it to your usual mood.
+                            </Text>
+                        )}
+                    </Card>
+
+                    {/* (c) Distribution histogram */}
+                    <Card>
+                        <Text style={styles.cardTitle}>How those days are distributed</Text>
+                        <Text style={styles.cardBody}>
+                            How often your mood on {currentActivity.name} lands at each level.
+                        </Text>
+
+                        <View style={styles.distributionContainer}>
+                            {/* Y-axis title */}
+                            <View style={styles.yAxisTitleContainer}>
+                                <Text style={[styles.axisTitle, styles.yAxisTitle]}>Frequency</Text>
+                            </View>
+
+                            {/* Y-axis labels and plot area */}
+                            <View style={styles.plotContainer}>
+                                {/* Y-axis labels */}
+                                <View style={styles.yAxis}>
+                                    {yAxisLabels.map((label, index) => (
+                                        <Text key={index} style={[styles.yAxisLabel, {top: (index * HISTOGRAM_HEIGHT) / 4 - 8,}]}>
+                                            {label}
+                                        </Text>
+                                    ))}
+                                </View>
+
+                                {/* Plot area */}
+                                <View style={styles.plotArea}>
+                                    {/* Grid lines */}
+                                    {yAxisLabels.map((_, index) => (
+                                        <View
+                                            key={index}
+                                            style={[
+                                                styles.gridLine,
+                                                {
+                                                    top: (index * HISTOGRAM_HEIGHT) / 4,
+                                                }
+                                            ]}
+                                        />
+                                    ))}
+
+                                    {/* Bars */}
+                                    <View style={styles.barsContainer}>
+                                        {model.buckets.map((count, index) => (
+                                            <View key={index} style={styles.barWrapper}>
+                                                <View
+                                                    style={[
+                                                        styles.bar,
+                                                        {
+                                                            height: getBarHeight(count),
+                                                        }
+                                                    ]}
+                                                />
+                                                {count > 0 && (
+                                                    <Text style={styles.freqLabel}>{count}</Text>
+                                                )}
+                                            </View>
+                                        ))}
+                                    </View>
+                                </View>
+                            </View>
+                        </View>
+
+                        {/* X-axis container with labels */}
+                        <View style={styles.xAxisContainer}>
+                            {/* Tick marks and numbers */}
+                            <View style={styles.xAxisLabels}>
+                                {Array.from({ length: NUM_BUCKETS }, (_, i) => (
+                                    <Text key={i} style={styles.xAxisLabel}>
+                                        {i}
+                                    </Text>
+                                ))}
+                            </View>
+
+                            {/* X-axis title */}
+                            <Text style={[styles.axisTitle, styles.xAxisTitle]}>Mood rating</Text>
                         </View>
                     </Card>
-                )}
 
-                {/* (f) Optional trend sparkline */}
-                {model.trend.length >= MIN_TREND_DAYS && (
-                    <Card>
-                        <Text style={styles.cardTitle}>Trend over time</Text>
-                        <Text style={styles.cardBody}>
-                            Your daily average mood on {currentActivity.name} days, oldest to newest.
-                        </Text>
-                        <Sparkline
-                            values={model.trend.map((t) => t.avg)}
-                            color={colors.accent}
-                            styles={styles}
-                        />
-                    </Card>
-                )}
+                    {/* (e) Often paired with */}
+                    {model.co.length > 0 && (
+                        <Card>
+                            <Text style={styles.cardTitle}>Often paired with</Text>
+                            <View style={styles.chipWrap}>
+                                {model.co.map((c) => (
+                                    <Pressable
+                                        key={'button-' + c.id}
+                                        onPress={() => setCurrentActivity(c)}
+                                        style={({ pressed }) => [pressed && styles.chipPressed]}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`Open ${c.name} insights`}
+                                    >
+                                        <View key={c.id} style={styles.pairChip}>
+                                            <ActivityIcon
+                                                iconName={c.icon_name}
+                                                iconFamily={c.icon_family}
+                                                color={colors.text}
+                                                size={14}
+                                            />
+                                            <Text style={styles.pairName}>{c.name}</Text>
+                                            <Text style={styles.pairCount}>×{c.n}</Text>
+                                            <Feather name='chevron-right' size={14} color={colors.textSecondary} />
+                                        </View>
+                                    </Pressable>
+                                ))}
+                            </View>
+                        </Card>
+                    )}
+
+                    {/* (f) Optional trend sparkline */}
+                    {model.trend.length >= MIN_TREND_DAYS && (
+                        <Card>
+                            <Text style={styles.cardTitle}>Trend over time</Text>
+                            <Text style={styles.cardBody}>
+                                Your daily average mood on {currentActivity.name} days, oldest to newest.
+                            </Text>
+                            <Sparkline
+                                values={model.trend.map((t) => t.avg)}
+                                color={colors.accent}
+                                styles={styles}
+                            />
+                        </Card>
+                    )}
+                </PeriodSwipe>
             </ScrollView>
             {editModal}
         </View>
@@ -643,7 +727,7 @@ const makeStyles = (colors: ThemeColors) =>
             gap: 10,
         },
         compareLabel: {
-            width: 92,
+            width: 55,
             fontSize: 12,
             color: colors.textSecondary,
         },
@@ -664,43 +748,109 @@ const makeStyles = (colors: ThemeColors) =>
             color: colors.text,
             textAlign: 'right',
         },
-        histRow: {
+        distributionContainer: {
+            flexDirection: 'row',
+            marginTop: 30,
+        },
+        yAxisTitleContainer: {
+            width: 16,
+            height: HISTOGRAM_HEIGHT,
+            justifyContent: 'center',
+        },
+        plotContainer: {
+            flex: 1,
+            flexDirection: 'row',
+        },
+        yAxis: {
+            width: 30,
+            height: HISTOGRAM_HEIGHT,
+            alignItems: 'flex-end',
+            paddingRight: 8,
+        },
+        yAxisLabel: {
+            position: 'absolute',
+            color: colors.textSecondary,
+            fontSize: 12,
+            paddingRight: 8,
+        },
+        plotArea: {
+            flex: 1,
+            height: HISTOGRAM_HEIGHT,
+            position: 'relative',
+        },
+        gridLine: {
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            height: 1,
+            backgroundColor: colors.overlays.tag,
+        },
+        barsContainer: {
+            flex: 1,
             flexDirection: 'row',
             alignItems: 'flex-end',
-            height: HISTOGRAM_HEIGHT + 34,
-            marginTop: 14,
+            height: HISTOGRAM_HEIGHT,
         },
-        histCol: {
+        barWrapper: {
             flex: 1,
             alignItems: 'center',
             justifyContent: 'flex-end',
         },
-        histCount: {
-            fontSize: 10,
-            color: colors.textSecondary,
-            marginBottom: 2,
-        },
-        histBar: {
-            width: '72%',
+        bar: {
+            width: '80%',
+            backgroundColor: colors.accent,
             borderTopLeftRadius: 4,
             borderTopRightRadius: 4,
+            minHeight: 1,
         },
-        histAxis: {
-            fontSize: 11,
+        freqLabel: {
+            position: 'absolute',
+            top: -20,
             color: colors.textSecondary,
+            fontSize: 10,
+        },
+        xAxisContainer: {
+            height: 30,
+            marginLeft: 45,
             marginTop: 6,
+            marginBottom: 8,
         },
-        axisCaption: {
-            fontSize: 12,
+        xAxisLabels: {
+            flexDirection: 'row',
+            justifyContent: 'flex-end',
+            width: '100%',
+        },
+        xAxisLabel: {
+            flex: 1,
             color: colors.textSecondary,
+            fontSize: 12,
             textAlign: 'center',
-            marginTop: 4,
+            width: '100%',
+        },
+        axisTitle: {
+            color: colors.textSecondary,
+            fontSize: 14,
+            fontWeight: '500',
+        },
+        yAxisTitle: {
+            transform: [{ rotate: '-90deg' }],
+            width: HISTOGRAM_HEIGHT,
+            textAlign: 'center',
+            position: 'absolute',
+            left: -HISTOGRAM_HEIGHT / 2 + 10,
+        },
+        xAxisTitle: {
+            textAlign: 'center',
+            marginTop: 0,
         },
         chipWrap: {
             flexDirection: 'row',
             flexWrap: 'wrap',
             gap: 8,
             marginTop: 10,
+        },
+        chipPressed: {
+            opacity: 0.6,
         },
         pairChip: {
             flexDirection: 'row',
@@ -709,9 +859,15 @@ const makeStyles = (colors: ThemeColors) =>
             paddingVertical: 7,
             paddingHorizontal: 12,
             borderRadius: 16,
-            backgroundColor: colors.overlays.tag,
             borderWidth: StyleSheet.hairlineWidth,
             borderColor: colors.overlays.tagBorder,
+            backgroundColor: colors.accentLight,
+            justifyContent: 'center',
+        },
+        activityUnit: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 8,
         },
         pairName: {
             fontSize: 13,

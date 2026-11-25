@@ -1,3 +1,4 @@
+import { MIN_SAMPLES } from '@/components/visualisations/transforms/activityCorrelation';
 import {
     activityMoodStats,
     classifyVariability,
@@ -18,11 +19,31 @@ import {
     LOW_MEAN,
     type CoOccurringRow,
 } from '@/components/visualisations/transforms/activityDetail';
-import { localIso } from '@/testing/builders';
+import { localDateTimeIso, localIso } from '@/testing/builders';
+
+let nextId = 1;
 
 // A local-noon instant for a given 'YYYY-MM-DD', so day-keying is TZ-robust under the
 // non-UTC jest pin (jest.globalSetup.js = Australia/Brisbane). Mirrors dailyAverages tests.
-const at = (day: string, mood: number) => ({ date: localIso(day), mood });
+const at = (day: string, mood: number, activity_id: number | null = null) => (
+    {
+        entry_id: nextId++,
+        date: localIso(day),
+        mood,
+        activity_id,
+        activity_name: activity_id ? "Activity" : null
+    });
+
+// A local instant for a given 'YYYY-MM-DD('T'HH:mm:ss)?', so day-keying is TZ-robust under the
+// non-UTC jest pin (jest.globalSetup.js = Australia/Brisbane).
+const atTime = (date: string, mood: number, activity_id: number | null = null) => (
+    {
+        entry_id: nextId++,
+        date: localDateTimeIso(date),
+        mood,
+        activity_id,
+        activity_name: activity_id ? "Activity" : null
+    });
 
 describe('activityMoodStats', () => {
     it('is all-zeros (never NaN) on empty input', () => {
@@ -82,7 +103,7 @@ describe('classifyVariability', () => {
     it('is insufficient below the sample gate, with calm low-data copy', () => {
         const r = classifyVariability([5, 5, 5, 5], { label }); // 4 < 5
         expect(r.kind).toBe('insufficient');
-        expect(r.headline).toBe('Not enough yet');
+        expect(r.headline).toBe('Not enough entries');
         expect(r.detail).toContain('Gym');
     });
 
@@ -162,17 +183,15 @@ describe('classifyVariability', () => {
 });
 
 describe('activityMoodImpact', () => {
-    it('splits with-vs-without by local day and gates on sample size', () => {
+    it('splits with-vs-without by local date and gates on sample size', () => {
         // 12 days total. Activity logged on 6 of them, all high (8); the other 6 low (2).
-        const activityEntries = [
-            at('2026-01-01', 8),
-            at('2026-01-02', 8),
-            at('2026-01-03', 8),
-            at('2026-01-04', 8),
-            at('2026-01-05', 8),
-            at('2026-01-06', 8),
-        ];
-        const otherEntries = [
+        const all = [
+            at('2026-01-01', 8, 1),
+            at('2026-01-02', 8, 1),
+            at('2026-01-03', 8, 1),
+            at('2026-01-04', 8, 1),
+            at('2026-01-05', 8, 1),
+            at('2026-01-06', 8, 1),
             at('2026-01-07', 2),
             at('2026-01-08', 2),
             at('2026-01-09', 2),
@@ -180,40 +199,46 @@ describe('activityMoodImpact', () => {
             at('2026-01-11', 2),
             at('2026-01-12', 2),
         ];
-        const all = [...activityEntries, ...otherEntries];
-        const r = activityMoodImpact(all, activityEntries);
+        const r = activityMoodImpact(1, all);
         expect(r.withAvg).toBe(8);
         expect(r.withoutAvg).toBe(2);
         expect(r.delta).toBe(6);
-        expect(r.withDays).toBe(6);
-        expect(r.withoutDays).toBe(6);
+        expect(r.withCount).toBe(6);
+        expect(r.withoutCount).toBe(6);
         expect(r.isMeaningful).toBe(true);
     });
 
-    it('averages the per-DAY averages (a busy day counts once)', () => {
-        // Day 1 has two "other" entries (mood 2 and 4 → day avg 3); day 2 is the activity (mood 9).
-        const activityEntries = [at('2026-02-02', 9)];
-        const all = [at('2026-02-01', 2), at('2026-02-01', 4), at('2026-02-02', 9)];
-        const r = activityMoodImpact(all, activityEntries);
+    it('returns per-DAY averages (a busy day counts once)', () => {
+        const all = [
+            atTime('2026-02-01T09:00:00', 3),
+            atTime('2026-02-01T12:00:00', 4),
+            atTime('2026-02-01T15:00:00', 2),
+            atTime('2026-02-02T09:00:00', 8, 1),
+            atTime('2026-02-02T18:00:00', 10, 1)
+        ];
+        const r = activityMoodImpact(1, all);
         expect(r.withAvg).toBe(9);
         expect(r.withoutAvg).toBe(3); // (2+4)/2, one day
-        expect(r.withDays).toBe(1);
-        expect(r.withoutDays).toBe(1);
+        expect(r.withCount).toBe(1);
+        expect(r.withoutCount).toBe(1);
         expect(r.isMeaningful).toBe(false); // < MIN_SAMPLES on each side
     });
 
     it('is null-safe when a side is empty', () => {
-        const only = [at('2026-03-01', 7)];
-        const r = activityMoodImpact(only, only); // every day is a "with" day
+        const only = [at('2026-03-01', 7, 1)];
+        let r = activityMoodImpact(1, only); // every day is a "with" day
         expect(r.withAvg).toBe(7);
         expect(r.withoutAvg).toBeNull();
         expect(r.delta).toBeNull();
         expect(r.isMeaningful).toBe(false);
-    });
+    });    
 
     it('does not throw on empty input', () => {
-        expect(() => activityMoodImpact([], [])).not.toThrow();
-        expect(activityMoodImpact([], []).withAvg).toBeNull();
+        expect(() => activityMoodImpact(1, [])).not.toThrow();
+        expect(activityMoodImpact(1, []).withAvg).toBeNull();
+
+        expect(() => activityMoodImpact(1, [], MIN_SAMPLES, true)).not.toThrow();
+        expect(activityMoodImpact(1, []).withAvg).toBeNull();
     });
 });
 
@@ -260,9 +285,9 @@ describe('sparklinePoints', () => {
 
 describe('topCoOccurring', () => {
     const rows: CoOccurringRow[] = [
-        { id: 3, name: 'Gym', icon_family: 'Feather', icon_name: 'activity', n: 5 },
-        { id: 2, name: 'Work', icon_family: 'Feather', icon_name: 'briefcase', n: 2 },
-        { id: 9, name: 'Empty', icon_family: 'Feather', icon_name: 'circle', n: 0 },
+        { id: 3, group_id: 1, name: 'Gym', icon_family: 'Feather', icon_name: 'activity', n: 5, position: 1 },
+        { id: 2, group_id: 1, name: 'Work', icon_family: 'Feather', icon_name: 'briefcase', n: 2, position: 2 },
+        { id: 9, group_id: 1, name: 'Empty', icon_family: 'Feather', icon_name: 'circle', n: 0, position: 3 },
     ];
 
     it('drops zero-count rows and caps to the limit', () => {
@@ -277,31 +302,57 @@ describe('topCoOccurring', () => {
 });
 
 describe('withEntryCounts', () => {
+    const groups = [
+        { id: 1, name: 'Group 1', sort_order: 1, },
+        { id: 2, name: 'Group 2', sort_order: 2, },
+        { id: 3, name: 'Group 3', sort_order: 3, },
+    ];
     const activities = [
-        { id: 1, name: 'Running' },
-        { id: 2, name: 'Work' },
-        { id: 3, name: 'Aardvark' },
+        { id: 1, name: 'Running', group_id: 2 },
+        { id: 2, name: 'Work', group_id: 1 },
+        { id: 3, name: 'Aardvark', group_id: 3 },
     ];
 
-    it('decorates with counts and sorts most-logged first, then name', () => {
-        const out = withEntryCounts(activities, [
+    it('decorates with counts and group, and sorts most-logged first, then name', () => {
+        const out = withEntryCounts(activities, groups, [
             { activity_id: 1, n: 3 },
             { activity_id: 2, n: 3 },
             // id 3 has no count row → 0
         ]);
         // ties (Running 3, Work 3) resolve by name; Aardvark (0) last.
         expect(out.map((a) => a.name)).toEqual(['Running', 'Work', 'Aardvark']);
+        expect(out.map((a) => a.group)).toEqual(['Group 2', 'Group 1', 'Group 3']);
         expect(out.map((a) => a.entryCount)).toEqual([3, 3, 0]);
     });
 
+    it('decorates undefined group, if group is not found or groups is empty ', () => {
+        // Unknown group
+        let out = withEntryCounts(activities.map((a) => ({...a, group_id: 18 })), groups, [
+            { activity_id: 1, n: 3 },
+            { activity_id: 2, n: 3 },
+        ]);
+        expect(out.map((a) => a.group)).toEqual([undefined, undefined, undefined]);
+
+        // Empty groups parameter
+        out = withEntryCounts(activities, [], [
+            { activity_id: 1, n: 3 },
+            { activity_id: 2, n: 3 },
+        ]);
+        expect(out.map((a) => a.group)).toEqual([undefined, undefined, undefined]);
+    });
+
     it('defaults missing counts to 0 and never throws on nullish input', () => {
-        expect(withEntryCounts(activities, [])[0].entryCount).toBe(0);
-        expect(() => withEntryCounts([], [])).not.toThrow();
+        expect(withEntryCounts(activities, groups, [])[0].entryCount).toBe(0);
+        expect(() => withEntryCounts([], [], [])).not.toThrow();
     });
 });
 
 describe('filterActivitiesByQuery', () => {
-    const activities = [{ name: 'Running' }, { name: 'Reading' }, { name: 'Gym' }];
+    const activities = [
+        { name: 'Running', group: 'Activity' },
+        { name: 'Reading', group: 'Activity' },
+        { name: 'Gym', group: 'Emotions' }
+    ];
 
     it('returns all on an empty / whitespace query', () => {
         expect(filterActivitiesByQuery(activities, '')).toHaveLength(3);
@@ -319,6 +370,14 @@ describe('filterActivitiesByQuery', () => {
     it('returns empty when nothing matches', () => {
         expect(filterActivitiesByQuery(activities, 'zzz')).toEqual([]);
     });
+
+    it('filters case-insensitively by group substring', () => {
+        expect(filterActivitiesByQuery(activities, 'activity').map((a) => a.name)).toEqual([
+            'Running',
+            'Reading',
+        ]);
+        expect(filterActivitiesByQuery(activities, 'EMOTIONS').map((a) => a.name)).toEqual(['Gym']);
+    });
 });
 
 describe('visibleActivities (top-N cap + search bypass)', () => {
@@ -326,6 +385,7 @@ describe('visibleActivities (top-N cap + search bypass)', () => {
     // the list it's given). 15 items so we straddle the default cap of 10.
     const many = Array.from({ length: 15 }, (_, i) => ({
         name: `Activity ${String(i + 1).padStart(2, '0')}`,
+        group: i < 5 ? 'Group 1' : i < 10 ? 'Group 2' : 'Group 3',
     }));
     const few = many.slice(0, 4); // fewer than the cap
 

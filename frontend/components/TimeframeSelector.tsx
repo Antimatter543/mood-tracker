@@ -39,6 +39,7 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
     <View style={styles.wrap}>
       <SegmentedControl
         options={OPTIONS}
+        size='xs'
         value={selectedTimeframe}
         onChange={onTimeframeChange}
         testID="timeframe-selector"

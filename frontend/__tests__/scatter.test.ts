@@ -17,6 +17,13 @@ describe('bucketMoodHistogram', () => {
     expect(out[8]).toBe(0);
   });
 
+  it('all moods 0...10 land into respective buckets', () => {
+    const entries = Array.from({ length: 11 }, (_, index) => ({ mood: index }));
+    const out = bucketMoodHistogram(entries);
+    expect(out.length).toBe(11);
+    out.forEach((value) => expect(value).toBe(1));
+  });
+
   it('clamps mood >= 10 into the last bucket', () => {
     const out = bucketMoodHistogram([{ mood: 10 }, { mood: 12 }]);
     expect(out[NUM_BUCKETS - 1]).toBe(2);

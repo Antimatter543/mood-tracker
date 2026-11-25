@@ -170,6 +170,13 @@ describe('date helpers (TZ pinned to Australia/Brisbane)', () => {
         expect(addDays('2026-03-01', -1)).toBe('2026-02-28');
     });
 
+    it('addDays works properly with long time periods', () => {
+        expect(addDays('2026-03-01', -167)).toBe('2025-09-15');
+        expect(addDays('2025-03-01', 365)).toBe('2026-03-01');
+        // Leap year
+        expect(addDays('2024-02-01', 365)).toBe('2025-01-31');
+    });
+
     it('rejects a day that is not YYYY-MM-DD instead of guessing', () => {
         expect(() => localAt('2026-6-1')).toThrow(/YYYY-MM-DD/);
     });

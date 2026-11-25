@@ -43,6 +43,8 @@ import {
   type DaySummary,
 } from './transforms/daySummary';
 import { now } from '@/lib/clock';
+import { useTimeframe } from '@/context/TimeframeContext';
+import { convertStringToDate } from '@/databases/dateHelpers';
 
 // Semantic day-number colors used ON a mood marker (like the calendar's own
 // selectedDayTextColor / the heatmap's on-square text). NOT a mood palette —
@@ -76,11 +78,14 @@ const MoodCalendar = () => {
   const db = useSQLiteContext();
   const colors = useThemeColors();
   const { pref: dateFormatPref } = useDateFormat();
+  const { periodWindow } = useTimeframe();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const [activities, setActivities] = useState<Activity[]>([]);
   const [selectedActivityId, setSelectedActivityId] = useState<number | null>(null);
-  const [visibleMonth, setVisibleMonth] = useState<VisibleMonth>(() => visibleMonthOf(now()));
+  const [visibleMonth, setVisibleMonth] = useState<VisibleMonth>(() =>
+        visibleMonthOf(periodWindow.end ? convertStringToDate(periodWindow.end) : now())
+  );
 
   // Per-month RAW rows (theme-independent), so a theme switch re-styles markers
   // WITHOUT re-querying, and navigating back to a visited month is instant.

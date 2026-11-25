@@ -3,7 +3,9 @@ import { View, Text, StyleSheet, Platform } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
 import { Layout } from '@/components/PageContainer';
-import { PageHeader } from '@/components/PageHeader';
+import { PageHeader, pageHeaderFullHeightInset } from '@/components/PageHeader';
+import { LAYOUT_CONTENT_PADDING, LAYOUT_FAB_CLEARANCE } from '@/styles/layout';
+import PeriodSwipe from '@/components/PeriodSwipe';
 import { Card } from '@/components/Card';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
@@ -29,6 +31,7 @@ import {
     computeActivityCorrelation,
     aggregateActivityCorrelation,
     type ActivityCorrelationRawRow,
+    ActivityCorrelationResult,
 } from '@/components/visualisations/transforms/activityCorrelation';
 import { aggregateDailyAverages } from '@/components/visualisations/transforms/dailyAverages';
 import {
@@ -39,7 +42,7 @@ import {
     buildMoodDrivers,
     type MoodDriversData,
 } from '@/components/visualisations/transforms/moodDrivers';
-import TopActivitiesCard, { type TopActivity } from '@/components/visualisations/TopActivitiesCard';
+import TopActivitiesCard from '@/components/visualisations/TopActivitiesCard';
 import MoodDriversCard from '@/components/visualisations/MoodDriversCard';
 import RecoveryAnalysisCard from '@/components/visualisations/RecoveryPatterns';
 import HealthMoodPagerCard from '@/components/visualisations/HealthMoodPagerCard';
@@ -55,6 +58,9 @@ import {
 import { getHealthMetricsRange } from '@/databases/health-metrics';
 import { shouldShowHealthConnect } from '@/lib/healthConnectConfig';
 import { now } from '@/lib/clock';
+import { useSettings } from '@/context/SettingsContext';
+import { useTimeframe } from '@/context/TimeframeContext';
+import SectionHeader from '@/components/SectionHeader';
 
 /**
  * Insights — honest, locally-derived patterns from the user's own entries.
@@ -74,7 +80,7 @@ type Insights = {
     bestDay: string | null;
     worstDay: string | null;
     hasDowSignal: boolean;
-    topActivities: TopActivity[];
+    topActivities: ActivityCorrelationResult[];
     moodState: MoodState;
     drivers: MoodDriversData;
     // Health Connect (Android + feature-flag only). Cards render only when the
@@ -131,6 +137,7 @@ const INSIGHTS_HEADER = (
     <PageHeader
         title="Insights"
         subtitle="What your entries say about you"
+        style={pageHeaderFullHeightInset}
         icon={p => <Ionicons name="bulb-outline" {...p} />}
     />
 );
@@ -168,6 +175,9 @@ export default function InsightsScreen() {
     const colors = useThemeColors();
     const styles = useStyles(colors);
     const db = useSQLiteContext();
+    const { periodLabel, periodWindow } = useTimeframe();
+    const { settings } = useSettings();
+    const carryover = settings.activity_carryover;
     const [data, setData] = useState<Insights | null>(null);
 
     // Sync loader returning a cleanup: the `active` flag (flipped on
@@ -177,9 +187,9 @@ export default function InsightsScreen() {
             let active = true;
             (async () => {
                 try {
-                    // All-time window: from the epoch up to the end of today (local).
-                    const start = startOfLocalDay(new Date(0));
-                    const end = endOfLocalDay(now());
+                    // Selected period window.
+                    const start = startOfLocalDay(periodWindow.startDay);
+                    const end = endOfLocalDay(periodWindow.endDay);
                     const today = localDateString(now());
                     // Health Connect cards only exist on Android behind the flag;
                     // skip the read entirely elsewhere. Bounds are day-strings
@@ -210,7 +220,7 @@ export default function InsightsScreen() {
                                 [start, end]
                             ),
                             showHealth
-                                ? getHealthMetricsRange(db, '0000-01-01', today)
+                                ? getHealthMetricsRange(db, start, end)
                                 : Promise.resolve([]),
                         ]);
                     if (!active) return;
@@ -219,7 +229,7 @@ export default function InsightsScreen() {
                     // in JS (localDateString / aggregate*) — see queries.ts.
                     const dow = buildDowPatternData(aggregateDowRows(dowRawRows));
                     const corr = computeActivityCorrelation(
-                        aggregateActivityCorrelation(activityRawRows)
+                        aggregateActivityCorrelation(activityRawRows, { carryover })
                     );
                     // Most uplifting activities = largest positive, meaningful deltas
                     // (top 3). Empty when none lift mood, which drives the empty state.
@@ -228,7 +238,7 @@ export default function InsightsScreen() {
                         .sort((a, b) => b.delta - a.delta)
                         .slice(0, 3);
 
-                    // 2-axis "how you've been" state over all recorded local days,
+                    // 2-axis "how you've been" state over the recorded period,
                     // and the state-conditioned forward-looking drivers (reusing
                     // the SAME raw activity rows already fetched above).
                     const dailyMoods = aggregateDailyAverages(moodRawRows);
@@ -266,12 +276,7 @@ export default function InsightsScreen() {
                         bestDay: dow.hasEnoughData ? dow.bestDay : null,
                         worstDay: dow.hasEnoughData ? dow.worstDay : null,
                         hasDowSignal: dow.hasEnoughData,
-                        topActivities: topActivities.map((t) => ({
-                            name: t.activity_name,
-                            avgWith: t.avg_with,
-                            avgWithout: t.avg_without,
-                            delta: t.delta,
-                        })),
+                        topActivities: topActivities,
                         moodState,
                         drivers,
                         showHealth,
@@ -299,10 +304,10 @@ export default function InsightsScreen() {
                 active = false;
             };
         // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
-        }, [db]);
+        }, [db, periodWindow]);
     // Focus-aware refetch (replaces useEffect([db, refreshCount])): always
     // reloads when this tab regains focus AND live-updates while focused.
-    useDataRefresh(load, [db]);
+    useDataRefresh(load, [db, periodWindow]);
 
     if (data && data.totalEntries === 0) {
         return (
@@ -316,141 +321,150 @@ export default function InsightsScreen() {
     const d = data ?? EMPTY;
 
     return (
-        <Layout>
+        <Layout useScrollView={false}>
             {INSIGHTS_HEADER}
 
-            {/* How you've been — 2-axis mood state (only once classified) */}
-            {d.moodState.state === 'classified' && (
-                <Card>
-                    <View style={styles.row}>
-                        <View style={[styles.iconCircle, { backgroundColor: colors.accentLight }]}>
-                            <Ionicons name="pulse-outline" size={20} color={colors.accent} />
-                        </View>
-                        <View style={styles.grow}>
-                            <Text style={styles.cardTitle}>How you've been</Text>
-                            <Text style={styles.cardBody}>{d.moodState.description}</Text>
-                        </View>
-                    </View>
-                </Card>
-            )}
-
-            {/* Streak hero */}
-            <Card accentTop>
-                <View style={styles.row}>
-                    <View style={[styles.iconCircle, { backgroundColor: colors.accentLight }]}>
-                        <Ionicons name="flame" size={22} color={colors.accent} />
-                    </View>
-                    <View style={styles.grow}>
-                        <Text style={styles.bigValue}>
-                            {d.streak} {d.streak === 1 ? 'day' : 'days'}
-                        </Text>
-                        <Text style={styles.cardSub}>
-                            Current streak · longest {d.longest}
-                        </Text>
-                    </View>
-                </View>
-            </Card>
-
-            {/* Overview */}
-            <Card>
-                <View style={styles.statsGrid}>
-                    <View style={styles.stat}>
-                        <Text style={styles.statValue}>{d.avgMood.toFixed(1)}</Text>
-                        <Text style={styles.statLabel}>Average mood</Text>
-                    </View>
-                    <View style={styles.stat}>
-                        <Text style={styles.statValue}>{d.totalEntries}</Text>
-                        <Text style={styles.statLabel}>Entries logged</Text>
-                    </View>
-                </View>
-            </Card>
-
-            {/* Day-of-week pattern */}
-            <Card>
-                <View style={styles.row}>
-                    <View style={[styles.iconCircle, { backgroundColor: colors.accentLight }]}>
-                        <Ionicons name="calendar-outline" size={20} color={colors.accent} />
-                    </View>
-                    <View style={styles.grow}>
-                        {d.hasDowSignal && d.bestDay ? (
-                            <>
-                                <Text style={styles.cardTitle}>Your week</Text>
-                                <Text style={styles.cardBody}>
-                                    You tend to feel best on{' '}
-                                    <Text style={styles.emphasis}>{d.bestDay}</Text>
-                                    {d.worstDay && d.worstDay !== d.bestDay ? (
-                                        <>
-                                            {' '}and toughest on{' '}
-                                            <Text style={styles.emphasis}>{d.worstDay}</Text>
-                                        </>
-                                    ) : null}
-                                    .
+            <View style={styles.container}>
+                <PeriodSwipe
+                    style={styles.scrollView}
+                    contentContainerStyle={styles.contentContainer}
+                    contentStyle={styles.content}
+                >
+                    {/* Streak hero */}
+                    <Card accentTop>
+                        <View style={styles.row}>
+                            <View style={[styles.iconCircle, { backgroundColor: colors.accentLight }]}>
+                                <Ionicons name="flame" size={22} color={colors.accent} />
+                            </View>
+                            <View style={styles.grow}>
+                                <Text style={styles.bigValue}>
+                                    {d.streak} {d.streak === 1 ? 'day' : 'days'}
                                 </Text>
-                            </>
-                        ) : (
-                            <>
-                                <Text style={styles.cardTitle}>Your week</Text>
-                                <Text style={styles.cardBody}>
-                                    Keep logging for a couple of weeks to reveal which days
-                                    tend to lift you up.
+                                <Text style={styles.cardSub}>
+                                    Current streak · longest {d.longest}
                                 </Text>
-                            </>
+                            </View>
+                        </View>
+                    </Card>
+
+                    <SectionHeader label={`Insights for ${periodLabel}`}/>
+
+                    {/* How you've been — 2-axis mood state (only once classified) */}
+                    {d.moodState.state === 'classified' && (
+                        <Card>
+                            <View style={styles.row}>
+                                <View style={[styles.iconCircle, { backgroundColor: colors.accentLight }]}>
+                                    <Ionicons name="pulse-outline" size={20} color={colors.accent} />
+                                </View>
+                                <View style={styles.grow}>
+                                    <Text style={styles.cardTitle}>How you've been</Text>
+                                    <Text style={styles.cardBody}>{d.moodState.description}</Text>
+                                </View>
+                            </View>
+                        </Card>
+                    )}
+
+                    {/* Overview */}
+                    <Card>
+                        <View style={styles.statsGrid}>
+                            <View style={styles.stat}>
+                                <Text style={styles.statValue}>{d.avgMood.toFixed(1)}</Text>
+                                <Text style={styles.statLabel}>Average mood</Text>
+                            </View>
+                            <View style={styles.stat}>
+                                <Text style={styles.statValue}>{d.totalEntries}</Text>
+                                <Text style={styles.statLabel}>Entries logged</Text>
+                            </View>
+                        </View>
+                    </Card>
+
+                    {/* Day-of-week pattern */}
+                    <Card>
+                        <View style={styles.row}>
+                            <View style={[styles.iconCircle, { backgroundColor: colors.accentLight }]}>
+                                <Ionicons name="calendar-outline" size={20} color={colors.accent} />
+                            </View>
+                            <View style={styles.grow}>
+                                {d.hasDowSignal && d.bestDay ? (
+                                    <>
+                                        <Text style={styles.cardTitle}>Your week</Text>
+                                        <Text style={styles.cardBody}>
+                                            You tend to feel best on{' '}
+                                            <Text style={styles.emphasis}>{d.bestDay}</Text>
+                                            {d.worstDay && d.worstDay !== d.bestDay ? (
+                                                <>
+                                                    {' '}and toughest on{' '}
+                                                    <Text style={styles.emphasis}>{d.worstDay}</Text>
+                                                </>
+                                            ) : null}
+                                            .
+                                        </Text>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Text style={styles.cardTitle}>Your week</Text>
+                                        <Text style={styles.cardBody}>
+                                            Keep logging for a couple of weeks to reveal which days
+                                            tend to lift you up.
+                                        </Text>
+                                    </>
+                                )}
+                            </View>
+                        </View>
+                    </Card>
+
+                    {/* Top activity correlations */}
+                    <TopActivitiesCard activities={d.topActivities} />
+
+                    {/* State-conditioned, forward-looking drivers */}
+                    <MoodDriversCard data={d.drivers} />
+
+                    {/* Low stretches in the previous 90 days and how they ended.
+                        Loads its own window and renders nothing when there are none. */}
+                    <RecoveryAnalysisCard />
+
+                    {/* Health Connect: ONE swipeable card cycling sleep / heart-rate /
+                        resting-HR / HRV ↔ mood (Android + opt-in only). Only metrics
+                        WITH on-device data get a pane — panes with no data are excluded
+                        entirely, so Insights stays uncluttered for non-health users (a
+                        single available metric shows as one static card, no pager
+                        chrome). Gated on ANY metric having data, same as the overlay. */}
+                    {d.showHealth &&
+                        (d.hasSleepData ||
+                            d.hasHeartRateData ||
+                            d.hasRestingHrData ||
+                            d.hasHrvData) && (
+                            <HealthMoodPagerCard
+                                hasSleepData={d.hasSleepData}
+                                hasHeartRateData={d.hasHeartRateData}
+                                hasRestingHrData={d.hasRestingHrData}
+                                hasHrvData={d.hasHrvData}
+                                sleepMood={d.sleepMood}
+                                heartRateMood={d.heartRateMood}
+                                restingHeartRateMood={d.restingHeartRateMood}
+                                hrvMood={d.hrvMood}
+                            />
                         )}
-                    </View>
-                </View>
-            </Card>
 
-            {/* Top activity correlations */}
-            <TopActivitiesCard activities={d.topActivities} />
-
-            {/* State-conditioned, forward-looking drivers */}
-            <MoodDriversCard data={d.drivers} />
-
-            {/* Low stretches in the last 90 days and how they ended. Loads its
-                own window and renders nothing when there are none. */}
-            <RecoveryAnalysisCard />
-
-            {/* Health Connect: ONE swipeable card cycling sleep / heart-rate /
-                resting-HR / HRV ↔ mood (Android + opt-in only). Only metrics
-                WITH on-device data get a pane — panes with no data are excluded
-                entirely, so Insights stays uncluttered for non-health users (a
-                single available metric shows as one static card, no pager
-                chrome). Gated on ANY metric having data, same as the overlay. */}
-            {d.showHealth &&
-                (d.hasSleepData ||
-                    d.hasHeartRateData ||
-                    d.hasRestingHrData ||
-                    d.hasHrvData) && (
-                    <HealthMoodPagerCard
-                        hasSleepData={d.hasSleepData}
-                        hasHeartRateData={d.hasHeartRateData}
-                        hasRestingHrData={d.hasRestingHrData}
-                        hasHrvData={d.hasHrvData}
-                        sleepMood={d.sleepMood}
-                        heartRateMood={d.heartRateMood}
-                        restingHeartRateMood={d.restingHeartRateMood}
-                        hrvMood={d.hrvMood}
-                    />
-                )}
-
-            {/* The mood × metric overlay — plot mood against sleep / resting HR /
-                HRV / avg HR over time, with a metric toggle. Mounts once ANY
-                health metric has data (the toggle only offers metrics that do). */}
-            {d.showHealth &&
-                (d.hasSleepData ||
-                    d.hasHeartRateData ||
-                    d.hasRestingHrData ||
-                    d.hasHrvData) && (
-                    <MoodMetricOverlayCard
-                        healthRows={d.healthRows}
-                        dailyMoods={d.dailyMoods}
-                    />
-                )}
-
-            <Text style={styles.footnote}>
-                All insights are computed on your device from your own entries. Nothing leaves
-                your phone.
-            </Text>
+                    {/* The mood × metric overlay — plot mood against sleep / resting HR /
+                        HRV / avg HR over time, with a metric toggle. Mounts once ANY
+                        health metric has data (the toggle only offers metrics that do). */}
+                    {d.showHealth &&
+                        (d.hasSleepData ||
+                            d.hasHeartRateData ||
+                            d.hasRestingHrData ||
+                            d.hasHrvData) && (
+                            <MoodMetricOverlayCard
+                                healthRows={d.healthRows}
+                                dailyMoods={d.dailyMoods}
+                            />
+                        )}
+                    <Text style={styles.footnote}>
+                        All insights are computed on your device from your own entries. Nothing leaves
+                        your phone.
+                    </Text>
+                </PeriodSwipe>
+            </View>
         </Layout>
     );
 }
@@ -467,6 +481,24 @@ const useStyles = (colors: ThemeColors) =>
                     gap: 14,
                 },
                 grow: { flex: 1 },
+                container: {
+                    flex: 1,
+                },
+                scrollView: {
+                    flex: 1,
+                },
+                contentContainer: {
+                    // Same gutter as the page title above it and as every scrolling
+                    // screen's content (Layout's scrollContent padding) — see
+                    // styles/layout.ts.
+                    paddingHorizontal: LAYOUT_CONTENT_PADDING,
+                    // Measured header height + a small gap, instead of a magic 120.
+                    paddingTop: 12,
+                    paddingBottom: LAYOUT_FAB_CLEARANCE,
+                },
+                content: {
+                    gap: 4,
+                },
                 iconCircle: {
                     width: 44,
                     height: 44,

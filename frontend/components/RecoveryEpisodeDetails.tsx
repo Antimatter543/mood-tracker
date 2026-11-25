@@ -145,6 +145,8 @@ const MoodChart: React.FC<{
     const lowY = yFor(DIP_THRESHOLD);
     const upY = yFor(RECOVERY_THRESHOLD);
     const plotRight = CHART_INSET.left + plotW;
+    const gridLines = [0, 2, 8, 10];
+    const negativeColor = colors.isDark ? '#FF8A80' : '#E57373';
 
     return (
         <View
@@ -162,8 +164,28 @@ const MoodChart: React.FC<{
                         y={lowY}
                         width={plotW}
                         height={CHART_INSET.top + plotH - lowY}
-                        fill={colors.accentLight}
+                        fill={negativeColor}
+                        fillOpacity={0.4}
                     />
+                    <Rect
+                        x={CHART_INSET.left}
+                        y={CHART_INSET.top}
+                        width={plotW}
+                        height={upY - CHART_INSET.top}
+                        fill={colors.accent}
+                        fillOpacity={0.4}
+                    />
+                    {gridLines.map((g) => (
+                        <Line
+                            x1={CHART_INSET.left}
+                            y1={yFor(g)}
+                            x2={plotRight}
+                            y2={yFor(g)}
+                            stroke={colors.textSecondary}
+                            strokeOpacity={0.5}
+                            strokeWidth={1}
+                        />
+                    ))}
                     <Line
                         x1={CHART_INSET.left}
                         y1={upY}
@@ -171,7 +193,17 @@ const MoodChart: React.FC<{
                         y2={upY}
                         stroke={colors.textSecondary}
                         strokeOpacity={0.5}
-                        strokeWidth={1}
+                        strokeWidth={2}
+                        strokeDasharray="4 4"
+                    />
+                    <Line
+                        x1={CHART_INSET.left}
+                        y1={lowY}
+                        x2={plotRight}
+                        y2={lowY}
+                        stroke={colors.textSecondary}
+                        strokeOpacity={0.5}
+                        strokeWidth={2}
                         strokeDasharray="4 4"
                     />
                     <SvgText x={0} y={upY + 4} fill={colors.textSecondary} fontSize={11}>
@@ -180,6 +212,11 @@ const MoodChart: React.FC<{
                     <SvgText x={0} y={lowY + 4} fill={colors.textSecondary} fontSize={11}>
                         4
                     </SvgText>
+                    {gridLines.map((g) => (
+                        <SvgText
+                            x={0} y={yFor(g) + 4} fill={colors.textSecondary} fontSize={11}
+                        >{g}</SvgText>
+                    ))}
                     <G transform={`translate(${CHART_INSET.left} ${CHART_INSET.top})`}>
                         {points.length > 1 && (
                             <Polyline

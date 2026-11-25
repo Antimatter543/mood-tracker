@@ -27,8 +27,8 @@ describe('low stretch copy', () => {
         expect(daysLabel(2)).toBe('2 days');
         expect(dipsLabel(1)).toBe('1 dip');
         expect(dipsLabel(3)).toBe('3 dips');
-        expect(summaryLine(1)).toBe('1 low stretch in the last 90 days');
-        expect(summaryLine(4)).toBe('4 low stretches in the last 90 days');
+        expect(summaryLine(1, '05-19 – 09-19')).toBe('You have logged 1 low stretch 05-19 – 09-19.');
+        expect(summaryLine(4, '05-19 – 09-19')).toBe('You have logged 4 low stretches 05-19 – 09-19.');
     });
 
     it('shows whole moods without decimals and others to one place', () => {

@@ -16,9 +16,9 @@ export const daysLabel = (n: number): string => `${n} ${n === 1 ? 'day' : 'days'
 export const formatMood = (mood: number): string =>
     Number.isInteger(mood) ? String(mood) : mood.toFixed(1);
 
-/** "2 low stretches in the last 90 days". */
-export const summaryLine = (count: number): string =>
-    `${count} low ${count === 1 ? 'stretch' : 'stretches'} in the last 90 days`;
+/** "You have logged 2 low stretches 07/15 – 11/15". */
+export const summaryLine = (count: number, period: string): string =>
+    `You have logged ${count} low ${count === 1 ? 'stretch' : 'stretches'} ${period}.`;
 
 /**
  * How long ended stretches took to get back to 6+, or null when none did.

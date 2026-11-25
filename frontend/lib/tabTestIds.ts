@@ -12,6 +12,7 @@
  */
 export const TAB_BUTTON_TEST_IDS = {
     index: 'tab-home',
+    periodwindow: 'tab-periodwindow',
     stats: 'tab-stats',
     timeline: 'tab-timeline',
     insights: 'tab-insights',

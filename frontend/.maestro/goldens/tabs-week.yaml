@@ -17,6 +17,11 @@ appId: com.raeduslabs.soulsyncapp
     file: subflows/hold.yaml
 - takeScreenshot: tab-home
 - tapOn:
+    id: tab-periodwindow
+- runFlow:
+    file: subflows/hold.yaml
+- takeScreenshot: tab-periodwindow
+- tapOn:
     id: tab-stats
 - runFlow:
     file: subflows/hold.yaml

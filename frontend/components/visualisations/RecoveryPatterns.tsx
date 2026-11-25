@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -9,8 +9,9 @@ import RecoveryEpisodeDetails from '@/components/RecoveryEpisodeDetails';
 import { ThemeColors, useThemeColors } from '@/styles/global';
 import { useDataRefresh } from '@/hooks/useDataRefresh';
 import { useDateFormat } from '@/hooks/useDateFormat';
-import { addDays, localDateString, startOfLocalDay } from '@/databases/dateHelpers';
+import { addDays, endOfLocalDay, localDateString, startOfLocalDay } from '@/databases/dateHelpers';
 import { now } from '@/lib/clock';
+import { useTimeframe } from '@/context/TimeframeContext';
 import { RECOVERY_ENTRY_ACTIVITIES } from './queries';
 import {
     analyseRecoveryPatterns,
@@ -43,25 +44,32 @@ const MAX_ROWS = 5;
 const RecoveryAnalysisCard = () => {
     const colors = useThemeColors();
     const styles = useThemedStyles(colors);
+    const { periodWindow } = useTimeframe();
     const { format: formatDate } = useDateFormat();
     const db = useSQLiteContext();
     const [analysis, setAnalysis] = useState<RecoveryAnalysis | null>(null);
     const [selected, setSelected] = useState<RecoveryEpisode | null>(null);
     const [explainerOpen, setExplainerOpen] = useState(false);
+    const [startDate, setStartDate] = useState(addDays(periodWindow.startDay ? periodWindow.startDay : startOfLocalDay(now()), -WINDOW_DAYS));
+    const [endDate, setEndDate] = useState(periodWindow.endDay ?? startOfLocalDay(now()));
 
     const load = useCallback(async () => {
         try {
-            // LOCAL start of the day 90 days ago, as a UTC instant bound.
-            const start = startOfLocalDay(addDays(localDateString(now()), -WINDOW_DAYS));
-            const raw = await db.getAllAsync<RecoveryRawRow>(RECOVERY_ENTRY_ACTIVITIES, [start]);
-            setAnalysis(analyseRecoveryPatterns(groupRecoveryRows(raw ?? [])));
+            const { start, end } = periodWindow;
+            const queryStart = addDays(start ? start : startOfLocalDay(now()), -WINDOW_DAYS)
+            const analysisEnd = end ? endOfLocalDay(end) : endOfLocalDay(now());
+            const queryEnd = addDays(analysisEnd, WINDOW_DAYS);
+            const raw = await db.getAllAsync<RecoveryRawRow>(RECOVERY_ENTRY_ACTIVITIES, [queryStart, queryEnd]);
+            setStartDate(queryStart);
+            setEndDate(analysisEnd);
+            setAnalysis(analyseRecoveryPatterns(groupRecoveryRows(raw ?? []), analysisEnd));
         } catch (error) {
             console.error('Error loading low stretches:', error);
-        }
+        };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
-    }, [db]);
-    useDataRefresh(load, [db]);
-
+    }, [db, periodWindow]);
+    useDataRefresh(load, [db, periodWindow]);
+    
     if (!analysis || analysis.episodeCount === 0) return null;
 
     const dateRange = (episode: RecoveryEpisode) =>
@@ -113,7 +121,8 @@ const RecoveryAnalysisCard = () => {
             )}
 
             <Text style={styles.body} testID="low-stretch-summary">
-                {summaryLine(analysis.episodeCount)}
+                {summaryLine(analysis.episodeCount,
+                    `${formatDate(startDate, "mediumNoYear")}–${formatDate(endDate, "mediumNoYear")}`)}
             </Text>
             {typical && (
                 <Text style={styles.body} testID="low-stretch-typical">
@@ -127,7 +136,8 @@ const RecoveryAnalysisCard = () => {
                     style={({ pressed }) => [styles.row, styles.currentRow, pressed && styles.pressed]}
                     onPress={() => setSelected(current)}
                     accessibilityRole="button"
-                    accessibilityLabel={`Low stretch since ${formatDate(current.startDate, 'mediumNoYear')}, ${daysLabel(daysSoFar(current.startDate, today))} so far. Opens details.`}
+                    accessibilityLabel={`Low stretch since ${formatDate(current.startDate, 'mediumNoYear')},
+                        ${daysLabel(daysSoFar(current.startDate, today))} so far. Opens details.`}
                 >
                     <View style={styles.grow}>
                         <Text style={styles.rowTitle} numberOfLines={1}>
@@ -159,8 +169,11 @@ const RecoveryAnalysisCard = () => {
                             accessibilityRole="button"
                             accessibilityLabel={`Low stretch ${dateRange(episode).replace('–', 'to')}, ${statusLabel(episode).toLowerCase()}. Opens details.`}
                         >
-                            <Text style={[styles.rowTitle, styles.grow]} numberOfLines={1}>
-                                {dateRange(episode)}
+                            <Text style={styles.rowTitle} numberOfLines={1}>
+                                {dateRange(episode)},
+                            </Text>
+                            <Text style={[styles.status, styles.grow]} numberOfLines={1}>
+                                {episode.durationDays} {episode.durationDays == 1 ? 'day' : 'days'}
                             </Text>
                             <Text style={styles.status} numberOfLines={1}>
                                 {statusLabel(episode)}
@@ -241,6 +254,7 @@ const useThemedStyles = (colors: ThemeColors) =>
                 row: {
                     flexDirection: 'row',
                     alignItems: 'center',
+                    justifyContent: 'flex-start',
                     gap: 12,
                     minHeight: 48,
                     paddingVertical: 10,
@@ -272,7 +286,6 @@ const useThemedStyles = (colors: ThemeColors) =>
                 status: {
                     fontSize: 14,
                     color: colors.textSecondary,
-                    flexShrink: 0,
                 },
             }),
         [colors]

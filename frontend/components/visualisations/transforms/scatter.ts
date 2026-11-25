@@ -4,16 +4,14 @@
 // "scatter" predates the histogram refactor — kept for filename clarity per
 // the brief.
 //
-// Buckets mood ratings into 10 integer buckets (0..9 — values >= 10 fall into
-// the last bucket, matching the existing display which only labels 0..9 on
-// the x-axis).
+// Buckets mood ratings into 11 integer buckets (0..10).
 //
 // Note on "identical (x,y) points": the existing chart is a histogram, so
 // duplicate mood values are *expected* and counted into bucket frequency.
 // We additionally expose `bucketEntries()` for a future scatter view that
 // needs overlap counts, so callers can render with size/jitter.
 
-export const NUM_BUCKETS = 10;
+export const NUM_BUCKETS = 11;
 
 export type MoodSample = { mood: number };
 

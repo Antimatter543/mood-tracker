@@ -3,7 +3,7 @@
  * date text after `date_format` shipped (v2.14.0), the same bug class PR #14
  * fixed in `periodWindow.ts`:
  *
- *   1. MonthOverMonthCard      "June (this month)"        hardcoded month table
+ *   1. MonthOverMonthCard      "June (current)"           hardcoded month table
  *   2. transforms/heatmap      month columns "Jan 26"     hardcoded 'en-US'
  *   3. transforms/weeklyMood   "Jan '25" / "Sun" axes     device locale, never `pref`
  *   4. MoodMetricOverlayCard   "1 Jul" under the chart    hardcoded day-first
@@ -87,6 +87,8 @@ jest.mock('@/styles/global', () => require('@/testing/theme').mockThemeModule())
 import MonthOverMonthCard from '@/components/visualisations/MonthOverMonthCard';
 import CustomHeatMap from '@/components/visualisations/CustomHeatMap';
 import MoodMetricOverlayCard from '@/components/visualisations/MoodMetricOverlayCard';
+import { computePeriodWindow, formatPeriodLabel, PeriodWindow } from '@/components/visualisations/transforms/periodWindow';
+import { localDateString } from '@/databases/dateHelpers';
 
 type View = Awaited<ReturnType<typeof render>>;
 
@@ -99,8 +101,23 @@ const ALL_TIMERS_BUT_DATE = [
     'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback', 'setImmediate',
     'clearImmediate', 'setInterval', 'clearInterval', 'setTimeout', 'clearTimeout',
 ] as const;
-const pinToday = (today: Date) =>
+
+// Mock the TimeFrameContext based on the mock now() and mockSettings format.
+const mockPeriodWindow = jest.fn<PeriodWindow, []>();
+const mockPeriodLabel = jest.fn<string, []>();
+jest.mock('@/context/TimeframeContext', () => ({
+    useTimeframe: () => ({
+        periodWindow: mockPeriodWindow(),
+        periodLabel: mockPeriodLabel(),
+    }),
+}));
+
+const pinToday = (today: Date) => {
+    mockPeriodWindow.mockReturnValue(computePeriodWindow('month', 0, localDateString(today)));
+    mockPeriodLabel.mockReturnValue(formatPeriodLabel('month', 0, localDateString(today), mockSettings().date_format));
+
     jest.useFakeTimers({ now: today, doNotFake: [...ALL_TIMERS_BUT_DATE] });
+} 
 
 // A simulated device locale. `system` formats call `toLocaleDateString(undefined,
 // ...)`, so substituting a locale for `undefined` is exactly "the phone is set to
@@ -138,15 +155,16 @@ describe('MonthOverMonthCard captions follow the date_format setting', () => {
     const renderCard = async () => {
         const view = await render(<MonthOverMonthCard />);
         // Resolves once the two summary queries have settled and the card has data.
-        await view.findByText(/\(this month\)/);
+        await view.findByText(/\(current\)/);
         return view;
     };
 
     it.each([
-        ['system', 'June (this month)', 'May (last month)'],
-        ['mdy', 'June (this month)', 'May (last month)'],
-        ['dmy', 'June (this month)', 'May (last month)'],
-        ['ymd', '2026-06 (this month)', '2026-05 (last month)'],
+        ['system', 'June (current)', 'May (previous)'],
+        ['mdy', 'June (current)', 'May (previous)'],
+        ['dmy', 'June (current)', 'May (previous)'],
+        ['dmy-dot', 'June (current)', 'May (previous)'],
+        ['ymd', '2026-06 (current)', '2026-05 (previous)'],
     ] as Array<[DateFormatPref, string, string]>)(
         'captions the two columns under %s -> "%s" / "%s"',
         async (pref, current, previous) => {
@@ -161,16 +179,16 @@ describe('MonthOverMonthCard captions follow the date_format setting', () => {
         pinToday(new Date(2026, 0, 15, 12));
         withPref('ymd');
         const view = await renderCard();
-        expect(view.getByText('2026-01 (this month)')).toBeTruthy();
-        expect(view.getByText('2025-12 (last month)')).toBeTruthy();
+        expect(view.getByText('2026-01 (current)')).toBeTruthy();
+        expect(view.getByText('2025-12 (previous)')).toBeTruthy();
     });
 
     it('still reads "January" / "December" under a month-name preference', async () => {
         pinToday(new Date(2026, 0, 15, 12));
         withPref('dmy');
         const view = await renderCard();
-        expect(view.getByText('January (this month)')).toBeTruthy();
-        expect(view.getByText('December (last month)')).toBeTruthy();
+        expect(view.getByText('January (current)')).toBeTruthy();
+        expect(view.getByText('December (previous)')).toBeTruthy();
     });
 
     // The regression a stored string would hide: when the headings were React
@@ -178,19 +196,19 @@ describe('MonthOverMonthCard captions follow the date_format setting', () => {
     // the next refetch. They are derived from the stored DATES at render.
     it('re-labels the moment the setting changes, WITHOUT refetching', async () => {
         const view = await renderCard();
-        expect(view.getByText('June (this month)')).toBeTruthy();
+        expect(view.getByText('June (current)')).toBeTruthy();
         const fetchesBefore = mockDb.getFirstAsync.mock.calls.length;
-        expect(fetchesBefore).toBe(2); // this month + last month
+        expect(fetchesBefore).toBe(2); // current + previous
 
         withPref('ymd');
         await view.rerender(<MonthOverMonthCard />);
-        expect(view.getByText('2026-06 (this month)')).toBeTruthy();
-        expect(view.getByText('2026-05 (last month)')).toBeTruthy();
-        expect(view.queryByText('June (this month)')).toBeNull();
+        expect(view.getByText('2026-06 (current)')).toBeTruthy();
+        expect(view.getByText('2026-05 (previous)')).toBeTruthy();
+        expect(view.queryByText('June (current)')).toBeNull();
 
         withPref('mdy');
         await view.rerender(<MonthOverMonthCard />);
-        expect(view.getByText('June (this month)')).toBeTruthy();
+        expect(view.getByText('June (current)')).toBeTruthy();
 
         expect(mockDb.getFirstAsync.mock.calls.length).toBe(fetchesBefore);
     });
@@ -238,6 +256,7 @@ describe('CustomHeatMap month columns follow the date_format setting', () => {
         ['system', ['Nov 25', 'Dec', 'Jan 26', 'Feb']],
         ['mdy', ['Nov 25', 'Dec', 'Jan 26', 'Feb']],
         ['dmy', ['Nov 25', 'Dec', 'Jan 26', 'Feb']],
+        ['dmy-dot', ['Nov 25', 'Dec', 'Jan 26', 'Feb']],
         ['ymd', ['2025-11', '2025-12', '2026-01', '2026-02']],
     ] as Array<[DateFormatPref, string[]]>)(
         'labels the month columns under %s -> %j',
@@ -315,6 +334,7 @@ describe('MoodMetricOverlayCard day labels follow the date_format setting', () =
         ['system', ['1 Jun', '4 Jun', '8 Jun']],
         ['mdy', ['Jun 1', 'Jun 4', 'Jun 8']],
         ['dmy', ['1 Jun', '4 Jun', '8 Jun']],
+        ['dmy-dot', ['1 Jun', '4 Jun', '8 Jun']],
         ['ymd', ['06-01', '06-04', '06-08']],
     ] as Array<[DateFormatPref, string[]]>)(
         'labels the first / middle / last day under %s -> %j',

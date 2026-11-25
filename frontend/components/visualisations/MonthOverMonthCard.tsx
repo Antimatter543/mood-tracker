@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useMemo } from 'react';
+import  { useCallback, useState, useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Feather from '@expo/vector-icons/Feather';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -15,6 +15,8 @@ import {
   type MonthOverMonthData,
 } from './transforms/monthOverMonth';
 import { now } from '@/lib/clock';
+import { useTimeframe } from '@/context/TimeframeContext';
+import { convertStringToDate } from '@/databases/dateHelpers';
 
 /** Material red 300 — semantic "down" signal, not a brand color. */
 const FALLING_COLOR = '#e57373';
@@ -29,6 +31,7 @@ const MonthOverMonthCard = () => {
   const colors = useThemeColors();
   const db = useSQLiteContext();
   const { pref: dateFormatPref } = useDateFormat();
+  const { periodWindow } = useTimeframe();
   const [data, setData] = useState<MonthOverMonthData | null>(null);
   // The two months as DATES, not as text: the headings are spelled at render
   // from the user's date format, so changing the setting re-labels the card
@@ -105,9 +108,9 @@ const MonthOverMonthCard = () => {
 
   const fetchData = useCallback(async () => {
       try {
-        const today = now();
-        const year = today.getFullYear();
-        const month = today.getMonth(); // 0-11
+        const end = periodWindow.endDay ? convertStringToDate(periodWindow.endDay) : now();
+        const year = end.getFullYear();
+        const month = end.getMonth(); // 0-11
 
         // Current calendar month boundaries (local).
         const curFirst = new Date(year, month, 1);
@@ -143,9 +146,9 @@ const MonthOverMonthCard = () => {
         setData(null);
       }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- query reads only db; setState identities are stable
-    }, [db]);
+    }, [db, periodWindow]);
   // Focus-aware refetch (replaces useEffect([db, refreshCount])).
-  useDataRefresh(fetchData, [db]);
+  useDataRefresh(fetchData, [db, periodWindow]);
 
   if (!data || !months) {
     return (
@@ -175,11 +178,11 @@ const MonthOverMonthCard = () => {
         <Feather name="calendar" size={18} color={colors.accent} />
         <Text style={styles.title}>Month over Month</Text>
       </View>
-      <Text style={styles.subtitle}>Calendar months — not the timeframe above</Text>
+      <Text style={styles.subtitle}>Calendar months — ending month from the timeframe</Text>
 
       <View style={styles.columns}>
         <View style={styles.column}>
-          <Text style={styles.monthLabel}>{labels.current} (this month)</Text>
+          <Text style={styles.monthLabel}>{labels.current} (current)</Text>
 
           <View style={styles.metric}>
             <Text style={styles.metricLabel}>Avg mood</Text>
@@ -211,7 +214,7 @@ const MonthOverMonthCard = () => {
         <View style={styles.columnDivider} />
 
         <View style={styles.column}>
-          <Text style={styles.monthLabel}>{labels.previous} (last month)</Text>
+          <Text style={styles.monthLabel}>{labels.previous} (previous)</Text>
 
           <View style={styles.metric}>
             <Text style={styles.metricLabel}>Avg mood</Text>

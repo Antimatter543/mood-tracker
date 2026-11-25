@@ -15,13 +15,17 @@
 // `localDateString` / `aggregateDailyAverages` (the one authority), never a
 // SQL date() bucket — see databases/dateHelpers.ts READ CONTRACT.
 
-import { localDateString } from '@/databases/dateHelpers';
 import {
     aggregateDailyAverages,
-    dailyAverageMap,
     type InstantValueRow,
 } from './dailyAverages';
-import { MIN_SAMPLES } from './activityCorrelation';
+import {
+    ActivityCorrelationRawRow,
+    aggregateActivityCorrelation,
+    MIN_SAMPLES
+} from './activityCorrelation';
+import { IconFamilyType } from '@/components/iconRegistry';
+import { ActivityGroup } from '@/components/types';
 
 // Re-export so consumers can `bucketMoodHistogram` the activity's moods from one
 // import surface without reimplementing the distribution (the histogram uses the
@@ -152,8 +156,8 @@ export const classifyVariability = (
     if (vals.length < minSamples) {
         return {
             kind: 'insufficient',
-            headline: 'Not enough yet',
-            detail: `Log ${label} a few more times to see whether your mood on those days is steady or all over the place.`,
+            headline: 'Not enough entries',
+            detail: `Log ${label} a few more times or change the time period to see whether your mood on those days is steady or all over the place.`,
         };
     }
 
@@ -212,61 +216,51 @@ export type ActivityMoodImpact = {
     withoutAvg: number | null;
     /** withAvg − withoutAvg (null unless both sides exist). */
     delta: number | null;
-    withDays: number;
-    withoutDays: number;
+    withCount: number;
+    withoutCount: number;
     /** Both sides have ≥ minSamples days — enough to state the comparison. */
     isMeaningful: boolean;
 };
 
 /**
- * Compare mood on this activity's days vs all other days.
+ * Compare mood on this activity's vs otherwise.
  *
- * `allEntries` = every entry (raw {date, mood}); `activityEntries` = the subset
- * that logged this activity. Both are day-keyed via localDateString; we average
- * the per-day averages (so a day with many entries counts once, matching
+ * `allEntries` = every entry, day-keyed via localDateString;
+ * we average the per-day averages (so a day with many entries counts once, matching
  * activityCorrelation). "without" days are the local days present in the data
  * that this activity was NOT on.
  */
 export const activityMoodImpact = (
-    allEntries: InstantValueRow[],
-    activityEntries: InstantValueRow[],
+    activityId: number | null,
+    allEntries: ActivityCorrelationRawRow[],
     minSamples: number = MIN_SAMPLES,
+    carryover: boolean = false,
+    windowStart: string | undefined = undefined,
 ): ActivityMoodImpact => {
-    const dayAvg = dailyAverageMap(allEntries); // Map<localDay, avgMood>
+    const filteredEntries = allEntries.map((r) =>
+        (r.activity_id != activityId ?
+            {...r, activity_id: null, activity_name: null} : r));
 
-    const withDaySet = new Set<string>();
-    for (const row of activityEntries ?? []) {
-        if (!row || typeof row.date !== 'string') continue;
-        if (Number.isNaN(new Date(row.date).getTime())) continue;
-        withDaySet.add(localDateString(row.date));
-    }
+    const correlations = aggregateActivityCorrelation(filteredEntries, { carryover, windowStart })
+    if (correlations.length == 0)
+        return {
+            withAvg: null, withoutAvg: null,
+            delta: null,  isMeaningful: false,
+            withCount: 0, withoutCount: 0,
+        };
 
-    let sumWith = 0;
-    let countWith = 0;
-    let sumWithout = 0;
-    let countWithout = 0;
-    for (const [day, avg] of dayAvg) {
-        if (withDaySet.has(day)) {
-            sumWith += avg;
-            countWith += 1;
-        } else {
-            sumWithout += avg;
-            countWithout += 1;
-        }
-    }
-
-    const withAvg = countWith > 0 ? round1(sumWith / countWith) : null;
-    const withoutAvg = countWithout > 0 ? round1(sumWithout / countWithout) : null;
-    const delta =
-        withAvg !== null && withoutAvg !== null ? round1(withAvg - withoutAvg) : null;
+    const corr = correlations[0];
+    const delta = corr.avg_with !== null && corr.avg_without !== null
+        ? round1(corr.avg_with - corr.avg_without) : null;
+    const meaningful = corr.count_with >= minSamples && corr.count_without >= minSamples
 
     return {
-        withAvg,
-        withoutAvg,
-        delta,
-        withDays: countWith,
-        withoutDays: countWithout,
-        isMeaningful: countWith >= minSamples && countWithout >= minSamples,
+        withAvg: corr.avg_with,
+        withoutAvg: corr.avg_without,
+        delta: delta,
+        withCount: corr.count_with,
+        withoutCount: corr.count_without,
+        isMeaningful: meaningful,
     };
 };
 
@@ -312,9 +306,11 @@ export const sparklinePoints = (
 
 export type CoOccurringRow = {
     id: number;
+    group_id: number;
     name: string;
-    icon_family: string;
     icon_name: string;
+    icon_family: IconFamilyType;
+    position: number;
     n: number;
 };
 
@@ -333,10 +329,11 @@ export const topCoOccurring = (
 // count, sorted most-logged first, and a pure case-insensitive name filter.
 // ---------------------------------------------------------------------------
 
-export type ActivityWithCount<T> = T & { entryCount: number };
+export type ActivityWithCount<T> = T & { entryCount: number, group: string | undefined };
 
-export const withEntryCounts = <T extends { id: number; name: string }>(
+export const withEntryCounts = <T extends { id: number; name: string, group_id: number }>(
     activities: T[],
+    groups: ActivityGroup[],
     countRows: { activity_id: number; n: number }[],
 ): ActivityWithCount<T>[] => {
     const counts = new Map<number, number>();
@@ -345,22 +342,25 @@ export const withEntryCounts = <T extends { id: number; name: string }>(
             counts.set(r.activity_id, typeof r.n === 'number' ? r.n : 0);
         }
     }
+
+    const groupMap = new Map(groups.map((g) => [g.id, g.name]));
     return (activities ?? [])
-        .map((a) => ({ ...a, entryCount: counts.get(a.id) ?? 0 }))
+        .map((a) => ({ ...a, group: groupMap.get(a.group_id), entryCount: counts.get(a.id) ?? 0 }))
         .sort(
             (a, b) =>
                 b.entryCount - a.entryCount || a.name.localeCompare(b.name),
         );
 };
 
-export const filterActivitiesByQuery = <T extends { name: string }>(
+export const filterActivitiesByQuery = <T extends { name: string, group: string | undefined }>(
     activities: T[],
     query: string,
 ): T[] => {
     const q = (query ?? '').trim().toLowerCase();
     if (!q) return activities ?? [];
     return (activities ?? []).filter(
-        (a) => typeof a?.name === 'string' && a.name.toLowerCase().includes(q),
+        (a) => typeof a?.name === 'string' && a.name.toLowerCase().includes(q) ||
+               typeof a?.group === 'string' && a.group.toLowerCase().includes(q)
     );
 };
 
@@ -381,7 +381,7 @@ export const DEFAULT_ACTIVITY_BROWSE_CAP = 10;
  * `all` is assumed pre-ranked; this helper never re-sorts. Total on nullish
  * input (never throws).
  */
-export const visibleActivities = <T extends { name: string }>(
+export const visibleActivities = <T extends { name: string, group: string | undefined }>(
     all: T[],
     {
         query,
