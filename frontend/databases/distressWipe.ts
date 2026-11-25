@@ -33,8 +33,8 @@ import { withWriteLock, withWriteTransaction } from '@/databases/writeTransactio
  *     same transaction, so the Settings screen no longer advertises it and a
  *     second lockout cannot fire again.
  *
- * Forensics: `PRAGMA secure_delete` overwrites freed pages with zeros, then a
- * WAL checkpoint (TRUNCATE) + VACUUM rewrite the file, so the old notes are not
+ * Forensics: `PRAGMA secure_delete` (on before the wipe) zeroes freed space,
+ * then a VACUUM + WAL checkpoint (TRUNCATE) rewrite the file, so the old notes are not
  * recoverable from free pages or the WAL. Both are best-effort: the logical
  * wipe has already committed atomically when they run.
  *
@@ -98,6 +98,12 @@ export async function wipeSensitiveData(
         'SELECT file_path FROM entry_media'
     );
     const mediaFiles = mediaRows.map(r => r.file_path);
+
+    // secure_delete zeroes the space the deletes and the NULLed notes free,
+    // inside the same transaction. Per connection, set OUTSIDE a transaction;
+    // left on for the write connection afterwards, which only costs a little
+    // write speed on later deletes.
+    await withWriteLock(conn => conn.execAsync('PRAGMA secure_delete = ON;'));
 
     const activityKeys = defaultActivityKeys();
     const groupNames = defaultGroupNames();
@@ -180,7 +186,6 @@ export async function wipeSensitiveData(
 export async function scrubDatabaseFile(): Promise<void> {
     try {
         await withWriteLock(async (conn) => {
-            await conn.execAsync('PRAGMA secure_delete = ON;');
             await conn.execAsync('VACUUM;');
             await conn.execAsync('PRAGMA wal_checkpoint(TRUNCATE);');
         });

@@ -30,11 +30,13 @@ export type AuthOutcome = 'unlock' | 'wipe' | 'locked_out' | 'dismissed' | 'unav
  * A lockout that comes back faster than this was NOT produced in our prompt:
  * the biometric sensor was already locked out (e.g. failed attempts on the
  * phone's own lock screen, or in another app) and the system refused at once.
- * Five deliberate wrong fingers in our prompt always take longer than this.
+ * The system shows that refusal for ~2 s before reporting it, so the bar sits
+ * well above that; five deliberate wrong fingers (each "Not recognised", then
+ * the lockout message) always take longer.
  * Without this guard an unrelated lockout elsewhere would wipe the journal on
  * the next open, which is never what the user meant.
  */
-export const MIN_PROMPT_MS_FOR_DISTRESS = 2500;
+export const MIN_PROMPT_MS_FOR_DISTRESS = 4000;
 
 export function classifyAuthAttempt(
     attempt: AuthAttempt,

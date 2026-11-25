@@ -169,7 +169,9 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
 
     // Cold start: the app is already active when this mounts locked.
     useEffect(() => {
-        if (locked && autoPromptPending.current && appStateRef.current === 'active') {
+        // Android can report 'unknown' this early; only a real 'background'
+        // waits for the 'active' event (the listener above then prompts).
+        if (locked && autoPromptPending.current && appStateRef.current !== 'background') {
             autoPromptPending.current = false;
             unlock();
         }

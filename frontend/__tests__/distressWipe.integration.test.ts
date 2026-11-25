@@ -166,6 +166,12 @@ describeSqlite('distress wipe: real SQLite', () => {
         expect(get('app_lock_enabled')).toBe('true');
     });
 
+    it('switches secure_delete on for the write connection before deleting', async () => {
+        await wipeSensitiveData(db as never);
+        const row = db.raw.prepare('PRAGMA secure_delete').get() as { secure_delete: number };
+        expect(row.secure_delete).toBe(1);
+    });
+
     it('is atomic: a failing statement rolls everything back', async () => {
         db.raw.exec('DROP TABLE user_settings');
         await expect(wipeSensitiveData(db as never)).rejects.toThrow();
