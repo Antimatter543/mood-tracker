@@ -1,15 +1,16 @@
 /**
- * EntryForm (details step): the floating Back / Save pair (#23).
+ * EntryForm (details step): the floating Back / Add/Save pair (#23).
  *
- * When a long entry pushes the inline Back + Submit row below the fold, a
+ * When a long entry pushes the inline Back + Add/Save row below the fold, a
  * floating pair stands in for it. These tests pin:
  *   - WHEN it shows: only while the inline row is not fully visible, worked out
  *     from layout + scroll + keyboard (no polling sensor), only on step 2;
- *   - the floating Save is the SAME guarded write as the inline Submit: a
+ *   - the floating Add/Save is the SAME guarded write as the inline Add/Save: a
  *     double-tap in one frame saves once (useSingleFlight), and it is disabled +
  *     busy while the write is in flight;
- *   - both buttons are labelled for screen readers, Save shows a check icon;
- *   - Back always sits LEFT of Save, for both fab_position sides.
+ *   - both buttons are labelled for screen readers, Save shows a check icon and
+ *     Add shows a plus icon;
+ *   - Back always sits LEFT of Add/Save, for both fab_position sides.
  */
 import { render, fireEvent, act } from '@testing-library/react-native';
 import { StyleSheet } from 'react-native';
@@ -47,17 +48,18 @@ jest.mock('../components/forms/ActivitySelector', () => {
     const { Text } = require('react-native');
     return { ActivitySelector: () => ReactActual.createElement(Text, null, 'activity-selector') };
 });
-// Record the icon name so the test can assert Save shows a check.
+// Record the icon name so the test can assert Add shows a plus and Save shows a check.
 jest.mock('@expo/vector-icons/Feather', () => {
     const ReactActual = require('react');
     const { Text } = require('react-native');
     return { __esModule: true, default: ({ name }: { name: string }) => ReactActual.createElement(Text, null, `icon:${name}`) };
 });
 
-import { EntryForm } from '@/components/forms/EntryForm';
+import { EntryForm, EntryFormData } from '@/components/forms/EntryForm';
 
 const VIEWPORT = 600;
 const ROW = { y: 900, height: 50 }; // below a 600dp viewport until scrolled ~350
+const INITIAL_DATA: EntryFormData = { mood: 5, activities: [], notes: '', date: new Date('2025-05-19T00:00:00'), photos: []}
 
 function scrollNode(view: any) {
     const matches = view.container.queryAll(
@@ -67,8 +69,8 @@ function scrollNode(view: any) {
     return matches[0];
 }
 
-async function renderDetailsStepWithRowBelowFold(onSubmit: (data: any) => Promise<void> = jest.fn(async () => {})) {
-    const view = await render(<EntryForm onSubmit={onSubmit} onCancel={jest.fn()} />);
+async function renderDetailsStepWithRowBelowFold(initialData?: EntryFormData, onSubmit: (data: any) => Promise<void> = jest.fn(async () => {})) {
+    const view = await render(<EntryForm initialData={initialData} onSubmit={onSubmit} onCancel={jest.fn()} onDateChange={jest.fn()} />);
     await act(async () => {
         await fireEvent.press(view.getByText('Continue'));
     });
@@ -119,11 +121,11 @@ describe('floatingActions geometry (pure)', () => {
     });
 });
 
-describe('EntryForm floating Back / Save', () => {
+describe('EntryForm floating Back / Add/Save', () => {
     beforeEach(() => mockFabPosition.mockReturnValue('right'));
 
     it('mood step: no duplicate Cancel button, Continue keeps its full-width look', async () => {
-        const view = await render(<EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />);
+        const view = await render(<EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} onDateChange={jest.fn} />);
         expect(view.queryByText('Cancel')).toBeNull();
         const continueStyle = StyleSheet.flatten(
             view.getByLabelText('Continue to the details step').props.style
@@ -133,7 +135,7 @@ describe('EntryForm floating Back / Save', () => {
     });
 
     it('stays hidden while the inline row is on screen, shows when it is below the fold', async () => {
-        const view = await render(<EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} />);
+        const view = await render(<EntryForm onSubmit={jest.fn()} onCancel={jest.fn()} onDateChange={jest.fn} />);
         await act(async () => {
             await fireEvent.press(view.getByText('Continue'));
         });
@@ -167,19 +169,28 @@ describe('EntryForm floating Back / Save', () => {
         expect(view.queryByTestId('entry-form-floating-save')).toBeNull();
     });
 
-    it('labels both buttons, and Save shows a check (not a forward chevron)', async () => {
-        const view = await renderDetailsStepWithRowBelowFold();
-        const save = view.getByLabelText('Save entry');
-        const back = view.getByLabelText('Back to mood');
+    it('labels both buttons, and Save button shows a check icon (not a forward chevron)', async () => {
+        const view = await renderDetailsStepWithRowBelowFold(INITIAL_DATA);
+        const save = view.getByLabelText('Save current entry');
+        const back = view.getByLabelText('Back to mood and date');
         expect(save.props.accessibilityRole).toBe('button');
         expect(back.props.accessibilityRole).toBe('button');
         expect(view.getByTestId('entry-form-floating-save')).toHaveTextContent('icon:check');
     });
 
-    it('floating Save writes ONCE on a double-tap in the same frame', async () => {
+    it('labels both buttons, and Add button shows a plus icon (not a forward chevron)', async () => {
+        const view = await renderDetailsStepWithRowBelowFold();
+        const save = view.getByLabelText('Add new entry');
+        const back = view.getByLabelText('Back to mood and date');
+        expect(save.props.accessibilityRole).toBe('button');
+        expect(back.props.accessibilityRole).toBe('button');
+        expect(view.getByTestId('entry-form-floating-save')).toHaveTextContent('icon:plus');
+    });
+
+    it('floating Add/Save writes ONCE on a double-tap in the same frame', async () => {
         const gate = deferred();
         const onSubmit = jest.fn(() => gate.promise);
-        const view = await renderDetailsStepWithRowBelowFold(onSubmit);
+        const view = await renderDetailsStepWithRowBelowFold(undefined, onSubmit);
         const save = view.getByTestId('entry-form-floating-save');
 
         await act(async () => {
@@ -192,10 +203,10 @@ describe('EntryForm floating Back / Save', () => {
         expect(onSubmit).toHaveBeenCalledTimes(1);
     });
 
-    it('floating Save is disabled + busy while the write is in flight', async () => {
+    it('floating Add/Save is disabled + busy while the write is in flight', async () => {
         const gate = deferred();
         const onSubmit = jest.fn(() => gate.promise);
-        const view = await renderDetailsStepWithRowBelowFold(onSubmit);
+        const view = await renderDetailsStepWithRowBelowFold(undefined, onSubmit);
         expect(view.getByTestId('entry-form-floating-save').props.accessibilityState).toEqual({
             disabled: false,
             busy: false,
@@ -226,7 +237,7 @@ describe('EntryForm floating Back / Save', () => {
         expect(view.queryByTestId('entry-form-floating-save')).toBeNull();
     });
 
-    it.each(['left', 'right'] as const)('renders Back left of Save with fab_position=%s', async (side) => {
+    it.each(['left', 'right'] as const)('renders Back left of Add/Save with fab_position=%s', async (side) => {
         mockFabPosition.mockReturnValue(side);
         const view = await renderDetailsStepWithRowBelowFold();
         const style = (id: string) => StyleSheet.flatten(view.getByTestId(id).props.style);

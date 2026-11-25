@@ -40,6 +40,8 @@ import {
     isRowFullyVisible,
     RowLayout,
 } from './floatingActions';
+import { useDateFormat } from '@/hooks/useDateFormat';
+import { formatEntryTime } from '../visualisations/transforms/latestEntry';
 
 const MAX_PHOTOS = 5;
 
@@ -200,6 +202,7 @@ type EntryFormProps = {
     initialData?: EntryFormData;
     onSubmit: (data: EntryFormData) => Promise<void>;
     onCancel: () => void;
+    onDateChange: (date: Date) => void;
     /**
      * Bottom safe-area inset of the window the form is drawn in (the overlay
      * passes it). Added to the scroll content's bottom padding so the last
@@ -281,6 +284,7 @@ const DetailsStep = ({
     onButtonRowLayout,
     submitDisabled,
     submitBusy,
+    submitTitle,
     scrollableRef,
 }: {
     activities: number[];
@@ -295,11 +299,12 @@ const DetailsStep = ({
     onRemovePhoto: (uri: string) => void;
     onBack: () => void;
     onSubmit: () => void;
-    /** Where the Back + Submit row sits in the scroll content (drives the floating pair). */
+    /** Where the Back + Add/Save row sits in the scroll content (drives the floating pair). */
     onButtonRowLayout?: (event: LayoutChangeEvent) => void;
     submitDisabled?: boolean;
     /** In-flight save: the button is disabled AND announced busy. */
     submitBusy?: boolean;
+    submitTitle: string;
     scrollableRef?: AnimatedRef<Animated.ScrollView>;
 }) => {
     const colors = useThemeColors();
@@ -354,8 +359,10 @@ const DetailsStep = ({
                     onPress={onSubmit}
                     disabled={submitDisabled}
                     accessibilityState={{ disabled: !!submitDisabled, busy: !!submitBusy }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${submitTitle} entry`}
                 >
-                    <Text style={styles.buttonText}>Submit</Text>
+                    <Text style={styles.buttonText}>{submitTitle}</Text>
                 </Pressable>
             </View>
         </>
@@ -380,6 +387,8 @@ const EntryFormOverlay: React.FC<{
     // scroll area both sit under it); the bottom one is handed to the form so
     // its last button can scroll clear of the nav bar.
     const insets = useSafeAreaInsets();
+    const { format } = useDateFormat();
+    const [ entryDate, setEntryDate ] = useState<Date | undefined>(initialData?.date);
 
     // Replicate <Modal onRequestClose>: Android hardware back closes the overlay
     // while it's up (and swallows the event so it doesn't pop the route under it).
@@ -390,6 +399,12 @@ const EntryFormOverlay: React.FC<{
         });
         return () => sub.remove();
     }, [onClose]);
+
+    const formatDate = () =>
+        entryDate
+            ? format(entryDate, 'numericShort') + ' '
+                + formatEntryTime(entryDate)
+            : ''
 
     return (
         <Animated.View
@@ -404,6 +419,13 @@ const EntryFormOverlay: React.FC<{
                 <Pressable style={styles.closeButton} onPress={onClose}>
                     <Ionicons name="close" color={colors.text} size={24} />
                 </Pressable>
+
+                <Text style={styles.modalHeaderTitle}>
+                    {initialData && entryDate
+                        ? `Editing ${formatDate()}`
+                        : `New Entry ${formatDate()}`
+                    }
+                </Text>
 
                 <InfoBubble
                     text="Hold an activity to edit or delete it"
@@ -422,6 +444,7 @@ const EntryFormOverlay: React.FC<{
                 initialData={initialData}
                 onSubmit={onSubmit}
                 onCancel={onClose}
+                onDateChange={setEntryDate}
                 bottomInset={insets.bottom}
             />
         </Animated.View>
@@ -469,6 +492,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     initialData,
     onSubmit,
     onCancel: _onCancel,
+    onDateChange = () => {},
     bottomInset = 0,
 }) => {
     const [currentStep, setCurrentStep] = useState(1);
@@ -498,7 +522,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
     // the keyboard.
     const scrollRef = useAnimatedRef<Animated.ScrollView>();
 
-    // Is the inline Back + Submit row fully on screen? When it is not (a long
+    // Is the inline Back + Add/Save row fully on screen? When it is not (a long
     // entry pushed it below the fold), a floating Back / Save pair stands in for
     // it. Worked out from the row's onLayout + the ScrollView's scroll offset,
     // viewport height and the keyboard height (see floatingActions.ts): no
@@ -622,6 +646,11 @@ export const EntryForm: React.FC<EntryFormProps> = ({
         }
     }, [keyboardHeight, currentStep, scrollToBottom]);
 
+    // Inform the container of the initial date
+    useEffect(() => {
+        onDateChange(draft.date);
+    }, [draft.date]);
+
     return (
         <>
             <Animated.ScrollView
@@ -668,6 +697,7 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                         onButtonRowLayout={handleButtonRowLayout}
                         submitDisabled={submitDisabled}
                         submitBusy={isSubmitting}
+                        submitTitle={initialData ? "Save" : "Add"}
                         scrollableRef={scrollRef}
                     />
                 )}
@@ -685,12 +715,12 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                         ]}
                         onPress={goToMoodStep}
                         accessibilityRole="button"
-                        accessibilityLabel="Back to mood"
+                        accessibilityLabel="Back to mood and date"
                     >
                         <Feather name="chevron-left" size={28} color={colors.text} />
                     </Pressable>
 
-                    {/* Same guarded handler + disabled state as the inline Submit:
+                    {/* Same guarded handler + disabled state as the inline Add/Save:
                         useSingleFlight's ref gate makes a double-tap ONE write. */}
                     <Pressable
                         testID="entry-form-floating-save"
@@ -704,10 +734,10 @@ export const EntryForm: React.FC<EntryFormProps> = ({
                         onPress={handleSubmit}
                         disabled={submitDisabled}
                         accessibilityRole="button"
-                        accessibilityLabel="Save entry"
+                        accessibilityLabel={initialData ? "Save current entry" : "Add new entry"}
                         accessibilityState={{ disabled: submitDisabled, busy: isSubmitting }}
                     >
-                        <Feather name="check" size={26} color={colors.text} />
+                        <Feather name={initialData ? "check" : "plus"} size={26} color={colors.text} />
                     </Pressable>
                 </>
             )}
@@ -730,8 +760,15 @@ const useThemedStyles = (colors: ThemeColors) =>
         modalHeader: {
             paddingHorizontal: 12,
             flexDirection: 'row',
+            alignContent: 'center',
             justifyContent: 'flex-start',
             marginBottom: 8,
+        },
+        modalHeaderTitle: {
+            color: colors.text,
+            fontSize: 18,
+            fontWeight: 600,
+            padding: 8,
         },
         closeButton: {
             padding: 8,
@@ -742,7 +779,7 @@ const useThemedStyles = (colors: ThemeColors) =>
         contentContainer: {
             // flexGrow (not flex) so the content stays vertically centred when it
             // fits the viewport, but grows past it and scrolls when it doesn't —
-            // guarantees the Continue/Submit button is always reachable on small
+            // guarantees the Continue/Add/Save button is always reachable on small
             // screens. Vertical padding gives breathing room at both ends. The
             // bottom safe-area inset and the keyboard height are added on top of
             // paddingBottom at the call site.
