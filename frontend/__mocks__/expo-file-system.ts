@@ -12,3 +12,6 @@ export const StorageAccessFramework = {
   requestDirectoryPermissionsAsync: jest.fn().mockResolvedValue({ granted: false }),
   createFileAsync: jest.fn().mockResolvedValue('mock://file'),
 };
+// Distress wipe (databases/distressWipe.ts) lists these folders.
+export const cacheDirectory = '/mock/cache/';
+export const readDirectoryAsync = jest.fn().mockResolvedValue([]);

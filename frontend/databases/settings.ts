@@ -95,8 +95,42 @@ export const SETTINGS_REGISTRY = {
         type: 'text',
         label: 'Reminders',
         description: 'Times you want to be nudged to log your mood',
+    },
+    app_lock_enabled: {
+        key: 'app_lock_enabled',
+        // Opt-in (default OFF): ask for the fingerprint / face / device PIN on
+        // every cold start AND every return from the background. type:'text' so
+        // the generic SettingRow renderer skips it: turning it on needs a
+        // successful authentication first, which only the bespoke card
+        // (components/AppLockSection.tsx) does. Gate: context/AppLock.tsx.
+        // Seeded by migration 16.
+        default: false,
+        type: 'text',
+        label: 'App lock',
+        description: 'Require biometrics to open SoulSync',
+    },
+    distress_wipe_enabled: {
+        key: 'distress_wipe_enabled',
+        // Opt-in (default OFF), only meaningful while app_lock_enabled is on.
+        // When on, the unlock prompt is biometric-only, and a biometric LOCKOUT
+        // (too many wrong fingers in OUR prompt) silently strips the journal
+        // down to mood scores + default activities (databases/distressWipe.ts).
+        // Switches itself off once it has fired. Bespoke card only (type:'text').
+        // Seeded by migration 16.
+        default: false,
+        type: 'text',
+        label: 'Distress wipe',
+        description: 'Clear private journal content after too many failed biometric attempts',
     }
 } as const;
+
+/**
+ * Settings that belong to THIS phone, not to the journal: a backup restore never
+ * applies them (databases/data-export.ts). Restoring a backup made before a
+ * distress wipe must not quietly re-arm the wipe, and a lock copied from
+ * another phone could ask for biometrics this phone does not have.
+ */
+export const DEVICE_ONLY_SETTING_KEYS: readonly string[] = ['app_lock_enabled', 'distress_wipe_enabled'];
 
 // Define possible values for each setting
 export type SettingValues = {
@@ -108,6 +142,8 @@ export type SettingValues = {
     activity_carryover: boolean;
     date_format: DateFormatPref;  // 'system' | 'mdy' | 'dmy' | 'ymd', see lib/dateFormat.ts
     reminders: string;  // JSON-encoded Reminder[] — parse with lib/reminders.parseReminders
+    app_lock_enabled: boolean;
+    distress_wipe_enabled: boolean;
 };
 
 export type SettingKey = keyof typeof SETTINGS_REGISTRY;

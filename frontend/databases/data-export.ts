@@ -9,6 +9,7 @@ import * as Sharing from 'expo-sharing';
 import { SQLiteDatabase } from 'expo-sqlite';
 
 import { GROUP_ORDER_BY } from '@/databases/groups';
+import { DEVICE_ONLY_SETTING_KEYS } from '@/databases/settings';
 import { deriveMediaExt, writeBase64ToMediaDir } from '@/databases/mediaHelpers';
 import { withWriteLock, withWriteTransaction } from '@/databases/writeTransaction';
 import { Argon2UnavailableError } from '@/lib/argon2';
@@ -831,6 +832,9 @@ export async function applyBackupData(
     // Step 4: Import user settings
     if (importData.data.settings && Array.isArray(importData.data.settings)) {
       for (const setting of importData.data.settings) {
+        // App lock / distress wipe stay as they are on this phone (see
+        // DEVICE_ONLY_SETTING_KEYS).
+        if (DEVICE_ONLY_SETTING_KEYS.includes(setting.key)) continue;
         try {
           await txn.runAsync(
             'INSERT OR REPLACE INTO user_settings (key, value) VALUES (?, ?)',

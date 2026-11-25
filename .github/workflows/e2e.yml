@@ -43,6 +43,11 @@ on:
         required: false
         type: boolean
         default: false
+      applock:
+        description: 'Run ONLY the app lock + distress wipe device check (frontend/scripts/e2e-app-lock.sh)'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -265,8 +270,25 @@ jobs:
       - name: Mark smoke step start
         run: echo "SMOKE_T0=$(date +%s)" >> "$GITHUB_ENV"
 
+      # Opt-in (dispatch input `applock`): fingerprint enrolment via `adb emu finger`, then the
+      # app lock / distress wipe walk-through. Maestro cannot touch a fingerprint sensor.
+      - name: Emulator app lock + distress wipe check
+        if: github.event.inputs.applock == 'true'
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_3
+          cores: 3
+          ram-size: 4096M
+          force-avd-creation: false
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash frontend/scripts/e2e-app-lock.sh qa-apk/soulsync-qa.apk
+
       - name: Emulator + Maestro smoke (API 34 x86_64 google_apis)
-        if: github.event.inputs.record != 'true'
+        if: github.event.inputs.record != 'true' && github.event.inputs.applock != 'true'
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
           EMU_T0: ${{ env.SMOKE_T0 }}
@@ -289,11 +311,11 @@ jobs:
       # depend on what the smoke flows left behind (about a minute, and it isolates the two).
       # Runs after a smoke failure too: it is a separate verdict, and often the explanation.
       - name: Mark goldens step start
-        if: ${{ !cancelled() && github.event.inputs.flows == '' }}
+        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.applock != 'true' }}
         run: echo "GOLDENS_T0=$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Emulator + Maestro golden screenshots
-        if: ${{ !cancelled() && github.event.inputs.flows == '' }}
+        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.applock != 'true' }}
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
           E2E_OUT: e2e-out/goldens
@@ -311,26 +333,26 @@ jobs:
           script: bash frontend/scripts/e2e-goldens.sh qa-apk/soulsync-qa.apk
 
       - name: Record end of the goldens step
-        if: ${{ !cancelled() && github.event.inputs.flows == '' }}
+        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.applock != 'true' }}
         run: echo "GOLDENS_STEP_S=$(( $(date +%s) - GOLDENS_T0 ))" >> "$GITHUB_ENV"
 
       # The verdict runs even when a flow failed: whatever images exist still get their deltas,
       # and the missing ones are listed as misses. Node only here: pngjs + pixelmatch from the
       # lockfile, with no lifecycle scripts (nothing in this step needs them).
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' }}
+        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' && github.event.inputs.applock != 'true' }}
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install the diff's dependencies
-        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' }}
+        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' && github.event.inputs.applock != 'true' }}
         working-directory: frontend
         run: npm ci
 
       - name: Compare against the goldens
-        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' }}
+        if: ${{ !cancelled() && github.event.inputs.flows == '' && github.event.inputs.record != 'true' && github.event.inputs.applock != 'true' }}
         run: node frontend/scripts/golden-diff.mjs --goldens frontend/e2e/goldens --actual e2e-out/goldens/actual --out e2e-out/goldens/diff
 
       - name: Upload the recorded goldens

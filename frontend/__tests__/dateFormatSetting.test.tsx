@@ -43,6 +43,8 @@ const baseSettings: Settings = {
     activity_carryover: false,
     date_format: 'system',
     reminders: '[]',
+    app_lock_enabled: false,
+    distress_wipe_enabled: false,
 };
 
 const renderSettings = () =>
