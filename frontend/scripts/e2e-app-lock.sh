@@ -201,7 +201,8 @@ c.execute("INSERT INTO activity_groups (name, sort_order) VALUES ('Therapy', 99)
 g = c.execute("SELECT id FROM activity_groups WHERE name='Therapy'").fetchone()[0]
 c.execute("INSERT INTO activities (name, group_id) VALUES ('Panic attack', ?)", (g,))
 a = c.execute("SELECT id FROM activities WHERE name='Panic attack'").fetchone()[0]
-e = c.execute("SELECT MAX(id) FROM entries").fetchone()[0]
+# the newest live entry: first on the Timeline, in view without scrolling
+e = c.execute("SELECT id FROM entries WHERE deleted_at IS NULL ORDER BY date DESC LIMIT 1").fetchone()[0]
 c.execute("UPDATE entries SET notes='E2E SECRET NOTE', starred_at='2026-11-01T10:00:00.000Z' WHERE id=?", (e,))
 c.execute("INSERT OR REPLACE INTO health_metrics (date, sleep_total_minutes, avg_heart_rate, synced_at) VALUES ('2026-11-01', 420, 61, 'e2e')")
 c.execute("INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?)", (e, a))
@@ -253,11 +254,14 @@ adb shell input keyevent KEYCODE_HOME; sleep 1
 launch; sleep 2
 wait_for 'resource-id="app-lock-screen"' 8; check "app switch + return shows the lock" "$(( $? == 0 ))"
 type_pin "$APP_PIN"; sleep 3
-adb shell am force-stop "$PKG"; sleep 1
-launch; sleep 5
-has 'resource-id="app-lock-screen"'; check "cold start shows the lock" "$(( $? == 0 ))"
+adb shell am force-stop "$PKG"; sleep 2
+launch
+# A cold start can take a while on the emulator; ask again once if the launcher is still up.
+wait_for 'resource-id="app-lock-screen"' 10 || { launch; wait_for 'resource-id="app-lock-screen"' 10; }
+check "cold start shows the lock" "$(( $? == 0 ))"
 type_pin "$APP_PIN"; sleep 3
-has 'resource-id="app-lock-screen"'; check "cold start: app PIN unlocks" "$(( $? != 0 ))"
+has 'resource-id="app-lock-screen"'; COLD_LOCKED=$?
+has "package=\"$PKG\""; check "cold start: app PIN unlocks" "$(( COLD_LOCKED != 0 && $? == 0 ))"
 
 # wrong PINs: message, then a wait after 5
 home; launch; sleep 2
@@ -344,7 +348,8 @@ check "both PINs take the same time to open (within the 1-2 s poll)" "$(( $? == 
 [[ -n "$TAB_LOCKED" && "$(current_tab)" == "$TAB_LOCKED" ]]
 check "the distress PIN comes back to the same screen" "$(( $? == 0 ))" "$TAB_LOCKED -> $(current_tab)"
 grep -q 'E2E SECRET NOTE' <<<"$UI"; check "the private note is gone at the first look" "$(( $? != 0 ))"
-has 'wip|eras|delet|distress'; check "nothing on screen mentions a wipe" "$(( $? != 0 ))"
+# Words only (the Timeline's own "Recently deleted" button is not a hint).
+has '(text|content-desc)="[^"]*(wipe|wiping|erase|erasing|distress)'; check "nothing on screen mentions a wipe" "$(( $? != 0 ))"
 sleep 2
 shot pr-timeline-after-wipe
 has 'E2E SECRET NOTE'; check "secret note not on the Timeline" "$(( $? != 0 ))"
