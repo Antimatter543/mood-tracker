@@ -122,10 +122,10 @@ describeSqlite('distress wipe: real SQLite', () => {
         ]);
     });
 
-    it('clears every note and star', async () => {
+    it('clears every note, but keeps stars (not incriminating, and they make it look real)', async () => {
         await wipeSensitiveData(db as never);
         expect(countRows(db, 'entries', 'notes IS NOT NULL')).toBe(0);
-        expect(countRows(db, 'entries', 'starred_at IS NOT NULL')).toBe(0);
+        expect(countRows(db, 'entries', 'starred_at IS NOT NULL')).toBe(1);
         const dump = JSON.stringify(db.raw.prepare('SELECT * FROM entries').all());
         expect(dump).not.toMatch(/secret|private/);
     });
@@ -172,6 +172,55 @@ describeSqlite('distress wipe: real SQLite', () => {
         expect(row.secure_delete).toBe(1);
     });
 
+    it('200 logged days stay 200 days, each with its mood and default activities', async () => {
+        db.raw.exec('DELETE FROM entry_activities; DELETE FROM entry_media; DELETE FROM entries;');
+        const ins = db.raw.prepare('INSERT INTO entries (id, mood, notes, date) VALUES (?, ?, ?, ?)');
+        const link = db.raw.prepare('INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?)');
+        for (let i = 1; i <= 200; i++) {
+            const day = new Date(Date.UTC(2026, 0, 1) + i * 86_400_000).toISOString();
+            ins.run(i, (i % 10) + 1, `private note ${i}`, day);
+            link.run(i, defaultHappy);
+            link.run(i, customGroupActivity);
+        }
+        const before = db.raw.prepare('SELECT id, mood, date FROM entries ORDER BY id').all();
+
+        await wipeSensitiveData(db as never);
+
+        expect(db.raw.prepare('SELECT id, mood, date FROM entries ORDER BY id').all()).toEqual(before);
+        expect(countRows(db, 'entry_activities', `activity_id = ${defaultHappy}`)).toBe(200);
+        expect(countRows(db, 'entry_activities')).toBe(200);
+        expect(countRows(db, 'entries', 'notes IS NOT NULL')).toBe(0);
+    });
+
+    it('blanks reminder NAMES but keeps each reminder, its time and on/off state', async () => {
+        const list = [
+            { id: 'a', label: 'Take meds', time: '08:00', enabled: true },
+            { id: 'b', label: '', time: '20:00', enabled: false },
+        ];
+        db.raw.prepare(`INSERT OR REPLACE INTO user_settings (key, value) VALUES ('reminders', ?)`)
+            .run(JSON.stringify(list));
+
+        const result = await wipeSensitiveData(db as never);
+
+        const stored = JSON.parse(
+            (db.raw.prepare(`SELECT value FROM user_settings WHERE key='reminders'`).get() as { value: string }).value
+        );
+        expect(stored).toEqual([
+            { id: 'a', label: '', time: '08:00', enabled: true },
+            { id: 'b', label: '', time: '20:00', enabled: false },
+        ]);
+        expect(JSON.parse(result.reminders!)).toEqual(stored);
+    });
+
+    it('keeps health metrics and every other setting', async () => {
+        db.raw.exec(`INSERT INTO health_metrics (date, sleep_total_minutes, synced_at) VALUES ('2026-11-01', 420, 'x')`);
+        db.raw.exec(`INSERT OR REPLACE INTO user_settings (key, value) VALUES ('theme', 'forest')`);
+        await wipeSensitiveData(db as never);
+        expect(countRows(db, 'health_metrics')).toBe(1);
+        expect((db.raw.prepare(`SELECT value FROM user_settings WHERE key='theme'`).get() as { value: string }).value)
+            .toBe('forest');
+    });
+
     it('is atomic: a failing statement rolls everything back', async () => {
         db.raw.exec('DROP TABLE user_settings');
         await expect(wipeSensitiveData(db as never)).rejects.toThrow();
@@ -196,6 +245,7 @@ describeSqlite('distress wipe: real SQLite', () => {
             customActivitiesRemoved: 0,
             customGroupsRemoved: 0,
             binnedEntriesPurged: 0,
+            reminders: null,
         });
     });
 

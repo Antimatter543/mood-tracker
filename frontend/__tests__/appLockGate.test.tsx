@@ -214,6 +214,23 @@ describe('app lock gate', () => {
             expect(mockRunDistressWipe).toHaveBeenCalledTimes(1);
         });
 
+        it('the wiped reminder names reach the in-memory settings too', async () => {
+            mockRunDistressWipe.mockResolvedValueOnce({ reminders: '[{"id":"a","label":"","time":"08:00","enabled":true}]' } as never);
+            auth.__queueResult({ success: false, error: 'lockout' }, 6000);
+            const view = await renderGate({ app_lock_enabled: true, distress_wipe_enabled: true });
+            await waitFor(() => expect(view.getByTestId('app-lock-unlock')).toBeEnabled());
+            expect(mockUpdateSetting).toHaveBeenCalledWith(
+                'reminders', '[{"id":"a","label":"","time":"08:00","enabled":true}]'
+            );
+        });
+
+        it('no reminder names to blank: the reminders setting is left alone', async () => {
+            auth.__queueResult({ success: false, error: 'lockout' }, 6000);
+            const view = await renderGate({ app_lock_enabled: true, distress_wipe_enabled: true });
+            await waitFor(() => expect(view.getByTestId('app-lock-unlock')).toBeEnabled());
+            expect(mockUpdateSetting.mock.calls.map(c => c[0])).not.toContain('reminders');
+        });
+
         it('an instant lockout (already locked elsewhere) never wipes', async () => {
             auth.__queueResult({ success: false, error: 'lockout' }, 100);
             const view = await renderGate({ app_lock_enabled: true, distress_wipe_enabled: true });

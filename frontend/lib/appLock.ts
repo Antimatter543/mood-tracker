@@ -156,15 +156,16 @@ export const APP_LOCK_COPY = {
     lockDescription:
         'Ask for your fingerprint, face or device PIN every time SoulSync opens or comes back from the background.',
     distressDescription:
-        'If biometric unlock fails too many times, quietly erase everything private. Only mood scores and default activities stay.',
+        'If biometric unlock fails too many times, quietly remove what could give you away: notes, photos and your own activity names. Every day, mood score and default activity stays.',
     distressWarningTitle: 'Turn on distress wipe?',
     distressWarning:
         'While this is on, SoulSync unlocks with biometrics only (no PIN). If the check fails so often that ' +
-        'your phone blocks biometrics, SoulSync silently and permanently erases:\n\n' +
+        'your phone blocks biometrics, SoulSync silently and permanently removes only what could give you away:\n\n' +
         '• all notes and photos\n' +
         '• your custom activities and groups\n' +
+        '• your reminder names\n' +
         '• the recycle bin\n\n' +
-        'Your dates, mood scores and the default activities stay, so the app still looks normal.\n\n' +
+        'Every logged day stays, with its mood score, star and default activities, so your journal still looks complete and real.\n\n' +
         'This also happens if it fails by accident (wet finger, gloves). It cannot be undone. ' +
         'Make a backup first and keep it somewhere other than this phone.',
     distressActiveHint:

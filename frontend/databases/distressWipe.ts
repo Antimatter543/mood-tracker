@@ -4,6 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { initialActivities, initialActivityGroups } from '@/components/seedData';
 import { MEDIA_DIR } from '@/databases/mediaHelpers';
 import { withWriteLock, withWriteTransaction } from '@/databases/writeTransaction';
+import { parseReminders, serializeReminders } from '@/lib/reminders';
 
 /**
  * The DISTRESS WIPE: strip the journal down to what is believable and harmless.
@@ -14,14 +15,21 @@ import { withWriteLock, withWriteTransaction } from '@/databases/writeTransactio
  * wrong finger a few times, and what they later see is a real, plausible mood
  * history with nothing private in it.
  *
- * What SURVIVES (so the history still looks real and lived-in):
- *   - every live entry's date + mood score,
- *   - links to the DEFAULT activities (the seed catalogue in
- *     components/seedData.ts, matched by activity name AND group name),
- *   - the default groups/activities themselves, health metrics, settings.
+ * The rule: strip only what can INCRIMINATE (anything the user typed or
+ * photographed, and names they made up); keep everything else, so the journal
+ * stays as full and lived-in as it was. 200 logged days stay 200 logged days.
  *
- * What is DESTROYED:
- *   - every note (entries.notes -> NULL) and star (starred_at -> NULL),
+ * What SURVIVES:
+ *   - EVERY live entry: its date, time, mood score and star,
+ *   - its links to the DEFAULT activities (the seed catalogue in
+ *     components/seedData.ts, matched by activity name AND group name), i.e.
+ *     the general mood / sleep / social picture of each day,
+ *   - the default groups/activities themselves, health metrics, every
+ *     setting, every reminder (time and on/off).
+ *
+ * What is DESTROYED (only free text, photos and made-up names):
+ *   - every note (entries.notes -> NULL),
+ *   - every reminder's own name (back to the default label),
  *   - every photo: the entry_media rows AND the files on disk,
  *   - every custom activity and custom group (their NAMES can be the most
  *     revealing thing in the app), and every entry link to them,
@@ -81,6 +89,8 @@ export type DistressWipeSummary = {
     customActivitiesRemoved: number;
     customGroupsRemoved: number;
     binnedEntriesPurged: number;
+    /** The new `reminders` setting value when labels were blanked, else null. */
+    reminders: string | null;
 };
 
 const placeholders = (n: number) => Array.from({ length: n }, () => '?').join(', ');
@@ -126,8 +136,7 @@ export async function wipeSensitiveData(
         const photosRemoved = await changes('DELETE FROM entry_media');
 
         const notesCleared = await changes(
-            `UPDATE entries SET notes = NULL, starred_at = NULL
-             WHERE notes IS NOT NULL OR starred_at IS NOT NULL`
+            'UPDATE entries SET notes = NULL WHERE notes IS NOT NULL'
         );
 
         // Custom activities: anything whose (group name, activity name) pair is
@@ -160,6 +169,23 @@ export async function wipeSensitiveData(
             'DELETE FROM entry_activities WHERE activity_id NOT IN (SELECT id FROM activities)'
         );
 
+        // Reminder NAMES are typed by the user ("take meds"): blank them, keep
+        // each reminder's time and on/off state.
+        const reminderRow = await txn.getFirstAsync<{ value: string }>(
+            `SELECT value FROM user_settings WHERE key = 'reminders'`
+        );
+        let reminders: string | null = null;
+        if (reminderRow) {
+            const list = parseReminders(reminderRow.value);
+            if (list.some(r => r.label !== '')) {
+                reminders = serializeReminders(list.map(r => ({ ...r, label: '' })));
+                await txn.runAsync(
+                    `UPDATE user_settings SET value = ? WHERE key = 'reminders'`,
+                    [reminders]
+                );
+            }
+        }
+
         // The distress option switches itself off in the same transaction.
         await txn.runAsync(
             `INSERT OR REPLACE INTO user_settings (key, value) VALUES ('distress_wipe_enabled', 'false')`
@@ -171,6 +197,7 @@ export async function wipeSensitiveData(
             customActivitiesRemoved,
             customGroupsRemoved,
             binnedEntriesPurged,
+            reminders,
         };
     });
 

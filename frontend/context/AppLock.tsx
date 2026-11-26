@@ -129,7 +129,12 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
             setOutcome(result);
             if (result === 'wipe') {
                 try {
-                    await runDistressWipe(db);
+                    const summary = await runDistressWipe(db);
+                    // Keep the in-memory list in step, so Settings and the
+                    // notification re-arm stop using the old names at once.
+                    if (typeof summary.reminders === 'string') {
+                        await updateSetting('reminders', summary.reminders).catch(() => {});
+                    }
                 } catch (e) {
                     console.warn('[distress] wipe failed:', e);
                 }
