@@ -121,6 +121,16 @@ export const SETTINGS_REGISTRY = {
         type: 'text',
         label: 'Distress wipe',
         description: 'Clear private journal content after too many failed biometric attempts',
+    },
+    distress_wipe_scope: {
+        key: 'distress_wipe_scope',
+        // What the distress wipe erases: a JSON {category: bool}, model + copy in
+        // lib/distressScope.ts. Default: every category on. Bespoke card only.
+        // Seeded by migration 17.
+        default: '{}',
+        type: 'text',
+        label: 'Distress wipe scope',
+        description: 'What the distress wipe erases',
     }
 } as const;
 
@@ -130,7 +140,11 @@ export const SETTINGS_REGISTRY = {
  * distress wipe must not quietly re-arm the wipe, and a lock copied from
  * another phone could ask for biometrics this phone does not have.
  */
-export const DEVICE_ONLY_SETTING_KEYS: readonly string[] = ['app_lock_enabled', 'distress_wipe_enabled'];
+export const DEVICE_ONLY_SETTING_KEYS: readonly string[] = [
+    'app_lock_enabled',
+    'distress_wipe_enabled',
+    'distress_wipe_scope',
+];
 
 // Define possible values for each setting
 export type SettingValues = {
@@ -144,6 +158,7 @@ export type SettingValues = {
     reminders: string;  // JSON-encoded Reminder[] — parse with lib/reminders.parseReminders
     app_lock_enabled: boolean;
     distress_wipe_enabled: boolean;
+    distress_wipe_scope: string;  // JSON {category: bool}, parse with lib/distressScope.parseDistressScope
 };
 
 export type SettingKey = keyof typeof SETTINGS_REGISTRY;

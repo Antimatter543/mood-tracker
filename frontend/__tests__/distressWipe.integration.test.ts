@@ -24,6 +24,7 @@ import {
     wipeSensitiveData,
 } from '@/databases/distressWipe';
 import { initialActivities } from '@/components/seedData';
+import { DEFAULT_DISTRESS_SCOPE, DISTRESS_CATEGORIES, DistressScope } from '@/lib/distressScope';
 import { countRows, describeSqlite, openMigratedSqlite, SqliteAdapter } from '@/testing/realSqlite';
 
 const fs = FileSystem as unknown as {
@@ -234,6 +235,47 @@ describeSqlite('distress wipe: real SQLite', () => {
         await wipeSensitiveData(db as never);
         expect((db.raw.prepare(`SELECT value FROM user_settings WHERE key='theme'`).get() as { value: string }).value)
             .toBe('forest');
+    });
+
+    it('erases nothing the user switched off (each category on its own)', async () => {
+        db.raw.exec(`INSERT INTO health_metrics (date, sleep_total_minutes, synced_at) VALUES ('2026-11-01', 420, 'x')`);
+        const keepAll = Object.fromEntries(DISTRESS_CATEGORIES.map(c => [c, false])) as DistressScope;
+        const result = await wipeSensitiveData(db as never, keepAll);
+        expect(result).toMatchObject({
+            notesCleared: 0, starsCleared: 0, photosRemoved: 0, customActivitiesRemoved: 0,
+            customGroupsRemoved: 0, binnedEntriesPurged: 0, healthDaysRemoved: 0, reminders: null,
+        });
+        expect(result.mediaFiles).toEqual([]);
+        expect(countRows(db, 'entries', 'notes IS NOT NULL')).toBe(2);
+        expect(countRows(db, 'entries', 'starred_at IS NOT NULL')).toBe(1);
+        expect(countRows(db, 'entry_media')).toBe(2);
+        expect(countRows(db, 'activity_groups', `name = 'Therapy'`)).toBe(1);
+        expect(countRows(db, 'health_metrics')).toBe(1);
+        // the switch itself still turns off: it fired
+        expect((db.raw.prepare(`SELECT value FROM user_settings WHERE key='distress_wipe_enabled'`).get() as { value: string }).value)
+            .toBe('false');
+    });
+
+    it('keeping notes but erasing stars touches only the stars', async () => {
+        await wipeSensitiveData(db as never, { ...DEFAULT_DISTRESS_SCOPE, notes: false });
+        expect(countRows(db, 'entries', 'notes IS NOT NULL')).toBe(1); // the binned one is purged
+        expect(countRows(db, 'entries', 'starred_at IS NOT NULL')).toBe(0);
+    });
+
+    it('keeping photos still purges the photos of binned entries with the bin', async () => {
+        const result = await wipeSensitiveData(db as never, { ...DEFAULT_DISTRESS_SCOPE, photos: false });
+        expect(result.mediaFiles).toEqual(['file:///docs/entry_media/b.jpg']);
+        expect(db.raw.prepare('SELECT file_path FROM entry_media').all()).toEqual([
+            { file_path: 'file:///docs/entry_media/a.jpg' },
+        ]);
+    });
+
+    it('keeping the backup key leaves it stored', async () => {
+        await SecureStore.setItemAsync('backup_encryption_key_v1', '{"stored":"key"}');
+        await runDistressWipe(db as never, { ...DEFAULT_DISTRESS_SCOPE, backupKey: false });
+        expect((SecureStore as unknown as { __dump: () => Record<string, string> }).__dump())
+            .toHaveProperty('backup_encryption_key_v1');
+        (SecureStore as unknown as { __reset: () => void }).__reset();
     });
 
     it('is atomic: a failing statement rolls everything back', async () => {

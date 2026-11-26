@@ -251,7 +251,11 @@ has 'Make a backup first'; check "warning mentions backup" "$(( $? == 0 ))"
 shot distress-warning
 tap_text 'TURN ON|Turn on'; sleep 2
 [[ "$(node_attr distress-wipe-switch checked)" == "true" ]]; check "distress wipe turned on" "$(( $? == 0 ))"
-has 'resource-id="distress-wipe-hint"'; check "backup reminder shown" "$(( $? == 0 ))"
+has 'resource-id="distress-scope-notes"'; check "erase selection shown" "$(( $? == 0 ))"
+[[ "$(node_attr distress-scope-health checked)" == "true" ]]; check "selection defaults to erase" "$(( $? == 0 ))"
+scroll_to_id distress-details-toggle && tap_id distress-details-toggle; sleep 1
+wait_for 'Compatibility Definition' 4; check "technical details open with Android rule link" "$(( $? == 0 ))"
+scroll_to_id distress-wipe-hint; check "backup reminder shown" "$(( $? == 0 ))"
 shot distress-on
 
 # a correct finger in distress mode just unlocks, nothing wiped

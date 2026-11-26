@@ -3,7 +3,10 @@
  * when it wipes, when the device PIN is allowed, when the app re-locks.
  */
 import {
+    ANDROID_BIOMETRIC_RULE_URL,
     APP_LOCK_COPY,
+    DISTRESS_TECH_DETAILS,
+    distressWarningFor,
     MIN_PROMPT_MS_FOR_DISTRESS,
     appLockBlocker,
     classifyAuthAttempt,
@@ -13,6 +16,12 @@ import {
     promptOptionsFor,
     shouldLockOnAppStateChange,
 } from '@/lib/appLock';
+import {
+    DEFAULT_DISTRESS_SCOPE,
+    DISTRESS_CATEGORIES,
+    DISTRESS_CATEGORY_COPY,
+    erasedCategoryLabels,
+} from '@/lib/distressScope';
 
 const SLOW = MIN_PROMPT_MS_FOR_DISTRESS + 1500;
 const FAST = 200;
@@ -130,15 +139,33 @@ describe('lockMessageFor', () => {
 });
 
 describe('Settings copy', () => {
-    it('the distress warning names what is lost, that it cannot be undone, and asks for a backup', () => {
-        const w = APP_LOCK_COPY.distressWarning;
-        expect(w).toMatch(/notes, photos and stars/);
-        expect(w).toMatch(/health data/);
-        expect(w).toMatch(/backup password key/);
-        expect(w).toMatch(/custom activities/);
+    const w = distressWarningFor(erasedCategoryLabels(DEFAULT_DISTRESS_SCOPE));
+
+    it('the distress warning lists what is erased, says it cannot be undone, and asks for a backup', () => {
+        for (const c of DISTRESS_CATEGORIES) expect(w).toContain(DISTRESS_CATEGORY_COPY[c].label);
         expect(w).toMatch(/cannot be undone/);
         expect(w).toMatch(/backup/i);
         expect(w).toMatch(/by accident/);
+        expect(w).toMatch(/usually 5/);
         expect(APP_LOCK_COPY.distressActiveHint).toMatch(/backup/i);
+    });
+
+    it('the warning follows the selection: a kept category is not listed', () => {
+        const scope = { ...DEFAULT_DISTRESS_SCOPE, health: false };
+        expect(distressWarningFor(erasedCategoryLabels(scope))).not.toContain(DISTRESS_CATEGORY_COPY.health.label);
+    });
+
+    it('the description says what triggers it, not just "fails too many times"', () => {
+        expect(APP_LOCK_COPY.distressDescription).toMatch(/usually 5/);
+        expect(APP_LOCK_COPY.distressDescription).toMatch(/SoulSync's own unlock screen/);
+    });
+
+    it('technical details state the Android rule and link its source', () => {
+        const d = DISTRESS_TECH_DETAILS.join(' ');
+        expect(d).toMatch(/30 seconds after 5 wrong attempts/);
+        expect(d).toMatch(/at most 20/);
+        expect(d).toMatch(/already blocked/);
+        expect(d).toMatch(/no PIN option/);
+        expect(ANDROID_BIOMETRIC_RULE_URL).toMatch(/^https:\/\/source\.android\.com\/.*cdd#7310_biometric_sensors$/);
     });
 });

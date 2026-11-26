@@ -7,17 +7,18 @@
  * RNTL v14: render / fireEvent are awaited (tasks/lessons.md 2026-08-29).
  */
 import React, { useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, Linking } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import * as LocalAuth from 'expo-local-authentication';
-import { APP_LOCK_COPY } from '@/lib/appLock';
+import { ANDROID_BIOMETRIC_RULE_URL, APP_LOCK_COPY } from '@/lib/appLock';
+import { DISTRESS_CATEGORIES, DISTRESS_CATEGORY_COPY } from '@/lib/distressScope';
 
 const auth = LocalAuth as unknown as {
     __reset: () => void;
     __setCapabilities: (c: object) => void;
 };
 
-type S = { app_lock_enabled: boolean; distress_wipe_enabled: boolean; theme: string; theme_mode: string };
+type S = { app_lock_enabled: boolean; distress_wipe_enabled: boolean; distress_wipe_scope: string; theme: string; theme_mode: string };
 const mockUpdateSetting = jest.fn();
 let mockSettingsState: S;
 let mockSetSettings: (s: S) => void;
@@ -43,6 +44,7 @@ function Harness({ initial }: { initial: Partial<S> }) {
     const [s, setS] = useState<S>({
         app_lock_enabled: false,
         distress_wipe_enabled: false,
+        distress_wipe_scope: '{}',
         theme: 'dark',
         theme_mode: 'dark',
         ...initial,
@@ -144,5 +146,52 @@ describe('AppLockSection', () => {
         expect(mockUpdateSetting).toHaveBeenCalledWith('distress_wipe_enabled', false);
         expect(view.queryByTestId('distress-wipe-switch')).toBeNull();
         expect(view.queryByTestId('distress-wipe-hint')).toBeNull();
+    });
+
+    it('with distress on: one switch per category, all on by default, and what is always kept', async () => {
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        for (const c of DISTRESS_CATEGORIES) {
+            expect(view.getByTestId(`distress-scope-${c}`).props.value).toBe(true);
+        }
+        expect(view.getByText(APP_LOCK_COPY.distressAlwaysKept)).toBeTruthy();
+    });
+
+    it('the selection is hidden while distress is off', async () => {
+        const view = await render(<Harness initial={{ app_lock_enabled: true }} />);
+        expect(view.queryByTestId('distress-scope')).toBeNull();
+    });
+
+    it('switching a category off stores it', async () => {
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await fireEvent(view.getByTestId('distress-scope-health'), 'valueChange', false);
+        await waitFor(() => expect(mockUpdateSetting).toHaveBeenCalledWith(
+            'distress_wipe_scope', expect.any(String)
+        ));
+        const stored = JSON.parse(mockUpdateSetting.mock.calls.at(-1)![1]);
+        expect(stored.health).toBe(false);
+        expect(stored.notes).toBe(true);
+        expect(view.getByTestId('distress-scope-health').props.value).toBe(false);
+    });
+
+    it('the warning lists only what the current selection erases', async () => {
+        alertAnswer = 'Cancel';
+        const view = await render(
+            <Harness initial={{ app_lock_enabled: true, distress_wipe_scope: '{"health":false}' }} />
+        );
+        await fireEvent(view.getByTestId('distress-wipe-switch'), 'valueChange', true);
+        await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+        const message = alertSpy.mock.calls.at(-1)![1] as string;
+        expect(message).toContain(DISTRESS_CATEGORY_COPY.notes.label);
+        expect(message).not.toContain(DISTRESS_CATEGORY_COPY.health.label);
+    });
+
+    it('technical details open on tap and link the Android rule', async () => {
+        const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true as never);
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        expect(view.queryByTestId('distress-details')).toBeNull();
+        await fireEvent.press(view.getByTestId('distress-details-toggle'));
+        expect(view.getByTestId('distress-details')).toBeTruthy();
+        await fireEvent.press(view.getByText(/Compatibility Definition, 7\.3\.10/));
+        expect(openURL).toHaveBeenCalledWith(ANDROID_BIOMETRIC_RULE_URL);
     });
 });

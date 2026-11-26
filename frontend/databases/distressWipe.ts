@@ -6,6 +6,7 @@ import { MEDIA_DIR } from '@/databases/mediaHelpers';
 import { withWriteLock, withWriteTransaction } from '@/databases/writeTransaction';
 import { parseReminders, serializeReminders } from '@/lib/reminders';
 import { clearBackupPassword } from '@/lib/backupKeyStore';
+import { DEFAULT_DISTRESS_SCOPE, DistressScope } from '@/lib/distressScope';
 import {
     HEALTH_DAILY_SYNC_SETTING_KEY,
     HEALTH_LAST_SYNCED_SETTING_KEY,
@@ -34,7 +35,8 @@ import {
  *   - the default groups/activities themselves, the display settings, every
  *     reminder's time and on/off state, the app lock.
  *
- * What is DESTROYED:
+ * What is DESTROYED (each line below is a category of lib/distressScope.ts the
+ * user can turn off in Settings; by default all are on):
  *   - every note (entries.notes -> NULL) and every star (which days mattered),
  *   - every photo: the entry_media rows AND the files on disk,
  *   - every custom activity and custom group (their NAMES can be the most
@@ -98,6 +100,7 @@ export function isLeftoverBackupFile(name: string): boolean {
 
 export type DistressWipeSummary = {
     notesCleared: number;
+    starsCleared: number;
     photosRemoved: number;
     customActivitiesRemoved: number;
     customGroupsRemoved: number;
@@ -114,13 +117,20 @@ const placeholders = (n: number) => Array.from({ length: n }, () => '?').join(',
  * nothing changes. Returns what it removed plus the photo files to unlink.
  */
 export async function wipeSensitiveData(
-    db: SQLiteDatabase
+    db: SQLiteDatabase,
+    scope: DistressScope = DEFAULT_DISTRESS_SCOPE
 ): Promise<DistressWipeSummary & { mediaFiles: string[] }> {
     // Pre-read on the read connection (allowed before the callback, per the
     // contract): every photo path, binned or live, is going away.
-    const mediaRows = await db.getAllAsync<{ file_path: string }>(
-        'SELECT file_path FROM entry_media'
-    );
+    // Photos of binned entries go with the bin even when photos are kept.
+    const mediaRows = scope.photos
+        ? await db.getAllAsync<{ file_path: string }>('SELECT file_path FROM entry_media')
+        : scope.recycleBin
+          ? await db.getAllAsync<{ file_path: string }>(
+                `SELECT file_path FROM entry_media
+                 WHERE entry_id IN (SELECT id FROM entries WHERE deleted_at IS NOT NULL)`
+            )
+          : [];
     const mediaFiles = mediaRows.map(r => r.file_path);
 
     // secure_delete zeroes the space the deletes and the NULLed notes free,
@@ -136,78 +146,94 @@ export async function wipeSensitiveData(
         const changes = async (sql: string, params: (string | number)[] = []) =>
             (await txn.runAsync(sql, params)).changes;
 
+        const none = 0;
+
         // The bin first: binned entries keep their notes and photos until purged.
         // Child rows are deleted explicitly (not only by FK cascade), so the wipe
         // is complete even on a connection where foreign_keys is off.
-        await txn.runAsync(
-            `DELETE FROM entry_activities
-             WHERE entry_id IN (SELECT id FROM entries WHERE deleted_at IS NOT NULL)`
-        );
-        const binnedEntriesPurged = await changes(
-            'DELETE FROM entries WHERE deleted_at IS NOT NULL'
-        );
+        let binnedEntriesPurged = none;
+        if (scope.recycleBin) {
+            await txn.runAsync(
+                `DELETE FROM entry_activities
+                 WHERE entry_id IN (SELECT id FROM entries WHERE deleted_at IS NOT NULL)`
+            );
+            await txn.runAsync(
+                `DELETE FROM entry_media
+                 WHERE entry_id IN (SELECT id FROM entries WHERE deleted_at IS NOT NULL)`
+            );
+            binnedEntriesPurged = await changes('DELETE FROM entries WHERE deleted_at IS NOT NULL');
+        }
 
-        const photosRemoved = await changes('DELETE FROM entry_media');
+        const photosRemoved = scope.photos ? await changes('DELETE FROM entry_media') : none;
 
-        const notesCleared = await changes(
-            `UPDATE entries SET notes = NULL, starred_at = NULL
-             WHERE notes IS NOT NULL OR starred_at IS NOT NULL`
-        );
+        const notesCleared = scope.notes
+            ? await changes('UPDATE entries SET notes = NULL WHERE notes IS NOT NULL')
+            : none;
+        const starsCleared = scope.stars
+            ? await changes('UPDATE entries SET starred_at = NULL WHERE starred_at IS NOT NULL')
+            : none;
 
         // Custom activities: anything whose (group name, activity name) pair is
         // not in the default catalogue. Links go first, then the activities.
-        const customActivityWhere = `
-            id NOT IN (
-                SELECT a.id FROM activities a
-                JOIN activity_groups g ON g.id = a.group_id
-                WHERE g.name || '${KEY_SEP}' || a.name IN (${placeholders(activityKeys.length)})
-            )`;
-        await txn.runAsync(
-            `DELETE FROM entry_activities WHERE activity_id IN (
-                SELECT id FROM activities WHERE ${customActivityWhere}
-            )`,
-            activityKeys
-        );
-        const customActivitiesRemoved = await changes(
-            `DELETE FROM activities WHERE ${customActivityWhere}`,
-            activityKeys
-        );
-
-        // Custom groups are empty by now (their activities were all custom).
-        const customGroupsRemoved = await changes(
-            `DELETE FROM activity_groups WHERE name NOT IN (${placeholders(groupNames.length)})`,
-            groupNames
-        );
-
-        // Links to activities that no longer exist at all (belt and braces).
-        await txn.runAsync(
-            'DELETE FROM entry_activities WHERE activity_id NOT IN (SELECT id FROM activities)'
-        );
+        let customActivitiesRemoved = none;
+        let customGroupsRemoved = none;
+        if (scope.customActivities) {
+            const customActivityWhere = `
+                id NOT IN (
+                    SELECT a.id FROM activities a
+                    JOIN activity_groups g ON g.id = a.group_id
+                    WHERE g.name || '${KEY_SEP}' || a.name IN (${placeholders(activityKeys.length)})
+                )`;
+            await txn.runAsync(
+                `DELETE FROM entry_activities WHERE activity_id IN (
+                    SELECT id FROM activities WHERE ${customActivityWhere}
+                )`,
+                activityKeys
+            );
+            customActivitiesRemoved = await changes(
+                `DELETE FROM activities WHERE ${customActivityWhere}`,
+                activityKeys
+            );
+            // Custom groups are empty by now (their activities were all custom).
+            customGroupsRemoved = await changes(
+                `DELETE FROM activity_groups WHERE name NOT IN (${placeholders(groupNames.length)})`,
+                groupNames
+            );
+            // Links to activities that no longer exist at all (belt and braces).
+            await txn.runAsync(
+                'DELETE FROM entry_activities WHERE activity_id NOT IN (SELECT id FROM activities)'
+            );
+        }
 
         // Reminder NAMES are typed by the user ("take meds"): blank them, keep
         // each reminder's time and on/off state.
-        const reminderRow = await txn.getFirstAsync<{ value: string }>(
-            `SELECT value FROM user_settings WHERE key = 'reminders'`
-        );
         let reminders: string | null = null;
-        if (reminderRow) {
-            const list = parseReminders(reminderRow.value);
-            if (list.some(r => r.label !== '')) {
-                reminders = serializeReminders(list.map(r => ({ ...r, label: '' })));
-                await txn.runAsync(
-                    `UPDATE user_settings SET value = ? WHERE key = 'reminders'`,
-                    [reminders]
-                );
+        if (scope.reminderNames) {
+            const reminderRow = await txn.getFirstAsync<{ value: string }>(
+                `SELECT value FROM user_settings WHERE key = 'reminders'`
+            );
+            if (reminderRow) {
+                const list = parseReminders(reminderRow.value);
+                if (list.some(r => r.label !== '')) {
+                    reminders = serializeReminders(list.map(r => ({ ...r, label: '' })));
+                    await txn.runAsync(
+                        `UPDATE user_settings SET value = ? WHERE key = 'reminders'`,
+                        [reminders]
+                    );
+                }
             }
         }
 
         // Health data goes completely, and the sync that would refill it is off.
-        const healthDaysRemoved = await changes('DELETE FROM health_metrics');
-        await txn.runAsync(
-            `INSERT OR REPLACE INTO user_settings (key, value) VALUES (?, 'false'), (?, 'false')`,
-            [HEALTH_OPT_IN_SETTING_KEY, HEALTH_DAILY_SYNC_SETTING_KEY]
-        );
-        await txn.runAsync('DELETE FROM user_settings WHERE key = ?', [HEALTH_LAST_SYNCED_SETTING_KEY]);
+        let healthDaysRemoved = none;
+        if (scope.health) {
+            healthDaysRemoved = await changes('DELETE FROM health_metrics');
+            await txn.runAsync(
+                `INSERT OR REPLACE INTO user_settings (key, value) VALUES (?, 'false'), (?, 'false')`,
+                [HEALTH_OPT_IN_SETTING_KEY, HEALTH_DAILY_SYNC_SETTING_KEY]
+            );
+            await txn.runAsync('DELETE FROM user_settings WHERE key = ?', [HEALTH_LAST_SYNCED_SETTING_KEY]);
+        }
 
         // The distress option switches itself off in the same transaction.
         await txn.runAsync(
@@ -216,6 +242,7 @@ export async function wipeSensitiveData(
 
         return {
             notesCleared,
+            starsCleared,
             photosRemoved,
             customActivitiesRemoved,
             customGroupsRemoved,
@@ -267,9 +294,13 @@ async function deleteQuietly(path: string): Promise<void> {
  * The file half of the wipe: the photos, the whole media folder, plain backup
  * files the export left in the documents folder, and the picker caches.
  */
-export async function wipeSensitiveFiles(mediaFiles: string[]): Promise<void> {
+export async function wipeSensitiveFiles(
+    mediaFiles: string[],
+    scope: DistressScope = DEFAULT_DISTRESS_SCOPE
+): Promise<void> {
     for (const f of mediaFiles) await deleteQuietly(f);
-    await deleteQuietly(MEDIA_DIR);
+    if (scope.photos) await deleteQuietly(MEDIA_DIR);
+    if (!scope.leftoverFiles) return;
 
     const docs = FileSystem.documentDirectory;
     if (docs) {
@@ -299,10 +330,13 @@ export async function wipeSensitiveFiles(mediaFiles: string[]): Promise<void> {
  * with the summary (for tests/logs only: the UI must not show it, because the
  * point is that nothing visibly happened).
  */
-export async function runDistressWipe(db: SQLiteDatabase): Promise<DistressWipeSummary> {
-    const { mediaFiles, ...summary } = await wipeSensitiveData(db);
-    await wipeBackupKey();
-    await wipeSensitiveFiles(mediaFiles);
+export async function runDistressWipe(
+    db: SQLiteDatabase,
+    scope: DistressScope = DEFAULT_DISTRESS_SCOPE
+): Promise<DistressWipeSummary> {
+    const { mediaFiles, ...summary } = await wipeSensitiveData(db, scope);
+    if (scope.backupKey) await wipeBackupKey();
+    await wipeSensitiveFiles(mediaFiles, scope);
     await scrubDatabaseFile();
     return summary;
 }

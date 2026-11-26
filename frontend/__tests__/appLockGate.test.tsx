@@ -23,7 +23,7 @@ const auth = LocalAuth as unknown as {
 };
 
 // ── settings: a stateful stand-in for SettingsContext ──────────────────────
-type S = { app_lock_enabled: boolean; distress_wipe_enabled: boolean; theme: string; theme_mode: string };
+type S = { app_lock_enabled: boolean; distress_wipe_enabled: boolean; distress_wipe_scope: string; theme: string; theme_mode: string };
 const mockUpdateSetting = jest.fn();
 let mockSettingsState: S;
 let mockSetSettings: (s: S) => void;
@@ -37,9 +37,9 @@ jest.mock('@/context/SettingsContext', () => ({
     }),
 }));
 
-const mockRunDistressWipe = jest.fn(async (_db: unknown) => ({}));
+const mockRunDistressWipe = jest.fn(async (_db: unknown, _scope?: unknown) => ({}));
 jest.mock('@/databases/distressWipe', () => ({
-    runDistressWipe: (db: unknown) => mockRunDistressWipe(db),
+    runDistressWipe: (db: unknown, scope: unknown) => mockRunDistressWipe(db, scope),
 }));
 
 jest.mock('expo-sqlite', () => ({ useSQLiteContext: () => ({ mock: 'db' }) }));
@@ -78,6 +78,7 @@ function Harness({ initial }: { initial: Partial<S> }) {
     const [s, setS] = useState<S>({
         app_lock_enabled: false,
         distress_wipe_enabled: false,
+        distress_wipe_scope: '{}',
         theme: 'dark',
         theme_mode: 'dark',
         ...initial,
@@ -229,6 +230,17 @@ describe('app lock gate', () => {
             const view = await renderGate({ app_lock_enabled: true, distress_wipe_enabled: true });
             await waitFor(() => expect(view.getByTestId('app-lock-unlock')).toBeEnabled());
             expect(mockUpdateSetting.mock.calls.map(c => c[0])).not.toContain('reminders');
+        });
+
+        it('the wipe gets the stored selection', async () => {
+            auth.__queueResult({ success: false, error: 'lockout' }, 6000);
+            const view = await renderGate({
+                app_lock_enabled: true, distress_wipe_enabled: true, distress_wipe_scope: '{"health":false}',
+            });
+            await waitFor(() => expect(view.getByTestId('app-lock-unlock')).toBeEnabled());
+            const scope = mockRunDistressWipe.mock.calls[0][1] as Record<string, boolean>;
+            expect(scope.health).toBe(false);
+            expect(scope.notes).toBe(true);
         });
 
         it('an instant lockout (already locked elsewhere) never wipes', async () => {

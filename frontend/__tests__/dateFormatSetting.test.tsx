@@ -45,6 +45,7 @@ const baseSettings: Settings = {
     reminders: '[]',
     app_lock_enabled: false,
     distress_wipe_enabled: false,
+    distress_wipe_scope: '{}',
 };
 
 const renderSettings = () =>

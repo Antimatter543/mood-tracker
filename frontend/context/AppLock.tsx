@@ -23,6 +23,7 @@ import {
 } from '@/lib/appLock';
 import { getBiometricCapabilities, promptBiometric } from '@/lib/biometricAuth';
 import { runDistressWipe } from '@/databases/distressWipe';
+import { parseDistressScope } from '@/lib/distressScope';
 
 /**
  * The app lock gate (opt-in, Settings > Privacy & security).
@@ -78,6 +79,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     const authInFlight = useRef(false);
     const lockEnabledRef = useRef(lockEnabled);
     const distressRef = useRef(settings.distress_wipe_enabled);
+    const scopeRef = useRef(settings.distress_wipe_scope);
     // After a lockout / unavailable / wipe, the next prompt allows the PIN.
     const pinAllowedRef = useRef(false);
     // Prompt automatically on the next 'active' (cold start, return from background).
@@ -86,6 +88,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
 
     lockEnabledRef.current = lockEnabled;
     distressRef.current = settings.distress_wipe_enabled;
+    scopeRef.current = settings.distress_wipe_scope;
 
     // Turning the lock OFF releases it at once. Turning it ON does not lock the
     // current session: the user has just authenticated to switch it on.
@@ -129,7 +132,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
             setOutcome(result);
             if (result === 'wipe') {
                 try {
-                    const summary = await runDistressWipe(db);
+                    const summary = await runDistressWipe(db, parseDistressScope(scopeRef.current));
                     // Keep the in-memory list in step, so Settings and the
                     // notification re-arm stop using the old names at once.
                     if (typeof summary.reminders === 'string') {

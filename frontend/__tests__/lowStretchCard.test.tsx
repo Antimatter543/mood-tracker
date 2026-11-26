@@ -52,6 +52,7 @@ const mockSettings: Settings = {
     reminders: '[]',
     app_lock_enabled: false,
     distress_wipe_enabled: false,
+    distress_wipe_scope: '{}',
 };
 jest.mock('@/context/SettingsContext', () => ({
     useSettings: () => ({ settings: mockSettings, updateSetting: jest.fn() }),

@@ -156,20 +156,12 @@ export const APP_LOCK_COPY = {
     lockDescription:
         'Ask for your fingerprint, face or device PIN every time SoulSync opens or comes back from the background.',
     distressDescription:
-        'If biometric unlock fails too many times, quietly remove everything that could give you away. Every logged day keeps its mood score and default activities.',
+        'Android blocks fingerprint and face unlock after several wrong attempts in a row (usually 5). ' +
+        "If that happens at SoulSync's own unlock screen, SoulSync quietly erases what you pick below. " +
+        'Every logged day keeps its date, mood score and default activities.',
     distressWarningTitle: 'Turn on distress wipe?',
-    distressWarning:
-        'While this is on, SoulSync unlocks with biometrics only (no PIN). If the check fails so often that ' +
-        'your phone blocks biometrics, SoulSync silently and permanently removes only what could give you away:\n\n' +
-        '• all notes, photos and stars\n' +
-        '• your custom activities and groups\n' +
-        '• your reminder names\n' +
-        '• all health data (Health Connect sync turns off)\n' +
-        '• the recycle bin\n' +
-        '• the saved backup password key (backup encryption turns off)\n\n' +
-        'Every logged day stays, with its mood score and default activities, so your journal still looks complete and real.\n\n' +
-        'This also happens if it fails by accident (wet finger, gloves). It cannot be undone. ' +
-        'Make a backup first and keep it somewhere other than this phone.',
+    distressAlwaysKept:
+        'Always kept: every logged day with its date, time, mood score and default activities, your display settings and the app lock.',
     distressActiveHint:
         'Distress wipe is on. Keep a recent backup outside this phone: it is the only way to get your notes back after a wipe.',
     noScreenLockTitle: 'No screen lock',
@@ -177,3 +169,43 @@ export const APP_LOCK_COPY = {
     noBiometricsTitle: 'No biometrics set up',
     noBiometrics: 'Distress wipe needs a fingerprint or face unlock. Add one in your phone settings first.',
 } as const;
+
+/** Where the lockout rule comes from: the Android Compatibility Definition, 7.3.10. */
+export const ANDROID_BIOMETRIC_RULE_URL =
+    'https://source.android.com/docs/compatibility/17/android-17-cdd#7310_biometric_sensors';
+
+/**
+ * "Technical details" under the distress wipe (Settings). Kept here so the tests
+ * can pin every promise it makes against what the code does.
+ */
+export const DISTRESS_TECH_DETAILS: readonly string[] = [
+    'SoulSync does not count attempts itself. It reacts when Android blocks biometrics after wrong ' +
+        "attempts. Android's rules strongly recommend a block of at least 30 seconds after 5 wrong attempts, " +
+        'and require a switch to the PIN after at most 20. Most phones block after 5; the phone maker sets ' +
+        'the exact number.',
+    'Only attempts Android actually reads and rejects count. A smudged or partial touch usually does not.',
+    "Only a block that happens in SoulSync's own unlock prompt counts. If biometrics were already blocked " +
+        "(for example after wrong attempts on your phone's lock screen), nothing is erased.",
+    "While this is on, SoulSync's prompt has no PIN option: with one, Android would switch to the PIN " +
+        'instead of blocking. After a wipe, the PIN works again and the option turns itself off.',
+    'The erasing happens at once, in the background. The lock screen looks exactly like after a normal ' +
+        'block. Erased data is overwritten in the database file, not just marked as deleted.',
+    'Out of reach for the app: backups you saved elsewhere (Drive, email), Android\'s own device backup, ' +
+        'and data stored in Health Connect itself.',
+];
+
+/** The confirmation shown before turning the distress wipe on, for the current selection. */
+export function distressWarningFor(erasedLabels: readonly string[]): string {
+    const list = erasedLabels.length
+        ? erasedLabels.map(l => `\u2022 ${l}`).join('\n')
+        : '\u2022 nothing (every category is switched off)';
+    return (
+        "While this is on, SoulSync's unlock prompt accepts biometrics only (no PIN). If Android blocks " +
+        "biometrics after wrong attempts at that prompt (usually 5), SoulSync silently and permanently erases:\n\n" +
+        list +
+        '\n\nEvery logged day stays, with its date, mood score and default activities, so your journal ' +
+        'still looks complete and real.\n\n' +
+        'This also happens if it fails by accident (wet finger, gloves). It cannot be undone. ' +
+        'Make a backup first and keep it somewhere other than this phone.'
+    );
+}

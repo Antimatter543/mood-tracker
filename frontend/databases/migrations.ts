@@ -392,6 +392,17 @@ export const migrations: Migration[] = [
                 VALUES ('distress_wipe_enabled', 'false')
             `);
         }
+    },
+    {
+        // What the distress wipe erases (lib/distressScope.ts). '{}' reads as the
+        // default: every category on. Key-value row only.
+        version: 17,
+        up: async (db: SQLiteDatabase) => {
+            await db.runAsync(`
+                INSERT OR IGNORE INTO user_settings (key, value)
+                VALUES ('distress_wipe_scope', '{}')
+            `);
+        }
     }
 
     // To add a new migration: create a new entry with the next version number.
