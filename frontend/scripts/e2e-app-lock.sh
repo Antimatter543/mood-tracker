@@ -30,7 +30,7 @@ check() { # check <name> <0|1 ok> [detail]
     CHECKS+=("| $1 | **FAIL** | ${3:-} |"); NFAIL=$((NFAIL + 1)); log "FAIL $1 ${3:-}"
     # Self-explaining failures: what was on screen (the artifact may not be at hand).
     dump
-    log "  on screen: $(grep -oE '(text|resource-id)=\"[^\"]+\"' <<<"$UI" | grep -v 'resource-id="android' | head -25 | tr '\n' ' ')"
+    log "  on screen: $(grep -oE '(text|resource-id)=\"[^\"]+\"' <<<"$UI" | grep -v 'resource-id="android' | head -60 | tr '\n' ' ')"
     shot "fail-$(tr -c 'a-zA-Z0-9' '-' <<<"$1" | cut -c1-40)"
   fi
 }
@@ -74,6 +74,11 @@ finger() { adb -e emu finger touch "$1" >/dev/null 2>&1; sleep 0.4; adb -e emu f
 launch() { adb shell am start -n "$PKG/.MainActivity" >/dev/null 2>&1; }
 home() { adb shell input keyevent KEYCODE_HOME; sleep 2; }
 enter_pin() { adb shell input text "$PIN"; adb shell input keyevent 66; }
+scroll_to_text() { # swipe up (bounded) until <regex> is on screen
+  local i
+  for (( i = 0; i < 8; i++ )); do has "$1" && return 0; adb shell input swipe 540 1300 540 800 600; sleep 1; done
+  return 1
+}
 scroll_to_id() { # swipe up until <id> sits in the upper 2/3 of the screen, clear of the
   local i c y   # floating tab bar and the FAB (a tap there hits the tab bar instead)
   for (( i = 0; i < 14; i++ )); do
@@ -127,7 +132,6 @@ sleep 3
 enrolled=0
 for (( i = 0; i < 60; i++ )); do
   dump
-  cp /dev/null /dev/null
   if grep -qiE 'text="(Fingerprint added|All set!?)"' <<<"$UI"; then
     shot enroll-done
     tap_text 'Done|DONE' || true
@@ -252,9 +256,10 @@ shot distress-warning
 tap_text 'TURN ON|Turn on'; sleep 2
 [[ "$(node_attr distress-wipe-switch checked)" == "true" ]]; check "distress wipe turned on" "$(( $? == 0 ))"
 has 'resource-id="distress-scope-notes"'; check "erase selection shown" "$(( $? == 0 ))"
+scroll_to_id distress-scope-health
 [[ "$(node_attr distress-scope-health checked)" == "true" ]]; check "selection defaults to erase" "$(( $? == 0 ))"
 scroll_to_id distress-details-toggle && tap_id distress-details-toggle; sleep 1
-wait_for 'Compatibility Definition' 4; check "technical details open with Android rule link" "$(( $? == 0 ))"
+scroll_to_text 'Compatibility Definition'; check "technical details open with Android rule link" "$(( $? == 0 ))"
 scroll_to_id distress-wipe-hint; check "backup reminder shown" "$(( $? == 0 ))"
 shot distress-on
 
