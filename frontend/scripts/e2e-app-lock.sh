@@ -76,7 +76,7 @@ home() { adb shell input keyevent KEYCODE_HOME; sleep 2; }
 enter_pin() { adb shell input text "$PIN"; adb shell input keyevent 66; }
 scroll_to_text() { # swipe up (bounded) until <regex> is on screen
   local i
-  for (( i = 0; i < 8; i++ )); do has "$1" && return 0; adb shell input swipe 540 1300 540 800 600; sleep 1; done
+  for (( i = 0; i < 10; i++ )); do has "$1" && return 0; adb shell input swipe 540 1500 540 700 400; sleep 1; done
   return 1
 }
 scroll_to_id() { # swipe up until <id> sits in the upper 2/3 of the screen, clear of the
@@ -186,6 +186,7 @@ check "journal has private notes before" "$(( BEFORE_NOTES > 0 ))" "notes=$BEFOR
 
 # ── 3. defaults: lock off, app opens straight in ─────────────────────────────
 launch; sleep 4
+tap_id tab-timeline; sleep 3; shot pr-timeline-before; tap_id tab-home; sleep 1
 has 'resource-id="app-lock-screen"'; check "lock OFF by default: no lock screen" "$(( $? != 0 ))"
 shot default-open
 
@@ -261,11 +262,13 @@ wait_for 'resource-id="distress-details"' 6; check "technical details dialog ope
 shot details-dialog
 scroll_to_text 'Compatibility Definition'; check "dialog links the Android rule" "$(( $? == 0 ))"
 scroll_to_text 'look suspicious'; check "dialog explains why the default keeps the journal" "$(( $? == 0 ))"
+shot pr-why-default
 scroll_to_id distress-scope-health
 [[ "$(node_attr distress-scope-health checked)" == "true" ]]; check "selection defaults to erase" "$(( $? == 0 ))"
 scroll_to_id distress-scope-entries
 [[ "$(node_attr distress-scope-entries checked)" == "false" ]]; check "erasing all entries is off by default" "$(( $? == 0 ))"
 [[ "$(node_attr distress-scope-defaultActivityLinks checked)" == "false" ]]; check "erasing default activities is off by default" "$(( $? == 0 ))"
+scroll_to_text 'fresh install'; shot pr-advanced-end
 shot details-advanced
 tap_id distress-details-close; sleep 1
 has 'resource-id="distress-details"'; check "dialog closes" "$(( $? != 0 ))"
