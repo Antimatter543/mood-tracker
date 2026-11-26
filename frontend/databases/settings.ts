@@ -138,12 +138,15 @@ export const SETTINGS_REGISTRY = {
  * Settings that belong to THIS phone, not to the journal: a backup restore never
  * applies them (databases/data-export.ts). Restoring a backup made before a
  * distress wipe must not quietly re-arm the wipe, and a lock copied from
- * another phone would ask for a PIN this phone does not store.
+ * another phone would ask for a PIN this phone does not store. They are not
+ * written into backups either: a backup file shows nothing about the lock.
  */
 export const DEVICE_ONLY_SETTING_KEYS: readonly string[] = [
     'app_lock_enabled',
     'distress_wipe_enabled',
     'distress_wipe_scope',
+    // databases/distressWipe.ts DISTRESS_CLEANUP_KEY: a wipe's unfinished file cleanup.
+    'distress_cleanup_pending',
 ];
 
 // Define possible values for each setting

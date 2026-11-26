@@ -109,6 +109,26 @@ for n in lock.iter("node"):
     print("|".join(n.get(a, "") for a in ("resource-id", "text", "content-desc", "enabled", "clickable")))
 ' <<<"$UI"
 }
+# The selected bottom tab (tab-home / tab-timeline / ...), from the cached $UI.
+current_tab() {
+  grep -oE '<node [^>]*>' <<<"$UI" | grep -E 'resource-id="tab-[a-z]+"' | grep 'selected="true"' \
+    | grep -oE 'resource-id="tab-[a-z]+"' | head -1 | cut -d'"' -f2
+}
+# Type <pin> on the lock screen, then poll until it is gone: prints the seconds
+# (dump-paced, so ~1 s resolution) or "never" after 15 s. [shot] is taken
+# 0.4 s after the PIN (the "Unlocking…" moment).
+time_unlock() {
+  local t0 t
+  t0="$(date +%s.%N)"
+  type_pin "$1" >&2
+  [[ -n "${2:-}" ]] && { sleep 0.4; shot "$2"; }
+  while :; do
+    t="$(awk -v a="$t0" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1f", b-a}')"
+    dump >&2
+    grep -q 'resource-id="app-lock-screen"' <<<"$UI" || { echo "$t"; return 0; }
+    awk -v t="$t" 'BEGIN{exit !(t > 15)}' && { echo never; return 1; }
+  done
+}
 unlock_with() { # unlock_with <pin>: from the lock screen, wait out "Unlocking…"
   wait_for 'resource-id="app-lock-screen"' 8 || return 1
   type_pin "$1"
@@ -293,22 +313,39 @@ wait_for 'resource-id="app-lock-screen"' 8
 SIG_DISTRESS="$(lock_screen_signature | sort)"
 [[ "$SIG_DISTRESS" == "$SIG_NO_DISTRESS" ]]; check "lock screen identical with and without a distress PIN" "$(( $? == 0 ))"
 [[ "$SIG_DISTRESS" == "$SIG_NO_DISTRESS" ]] || { diff <(echo "$SIG_NO_DISTRESS") <(echo "$SIG_DISTRESS") | head -20; }
-type_pin "$APP_PIN"; sleep 3
-has 'resource-id="app-lock-screen"'; check "app PIN unlocks with a distress PIN set" "$(( $? != 0 ))"
+dump; TAB_LOCKED="$(current_tab)"
+T_APP="$(time_unlock "$APP_PIN")"
+check "app PIN unlocks with a distress PIN set" "$(( $? == 0 ))" "${T_APP} s"
+dump # (time_unlock ran in a subshell: refresh $UI here)
+[[ -n "$TAB_LOCKED" && "$(current_tab)" == "$TAB_LOCKED" ]]
+check "the app PIN comes back to the same screen" "$(( $? == 0 ))" "$TAB_LOCKED -> $(current_tab)"
 adb shell am force-stop "$PKG"; sleep 1
 pull_db
 [[ "$(sql 'SELECT COUNT(*) FROM entries WHERE notes IS NOT NULL AND notes <> ""')" == "$BEFORE_NOTES" ]]
 check "the app PIN wiped nothing" "$(( $? == 0 ))"
 
 # ── coercion: the distress PIN ───────────────────────────────────────────────
+# Leave SoulSync on the Timeline with the private note in view, then come back.
 launch; sleep 3
-wait_for 'resource-id="app-lock-screen"' 8
-type_pin "$DISTRESS_PIN"
-sleep 0.5; shot pr-unlocking
-sleep 4
-has 'resource-id="app-lock-screen"'; check "the distress PIN opens the app like the app PIN" "$(( $? != 0 ))"
-has 'wip|eras|delet|distress'; check "nothing on screen mentions a wipe" "$(( $? != 0 ))"
+unlock_with "$APP_PIN"
 tap_id tab-timeline; sleep 3
+has 'E2E SECRET NOTE'; check "the private note is on the Timeline before" "$(( $? == 0 ))"
+shot pr-timeline-before-distress
+home; launch; sleep 2
+wait_for 'resource-id="app-lock-screen"' 8
+dump; TAB_LOCKED="$(current_tab)"
+T_DISTRESS="$(time_unlock "$DISTRESS_PIN" pr-unlocking)"
+# The very first frame after the lock: already clean, no loading state.
+shot pr-first-frame-after-distress
+dump # (time_unlock ran in a subshell: refresh $UI here)
+check "the distress PIN opens the app like the app PIN" "$([[ "$T_DISTRESS" != never ]] && echo 1 || echo 0)" "${T_DISTRESS} s (app PIN: ${T_APP} s)"
+awk -v a="$T_APP" -v b="$T_DISTRESS" 'BEGIN{d=a-b; if (d<0) d=-d; exit !(b != "never" && d <= 2.0)}'
+check "both PINs take the same time to open (within the 1-2 s poll)" "$(( $? == 0 ))" "${T_APP} s vs ${T_DISTRESS} s"
+[[ -n "$TAB_LOCKED" && "$(current_tab)" == "$TAB_LOCKED" ]]
+check "the distress PIN comes back to the same screen" "$(( $? == 0 ))" "$TAB_LOCKED -> $(current_tab)"
+grep -q 'E2E SECRET NOTE' <<<"$UI"; check "the private note is gone at the first look" "$(( $? != 0 ))"
+has 'wip|eras|delet|distress'; check "nothing on screen mentions a wipe" "$(( $? != 0 ))"
+sleep 2
 shot pr-timeline-after-wipe
 has 'E2E SECRET NOTE'; check "secret note not on the Timeline" "$(( $? != 0 ))"
 tap_id tab-settings; sleep 2
@@ -337,6 +374,8 @@ check "default activity links kept" "$(( AFTER_LINKS == BEFORE_DEFAULT_LINKS && 
 [[ "$(sql "SELECT COUNT(*) FROM activity_groups WHERE name='Therapy'")" == 0 ]]; check "custom group removed" "$(( $? == 0 ))"
 [[ "$(sql 'SELECT COUNT(*) FROM entry_media')" == 0 ]]; check "photo rows removed" "$(( $? == 0 ))"
 adb shell ls "$PHOTO" >/dev/null 2>&1; check "photo file deleted" "$(( $? != 0 ))"
+[[ "$(sql "SELECT COUNT(*) FROM user_settings WHERE key = 'distress_cleanup_pending'")" == "0" ]]
+check "the background cleanup finished" "$(( $? == 0 ))"
 [[ "$(sql 'SELECT COUNT(*) FROM entries WHERE starred_at IS NOT NULL')" == 0 ]]; check "stars removed" "$(( $? == 0 ))"
 [[ "$(sql 'SELECT COUNT(*) FROM health_metrics')" == 0 ]]; check "health data removed" "$(( $? == 0 ))"
 [[ "$(sql "SELECT value FROM user_settings WHERE key='health_connect_opt_in'")" == false ]]; check "health sync off" "$(( $? == 0 ))"

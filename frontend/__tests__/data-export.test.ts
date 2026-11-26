@@ -404,6 +404,26 @@ describe('exportDatabaseData', () => {
     expect(json).toHaveProperty('exportDate');
   });
 
+  it('a backup never contains the device-only app lock / distress settings', async () => {
+    const { DEVICE_ONLY_SETTING_KEYS } = jest.requireActual('@/databases/settings');
+    const db = makeDb();
+    db.getAllAsync
+      .mockResolvedValueOnce([]) // entries
+      .mockResolvedValueOnce([]) // entry_media (photos)
+      .mockResolvedValueOnce([]) // activities
+      .mockResolvedValueOnce([]) // activity groups
+      .mockResolvedValueOnce([
+        { key: 'theme', value: 'forest' },
+        ...DEVICE_ONLY_SETTING_KEYS.map((key: string) => ({ key, value: 'true' })),
+      ]); // settings
+
+    const result = await exportDatabaseData(db as any);
+    expect(result.success).toBe(true);
+    const keys = getExportedJson().data.settings.map((s: { key: string }) => s.key);
+    expect(keys).toEqual(['theme']);
+    expect(DEVICE_ONLY_SETTING_KEYS).toContain('distress_cleanup_pending');
+  });
+
   it('carries starred_at through to the exported entry', async () => {
     const db = makeDb();
     db.getAllAsync

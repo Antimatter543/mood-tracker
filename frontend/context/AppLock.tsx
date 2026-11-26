@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus, BackHandler, StyleSheet, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
+import { usePathname, useRouter } from 'expo-router';
 
 import { useSettings } from '@/context/SettingsContext';
 import { bumpDataVersion } from '@/context/dataRefreshStore';
@@ -13,7 +14,7 @@ import {
     readFailures,
     writeFailures,
 } from '@/lib/pinStore';
-import { runDistressWipe } from '@/databases/distressWipe';
+import { runDistressCleanup, runDistressWipe } from '@/databases/distressWipe';
 import { parseDistressScope } from '@/lib/distressScope';
 import { now } from '@/lib/clock';
 
@@ -29,10 +30,14 @@ import { now } from '@/lib/clock';
  *
  * The distress PIN (the whole design rule): it must be impossible to tell from
  * the lock screen whether one is set or was just used. So both PINs go through
- * ONE path: the same "Unlocking…" for at least MIN_UNLOCK_MS, the same opening.
- * The distress PIN only runs the wipe inside that window (the slow file scrub
- * runs after the app is open), deletes itself and turns the option off. Wrong
- * PINs are counted and delayed the same way whatever is set.
+ * ONE path: the same "Unlocking…" for at least MIN_UNLOCK_MS, the same opening
+ * on the same screen. Inside that window the distress PIN runs only the FAST
+ * half of the wipe (one SQL transaction + the backup key), remounts the app
+ * under the lock screen (no screen or open form keeps wiped data in memory),
+ * returns to the screen that was open, deletes itself and turns the option
+ * off. The slow, invisible half (photo files, caches, VACUUM) runs after the
+ * app is open, and finishes on the next start if the app is killed first.
+ * Wrong PINs are counted and delayed the same way whatever is set.
  *
  * There is no "forgot PIN" way in: any recovery path would also be a way past
  * the distress PIN. A forgotten PIN means clearing the app data and restoring
@@ -54,6 +59,13 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     // Bumped after a wipe: remounts the app subtree so no screen or open form
     // keeps wiped notes in memory.
     const [generation, setGeneration] = useState(0);
+
+    // The screen to come back to after the remount (the app PIN keeps it too).
+    const pathname = usePathname();
+    const router = useRouter();
+    const pathnameRef = useRef(pathname);
+    const returnTo = useRef<string | null>(null);
+    if (locked) pathnameRef.current = pathname;
 
     const lockEnabledRef = useRef(lockEnabled);
     const settingsRef = useRef(settings);
@@ -82,6 +94,20 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
             }
         });
     }, [lockEnabled, updateSetting]);
+
+    // A wipe whose file cleanup the app did not live to finish: finish it now.
+    useEffect(() => {
+        void runDistressCleanup(db);
+    }, [db]);
+
+    // After the remount the navigator starts at its first tab: go back to the
+    // screen that was under the lock, still under the lock.
+    useEffect(() => {
+        const to = returnTo.current;
+        returnTo.current = null;
+        // Navigating to the screen already shown is a no-op.
+        if (to) router.navigate(to as never);
+    }, [generation, router]);
 
     // Restore a running wait after a restart (wrong PINs are persisted).
     useEffect(() => {
@@ -116,7 +142,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
             const summary = await runDistressWipe(
                 db,
                 parseDistressScope(settingsRef.current.distress_wipe_scope),
-                { deferScrub: true }
+                { background: true }
             );
             if (typeof summary.reminders === 'string') {
                 await updateSetting('reminders', summary.reminders).catch(() => {});
@@ -126,6 +152,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
         }
         await clearDistressPin().catch(() => {});
         await updateSetting('distress_wipe_enabled', false).catch(() => {});
+        returnTo.current = pathnameRef.current;
         setGeneration(g => g + 1);
         bumpDataVersion();
     }, [db, updateSetting]);

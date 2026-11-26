@@ -145,7 +145,9 @@ describeSqlite('distress wipe, per category (real SQLite, full wipe path)', () =
             ('distress_wipe_enabled', 'true')`);
         await SecureStore.setItemAsync(BACKUP_KEY, '{"k":1}');
         fs.readDirectoryAsync.mockImplementation(async (dir: string) =>
-            dir === fs.documentDirectory ? ['SQLite', LEFTOVER_BACKUP] : ['ImagePicker']
+            dir === fs.documentDirectory ? ['SQLite', 'entry_media', LEFTOVER_BACKUP]
+                : dir === `${fs.documentDirectory}entry_media/` ? ['live.jpg', 'binned.jpg']
+                : ['ImagePicker']
         );
     });
 
@@ -213,6 +215,15 @@ describeSqlite('distress wipe, per category (real SQLite, full wipe path)', () =
         for (const c of DISTRESS_CATEGORIES) expect([c, ERASED[c](ctx)]).toEqual([c, false]);
         expect(ctx.deleted).toEqual([]);
         expectNeverErased(ctx);
+    });
+
+    it('keeping photos never deletes a photo file that is still in use (the folder sweep included)', async () => {
+        for (const keep of [only('recycleBin'), only('notes'), { ...DEFAULT_DISTRESS_SCOPE, photos: false }]) {
+            fs.deleteAsync.mockClear();
+            const ctx = await run(keep);
+            expect(ctx.deleted).not.toContain(PHOTO_LIVE);
+            expect(ctx.deleted).not.toContain(`${fs.documentDirectory}entry_media/live.jpg`);
+        }
     });
 
     it('the default catalogue matches the seed list (guards the "default" definition itself)', () => {

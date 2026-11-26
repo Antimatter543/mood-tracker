@@ -20,6 +20,8 @@ import {
 import {
     defaultActivityKeys,
     isLeftoverBackupFile,
+    DISTRESS_CLEANUP_KEY,
+    runDistressCleanup,
     runDistressWipe,
     wipeSensitiveData,
 } from '@/databases/distressWipe';
@@ -30,6 +32,7 @@ import { countRows, describeSqlite, openMigratedSqlite, SqliteAdapter } from '@/
 const fs = FileSystem as unknown as {
     deleteAsync: jest.Mock;
     readDirectoryAsync: jest.Mock;
+    getInfoAsync: jest.Mock;
     documentDirectory: string;
     cacheDirectory: string;
 };
@@ -307,12 +310,17 @@ describeSqlite('distress wipe: real SQLite', () => {
         });
     });
 
-    it('runDistressWipe unlinks the photos, the media folder and leftover backups', async () => {
+    const MEDIA = () => `${fs.documentDirectory}entry_media/`;
+    const pending = () => countRows(db, 'user_settings', `key = '${DISTRESS_CLEANUP_KEY}'`);
+    const folders = (media: string[]) =>
         fs.readDirectoryAsync.mockImplementation(async (dir: string) =>
-            dir === fs.documentDirectory
-                ? ['SQLite', 'entry_media', 'mood_tracker_export_2026-10-01.json']
+            dir === fs.documentDirectory ? ['SQLite', 'entry_media', 'mood_tracker_export_2026-10-01.json']
+                : dir === MEDIA() ? media
                 : ['ImagePicker']
         );
+
+    it('runDistressWipe unlinks the photos, stray media files and leftover backups', async () => {
+        folders(['a.jpg', 'b.jpg', 'draft-never-saved.jpg']);
         await SecureStore.setItemAsync('backup_encryption_key_v1', '{"stored":"key"}');
         await SecureStore.setItemAsync('backup_password_confirmed_at_v1', '123');
         const summary = await runDistressWipe(db as never);
@@ -327,9 +335,83 @@ describeSqlite('distress wipe: real SQLite', () => {
             'file:///docs/entry_media/b.jpg',
             `${fs.documentDirectory}mood_tracker_export_2026-10-01.json`,
             `${fs.cacheDirectory}ImagePicker`,
+            // a photo file no row points at (an unsaved draft) goes too
+            `${MEDIA()}draft-never-saved.jpg`,
         ]));
-        expect(deleted.some((p: string) => p.endsWith('entry_media/'))).toBe(true);
-        // never the database itself
+        // never the database itself, never the media folder (a new photo may be landing in it)
         expect(deleted.some((p: string) => /SQLite|\.db$/.test(p))).toBe(false);
+        expect(deleted).not.toContain(MEDIA());
+        // the cleanup finished: nothing is owed
+        expect(pending()).toBe(0);
+    });
+
+    it('the fast half commits a cleanup marker in the SAME transaction as the wipe', async () => {
+        await wipeSensitiveData(db as never);
+        expect(pending()).toBe(1);
+        const marker = JSON.parse((db.raw.prepare('SELECT value FROM user_settings WHERE key = ?')
+            .get(DISTRESS_CLEANUP_KEY) as { value: string }).value);
+        expect(marker.scope).toEqual(DEFAULT_DISTRESS_SCOPE);
+        expect(typeof marker.at).toBe('number');
+        // a failed wipe owes nothing
+        db.raw.exec(`DELETE FROM user_settings WHERE key = '${DISTRESS_CLEANUP_KEY}'`);
+        db.raw.exec('DROP TABLE health_metrics');
+        await expect(wipeSensitiveData(db as never)).rejects.toThrow();
+        expect(pending()).toBe(0);
+    });
+
+    it('background: resolves once the SQL is done, before any file is touched', async () => {
+        folders(['a.jpg', 'b.jpg']);
+        let release!: () => void;
+        const gate = new Promise<void>(r => { release = r; });
+        fs.deleteAsync.mockImplementation(() => gate);
+        await runDistressWipe(db as never, DEFAULT_DISTRESS_SCOPE, { background: true });
+        // the journal is already clean ...
+        expect(countRows(db, 'entries', 'notes IS NOT NULL')).toBe(0);
+        expect(countRows(db, 'entry_media')).toBe(0);
+        // ... while the files are still being deleted, and the cleanup is still owed
+        expect(pending()).toBe(1);
+        release();
+        await runDistressCleanup(db as never); // joins the running cleanup
+        expect(fs.deleteAsync.mock.calls.map(c => c[0])).toEqual(
+            expect.arrayContaining(['file:///docs/entry_media/a.jpg', 'file:///docs/entry_media/b.jpg'])
+        );
+        expect(pending()).toBe(0);
+        fs.deleteAsync.mockReset();
+        fs.deleteAsync.mockResolvedValue(undefined);
+    });
+
+    it('a cleanup the app did not live to finish is finished on the next start', async () => {
+        await wipeSensitiveData(db as never); // the app dies right after the commit
+        expect(pending()).toBe(1);
+        folders(['a.jpg', 'b.jpg']);
+        fs.deleteAsync.mockClear();
+        await runDistressCleanup(db as never); // next start, no file list in memory
+        const deleted = fs.deleteAsync.mock.calls.map(c => c[0]);
+        expect(deleted).toEqual(expect.arrayContaining([
+            `${MEDIA()}a.jpg`,
+            `${MEDIA()}b.jpg`,
+            `${fs.documentDirectory}mood_tracker_export_2026-10-01.json`,
+            `${fs.cacheDirectory}ImagePicker`,
+        ]));
+        expect(pending()).toBe(0);
+        // and without a marker a start touches nothing
+        fs.deleteAsync.mockClear();
+        await runDistressCleanup(db as never);
+        expect(fs.deleteAsync).not.toHaveBeenCalled();
+    });
+
+    it('the sweep spares a photo added after the wipe (its row may not exist yet)', async () => {
+        await wipeSensitiveData(db as never);
+        folders(['a.jpg', 'just-attached.jpg']);
+        const later = Date.now() / 1000 + 60;
+        fs.getInfoAsync.mockImplementation(async (p: string) =>
+            p.endsWith('just-attached.jpg') ? { exists: true, modificationTime: later } : { exists: true, modificationTime: 1 }
+        );
+        await runDistressCleanup(db as never);
+        const deleted = fs.deleteAsync.mock.calls.map(c => c[0]);
+        expect(deleted).toContain(`${MEDIA()}a.jpg`);
+        expect(deleted).not.toContain(`${MEDIA()}just-attached.jpg`);
+        fs.getInfoAsync.mockReset();
+        fs.getInfoAsync.mockResolvedValue({ exists: false });
     });
 });

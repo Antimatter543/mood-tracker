@@ -16,8 +16,8 @@ import {
 /**
  * The DISTRESS WIPE: strip the journal down to what is believable and harmless.
  *
- * Fired by the app lock (context/AppLock.tsx) when the DISTRESS PIN is typed
- * (or "Forgot PIN?" is used while one is set). The use case: someone forces
+ * Fired by the app lock (context/AppLock.tsx) when the DISTRESS PIN is typed.
+ * The use case: someone forces
  * you to unlock SoulSync, you type the distress PIN, the app opens normally,
  * and what they see is a real, plausible mood history with nothing private in it.
  *
@@ -260,6 +260,12 @@ export async function wipeSensitiveData(
         await txn.runAsync(
             `INSERT OR REPLACE INTO user_settings (key, value) VALUES ('distress_wipe_enabled', 'false')`
         );
+        // And the file cleanup is owed from this commit on: if the app dies
+        // before runDistressCleanup finishes, the next start finishes it.
+        await txn.runAsync(
+            `INSERT OR REPLACE INTO user_settings (key, value) VALUES (?, ?)`,
+            [DISTRESS_CLEANUP_KEY, JSON.stringify({ scope, at: Date.now() } satisfies PendingCleanup)]
+        );
 
         return {
             notesCleared,
@@ -313,16 +319,55 @@ async function deleteQuietly(path: string): Promise<void> {
     }
 }
 
+/** user_settings key: a committed wipe whose file cleanup has not finished yet. */
+export const DISTRESS_CLEANUP_KEY = 'distress_cleanup_pending';
+type PendingCleanup = { scope: DistressScope; at: number };
+
 /**
- * The file half of the wipe: the photos, the whole media folder, plain backup
- * files the export left in the documents folder, and the picker caches.
+ * Photo files nobody references any more: every file in the media folder with
+ * no entry_media row, except one written after `notAfterMs` (a photo the next
+ * user attached since; its row may not exist yet).
+ */
+async function deleteUnreferencedMedia(db: SQLiteDatabase, notAfterMs: number): Promise<void> {
+    let names: string[];
+    try {
+        names = await FileSystem.readDirectoryAsync(MEDIA_DIR);
+    } catch {
+        return; // no media folder: nothing to sweep
+    }
+    const rows = await db.getAllAsync<{ file_path: string }>('SELECT file_path FROM entry_media');
+    const referenced = new Set(rows.map(r => r.file_path.split('/').pop()));
+    for (const name of names) {
+        if (referenced.has(name)) continue;
+        const path = `${MEDIA_DIR}${name}`;
+        try {
+            const info = await FileSystem.getInfoAsync(path);
+            const modifiedMs = info.exists && 'modificationTime' in info && info.modificationTime
+                ? info.modificationTime * 1000
+                : 0;
+            if (modifiedMs > notAfterMs) continue;
+        } catch {
+            // unknown age: an unreferenced file all the same
+        }
+        await deleteQuietly(path);
+    }
+}
+
+/**
+ * The file half of the wipe: the photos (by path, then any other file the media
+ * folder holds that no row references), plain backup files the export left in
+ * the documents folder, and the picker caches.
  */
 export async function wipeSensitiveFiles(
+    db: SQLiteDatabase,
     mediaFiles: string[],
-    scope: DistressScope = DEFAULT_DISTRESS_SCOPE
+    scope: DistressScope = DEFAULT_DISTRESS_SCOPE,
+    wipedAtMs: number = Date.now()
 ): Promise<void> {
     for (const f of mediaFiles) await deleteQuietly(f);
-    if (scope.photos || scope.entries) await deleteQuietly(MEDIA_DIR);
+    // Only when this wipe removed photo rows: with photos and the bin kept,
+    // the media folder is not touched at all.
+    if (scope.photos || scope.recycleBin || scope.entries) await deleteUnreferencedMedia(db, wipedAtMs);
     if (!scope.leftoverFiles) return;
 
     const docs = FileSystem.documentDirectory;
@@ -348,26 +393,62 @@ export async function wipeSensitiveFiles(
     }
 }
 
+let cleanupRunning: Promise<void> | null = null;
+
 /**
- * The whole wipe, in order: atomic DB wipe -> backup key -> files -> file scrub. Resolves
- * with the summary (for tests/logs only: the UI must not show it, because the
- * point is that nothing visibly happened).
+ * The slow, invisible half of a committed wipe: files, then the marker, then
+ * the database scrub (VACUUM, so the marker and every freed page are rewritten
+ * too). Nothing it touches can be seen in the app any more (the rows pointing
+ * at the files are already gone), so it runs AFTER the app is open. Safe to
+ * call at every start: without a pending marker it is one SELECT. Never throws;
+ * concurrent calls share one run.
+ */
+export function runDistressCleanup(db: SQLiteDatabase, mediaFiles: string[] = []): Promise<void> {
+    if (cleanupRunning) return cleanupRunning;
+    cleanupRunning = (async () => {
+        try {
+            const row = await db.getFirstAsync<{ value: string }>(
+                'SELECT value FROM user_settings WHERE key = ?',
+                [DISTRESS_CLEANUP_KEY]
+            );
+            if (!row) return;
+            let pending: PendingCleanup;
+            try {
+                pending = JSON.parse(row.value) as PendingCleanup;
+            } catch {
+                pending = { scope: DEFAULT_DISTRESS_SCOPE, at: Date.now() };
+            }
+            await wipeSensitiveFiles(db, mediaFiles, { ...DEFAULT_DISTRESS_SCOPE, ...pending.scope }, pending.at);
+            await withWriteTransaction(txn =>
+                txn.runAsync('DELETE FROM user_settings WHERE key = ?', [DISTRESS_CLEANUP_KEY])
+            );
+            await scrubDatabaseFile();
+        } catch (e) {
+            console.warn('[distress] cleanup failed:', e);
+        } finally {
+            cleanupRunning = null;
+        }
+    })();
+    return cleanupRunning;
+}
+
+/**
+ * The whole wipe: the atomic DB wipe and the backup key (fast: a handful of
+ * set-based statements and one keystore delete), then runDistressCleanup.
+ * With `background`, it resolves as soon as the fast part is done and the
+ * cleanup carries on by itself, so the distress PIN opens the app in the same
+ * time as the app PIN (context/AppLock.tsx). Resolves with the summary (for
+ * tests/logs only: the UI must not show it, because the point is that nothing
+ * visibly happened).
  */
 export async function runDistressWipe(
     db: SQLiteDatabase,
     scope: DistressScope = DEFAULT_DISTRESS_SCOPE,
-    opts: { deferScrub?: boolean } = {}
+    opts: { background?: boolean } = {}
 ): Promise<DistressWipeSummary> {
     const { mediaFiles, ...summary } = await wipeSensitiveData(db, scope);
     if (scope.backupKey) await wipeBackupKey();
-    await wipeSensitiveFiles(mediaFiles, scope);
-    // The scrub (VACUUM) is the slow part and only matters forensically: the
-    // logical wipe has committed. Deferred, the distress PIN opens the app as
-    // fast as the real one (context/AppLock.tsx).
-    if (opts.deferScrub) {
-        void scrubDatabaseFile();
-    } else {
-        await scrubDatabaseFile();
-    }
+    const cleanup = runDistressCleanup(db, mediaFiles);
+    if (!opts.background) await cleanup;
     return summary;
 }

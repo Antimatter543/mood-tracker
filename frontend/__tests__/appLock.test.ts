@@ -62,6 +62,8 @@ describe('Settings copy', () => {
         expect(d).toMatch(/deleted and this option turns itself off/);
         expect(d).toMatch(/Wrong PINs never erase anything/);
         expect(d).toMatch(/no "forgot PIN"/);
+        // the background half (runDistressCleanup) is disclosed, with its resume
+        expect(d).toMatch(/finish in the background right after the app opens \(on the next start/);
         expect(APP_LOCK_COPY.distressActiveHint).toMatch(/backup/i);
     });
 

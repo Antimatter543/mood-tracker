@@ -38,11 +38,20 @@ jest.mock('@/context/SettingsContext', () => ({
 }));
 
 const mockRunDistressWipe = jest.fn(async (_db: unknown, _scope?: unknown, _opts?: unknown) => ({} as never));
+const mockRunDistressCleanup = jest.fn(async (_db: unknown) => {});
 jest.mock('@/databases/distressWipe', () => ({
     runDistressWipe: (db: unknown, scope: unknown, opts: unknown) => mockRunDistressWipe(db, scope, opts),
+    runDistressCleanup: (db: unknown) => mockRunDistressCleanup(db),
 }));
 
 jest.mock('expo-sqlite', () => ({ useSQLiteContext: () => ({ mock: 'db' }) }));
+
+const mockNavigate = jest.fn();
+let mockPathname = '/timeline';
+jest.mock('expo-router', () => ({
+    usePathname: () => mockPathname,
+    useRouter: () => ({ navigate: mockNavigate }),
+}));
 
 import { AppLockProvider } from '@/context/AppLock';
 import { findNodes } from '@/testing/rntl';
@@ -63,6 +72,9 @@ beforeEach(async () => {
     store.__reset();
     mockUpdateSetting.mockClear();
     mockRunDistressWipe.mockClear();
+    mockRunDistressCleanup.mockClear();
+    mockNavigate.mockClear();
+    mockPathname = '/timeline';
     appStateListener = null;
     Object.defineProperty(AppState, 'currentState', { value: 'active', configurable: true });
     jest.spyOn(AppState, 'addEventListener').mockImplementation(((_t: string, cb: (s: string) => void) => {
@@ -179,6 +191,11 @@ describe('app lock gate (PIN)', () => {
         expect(findNodes(hidden[0], n => n.props?.testID === 'app-lock-screen')).toHaveLength(0);
     });
 
+    it('every start finishes a wipe cleanup the app did not live to finish', async () => {
+        await renderGate({ app_lock_enabled: false });
+        expect(mockRunDistressCleanup).toHaveBeenCalledWith({ mock: 'db' });
+    });
+
     it('a lock without a stored PIN fails open and turns itself off', async () => {
         store.__reset();
         const view = await renderGate();
@@ -205,14 +222,26 @@ describe('app lock gate (PIN)', () => {
             await typePin(view, '9999');
             await unlocked(view);
             expect(mockRunDistressWipe).toHaveBeenCalledTimes(1);
-            const [, scope, opts] = mockRunDistressWipe.mock.calls[0] as [unknown, Record<string, boolean>, { deferScrub: boolean }];
+            const [, scope, opts] = mockRunDistressWipe.mock.calls[0] as [unknown, Record<string, boolean>, { background: boolean }];
             expect(scope.health).toBe(false);
             expect(scope.notes).toBe(true);
-            expect(opts.deferScrub).toBe(true);
+            // Only the fast SQL half is awaited; files and VACUUM run after the app opens.
+            expect(opts.background).toBe(true);
             expect(mockUpdateSetting).toHaveBeenCalledWith('distress_wipe_enabled', false);
             expect(await checkPin('9999')).toBe('wrong'); // deleted
             expect(await checkPin('2468')).toBe('app'); // the app PIN still works
             expect(mountCount).toBe(2); // the subtree was remounted
+            // ...and sent back to the screen that was under the lock, like the app PIN.
+            expect(mockNavigate).toHaveBeenCalledWith('/timeline');
+        });
+
+        it('the app PIN neither remounts nor navigates', async () => {
+            mountCount = 0;
+            const view = await renderGate({ distress_wipe_enabled: true });
+            await typePin(view, '2468');
+            await unlocked(view);
+            expect(mountCount).toBe(1);
+            expect(mockNavigate).not.toHaveBeenCalled();
         });
 
         it('the app PIN with a distress PIN set wipes nothing', async () => {

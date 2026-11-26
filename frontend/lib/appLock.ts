@@ -65,7 +65,9 @@ export const DISTRESS_TECH_DETAILS: readonly string[] = [
     'After it is used, the distress PIN is deleted and this option turns itself off. Settings then look like ' +
         'an app lock without a distress PIN.',
     'Wrong PINs never erase anything. After 5 in a row SoulSync makes you wait, the same with or without a distress PIN.',
-    'Erased data is overwritten in the database file, not just marked as deleted.',
+    'Erased data is overwritten in the database file, not just marked as deleted. Photo files and that ' +
+        'overwrite finish in the background right after the app opens (on the next start if SoulSync is ' +
+        'closed first); nothing they belong to can be seen in the app by then.',
     "Out of reach for the app: backups you saved elsewhere (Drive, email), Android's own device backup, " +
         'and data stored in Health Connect itself.',
     "There is no \"forgot PIN\": any way back in would also be a way past the distress PIN. A forgotten " +

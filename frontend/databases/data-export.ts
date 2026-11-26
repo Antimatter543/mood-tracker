@@ -284,7 +284,9 @@ export async function exportDatabaseData(db: SQLiteDatabase): Promise<DatabaseRe
       const activityGroups = await db.getAllAsync(
         `SELECT * FROM activity_groups ${GROUP_ORDER_BY}`
       );
-      const settings = await db.getAllAsync('SELECT * FROM user_settings');
+      // Device-only settings (the app lock) never travel in a backup.
+      const settings = (await db.getAllAsync<{ key: string }>('SELECT * FROM user_settings'))
+        .filter(s => !DEVICE_ONLY_SETTING_KEYS.includes(s.key));
 
       // Create an export object
       const exportData = {
