@@ -3,6 +3,11 @@
 All notable changes to SoulSync are documented here. Versions follow
 [semver](https://semver.org/); each release ships an APK on GitHub Releases.
 
+## [2.18.0] - 2026-11-26
+
+### Added
+- **DD.MM.YYYY date format:** pick it in Settings > Date format to see dates written like 26.11.2026. Thanks to makusuko!
+
 ## [2.17.1] - 2026-11-17
 
 ### Fixed
