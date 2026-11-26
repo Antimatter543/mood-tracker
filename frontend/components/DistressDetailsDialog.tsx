@@ -1,10 +1,10 @@
 /**
- * "Technical details" for the distress wipe (Settings > Privacy & security),
+ * "Technical details" for the distress PIN (Settings > Privacy & security),
  * the same pattern as the backup-encryption details: the card itself stays
  * short (switch, one sentence, a link), everything else lives here.
  *
- *   1. When it triggers: Android's own biometric lockout (lib/appLock.ts
- *      DISTRESS_TECH_DETAILS), with a link to the rule.
+ *   1. How it works: the distress PIN, and why nothing on the lock screen
+ *      gives it away (lib/appLock.ts DISTRESS_TECH_DETAILS).
  *   2. Why the default keeps the journal: an empty mood tracker can itself
  *      raise suspicion.
  *   3. Advanced: one switch per category (lib/distressScope.ts), what is kept,
@@ -13,12 +13,12 @@
  * In-tree overlay (OverlayModal), never a native <Modal> (CLAUDE.md).
  */
 import React, { useMemo } from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { OverlayModal } from '@/components/OverlayModal';
 import { useThemeColors } from '@/styles/global';
-import { ANDROID_BIOMETRIC_RULE_URL, APP_LOCK_COPY, DISTRESS_TECH_DETAILS } from '@/lib/appLock';
+import { APP_LOCK_COPY, DISTRESS_TECH_DETAILS } from '@/lib/appLock';
 import {
     DISTRESS_CATEGORIES,
     DISTRESS_CATEGORY_COPY,
@@ -61,7 +61,6 @@ export function DistressDetailsDialog({
         scrollContent: { gap: 10, paddingBottom: 4 },
         sectionLabel: { color: colors.text, fontSize: 16, fontWeight: '600', marginTop: 6 },
         body: { color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
-        link: { color: colors.accent, fontSize: 14, textDecorationLine: 'underline' },
         scopeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
         scopeText: { flex: 1 },
         scopeLabel: { color: colors.text, fontSize: 14, lineHeight: 18 },
@@ -88,17 +87,10 @@ export function DistressDetailsDialog({
                 </View>
 
                 <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-                    <Text style={styles.sectionLabel}>When it triggers</Text>
+                    <Text style={styles.sectionLabel}>How it works</Text>
                     {DISTRESS_TECH_DETAILS.map(line => (
                         <Text key={line} style={styles.body}>{'• '}{line}</Text>
                     ))}
-                    <Text
-                        style={styles.link}
-                        accessibilityRole="link"
-                        onPress={() => Linking.openURL(ANDROID_BIOMETRIC_RULE_URL)}
-                    >
-                        Android's rule: Compatibility Definition, 7.3.10 Biometric Sensors
-                    </Text>
 
                     <Text style={styles.sectionLabel}>Why the default keeps your journal</Text>
                     <Text style={styles.body} testID="distress-why-default">{APP_LOCK_COPY.distressWhyDefault}</Text>

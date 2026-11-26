@@ -46,7 +46,7 @@ export default function RootLayout() {
                         mounts (entry form, settings dropdown) can read those
                         contexts, and its overlay slots render after <Tabs> so they
                         paint above the floating tab bar. See context/OverlayHost.tsx. */}
-                    {/* AppLockProvider: the opt-in biometric lock. It wraps the
+                    {/* AppLockProvider: the opt-in PIN lock. It wraps the
                         OverlayProvider so its lock screen paints above every
                         overlay, and stays inside SQLite/Settings (it reads both).
                         See context/AppLock.tsx. */}

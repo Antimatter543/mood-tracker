@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# e2e-app-lock.sh: device verification of the app lock + distress wipe, run
+# e2e-app-lock.sh: device verification of the PIN app lock + distress PIN, run
 # INSIDE reactivecircus/android-emulator-runner (e2e.yml, dispatch input
-# `applock`). Maestro cannot touch a fingerprint sensor, so this drives the
-# emulator with adb: `adb emu finger touch <id>` plays a finger, a uiautomator
-# dump reads the screen, and the database is pulled (adb root) and read with
-# python's sqlite3 to prove what the wipe kept and what it destroyed.
+# `applock`). adb drives the emulator: taps on SoulSync's own number pad, a
+# uiautomator dump reads the screen, and the database is pulled (adb root) and
+# read with python's sqlite3 to prove what the distress PIN kept and destroyed.
 #
-# Fingers: 1 is enrolled (the owner), 2 is not (the "wrong finger").
-# PIN: 1111. NEVER run on the laptop: it drives whatever adb device is attached.
+# PINs: app 2468, distress 9999, the phone's own screen lock 1111.
+# NEVER run on the laptop: it drives whatever adb device is attached.
 #
 # Usage: frontend/scripts/e2e-app-lock.sh <qa-apk>
 set -uo pipefail
@@ -16,7 +15,9 @@ APK="${1:?usage: e2e-app-lock.sh <qa-apk>}"
 OUT="${E2E_OUT:-e2e-out}"
 BOOT_TRIES="${BOOT_TRIES:-150}"
 PKG=com.raeduslabs.soulsyncapp
-PIN=1111
+PHONE_PIN=1111   # the phone's own screen lock ("Forgot PIN?")
+APP_PIN=2468
+DISTRESS_PIN=9999
 mkdir -p "$OUT/screens" "$OUT/ui" "$OUT/db"
 FAIL_TITLE="App lock e2e"
 # shellcheck source=e2e-lib.sh
@@ -70,10 +71,30 @@ node_attr() { # node_attr <id> <attr>
   dump
   grep -oE "<node [^>]*resource-id=\"$1\"[^>]*>" <<<"$UI" | head -1 | grep -oE "$2=\"[^\"]*\"" | cut -d'"' -f2
 }
-finger() { adb -e emu finger touch "$1" >/dev/null 2>&1; sleep 0.4; adb -e emu finger remove "$1" >/dev/null 2>&1 || true; }
 launch() { adb shell am start -n "$PKG/.MainActivity" >/dev/null 2>&1; }
 home() { adb shell input keyevent KEYCODE_HOME; sleep 2; }
-enter_pin() { adb shell input text "$PIN"; adb shell input keyevent 66; }
+phone_pin() { adb shell input text "$PHONE_PIN"; adb shell input keyevent 66; }
+# Type a PIN on SoulSync's own pad: one dump for the key positions, then taps.
+type_pin() {
+  local d c
+  dump
+  for (( i = 0; i < ${#1}; i++ )); do
+    d="${1:$i:1}"
+    c="$(center_of "resource-id=\"pin-key-$d\"")" || { log "no key $d on screen"; return 1; }
+    # shellcheck disable=SC2086
+    adb shell input tap $c
+  done
+  c="$(center_of 'resource-id="pin-key-ok"')" || return 1
+  # shellcheck disable=SC2086
+  adb shell input tap $c
+}
+# The lock screen as text + ids only (no bounds): what a person can see.
+lock_screen_signature() { dump; grep -oE '(text|resource-id|content-desc)="[^"]*"' <<<"$UI" | grep -v 'resource-id="android' ; }
+unlock_with() { # unlock_with <pin>: from the lock screen, wait out "Unlocking…"
+  wait_for 'resource-id="app-lock-screen"' 8 || return 1
+  type_pin "$1"
+  sleep 3
+}
 scroll_to_text() { # swipe up (bounded) until <regex> is on screen
   local i
   for (( i = 0; i < 10; i++ )); do has "$1" && return 0; adb shell input swipe 540 1500 540 700 400; sleep 1; done
@@ -124,33 +145,8 @@ clear_system_dialogs setup
 adb install -r -t -g "$APK" >"$OUT/install.txt" 2>&1 || { cat "$OUT/install.txt"; fail "adb install failed"; }
 log "installed"
 
-# ── 1. screen lock PIN + enrolled fingerprint #1 ────────────────────────────
-adb shell locksettings set-pin "$PIN" >/dev/null 2>&1 || log "warn: set-pin failed"
-adb shell am start -a android.settings.FINGERPRINT_ENROLL >/dev/null 2>&1 \
-  || adb shell am start -a android.settings.BIOMETRIC_ENROLL >/dev/null 2>&1
-sleep 3
-enrolled=0
-for (( i = 0; i < 60; i++ )); do
-  dump
-  if grep -qiE 'text="(Fingerprint added|All set!?)"' <<<"$UI"; then
-    shot enroll-done
-    tap_text 'Done|DONE' || true
-    enrolled=1; break
-  elif grep -qiE 'password_entry|pin_entry|Confirm your PIN|Re-enter your PIN|Enter your (device )?PIN' <<<"$UI" \
-       && ! grep -qiE 'Touch the sensor|Lift, then touch' <<<"$UI"; then
-    enter_pin; sleep 2
-  elif c="$(center_of 'text="(MORE|More|I AGREE|I agree|AGREE|Agree|NEXT|Next|START|Start|Continue|CONTINUE|Got it|OK)"')"; then
-    # shellcheck disable=SC2086
-    adb shell input tap $c; sleep 1.5
-  else
-    finger 1; sleep 1
-  fi
-done
-(( i == 59 )) && shot enroll-timeout
-adb shell dumpsys fingerprint >"$OUT/dumpsys-fingerprint.txt" 2>&1 || true
-check "fingerprint enrolled on emulator" "$enrolled"
-(( enrolled )) || { shot enroll-fail; echo "$UI" >"$OUT/ui/enroll-fail.xml"; }
-home
+# ── 1. the phone needs a screen lock (the way back in: "Forgot PIN?") ────────
+adb shell locksettings set-pin "$PHONE_PIN" >/dev/null 2>&1 || log "warn: set-pin failed"
 
 # ── 2. seed a journal, then add private things the seed has none of ─────────
 adb shell am start -a android.intent.action.VIEW -d "myapp://qa/seed?scenario=week" "$PKG" >/dev/null 2>&1
@@ -190,141 +186,124 @@ tap_id tab-timeline; sleep 3; shot pr-timeline-before; tap_id tab-home; sleep 1
 has 'resource-id="app-lock-screen"'; check "lock OFF by default: no lock screen" "$(( $? != 0 ))"
 shot default-open
 
-# ── 4. turn the lock on (needs the enrolled finger) ─────────────────────────
+# ── 4. turn the lock on: choose a PIN, twice ─────────────────────────────────
 tap_id tab-settings; sleep 2
 scroll_to_id app-lock-switch; check "Settings shows App lock switch" "$(( $? == 0 ))"
 [[ "$(node_attr app-lock-switch checked)" == "false" ]]; check "App lock switch default off" "$(( $? == 0 ))"
 has 'resource-id="distress-wipe-switch"'; check "distress option hidden while lock off" "$(( $? != 0 ))"
 shot settings-before
-tap_id app-lock-switch; sleep 2
-shot enable-prompt
-finger 1; sleep 3
-[[ "$(node_attr app-lock-switch checked)" == "true" ]]; check "App lock turned on after fingerprint" "$(( $? == 0 ))"
+tap_id app-lock-switch
+wait_for 'Choose an app PIN' 6; check "PIN setup opens" "$(( $? == 0 ))"
+shot pr-pin-setup
+type_pin "$APP_PIN"; sleep 1
+wait_for 'Enter the PIN again' 4
+type_pin 1357; sleep 1
+has "don't match"; check "mismatched confirmation is refused" "$(( $? == 0 ))"
+type_pin "$APP_PIN"; sleep 1; type_pin "$APP_PIN"; sleep 2
+[[ "$(node_attr app-lock-switch checked)" == "true" ]]; check "App lock on after choosing a PIN" "$(( $? == 0 ))"
 shot settings-lock-on
 
-# ── 5. minimise -> reopen, three times ───────────────────────────────────────
+# ── 5. minimise -> reopen, three times; app switch; cold start ───────────────
 for n in 1 2 3; do
-  home
-  launch; sleep 2
-  wait_for 'resource-id="app-lock-screen"|Unlock SoulSync' 8; locked=$?
-  shot "reopen-$n-locked"
-  check "reopen #$n shows lock" "$(( locked == 0 ))"
-  finger 1; sleep 3
-  has 'resource-id="app-lock-screen"'; check "reopen #$n unlocks with owner finger" "$(( $? != 0 ))"
+  home; launch; sleep 2
+  wait_for 'resource-id="app-lock-screen"' 8; check "reopen #$n shows the PIN lock" "$(( $? == 0 ))"
+  (( n == 1 )) && shot pr-lock-screen
+  type_pin "$APP_PIN"; sleep 3
+  has 'resource-id="app-lock-screen"'; check "reopen #$n: app PIN unlocks" "$(( $? != 0 ))"
 done
-shot after-reopens
-
-# recents switch away and back
 adb shell input keyevent KEYCODE_APP_SWITCH; sleep 2
 adb shell input keyevent KEYCODE_HOME; sleep 1
 launch; sleep 2
-wait_for 'resource-id="app-lock-screen"|Unlock SoulSync' 8; check "app switch + return shows lock" "$(( $? == 0 ))"
-finger 1; sleep 3
-
-# cancel the prompt, stay locked, Unlock button works
-home; launch; sleep 2
-wait_for 'Unlock SoulSync' 8
-adb shell input keyevent KEYCODE_BACK; sleep 2
-has 'resource-id="app-lock-screen"'; check "cancelled prompt stays locked" "$(( $? == 0 ))"
-shot cancelled
-tap_id app-lock-unlock; sleep 2
-finger 1; sleep 3
-has 'resource-id="app-lock-screen"'; check "Unlock button prompts again and unlocks" "$(( $? != 0 ))"
-
-# cold start
+wait_for 'resource-id="app-lock-screen"' 8; check "app switch + return shows the lock" "$(( $? == 0 ))"
+type_pin "$APP_PIN"; sleep 3
 adb shell am force-stop "$PKG"; sleep 1
 launch; sleep 5
-has 'resource-id="app-lock-screen"|Unlock SoulSync'; check "cold start shows lock" "$(( $? == 0 ))"
-shot cold-start
-finger 1; sleep 3
-has 'resource-id="app-lock-screen"'; check "cold start unlocks" "$(( $? != 0 ))"
+has 'resource-id="app-lock-screen"'; check "cold start shows the lock" "$(( $? == 0 ))"
+type_pin "$APP_PIN"; sleep 3
+has 'resource-id="app-lock-screen"'; check "cold start: app PIN unlocks" "$(( $? != 0 ))"
 
-# Normal mode looks exactly like distress mode: biometric-only prompt, and the
-# PIN only after Android's block. Here the block must wipe NOTHING.
+# wrong PINs: message, then a wait after 5
 home; launch; sleep 2
-wait_for 'Unlock SoulSync' 8
-shot normal-prompt
-has 'Use PIN|USE PIN'; check "normal prompt offers no PIN either (same as distress)" "$(( $? != 0 ))"
-for k in 1 2 3 4 5 6; do finger 2; sleep 1.5; done
-sleep 6
-wait_for 'Too many attempts' 10; check "normal mode: a block shows the same 'too many attempts'" "$(( $? == 0 ))"
-tap_id app-lock-unlock; sleep 3
-if tap_text 'Use PIN|USE PIN'; then sleep 2; fi
-enter_pin; sleep 4
-has 'resource-id="app-lock-screen"'; check "normal mode: device PIN unlocks after the block" "$(( $? != 0 ))"
-adb shell am force-stop "$PKG"; sleep 1
-pull_db
-[[ "$(sql 'SELECT COUNT(*) FROM entries WHERE notes IS NOT NULL AND notes <> ""')" == "$BEFORE_NOTES" ]]
-check "normal mode: the block wiped nothing" "$(( $? == 0 ))"
-# Android's biometric block lasts 30 s: let it expire before the distress part.
-sleep 35
-launch; sleep 3
-wait_for 'Unlock SoulSync' 8
-finger 1; sleep 3
-has 'resource-id="app-lock-screen"'; check "owner finger works again after the block expired" "$(( $? != 0 ))"
+wait_for 'resource-id="app-lock-screen"' 8
+type_pin 1111; sleep 2
+has 'Wrong PIN'; check "a wrong PIN says so and stays locked" "$(( $? == 0 ))"
+for k in 2 3 4 5; do type_pin 1111; sleep 2; done
+has 'Too many wrong PINs'; check "after 5 wrong PINs it makes you wait" "$(( $? == 0 ))"
+shot pr-wrong-pin-wait
+type_pin "$APP_PIN"; sleep 3
+has 'resource-id="app-lock-screen"'; check "no PIN accepted during the wait" "$(( $? == 0 ))"
+sleep 32
+# The lock screen without a distress PIN, at rest (wait over, nothing typed).
+SIG_NO_DISTRESS="$(lock_screen_signature | sort)"
+type_pin "$APP_PIN"; sleep 3
+has 'resource-id="app-lock-screen"'; check "after the wait the app PIN unlocks" "$(( $? != 0 ))"
 
-# ── 6. turn the distress wipe on (warning dialog) ────────────────────────────
+# ── 6. set the distress PIN ──────────────────────────────────────────────────
 tap_id tab-settings; sleep 2
 scroll_to_id distress-wipe-switch; check "distress option shown once lock is on" "$(( $? == 0 ))"
 tap_id distress-wipe-switch
-wait_for 'Turn on distress wipe' 8; check "distress warning dialog shown" "$(( $? == 0 ))"
-has 'Make a backup first'; check "warning mentions backup" "$(( $? == 0 ))"
-shot distress-warning
-tap_text 'TURN ON|Turn on'; sleep 2
-[[ "$(node_attr distress-wipe-switch checked)" == "true" ]]; check "distress wipe turned on" "$(( $? == 0 ))"
+wait_for 'Turn on the distress PIN' 8; check "distress confirmation shown" "$(( $? == 0 ))"
+has 'Make a backup first'; check "confirmation mentions backup" "$(( $? == 0 ))"
+has 'Technical details|options'; check "confirmation does not point at options" "$(( $? != 0 ))"
+shot pr-confirmation
+tap_text 'CHOOSE PIN|Choose PIN'
+wait_for 'Choose a distress PIN' 6; check "distress PIN setup opens" "$(( $? == 0 ))"
+type_pin "$APP_PIN"; sleep 2
+has 'must be different'; check "the app PIN is refused as distress PIN" "$(( $? == 0 ))"
+type_pin "$DISTRESS_PIN"; sleep 1; type_pin "$DISTRESS_PIN"; sleep 2
+[[ "$(node_attr distress-wipe-switch checked)" == "true" ]]; check "distress PIN set" "$(( $? == 0 ))"
 has 'resource-id="distress-scope"'; check "no category switches on the card (advanced only)" "$(( $? != 0 ))"
 scroll_to_id distress-details-toggle && tap_id distress-details-toggle
 wait_for 'resource-id="distress-details"' 6; check "technical details dialog opens" "$(( $? == 0 ))"
-shot details-dialog
-scroll_to_text 'Compatibility Definition'; check "dialog links the Android rule" "$(( $? == 0 ))"
+shot pr-technical-details
 scroll_to_text 'look suspicious'; check "dialog explains why the default keeps the journal" "$(( $? == 0 ))"
 shot pr-why-default
 scroll_to_id distress-scope-health
 [[ "$(node_attr distress-scope-health checked)" == "true" ]]; check "selection defaults to erase" "$(( $? == 0 ))"
+shot pr-advanced
 scroll_to_id distress-scope-entries
 [[ "$(node_attr distress-scope-entries checked)" == "false" ]]; check "erasing all entries is off by default" "$(( $? == 0 ))"
 [[ "$(node_attr distress-scope-defaultActivityLinks checked)" == "false" ]]; check "erasing default activities is off by default" "$(( $? == 0 ))"
 scroll_to_text 'fresh install'; shot pr-advanced-end
-shot details-advanced
 tap_id distress-details-close; sleep 1
 has 'resource-id="distress-details"'; check "dialog closes" "$(( $? != 0 ))"
 scroll_to_id distress-wipe-hint; check "backup reminder shown" "$(( $? == 0 ))"
-shot distress-on
+shot pr-distress-on
 
-# a correct finger in distress mode just unlocks, nothing wiped
+# ── 7. the lock screen gives nothing away; the app PIN still wipes nothing ──
 home; launch; sleep 2
-wait_for 'Unlock SoulSync' 8
-has 'Use PIN|USE PIN'; check "distress prompt offers no PIN" "$(( $? != 0 ))"
-shot distress-prompt
-finger 1; sleep 3
-has 'resource-id="app-lock-screen"'; check "distress mode: owner finger unlocks" "$(( $? != 0 ))"
+wait_for 'resource-id="app-lock-screen"' 8
+SIG_DISTRESS="$(lock_screen_signature | sort)"
+[[ "$SIG_DISTRESS" == "$SIG_NO_DISTRESS" ]]; check "lock screen identical with and without a distress PIN" "$(( $? == 0 ))"
+[[ "$SIG_DISTRESS" == "$SIG_NO_DISTRESS" ]] || { diff <(echo "$SIG_NO_DISTRESS") <(echo "$SIG_DISTRESS") | head -20; }
+type_pin "$APP_PIN"; sleep 3
+has 'resource-id="app-lock-screen"'; check "app PIN unlocks with a distress PIN set" "$(( $? != 0 ))"
 adb shell am force-stop "$PKG"; sleep 1
 pull_db
 [[ "$(sql 'SELECT COUNT(*) FROM entries WHERE notes IS NOT NULL AND notes <> ""')" == "$BEFORE_NOTES" ]]
-check "owner unlock wiped nothing" "$(( $? == 0 ))"
+check "the app PIN wiped nothing" "$(( $? == 0 ))"
 
-# ── 7. coercion: wrong finger until lockout ──────────────────────────────────
-launch; sleep 4
-wait_for 'Unlock SoulSync' 8
-for k in 1 2 3 4 5 6; do finger 2; sleep 1.5; done
-sleep 6
-shot after-wrong-fingers
-wait_for 'Too many attempts' 10; check "lock screen shows plain 'too many attempts'" "$(( $? == 0 ))"
-has 'wip|eras|delet|distress'; check "lock screen says nothing about a wipe" "$(( $? != 0 ))"
-sleep 8
-# the coercer is let in with the PIN
-tap_id app-lock-unlock; sleep 3
-shot after-wipe-prompt
-if tap_text 'Use PIN|USE PIN'; then sleep 2; fi
-enter_pin; sleep 4
-has 'resource-id="app-lock-screen"'; check "after the wipe the PIN unlocks" "$(( $? != 0 ))"
+# ── coercion: the distress PIN ───────────────────────────────────────────────
+launch; sleep 3
+wait_for 'resource-id="app-lock-screen"' 8
+type_pin "$DISTRESS_PIN"
+sleep 0.5; shot pr-unlocking
+sleep 4
+has 'resource-id="app-lock-screen"'; check "the distress PIN opens the app like the app PIN" "$(( $? != 0 ))"
+has 'wip|eras|delet|distress'; check "nothing on screen mentions a wipe" "$(( $? != 0 ))"
 tap_id tab-timeline; sleep 3
-shot timeline-after-wipe
+shot pr-timeline-after-wipe
 has 'E2E SECRET NOTE'; check "secret note not on the Timeline" "$(( $? != 0 ))"
 tap_id tab-settings; sleep 2
 scroll_to_id distress-wipe-switch
 [[ "$(node_attr distress-wipe-switch checked)" == "false" ]]; check "distress option switched itself off" "$(( $? == 0 ))"
 shot settings-after-wipe
+home; launch; sleep 2
+wait_for 'resource-id="app-lock-screen"' 8
+type_pin "$DISTRESS_PIN"; sleep 4
+has 'resource-id="app-lock-screen"'; check "the used distress PIN no longer opens anything" "$(( $? == 0 ))"
+type_pin "$APP_PIN"; sleep 3
+has 'resource-id="app-lock-screen"'; check "the app PIN still works after the wipe" "$(( $? != 0 ))"
 
 # ── 8. the database after the wipe ───────────────────────────────────────────
 adb shell am force-stop "$PKG"; sleep 1
@@ -348,15 +327,22 @@ adb shell ls "$PHOTO" >/dev/null 2>&1; check "photo file deleted" "$(( $? != 0 )
 adb shell cat "$DBDIR/moodTracker.db" "$DBDIR/moodTracker.db-wal" 2>/dev/null | grep -c 'E2E SECRET NOTE' >"$OUT/db/raw-grep.txt"
 check "secret note not recoverable from the raw DB file" "$(( $(cat "$OUT/db/raw-grep.txt") == 0 ))"
 
-# ── 9. turning the lock off releases it ───────────────────────────────────────
-launch; sleep 3
-wait_for 'Unlock SoulSync' 8
-finger 1; sleep 3
+# ── 9. "Forgot PIN?": the phone's screen lock turns the app lock off ──────────
+home; launch; sleep 2
+wait_for 'resource-id="app-lock-screen"' 8
+tap_id app-lock-forgot; sleep 2
+has 'Forgot your PIN'; check "Forgot PIN explains itself" "$(( $? == 0 ))"
+tap_text 'CONTINUE|Continue'; sleep 3
+shot forgot-device-prompt
+if tap_text 'Use PIN|USE PIN'; then sleep 2; fi
+phone_pin; sleep 4
+tap_text 'OK|Ok'; sleep 1
+has 'resource-id="app-lock-screen"'; check "Forgot PIN: phone screen lock opens the app" "$(( $? != 0 ))"
 tap_id tab-settings; sleep 2
 scroll_to_id app-lock-switch
-tap_id app-lock-switch; sleep 2
+[[ "$(node_attr app-lock-switch checked)" == "false" ]]; check "Forgot PIN turned the app lock off" "$(( $? == 0 ))"
 home; launch; sleep 3
-has 'resource-id="app-lock-screen"'; check "lock off again: reopen goes straight in" "$(( $? != 0 ))"
+has 'resource-id="app-lock-screen"'; check "lock off: reopen goes straight in" "$(( $? != 0 ))"
 shot final
 
 grep -E '\[distress\]|FATAL EXCEPTION|ReactNativeJS.*Error' "$OUT/logcat.txt" >"$OUT/logcat-errors.txt" 2>/dev/null || true

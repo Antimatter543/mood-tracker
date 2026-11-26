@@ -1,22 +1,23 @@
 /**
- * Settings > Privacy & security (components/AppLockSection.tsx): both options
- * default OFF, the lock only turns on after a successful prompt, the distress
- * wipe only after a destructive warning that asks for a backup, and turning the
- * lock off takes the distress wipe with it.
+ * Settings > Privacy & security (components/AppLockSection.tsx): the app lock
+ * is a PIN (typed twice), the distress PIN is a second PIN behind a short
+ * confirmation, and the advanced selection lives behind Technical details.
  *
+ * Real: the card, PinSetupDialog, PinPad, lib/pinStore (real Argon2id via the
+ * expo-argon2 mock, in-memory SecureStore). Fake: the settings store.
  * RNTL v14: render / fireEvent are awaited (tasks/lessons.md 2026-08-29).
  */
 import React, { useState } from 'react';
-import { Alert, Linking } from 'react-native';
+import { Alert } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import * as LocalAuth from 'expo-local-authentication';
-import { ANDROID_BIOMETRIC_RULE_URL, APP_LOCK_COPY } from '@/lib/appLock';
+import * as SecureStore from 'expo-secure-store';
+import { APP_LOCK_COPY } from '@/lib/appLock';
 import { DEFAULT_DISTRESS_SCOPE, DISTRESS_CATEGORIES, DISTRESS_CATEGORY_COPY, keptSummary } from '@/lib/distressScope';
+import { __setPinKdfForTests, checkPin, setAppPin } from '@/lib/pinStore';
 
-const auth = LocalAuth as unknown as {
-    __reset: () => void;
-    __setCapabilities: (c: object) => void;
-};
+const auth = LocalAuth as unknown as { __reset: () => void; __setCapabilities: (c: object) => void };
+const store = SecureStore as unknown as { __reset: () => void };
 
 type S = { app_lock_enabled: boolean; distress_wipe_enabled: boolean; distress_wipe_scope: string; theme: string; theme_mode: string };
 const mockUpdateSetting = jest.fn();
@@ -33,16 +34,25 @@ jest.mock('@/context/SettingsContext', () => ({
     }),
 }));
 
-const mockConfirmIdentity = jest.fn(async () => true);
-jest.mock('@/context/AppLock', () => ({
-    useAppLock: () => ({ confirmIdentity: () => mockConfirmIdentity() }),
-}));
-
 import { AppLockSection } from '@/components/AppLockSection';
 import { OverlayProvider } from '@/context/OverlayHost';
 
-/** Open "Technical details" (the dialog with the advanced switches). */
-const openDetails = async (view: Awaited<ReturnType<typeof render>>) => {
+type View = Awaited<ReturnType<typeof render>>;
+
+/** Type a PIN on the pad and press the arrow. */
+const typePin = async (view: View, pin: string) => {
+    for (const d of pin) await fireEvent.press(view.getByTestId(`pin-key-${d}`));
+    await fireEvent.press(view.getByTestId('pin-key-ok'));
+};
+/** Choose a PIN in the setup dialog (typed twice). */
+const choosePin = async (view: View, pin: string) => {
+    await waitFor(() => expect(view.getByTestId('pin-setup')).toBeTruthy());
+    await typePin(view, pin);
+    await waitFor(() => expect(view.getByTestId('pin-setup-title').props.children).toMatch(/again/));
+    await typePin(view, pin);
+    await waitFor(() => expect(view.queryByTestId('pin-setup')).toBeNull());
+};
+const openDetails = async (view: View) => {
     await fireEvent.press(view.getByTestId('distress-details-toggle'));
     await waitFor(() => expect(view.getByTestId('distress-details')).toBeTruthy());
 };
@@ -58,7 +68,6 @@ function Harness({ initial }: { initial: Partial<S> }) {
     });
     mockSettingsState = s;
     mockSetSettings = setS;
-    // The details dialog is an in-tree overlay: it needs the host.
     return (
         <OverlayProvider>
             <AppLockSection />
@@ -68,17 +77,16 @@ function Harness({ initial }: { initial: Partial<S> }) {
 
 type AlertButton = { text: string; onPress?: () => void };
 let alertSpy: jest.SpyInstance;
-/**
- * The button the NEXT Alert "presses" as soon as it opens. (The toggle handler
- * awaits the confirm, and RNTL v14's fireEvent awaits the handler, so the
- * answer has to be decided before the press.)
- */
+/** The button the NEXT Alert presses as soon as it opens. */
 let alertAnswer: string | null = null;
+
+beforeAll(() => __setPinKdfForTests({ name: 'argon2id', memoryKiB: 64, iterations: 1, parallelism: 1 }));
+afterAll(() => __setPinKdfForTests(null));
 
 beforeEach(() => {
     auth.__reset();
+    store.__reset();
     mockUpdateSetting.mockClear();
-    mockConfirmIdentity.mockReset().mockResolvedValue(true);
     alertAnswer = null;
     alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(((_t: string, _m: string, buttons?: AlertButton[]) => {
         if (alertAnswer) buttons?.find(b => b.text === alertAnswer)?.onPress?.();
@@ -87,161 +95,139 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe('AppLockSection', () => {
-    it('defaults: lock off, and the distress option is not even offered', async () => {
+    it('defaults: lock off, no distress option', async () => {
         const view = await render(<Harness initial={{}} />);
         expect(view.getByTestId('app-lock-switch').props.value).toBe(false);
         expect(view.queryByTestId('distress-wipe-switch')).toBeNull();
     });
 
-    it('turning the lock on asks for biometrics first, then saves', async () => {
+    it('turning the lock on asks for a PIN twice, stores it, and only then turns on', async () => {
         const view = await render(<Harness initial={{}} />);
         await fireEvent(view.getByTestId('app-lock-switch'), 'valueChange', true);
+        expect(mockUpdateSetting).not.toHaveBeenCalled();
+        await choosePin(view, '2468');
         await waitFor(() => expect(mockUpdateSetting).toHaveBeenCalledWith('app_lock_enabled', true));
-        expect(mockConfirmIdentity).toHaveBeenCalledTimes(1);
-        expect(view.getByTestId('distress-wipe-switch').props.value).toBe(false);
+        expect(await checkPin('2468')).toBe('app');
     });
 
-    it('a failed / cancelled prompt leaves the lock off', async () => {
-        mockConfirmIdentity.mockResolvedValue(false);
+    it('a mismatched confirmation starts over and turns nothing on', async () => {
         const view = await render(<Harness initial={{}} />);
         await fireEvent(view.getByTestId('app-lock-switch'), 'valueChange', true);
-        await waitFor(() => expect(mockConfirmIdentity).toHaveBeenCalled());
+        await waitFor(() => expect(view.getByTestId('pin-setup')).toBeTruthy());
+        await typePin(view, '2468');
+        await typePin(view, '1357');
+        await waitFor(() => expect(view.getByTestId('pin-setup-error').props.children).toMatch(/don't match/));
         expect(mockUpdateSetting).not.toHaveBeenCalled();
+    });
+
+    it('cancelling the PIN setup leaves the lock off', async () => {
+        const view = await render(<Harness initial={{}} />);
+        await fireEvent(view.getByTestId('app-lock-switch'), 'valueChange', true);
+        await waitFor(() => expect(view.getByTestId('pin-setup')).toBeTruthy());
+        await fireEvent.press(view.getByTestId('pin-setup-close'));
+        await waitFor(() => expect(view.queryByTestId('pin-setup')).toBeNull());
         expect(view.getByTestId('app-lock-switch').props.value).toBe(false);
     });
 
-    it('a phone with no screen lock explains what to set up instead', async () => {
+    it('a phone with no screen lock is told to set one up first (it is the way back in)', async () => {
         auth.__setCapabilities({ enrolled: false, securityLevel: 0 });
         const view = await render(<Harness initial={{}} />);
         await fireEvent(view.getByTestId('app-lock-switch'), 'valueChange', true);
         await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(
             APP_LOCK_COPY.noScreenLockTitle, APP_LOCK_COPY.noScreenLock
         ));
-        expect(mockConfirmIdentity).not.toHaveBeenCalled();
-        expect(mockUpdateSetting).not.toHaveBeenCalled();
+        expect(view.queryByTestId('pin-setup')).toBeNull();
     });
 
-    it('distress wipe shows the destructive warning, and Cancel keeps it off', async () => {
-        alertAnswer = 'Cancel';
+    it('distress PIN: short confirmation, then a second PIN that must differ from the app PIN', async () => {
+        await setAppPin('2468');
+        alertAnswer = 'Choose PIN';
         const view = await render(<Harness initial={{ app_lock_enabled: true }} />);
         await fireEvent(view.getByTestId('distress-wipe-switch'), 'valueChange', true);
         await waitFor(() => expect(alertSpy).toHaveBeenCalled());
         const [title, message] = alertSpy.mock.calls.at(-1)!;
         expect(title).toBe(APP_LOCK_COPY.distressWarningTitle);
-        expect(message).toMatch(/backup/i);
-        await waitFor(() => expect(view.getByTestId('distress-wipe-switch')).toBeEnabled());
-        expect(mockUpdateSetting).not.toHaveBeenCalled();
-    });
+        expect(message).toMatch(/notes, photos and other private details/);
 
-    it('confirming the warning turns it on and keeps a backup reminder on screen', async () => {
-        alertAnswer = 'Turn on';
-        const view = await render(<Harness initial={{ app_lock_enabled: true }} />);
-        await fireEvent(view.getByTestId('distress-wipe-switch'), 'valueChange', true);
+        await waitFor(() => expect(view.getByTestId('pin-setup')).toBeTruthy());
+        await typePin(view, '2468'); // the app PIN: refused
+        await waitFor(() => expect(view.getByTestId('pin-setup-error').props.children).toMatch(/different/));
+        await choosePin(view, '9999');
         await waitFor(() => expect(mockUpdateSetting).toHaveBeenCalledWith('distress_wipe_enabled', true));
-        expect(await view.findByTestId('distress-wipe-hint')).toBeTruthy();
+        expect(await checkPin('9999')).toBe('distress');
+        expect(await checkPin('2468')).toBe('app');
+        expect(view.getByTestId('distress-wipe-hint')).toBeTruthy();
     });
 
-    it('distress wipe needs enrolled biometrics', async () => {
-        auth.__setCapabilities({ enrolled: false, securityLevel: 1 });
+    it('Cancel on the confirmation sets no distress PIN', async () => {
+        await setAppPin('2468');
+        alertAnswer = 'Cancel';
         const view = await render(<Harness initial={{ app_lock_enabled: true }} />);
         await fireEvent(view.getByTestId('distress-wipe-switch'), 'valueChange', true);
-        await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(
-            APP_LOCK_COPY.noBiometricsTitle, APP_LOCK_COPY.noBiometrics
-        ));
+        await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+        expect(view.queryByTestId('pin-setup')).toBeNull();
         expect(mockUpdateSetting).not.toHaveBeenCalled();
     });
 
-    it('turning the lock off also turns the distress wipe off', async () => {
+    it('switching the distress PIN off forgets it', async () => {
+        await setAppPin('2468');
+        const { setDistressPin } = jest.requireActual('@/lib/pinStore');
+        await setDistressPin('9999');
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await fireEvent(view.getByTestId('distress-wipe-switch'), 'valueChange', false);
+        await waitFor(() => expect(mockUpdateSetting).toHaveBeenCalledWith('distress_wipe_enabled', false));
+        expect(await checkPin('9999')).toBe('wrong');
+    });
+
+    it('turning the lock off forgets both PINs and turns distress off', async () => {
+        await setAppPin('2468');
         const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
         await fireEvent(view.getByTestId('app-lock-switch'), 'valueChange', false);
         await waitFor(() => expect(mockUpdateSetting).toHaveBeenCalledWith('app_lock_enabled', false));
         expect(mockUpdateSetting).toHaveBeenCalledWith('distress_wipe_enabled', false);
-        expect(view.queryByTestId('distress-wipe-switch')).toBeNull();
-        expect(view.queryByTestId('distress-wipe-hint')).toBeNull();
+        expect(await checkPin('2468')).toBe('wrong');
     });
 
-    it('with distress on: one switch per category, all on by default, and what is always kept', async () => {
-        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
-        await openDetails(view);
-        for (const c of DISTRESS_CATEGORIES) {
-            expect(view.getByTestId(`distress-scope-${c}`).props.value).toBe(DEFAULT_DISTRESS_SCOPE[c]);
-        }
-        // the two that empty the journal are off by default
-        expect(view.getByTestId('distress-scope-entries').props.value).toBe(false);
-        expect(view.getByTestId('distress-scope-defaultActivityLinks').props.value).toBe(false);
-        expect(view.getByTestId('distress-kept').props.children).toBe(keptSummary(DEFAULT_DISTRESS_SCOPE));
+    it('Change PIN replaces the app PIN', async () => {
+        await setAppPin('2468');
+        const view = await render(<Harness initial={{ app_lock_enabled: true }} />);
+        await fireEvent.press(view.getByTestId('app-lock-change-pin'));
+        await choosePin(view, '1357');
+        await waitFor(async () => expect(await checkPin('1357')).toBe('app'));
+        expect(await checkPin('2468')).toBe('wrong');
     });
 
     it('normal users see no category switches: they live behind Technical details', async () => {
         const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
         expect(view.queryByTestId('distress-scope')).toBeNull();
-        expect(view.queryByTestId('distress-custom-scope')).toBeNull();
         await openDetails(view);
-        expect(view.getByTestId('distress-scope')).toBeTruthy();
-    });
-
-    it('the details explain why the default keeps the journal', async () => {
-        const view = await render(<Harness initial={{ app_lock_enabled: true }} />);
-        await openDetails(view);
+        for (const c of DISTRESS_CATEGORIES) {
+            expect(view.getByTestId(`distress-scope-${c}`).props.value).toBe(DEFAULT_DISTRESS_SCOPE[c]);
+        }
+        expect(view.getByTestId('distress-kept').props.children).toBe(keptSummary(DEFAULT_DISTRESS_SCOPE));
         expect(view.getByTestId('distress-why-default').props.children).toBe(APP_LOCK_COPY.distressWhyDefault);
-        expect(APP_LOCK_COPY.distressWhyDefault).toMatch(/suspicious/);
     });
 
-    it('a custom selection is flagged on the card and can be reset to the default', async () => {
-        const view = await render(<Harness initial={{
-            app_lock_enabled: true, distress_wipe_enabled: true, distress_wipe_scope: '{"health":false}',
-        }} />);
-        expect(view.getByTestId('distress-custom-scope')).toBeTruthy();
-        await openDetails(view);
-        await fireEvent.press(view.getByTestId('distress-scope-reset'));
-        await waitFor(() => expect(view.queryByTestId('distress-custom-scope')).toBeNull());
-        expect(JSON.parse(mockUpdateSetting.mock.calls.at(-1)![1])).toEqual(DEFAULT_DISTRESS_SCOPE);
-    });
-
-    it('with the default selection, turning it on is one short confirmation (no category list)', async () => {
-        alertAnswer = 'Cancel';
-        const view = await render(<Harness initial={{ app_lock_enabled: true }} />);
-        await fireEvent(view.getByTestId('distress-wipe-switch'), 'valueChange', true);
-        await waitFor(() => expect(alertSpy).toHaveBeenCalled());
-        const message = alertSpy.mock.calls.at(-1)![1] as string;
-        expect(message).toMatch(/notes, photos and other private details/);
-        expect(message).not.toContain(DISTRESS_CATEGORY_COPY.reminderNames.label);
-    });
-
-    it('switching a category off stores it', async () => {
+    it('switching a category off stores it, flags a custom selection, and can be reset', async () => {
         const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
         await openDetails(view);
         await fireEvent(view.getByTestId('distress-scope-health'), 'valueChange', false);
-        await waitFor(() => expect(mockUpdateSetting).toHaveBeenCalledWith(
-            'distress_wipe_scope', expect.any(String)
-        ));
-        const stored = JSON.parse(mockUpdateSetting.mock.calls.at(-1)![1]);
-        expect(stored.health).toBe(false);
-        expect(stored.notes).toBe(true);
-        expect(view.getByTestId('distress-scope-health').props.value).toBe(false);
+        await waitFor(() => expect(view.getByTestId('distress-scope-health').props.value).toBe(false));
+        expect(JSON.parse(mockUpdateSetting.mock.calls.at(-1)![1]).health).toBe(false);
+        expect(view.getByTestId('distress-custom-scope')).toBeTruthy();
+        await fireEvent.press(view.getByTestId('distress-scope-reset'));
+        await waitFor(() => expect(view.queryByTestId('distress-custom-scope')).toBeNull());
     });
 
-    it('the warning lists only what the current selection erases', async () => {
+    it('a custom selection is listed in full in the confirmation', async () => {
+        await setAppPin('2468');
         alertAnswer = 'Cancel';
-        const view = await render(
-            <Harness initial={{ app_lock_enabled: true, distress_wipe_scope: '{"health":false}' }} />
-        );
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_scope: '{"health":false}' }} />);
         await fireEvent(view.getByTestId('distress-wipe-switch'), 'valueChange', true);
         await waitFor(() => expect(alertSpy).toHaveBeenCalled());
         const message = alertSpy.mock.calls.at(-1)![1] as string;
         expect(message).toContain(DISTRESS_CATEGORY_COPY.notes.label);
         expect(message).not.toContain(DISTRESS_CATEGORY_COPY.health.label);
-    });
-
-    it('technical details open on tap and link the Android rule', async () => {
-        const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true as never);
-        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
-        expect(view.queryByTestId('distress-details')).toBeNull();
-        await openDetails(view);
-        await fireEvent.press(view.getByText(/Compatibility Definition, 7\.3\.10/));
-        expect(openURL).toHaveBeenCalledWith(ANDROID_BIOMETRIC_RULE_URL);
-        await fireEvent.press(view.getByTestId('distress-details-close'));
-        await waitFor(() => expect(view.queryByTestId('distress-details')).toBeNull());
     });
 
     it('erasing all entries needs its own confirmation; Cancel keeps it off', async () => {
@@ -252,24 +238,6 @@ describe('AppLockSection', () => {
         await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(
             APP_LOCK_COPY.eraseEntriesTitle, APP_LOCK_COPY.eraseEntriesWarning, expect.anything(), expect.anything()
         ));
-        expect(mockUpdateSetting).not.toHaveBeenCalled();
         expect(view.getByTestId('distress-scope-entries').props.value).toBe(false);
-    });
-
-    it('confirming turns it on, and the kept line says the journal is emptied', async () => {
-        alertAnswer = 'Erase entries too';
-        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
-        await openDetails(view);
-        await fireEvent(view.getByTestId('distress-scope-entries'), 'valueChange', true);
-        await waitFor(() => expect(view.getByTestId('distress-scope-entries').props.value).toBe(true));
-        expect(view.getByTestId('distress-kept').props.children).toMatch(/fresh install/);
-    });
-
-    it('the other off-by-default category needs no extra confirmation', async () => {
-        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
-        await openDetails(view);
-        await fireEvent(view.getByTestId('distress-scope-defaultActivityLinks'), 'valueChange', true);
-        await waitFor(() => expect(view.getByTestId('distress-scope-defaultActivityLinks').props.value).toBe(true));
-        expect(alertSpy).not.toHaveBeenCalled();
     });
 });

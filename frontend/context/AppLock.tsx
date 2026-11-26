@@ -1,68 +1,48 @@
-import React, {
-    createContext,
-    useCallback,
-    useContext,
-    useEffect,
-    useMemo,
-    useRef,
-    useState,
-} from 'react';
-import { AppState, AppStateStatus, BackHandler, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, AppState, AppStateStatus, BackHandler, StyleSheet, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { useSettings } from '@/context/SettingsContext';
 import { bumpDataVersion } from '@/context/dataRefreshStore';
 import { LockScreen } from '@/components/LockScreen';
+import { APP_LOCK_COPY } from '@/lib/appLock';
+import { MIN_UNLOCK_MS, remainingWaitMs, shouldLockOnAppStateChange, waitMessage } from '@/lib/pinLock';
 import {
-    AuthOutcome,
-    classifyAuthAttempt,
-    failsOpen,
-    lockMessageFor,
-    promptOptionsFor,
-    shouldLockOnAppStateChange,
-} from '@/lib/appLock';
-import { getBiometricCapabilities, promptBiometric } from '@/lib/biometricAuth';
+    checkPin,
+    clearAllPins,
+    clearDistressPin,
+    hasAppPin,
+    readFailures,
+    writeFailures,
+} from '@/lib/pinStore';
+import { confirmDeviceCredential } from '@/lib/deviceCredential';
 import { runDistressWipe } from '@/databases/distressWipe';
 import { parseDistressScope } from '@/lib/distressScope';
+import { now } from '@/lib/clock';
 
 /**
- * The app lock gate (opt-in, Settings > Privacy & security).
+ * The app lock gate: PIN on every cold start and every return from the
+ * background (opt-in, Settings > Privacy & security).
  *
  * Placement: app/(tabs)/_layout.tsx, INSIDE SQLite/Settings (it reads both) and
  * AROUND the OverlayProvider, so the lock screen paints above every overlay
- * (an open entry form included) and the overlays reset with the app subtree.
- *
- * The app content stays MOUNTED under the lock screen (no lost navigation or
- * half-written entry after a quick app switch); it is hidden from touch and
+ * (an entry form left open included) and the overlays reset with the subtree.
+ * The app content stays MOUNTED under the lock screen, hidden from touch and
  * from accessibility services while locked.
  *
- * Lock moments: cold start (the provider mounts locked when the setting is on;
- * SettingsProvider renders nothing until settings are loaded, so there is no
- * unlocked first frame) and every move to the background. Unlock: one prompt,
- * shown automatically, then by the Unlock button.
+ * The distress PIN (the whole design rule): it must be impossible to tell from
+ * the lock screen whether one is set or was just used. So both PINs go through
+ * ONE path: the same "Unlocking…" for at least MIN_UNLOCK_MS, the same opening.
+ * The distress PIN only runs the wipe inside that window (the slow file scrub
+ * runs after the app is open), deletes itself and turns the option off. Wrong
+ * PINs are counted and delayed the same way whatever is set.
  *
- * Distress wipe: see lib/appLock.ts (when it fires) and databases/distressWipe.ts
- * (what it does). After it runs, the app subtree is REMOUNTED (fresh key), so no
- * screen or open form keeps the wiped notes in memory, and the next prompt
- * allows the device PIN. The lock screen looks exactly like a plain lockout.
+ * "Forgot PIN?": the phone's screen lock turns the app lock off. With a
+ * distress PIN set it wipes first, since anyone who knows the phone PIN could
+ * use this way in; on screen both cases look the same.
  */
 
-type AppLockContextValue = {
-    /**
-     * Run one biometric prompt OUTSIDE the lock screen (Settings uses it to
-     * confirm the user before turning the lock on). Suspends background
-     * re-locking while the prompt is open.
-     */
-    confirmIdentity: () => Promise<boolean>;
-};
-
-const AppLockContext = createContext<AppLockContextValue>({
-    confirmIdentity: async () => false,
-});
-
-export function useAppLock(): AppLockContextValue {
-    return useContext(AppLockContext);
-}
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export function AppLockProvider({ children }: { children: React.ReactNode }) {
     const db = useSQLiteContext();
@@ -70,122 +50,170 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     const lockEnabled = settings.app_lock_enabled;
 
     const [locked, setLocked] = useState<boolean>(lockEnabled);
+    const [pin, setPin] = useState('');
     const [busy, setBusy] = useState(false);
-    const [outcome, setOutcome] = useState<AuthOutcome | null>(null);
-    // Bumped after a distress wipe: remounts the app subtree (see header).
+    const [message, setMessage] = useState<string | null>(null);
+    const [waitUntil, setWaitUntil] = useState(0);
+    const [nowTick, setNowTick] = useState(() => now().getTime());
+    // Bumped after a wipe: remounts the app subtree so no screen or open form
+    // keeps wiped notes in memory.
     const [generation, setGeneration] = useState(0);
 
-    // Refs: AppState callbacks and the async prompt must see current values.
-    const authInFlight = useRef(false);
     const lockEnabledRef = useRef(lockEnabled);
-    const distressRef = useRef(settings.distress_wipe_enabled);
-    const scopeRef = useRef(settings.distress_wipe_scope);
-    // After a lockout / unavailable / wipe, the next prompt allows the PIN.
-    const pinAllowedRef = useRef(false);
-    // Prompt automatically on the next 'active' (cold start, return from background).
-    const autoPromptPending = useRef(lockEnabled);
-    const appStateRef = useRef<AppStateStatus>(AppState.currentState);
-
+    const settingsRef = useRef(settings);
+    // Our own device-credential prompt pauses the activity: never re-lock on that.
+    const paused = useRef(false);
     lockEnabledRef.current = lockEnabled;
-    distressRef.current = settings.distress_wipe_enabled;
-    scopeRef.current = settings.distress_wipe_scope;
+    settingsRef.current = settings;
 
     // Turning the lock OFF releases it at once. Turning it ON does not lock the
-    // current session: the user has just authenticated to switch it on.
+    // current session (the user is setting it up right now).
     useEffect(() => {
         if (!lockEnabled) {
             setLocked(false);
-            setOutcome(null);
-            autoPromptPending.current = false;
+            setPin('');
+            setMessage(null);
         }
     }, [lockEnabled]);
 
-    const unlock = useCallback(async () => {
-        if (authInFlight.current) return;
-        authInFlight.current = true;
-        setBusy(true);
-        try {
-            const caps = await getBiometricCapabilities();
-            if (failsOpen(caps.securityLevel)) {
+    // A lock without a stored PIN (should not happen: a restore never brings
+    // the setting along) would be unpassable: fail open and turn it off.
+    useEffect(() => {
+        if (!lockEnabled) return;
+        hasAppPin().then(has => {
+            if (!has) {
                 setLocked(false);
-                setOutcome(null);
-                return;
+                updateSetting('app_lock_enabled', false).catch(() => {});
+                updateSetting('distress_wipe_enabled', false).catch(() => {});
             }
-            const distress = distressRef.current && !pinAllowedRef.current && caps.enrolled;
-            const { attempt, elapsedMs } = await promptBiometric(
-                // Same prompt with distress on or off (see promptOptionsFor).
-                promptOptionsFor({ pinAllowed: pinAllowedRef.current, biometricsEnrolled: caps.enrolled })
-            );
-            const result = classifyAuthAttempt(attempt, { distressEnabled: distress, elapsedMs });
+        });
+    }, [lockEnabled, updateSetting]);
 
-            if (result === 'unlock') {
-                pinAllowedRef.current = false;
-                setOutcome(null);
-                setLocked(false);
-                return;
+    // Restore a running wait after a restart (wrong PINs are persisted).
+    useEffect(() => {
+        readFailures().then(state => {
+            const left = remainingWaitMs(state, now().getTime());
+            if (left > 0) {
+                setWaitUntil(now().getTime() + left);
+                setMessage(waitMessage(left));
             }
-            if (result === 'dismissed') {
-                setOutcome('dismissed');
-                return;
+        });
+    }, []);
+
+    // Count the wait down on screen.
+    useEffect(() => {
+        if (!waitUntil) return;
+        const t = setInterval(() => {
+            const n = now().getTime();
+            setNowTick(n);
+            if (n >= waitUntil) {
+                setWaitUntil(0);
+                setMessage(null);
+            } else {
+                setMessage(waitMessage(waitUntil - n));
             }
-            // locked_out / unavailable / wipe: the next try may use the PIN.
-            pinAllowedRef.current = true;
-            setOutcome(result);
-            if (result === 'wipe') {
-                try {
-                    const summary = await runDistressWipe(db, parseDistressScope(scopeRef.current));
-                    // Keep the in-memory list in step, so Settings and the
-                    // notification re-arm stop using the old names at once.
-                    if (typeof summary.reminders === 'string') {
-                        await updateSetting('reminders', summary.reminders).catch(() => {});
-                    }
-                } catch (e) {
-                    console.warn('[distress] wipe failed:', e);
-                }
-                // The wipe already wrote 'false' in its transaction; this keeps
-                // the in-memory settings in step (idempotent write).
-                distressRef.current = false;
-                await updateSetting('distress_wipe_enabled', false).catch(() => {});
-                setGeneration(g => g + 1);
-                bumpDataVersion();
+        }, 1000);
+        return () => clearInterval(t);
+    }, [waitUntil]);
+
+    /** The distress wipe, shared by the distress PIN and "Forgot PIN?". */
+    const wipe = useCallback(async () => {
+        try {
+            const summary = await runDistressWipe(
+                db,
+                parseDistressScope(settingsRef.current.distress_wipe_scope),
+                { deferScrub: true }
+            );
+            if (typeof summary.reminders === 'string') {
+                await updateSetting('reminders', summary.reminders).catch(() => {});
             }
-        } finally {
-            authInFlight.current = false;
-            setBusy(false);
+        } catch (e) {
+            console.warn('[distress] wipe failed:', e);
         }
+        await clearDistressPin().catch(() => {});
+        await updateSetting('distress_wipe_enabled', false).catch(() => {});
+        setGeneration(g => g + 1);
+        bumpDataVersion();
     }, [db, updateSetting]);
 
-    // AppState: lock on background, prompt on return.
+    const submit = useCallback(async () => {
+        if (busy || pin.length === 0) return;
+        if (waitUntil && now().getTime() < waitUntil) return;
+        const typed = pin;
+        setBusy(true);
+        setMessage(null);
+        const started = now().getTime();
+        try {
+            const result = await checkPin(typed);
+            if (result === 'wrong') {
+                const prev = await readFailures();
+                const next = { failures: prev.failures + 1, lastFailureAt: now().getTime() };
+                await writeFailures(next);
+                const left = remainingWaitMs(next, now().getTime());
+                if (left > 0) {
+                    setWaitUntil(now().getTime() + left);
+                    setMessage(waitMessage(left));
+                } else {
+                    setMessage('Wrong PIN. Try again.');
+                }
+                setPin('');
+                return;
+            }
+            await writeFailures({ failures: 0, lastFailureAt: 0 });
+            if (result === 'distress') await wipe();
+            // The same minimum "Unlocking…" for both PINs.
+            const elapsed = now().getTime() - started;
+            if (elapsed < MIN_UNLOCK_MS) await sleep(MIN_UNLOCK_MS - elapsed);
+            setPin('');
+            setLocked(false);
+        } finally {
+            setBusy(false);
+        }
+    }, [busy, pin, waitUntil, wipe]);
+
+    const forgot = useCallback(() => {
+        Alert.alert(APP_LOCK_COPY.forgotTitle, APP_LOCK_COPY.forgotMessage, [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Continue',
+                onPress: async () => {
+                    paused.current = true;
+                    const ok = await confirmDeviceCredential();
+                    paused.current = false;
+                    if (!ok) return;
+                    setBusy(true);
+                    try {
+                        if (settingsRef.current.distress_wipe_enabled) await wipe();
+                        await clearAllPins();
+                        await updateSetting('distress_wipe_enabled', false).catch(() => {});
+                        await updateSetting('app_lock_enabled', false).catch(() => {});
+                        setPin('');
+                        setWaitUntil(0);
+                        setMessage(null);
+                        setLocked(false);
+                        Alert.alert(APP_LOCK_COPY.lockTurnedOff);
+                    } finally {
+                        setBusy(false);
+                    }
+                },
+            },
+        ]);
+    }, [updateSetting, wipe]);
+
+    // AppState: lock on background.
     useEffect(() => {
         const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
-            appStateRef.current = next;
             if (
                 shouldLockOnAppStateChange(next, {
                     lockEnabled: lockEnabledRef.current,
-                    authInFlight: authInFlight.current,
+                    paused: paused.current,
                 })
             ) {
                 setLocked(true);
-                setOutcome(null);
-                autoPromptPending.current = true;
-            } else if (next === 'active' && autoPromptPending.current && !authInFlight.current) {
-                autoPromptPending.current = false;
-                unlock();
+                setPin('');
             }
         });
         return () => sub.remove();
-    }, [unlock]);
-
-    // Cold start: the app is already active when this mounts locked.
-    useEffect(() => {
-        // Android can report 'unknown' this early; only a real 'background'
-        // waits for the 'active' event (the listener above then prompts).
-        if (locked && autoPromptPending.current && appStateRef.current !== 'background') {
-            autoPromptPending.current = false;
-            unlock();
-        }
-        // Only on mount: later locks are prompted by the AppState listener.
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Hardware back on the lock screen leaves the app instead of navigating the
@@ -199,27 +227,10 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
         return () => sub.remove();
     }, [locked]);
 
-    const confirmIdentity = useCallback(async () => {
-        if (authInFlight.current) return false;
-        authInFlight.current = true;
-        try {
-            const caps = await getBiometricCapabilities();
-            if (failsOpen(caps.securityLevel)) return false;
-            const { attempt } = await promptBiometric({
-                // Settings confirmation, not the lock screen: the PIN is fine here.
-                ...promptOptionsFor({ pinAllowed: true, biometricsEnrolled: caps.enrolled }),
-                promptMessage: 'Confirm it’s you',
-            });
-            return attempt.success;
-        } finally {
-            authInFlight.current = false;
-        }
-    }, []);
-
-    const value = useMemo(() => ({ confirmIdentity }), [confirmIdentity]);
+    const waiting = waitUntil > nowTick;
 
     return (
-        <AppLockContext.Provider value={value}>
+        <>
             <View
                 key={generation}
                 style={styles.fill}
@@ -231,12 +242,16 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
             </View>
             {locked ? (
                 <LockScreen
+                    pin={pin}
+                    onPinChange={setPin}
+                    onSubmit={submit}
                     busy={busy}
-                    message={lockMessageFor(outcome)}
-                    onUnlock={unlock}
+                    waiting={waiting}
+                    message={message}
+                    onForgot={forgot}
                 />
             ) : null}
-        </AppLockContext.Provider>
+        </>
     );
 }
 

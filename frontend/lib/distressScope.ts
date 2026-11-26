@@ -4,8 +4,7 @@
  * Stored in user_settings as `distress_wipe_scope`, a JSON {category: bool}
  * (default: every category on). Device-only: never restored from a backup.
  *
- * WHEN it fires is not a setting: Android decides how many wrong biometrics
- * lock the sensor (see DISTRESS_TECH_DETAILS in lib/appLock.ts).
+ * WHEN it fires: when the distress PIN is typed (context/AppLock.tsx).
  *
  * By default every logged day keeps its date, time and mood score and its
  * links to the default activities: that is what keeps the journal believable.

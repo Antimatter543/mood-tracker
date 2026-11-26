@@ -1,24 +1,34 @@
 import React, { useMemo } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useThemeColors } from '@/styles/global';
+import { PinPad } from '@/components/PinPad';
 
 /**
- * The full-window lock screen the app lock (context/AppLock.tsx) paints over the
- * whole app. Opaque on purpose: nothing of the journal shows through.
+ * The full-window lock screen of the app lock (context/AppLock.tsx). Opaque on
+ * purpose: nothing of the journal shows through.
  *
- * It must look the SAME after a distress wipe as after a plain lockout, so it
- * has no state of its own beyond what the gate hands it.
+ * It must look and behave the SAME with and without a distress PIN, so it has
+ * no state of its own beyond what the gate hands it: the typed PIN, whether a
+ * check is running ("Unlocking…"), and one status line.
  */
 export function LockScreen({
+    pin,
+    onPinChange,
+    onSubmit,
     busy,
+    waiting,
     message,
-    onUnlock,
+    onForgot,
 }: {
+    pin: string;
+    onPinChange: (next: string) => void;
+    onSubmit: () => void;
     busy: boolean;
+    waiting: boolean;
     message: string | null;
-    onUnlock: () => void;
+    onForgot: () => void;
 }) {
     const colors = useThemeColors();
     const insets = useSafeAreaInsets();
@@ -28,48 +38,14 @@ export function LockScreen({
             backgroundColor: colors.background,
             alignItems: 'center',
             justifyContent: 'center',
-            paddingHorizontal: 32,
+            paddingHorizontal: 24,
         },
-        iconWrap: {
-            width: 88,
-            height: 88,
-            borderRadius: 44,
-            backgroundColor: colors.accentLight,
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 24,
-        },
-        title: {
-            color: colors.text,
-            fontSize: 22,
-            fontWeight: '600',
-            marginBottom: 8,
-        },
-        subtitle: {
-            color: colors.textSecondary,
-            fontSize: 15,
-            textAlign: 'center',
-            marginBottom: 32,
-        },
-        message: {
-            color: colors.textSecondary,
-            fontSize: 14,
-            textAlign: 'center',
-            marginTop: 16,
-        },
-        button: {
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 8,
-            backgroundColor: colors.accent,
-            paddingVertical: 14,
-            paddingHorizontal: 32,
-            borderRadius: 24,
-            minWidth: 180,
-            justifyContent: 'center',
-        },
-        buttonDisabled: { opacity: 0.6 },
-        buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+        icon: { marginBottom: 12 },
+        title: { color: colors.text, fontSize: 22, fontWeight: '600', marginBottom: 6 },
+        subtitle: { color: colors.textSecondary, fontSize: 15, textAlign: 'center', marginBottom: 24 },
+        message: { color: colors.textSecondary, fontSize: 14, textAlign: 'center', minHeight: 20, marginTop: 18 },
+        forgot: { marginTop: 10, padding: 8 },
+        forgotText: { color: colors.accent, fontSize: 14, fontWeight: '500' },
     }), [colors]);
 
     return (
@@ -77,33 +53,20 @@ export function LockScreen({
             style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
             testID="app-lock-screen"
         >
-            <View style={styles.iconWrap}>
-                <Ionicons name="lock-closed-outline" size={40} color={colors.accent} />
-            </View>
+            <Ionicons name="lock-closed-outline" size={36} color={colors.accent} style={styles.icon} />
             <Text style={styles.title}>SoulSync is locked</Text>
-            <Text style={styles.subtitle}>Unlock to see your journal.</Text>
+            <Text style={styles.subtitle}>{busy ? 'Unlocking…' : 'Enter your PIN'}</Text>
+            <PinPad value={pin} onChange={onPinChange} onSubmit={onSubmit} busy={busy} disabled={waiting} />
+            <Text style={styles.message} testID="app-lock-message">{message ?? ''}</Text>
             <Pressable
-                testID="app-lock-unlock"
+                testID="app-lock-forgot"
                 accessibilityRole="button"
-                accessibilityLabel="Unlock"
-                accessibilityState={{ disabled: busy }}
+                onPress={onForgot}
                 disabled={busy}
-                onPress={onUnlock}
-                style={({ pressed }) => [
-                    styles.button,
-                    (busy || pressed) && styles.buttonDisabled,
-                ]}
+                style={styles.forgot}
             >
-                {busy ? (
-                    <ActivityIndicator color="#fff" />
-                ) : (
-                    <Ionicons name="finger-print" size={20} color="#fff" />
-                )}
-                <Text style={styles.buttonText}>Unlock</Text>
+                <Text style={styles.forgotText}>Forgot PIN?</Text>
             </Pressable>
-            {message ? (
-                <Text style={styles.message} testID="app-lock-message">{message}</Text>
-            ) : null}
         </View>
     );
 }

@@ -40,8 +40,6 @@ const WALL_CLOCK_ALLOWED: Record<string, string> = {
     'lib/clock.ts': 'the clock itself',
     'databases/mediaHelpers.ts':
         'buildMediaFilename uses Date.now() as a uniqueness stamp, not as "the time": a frozen QA clock would collide filenames',
-    'lib/biometricAuth.ts':
-        'measures how long the unlock prompt was open (the distress guard): a DURATION, and a frozen QA clock would make every prompt read as 0 ms',
 };
 
 const QA_SETTER_ALLOWED = (file: string) => file === 'lib/clock.ts' || file.startsWith('lib/qa/');

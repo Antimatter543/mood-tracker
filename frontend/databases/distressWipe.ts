@@ -16,11 +16,10 @@ import {
 /**
  * The DISTRESS WIPE: strip the journal down to what is believable and harmless.
  *
- * Fired by the app lock (context/AppLock.tsx) when the user has opted in and
- * the biometric prompt ended in a LOCKOUT (too many wrong fingers). The use
- * case: someone forces you to unlock SoulSync, you deliberately present the
- * wrong finger a few times, and what they later see is a real, plausible mood
- * history with nothing private in it.
+ * Fired by the app lock (context/AppLock.tsx) when the DISTRESS PIN is typed
+ * (or "Forgot PIN?" is used while one is set). The use case: someone forces
+ * you to unlock SoulSync, you type the distress PIN, the app opens normally,
+ * and what they see is a real, plausible mood history with nothing private in it.
  *
  * The rule: remove EVERYTHING that could incriminate (anything typed,
  * photographed or made up by the user, health data, and the key that opens the
@@ -356,11 +355,19 @@ export async function wipeSensitiveFiles(
  */
 export async function runDistressWipe(
     db: SQLiteDatabase,
-    scope: DistressScope = DEFAULT_DISTRESS_SCOPE
+    scope: DistressScope = DEFAULT_DISTRESS_SCOPE,
+    opts: { deferScrub?: boolean } = {}
 ): Promise<DistressWipeSummary> {
     const { mediaFiles, ...summary } = await wipeSensitiveData(db, scope);
     if (scope.backupKey) await wipeBackupKey();
     await wipeSensitiveFiles(mediaFiles, scope);
-    await scrubDatabaseFile();
+    // The scrub (VACUUM) is the slow part and only matters forensically: the
+    // logical wipe has committed. Deferred, the distress PIN opens the app as
+    // fast as the real one (context/AppLock.tsx).
+    if (opts.deferScrub) {
+        void scrubDatabaseFile();
+    } else {
+        await scrubDatabaseFile();
+    }
     return summary;
 }

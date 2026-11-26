@@ -375,7 +375,7 @@ export const migrations: Migration[] = [
         }
     },
     {
-        // App lock (biometric unlock on open / return from background) and its
+        // App lock (PIN on open / return from background) and its
         // optional distress wipe. Both opt-in, default OFF, so an upgrading user
         // sees no change. Key-value rows only, no schema change; seeded for
         // explicitness like migrations 4, 7, 10 and 15. Registry entries:
