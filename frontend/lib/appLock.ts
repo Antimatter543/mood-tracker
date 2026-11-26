@@ -229,8 +229,7 @@ export function distressWarningFor(scope: DistressScope): string {
             trigger +
             'removes your notes, photos and other private details. Your days and mood scores stay, so the ' +
             'journal still looks normal.\n\n' +
-            accident +
-            '\n\nDetails and options: Technical details, under the switch.'
+            accident
         );
     }
     const labels = erasedCategoryLabels(scope);

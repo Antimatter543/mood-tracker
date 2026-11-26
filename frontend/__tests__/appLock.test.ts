@@ -157,6 +157,8 @@ describe('Settings copy', () => {
         expect(w).toMatch(/by accident/);
         expect(w).toMatch(/usually 5/);
         expect(APP_LOCK_COPY.distressActiveHint).toMatch(/backup/i);
+        // The confirmation stays about what happens; options are explored later.
+        expect(w).not.toMatch(/Technical details|options/i);
     });
 
     it('a custom selection is listed in full, with what is kept', () => {
