@@ -72,20 +72,27 @@ describe('classifyAuthAttempt', () => {
 });
 
 describe('promptOptionsFor', () => {
-    it('distress mode is biometric-only (a PIN fallback would hide the lockout)', () => {
-        expect(promptOptionsFor({ distressEnabled: true, biometricsEnrolled: true }).disableDeviceFallback).toBe(true);
+    it('the unlock prompt is biometric-only until Android blocks biometrics', () => {
+        expect(promptOptionsFor({ pinAllowed: false, biometricsEnrolled: true }).disableDeviceFallback).toBe(true);
     });
 
-    it('without distress the device PIN is always allowed', () => {
-        expect(promptOptionsFor({ distressEnabled: false, biometricsEnrolled: true }).disableDeviceFallback).toBe(false);
+    it('after a block the next prompt allows the device PIN', () => {
+        expect(promptOptionsFor({ pinAllowed: true, biometricsEnrolled: true }).disableDeviceFallback).toBe(false);
     });
 
     it('never biometric-only when no biometrics are enrolled (would be unpassable)', () => {
-        expect(promptOptionsFor({ distressEnabled: true, biometricsEnrolled: false }).disableDeviceFallback).toBe(false);
+        expect(promptOptionsFor({ pinAllowed: false, biometricsEnrolled: false }).disableDeviceFallback).toBe(false);
     });
 
     it('a biometric-only prompt has a cancel label (Android requires a negative button)', () => {
-        expect(promptOptionsFor({ distressEnabled: true, biometricsEnrolled: true }).cancelLabel).toBeTruthy();
+        expect(promptOptionsFor({ pinAllowed: false, biometricsEnrolled: true }).cancelLabel).toBeTruthy();
+    });
+
+    it('the distress wipe is not an input at all: nothing about the prompt can reveal it', () => {
+        // Guards the rule structurally: promptOptionsFor takes no distress flag.
+        const src = require('fs').readFileSync(require.resolve('@/lib/appLock'), 'utf8') as string;
+        const sig = src.slice(src.indexOf('export function promptOptionsFor'), src.indexOf('): PromptOptions'));
+        expect(sig).not.toMatch(/distress/i);
     });
 });
 
@@ -178,10 +185,10 @@ describe('Settings copy', () => {
 
     it('technical details state the Android rule and link its source', () => {
         const d = DISTRESS_TECH_DETAILS.join(' ');
+        expect(d).toMatch(/never offers the PIN before Android blocks biometrics, with or without/);
         expect(d).toMatch(/30 seconds after 5 wrong attempts/);
         expect(d).toMatch(/at most 20/);
         expect(d).toMatch(/already blocked/);
-        expect(d).toMatch(/no PIN option/);
         expect(ANDROID_BIOMETRIC_RULE_URL).toMatch(/^https:\/\/source\.android\.com\/.*cdd#7310_biometric_sensors$/);
     });
 });

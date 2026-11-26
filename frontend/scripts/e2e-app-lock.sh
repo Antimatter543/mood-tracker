@@ -239,13 +239,29 @@ shot cold-start
 finger 1; sleep 3
 has 'resource-id="app-lock-screen"'; check "cold start unlocks" "$(( $? != 0 ))"
 
-# PIN fallback without distress
+# Normal mode looks exactly like distress mode: biometric-only prompt, and the
+# PIN only after Android's block. Here the block must wipe NOTHING.
 home; launch; sleep 2
 wait_for 'Unlock SoulSync' 8
-shot pin-option
+shot normal-prompt
+has 'Use PIN|USE PIN'; check "normal prompt offers no PIN either (same as distress)" "$(( $? != 0 ))"
+for k in 1 2 3 4 5 6; do finger 2; sleep 1.5; done
+sleep 6
+wait_for 'Too many attempts' 10; check "normal mode: a block shows the same 'too many attempts'" "$(( $? == 0 ))"
+tap_id app-lock-unlock; sleep 3
 if tap_text 'Use PIN|USE PIN'; then sleep 2; fi
-enter_pin; sleep 3
-has 'resource-id="app-lock-screen"'; check "device PIN unlocks when distress is off" "$(( $? != 0 ))"
+enter_pin; sleep 4
+has 'resource-id="app-lock-screen"'; check "normal mode: device PIN unlocks after the block" "$(( $? != 0 ))"
+adb shell am force-stop "$PKG"; sleep 1
+pull_db
+[[ "$(sql 'SELECT COUNT(*) FROM entries WHERE notes IS NOT NULL AND notes <> ""')" == "$BEFORE_NOTES" ]]
+check "normal mode: the block wiped nothing" "$(( $? == 0 ))"
+# Android's biometric block lasts 30 s: let it expire before the distress part.
+sleep 35
+launch; sleep 3
+wait_for 'Unlock SoulSync' 8
+finger 1; sleep 3
+has 'resource-id="app-lock-screen"'; check "owner finger works again after the block expired" "$(( $? != 0 ))"
 
 # ── 6. turn the distress wipe on (warning dialog) ────────────────────────────
 tap_id tab-settings; sleep 2

@@ -183,15 +183,40 @@ describe('app lock gate', () => {
     });
 
     describe('distress wipe', () => {
-        it('distress ON prompts biometric-only; OFF allows the PIN', async () => {
+        it('the unlock prompt is IDENTICAL with distress on and off (nobody can tell)', async () => {
             await renderGate({ app_lock_enabled: true, distress_wipe_enabled: true });
             await waitFor(() => expect(auth.__calls()).toHaveLength(1));
-            expect(auth.__calls()[0].disableDeviceFallback).toBe(true);
+            const withDistress = auth.__calls()[0];
 
             auth.__reset();
             await renderGate({ app_lock_enabled: true, distress_wipe_enabled: false });
             await waitFor(() => expect(auth.__calls()).toHaveLength(1));
-            expect(auth.__calls()[0].disableDeviceFallback).toBe(false);
+            const without = auth.__calls()[0];
+
+            expect(withDistress).toEqual(without);
+            expect(without.disableDeviceFallback).toBe(true);
+        });
+
+        it('distress OFF: a block offers the PIN next, and wipes nothing', async () => {
+            auth.__queueResult({ success: false, error: 'lockout' }, 6000);
+            const view = await renderGate({ app_lock_enabled: true, distress_wipe_enabled: false });
+            await waitFor(() => expect(view.getByTestId('app-lock-message')).toBeTruthy());
+            await fireEvent.press(view.getByTestId('app-lock-unlock'));
+            await waitFor(() => expect(view.queryByTestId('app-lock-screen')).toBeNull());
+            expect(auth.__calls()[1].disableDeviceFallback).toBe(false);
+            expect(mockRunDistressWipe).not.toHaveBeenCalled();
+        });
+
+        it('a successful unlock makes the next prompt biometric-only again', async () => {
+            auth.__queueResult({ success: false, error: 'lockout' }, 6000);
+            const view = await renderGate({ app_lock_enabled: true, distress_wipe_enabled: false });
+            await waitFor(() => expect(view.getByTestId('app-lock-message')).toBeTruthy());
+            await fireEvent.press(view.getByTestId('app-lock-unlock')); // PIN prompt, succeeds
+            await waitFor(() => expect(view.queryByTestId('app-lock-screen')).toBeNull());
+            await goBackground();
+            await goActive();
+            await waitFor(() => expect(auth.__calls()).toHaveLength(3));
+            expect(auth.__calls()[2].disableDeviceFallback).toBe(true);
         });
 
         it('a lockout in our prompt wipes, turns itself off, remounts the app, and looks like a plain lockout', async () => {

@@ -70,20 +70,26 @@ export type PromptOptions = {
 };
 
 /**
- * Distress mode needs a BIOMETRIC-ONLY prompt: with the device PIN allowed,
- * Android silently switches to the PIN after the fifth wrong finger and never
- * reports a lockout, so the wipe could never trigger. Everyone else gets the
- * PIN fallback, which is what keeps a wet finger from locking them out.
+ * The unlock prompt is BIOMETRIC-ONLY until Android blocks biometrics, and it
+ * is the same with the distress wipe on or off. That is deliberate: if only
+ * distress mode hid the PIN option, anyone watching could tell it was on.
+ * (Distress mode also needs it technically: with the PIN allowed, Android
+ * switches to the PIN after the fifth wrong finger instead of reporting a
+ * lockout, so the wipe could never trigger.)
  *
- * `biometricsEnrolled` false (fingerprints removed since the option was turned
- * on) always allows the PIN: a biometric-only prompt would then be impossible
- * to pass and the user would be locked out of their own journal for good.
+ * `pinAllowed`: after a block (or when biometrics are unavailable) the next
+ * prompt allows the device PIN, again in both modes. With distress on, the
+ * wipe has already run by then.
+ *
+ * `biometricsEnrolled` false (no fingerprint/face, or removed since the lock
+ * was turned on) always allows the PIN: a biometric-only prompt would be
+ * impossible to pass and the user would be locked out of their own journal.
  */
 export function promptOptionsFor(opts: {
-    distressEnabled: boolean;
+    pinAllowed: boolean;
     biometricsEnrolled: boolean;
 }): PromptOptions {
-    const biometricOnly = opts.distressEnabled && opts.biometricsEnrolled;
+    const biometricOnly = opts.biometricsEnrolled && !opts.pinAllowed;
     return {
         promptMessage: 'Unlock SoulSync',
         cancelLabel: 'Cancel',
@@ -156,7 +162,8 @@ export function distressWipeBlocker(caps: { enrolled: boolean; securityLevel: nu
 /** Settings copy, kept here so the tests can pin the promises it makes. */
 export const APP_LOCK_COPY = {
     lockDescription:
-        'Ask for your fingerprint, face or device PIN every time SoulSync opens or comes back from the background.',
+        'Ask for your fingerprint or face every time SoulSync opens or comes back from the background. ' +
+        'If Android blocks biometrics after too many tries, your device PIN works.',
     distressDescription:
         "If someone makes you unlock SoulSync, use a wrong finger until Android blocks biometrics (usually 5 tries). " +
         'SoulSync then quietly removes your notes, photos and other private details. Your days and mood scores stay, ' +
@@ -196,8 +203,9 @@ export const DISTRESS_TECH_DETAILS: readonly string[] = [
     'Only attempts Android actually reads and rejects count. A smudged or partial touch usually does not.',
     "Only a block that happens in SoulSync's own unlock prompt counts. If biometrics were already blocked " +
         "(for example after wrong attempts on your phone's lock screen), nothing is erased.",
-    "While this is on, SoulSync's prompt has no PIN option: with one, Android would switch to the PIN " +
-        'instead of blocking. After a wipe, the PIN works again and the option turns itself off.',
+    "SoulSync's unlock prompt never offers the PIN before Android blocks biometrics, with or without the " +
+        'distress wipe, so nobody can tell from the prompt whether it is on. Once biometrics are blocked, ' +
+        'the PIN works; with the distress wipe on, it has already run by then and turns itself off.',
     'The erasing happens at once, in the background. The lock screen looks exactly like after a normal ' +
         'block. Erased data is overwritten in the database file, not just marked as deleted.',
     'Out of reach for the app: backups you saved elsewhere (Drive, email), Android\'s own device backup, ' +
@@ -211,8 +219,8 @@ export const DISTRESS_TECH_DETAILS: readonly string[] = [
  */
 export function distressWarningFor(scope: DistressScope): string {
     const trigger =
-        "While this is on, SoulSync's unlock prompt accepts only fingerprint or face (no PIN). If Android " +
-        'blocks biometrics after wrong attempts there (usually 5), SoulSync silently and permanently ';
+        "If Android blocks biometrics after wrong attempts at SoulSync's unlock prompt (usually 5), " +
+        'SoulSync silently and permanently ';
     const accident =
         'This also happens if it fails by accident (wet finger, gloves). It cannot be undone. ' +
         'Make a backup first and keep it somewhere other than this phone.';

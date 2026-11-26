@@ -113,7 +113,8 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
             }
             const distress = distressRef.current && !pinAllowedRef.current && caps.enrolled;
             const { attempt, elapsedMs } = await promptBiometric(
-                promptOptionsFor({ distressEnabled: distress, biometricsEnrolled: caps.enrolled })
+                // Same prompt with distress on or off (see promptOptionsFor).
+                promptOptionsFor({ pinAllowed: pinAllowedRef.current, biometricsEnrolled: caps.enrolled })
             );
             const result = classifyAuthAttempt(attempt, { distressEnabled: distress, elapsedMs });
 
@@ -205,7 +206,8 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
             const caps = await getBiometricCapabilities();
             if (failsOpen(caps.securityLevel)) return false;
             const { attempt } = await promptBiometric({
-                ...promptOptionsFor({ distressEnabled: false, biometricsEnrolled: caps.enrolled }),
+                // Settings confirmation, not the lock screen: the PIN is fine here.
+                ...promptOptionsFor({ pinAllowed: true, biometricsEnrolled: caps.enrolled }),
                 promptMessage: 'Confirm it’s you',
             });
             return attempt.success;
