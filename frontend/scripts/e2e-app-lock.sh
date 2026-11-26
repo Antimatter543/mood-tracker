@@ -26,7 +26,13 @@ CHECKS=()
 NFAIL=0
 check() { # check <name> <0|1 ok> [detail]
   if [[ "$2" == 1 ]]; then CHECKS+=("| $1 | PASS | ${3:-} |"); log "PASS $1 ${3:-}";
-  else CHECKS+=("| $1 | **FAIL** | ${3:-} |"); NFAIL=$((NFAIL + 1)); log "FAIL $1 ${3:-}"; fi
+  else
+    CHECKS+=("| $1 | **FAIL** | ${3:-} |"); NFAIL=$((NFAIL + 1)); log "FAIL $1 ${3:-}"
+    # Self-explaining failures: what was on screen (the artifact may not be at hand).
+    dump
+    log "  on screen: $(grep -oE '(text|resource-id)=\"[^\"]+\"' <<<"$UI" | grep -v 'resource-id="android' | head -25 | tr '\n' ' ')"
+    shot "fail-$(tr -c 'a-zA-Z0-9' '-' <<<"$1" | cut -c1-40)"
+  fi
 }
 STEP=0
 shot() { STEP=$((STEP + 1)); adb exec-out screencap -p >"$OUT/screens/$(printf %02d $STEP)-$1.png" 2>/dev/null || true; }
@@ -68,10 +74,17 @@ finger() { adb -e emu finger touch "$1" >/dev/null 2>&1; sleep 0.4; adb -e emu f
 launch() { adb shell am start -n "$PKG/.MainActivity" >/dev/null 2>&1; }
 home() { adb shell input keyevent KEYCODE_HOME; sleep 2; }
 enter_pin() { adb shell input text "$PIN"; adb shell input keyevent 66; }
-scroll_to_id() { # swipe up until <id> is on screen (bounded)
-  local i
-  for (( i = 0; i < 12; i++ )); do has "resource-id=\"$1\"" && return 0; adb shell input swipe 540 1600 540 700 400; sleep 1; done
-  return 1
+scroll_to_id() { # swipe up until <id> sits in the upper 2/3 of the screen, clear of the
+  local i c y   # floating tab bar and the FAB (a tap there hits the tab bar instead)
+  for (( i = 0; i < 14; i++ )); do
+    if has "resource-id=\"$1\""; then
+      c="$(center_of "resource-id=\"$1\"")"; y="${c#* }"
+      (( y < 1400 )) && return 0
+      adb shell input swipe 540 1300 540 900 600; sleep 1; continue
+    fi
+    adb shell input swipe 540 1600 540 700 400; sleep 1
+  done
+  has "resource-id=\"$1\""
 }
 
 # Pull the app database (WAL folded in) and run SQL on it on the runner.
@@ -200,7 +213,7 @@ shot after-reopens
 adb shell input keyevent KEYCODE_APP_SWITCH; sleep 2
 adb shell input keyevent KEYCODE_HOME; sleep 1
 launch; sleep 2
-wait_for 'resource-id="app-lock-screen"' 8; check "app switch + return shows lock" "$(( $? == 0 ))"
+wait_for 'resource-id="app-lock-screen"|Unlock SoulSync' 8; check "app switch + return shows lock" "$(( $? == 0 ))"
 finger 1; sleep 3
 
 # cancel the prompt, stay locked, Unlock button works
@@ -232,9 +245,9 @@ has 'resource-id="app-lock-screen"'; check "device PIN unlocks when distress is 
 # ── 6. turn the distress wipe on (warning dialog) ────────────────────────────
 tap_id tab-settings; sleep 2
 scroll_to_id distress-wipe-switch; check "distress option shown once lock is on" "$(( $? == 0 ))"
-tap_id distress-wipe-switch; sleep 2
-has 'Turn on distress wipe'; check "distress warning dialog shown" "$(( $? == 0 ))"
-has 'backup'; check "warning mentions backup" "$(( $? == 0 ))"
+tap_id distress-wipe-switch
+wait_for 'Turn on distress wipe' 8; check "distress warning dialog shown" "$(( $? == 0 ))"
+has 'Make a backup first'; check "warning mentions backup" "$(( $? == 0 ))"
 shot distress-warning
 tap_text 'TURN ON|Turn on'; sleep 2
 [[ "$(node_attr distress-wipe-switch checked)" == "true" ]]; check "distress wipe turned on" "$(( $? == 0 ))"
