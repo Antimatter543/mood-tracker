@@ -9,13 +9,11 @@
 import React, { useState } from 'react';
 import { Alert } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
-import * as LocalAuth from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { APP_LOCK_COPY } from '@/lib/appLock';
 import { DEFAULT_DISTRESS_SCOPE, DISTRESS_CATEGORIES, DISTRESS_CATEGORY_COPY, keptSummary } from '@/lib/distressScope';
 import { checkPin, setAppPin } from '@/lib/pinStore';
 
-const auth = LocalAuth as unknown as { __reset: () => void; __setCapabilities: (c: object) => void };
 const store = SecureStore as unknown as { __reset: () => void };
 
 type S = { app_lock_enabled: boolean; distress_wipe_enabled: boolean; distress_wipe_scope: string; theme: string; theme_mode: string };
@@ -80,7 +78,6 @@ let alertSpy: jest.SpyInstance;
 let alertAnswer: string | null = null;
 
 beforeEach(() => {
-    auth.__reset();
     store.__reset();
     mockUpdateSetting.mockClear();
     alertAnswer = null;
@@ -125,14 +122,11 @@ describe('AppLockSection', () => {
         expect(view.getByTestId('app-lock-switch').props.value).toBe(false);
     });
 
-    it('a phone with no screen lock is told to set one up first (it is the way back in)', async () => {
-        auth.__setCapabilities({ enrolled: false, securityLevel: 0 });
+    it('setting the app PIN says a forgotten PIN cannot be reset', async () => {
         const view = await render(<Harness initial={{}} />);
         await fireEvent(view.getByTestId('app-lock-switch'), 'valueChange', true);
-        await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(
-            APP_LOCK_COPY.noScreenLockTitle, APP_LOCK_COPY.noScreenLock
-        ));
-        expect(view.queryByTestId('pin-setup')).toBeNull();
+        await waitFor(() => expect(view.getByTestId('pin-setup')).toBeTruthy());
+        expect(view.getByTestId('pin-setup-note').props.children).toMatch(/no way to reset a forgotten PIN/);
     });
 
     it('distress PIN: short confirmation, then a second PIN that must differ from the app PIN', async () => {

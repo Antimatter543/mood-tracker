@@ -5,7 +5,7 @@
 # uiautomator dump reads the screen, and the database is pulled (adb root) and
 # read with python's sqlite3 to prove what the distress PIN kept and destroyed.
 #
-# PINs: app 2468, distress 9999, the phone's own screen lock 1111.
+# PINs: app 2468, distress 9999.
 # NEVER run on the laptop: it drives whatever adb device is attached.
 #
 # Usage: frontend/scripts/e2e-app-lock.sh <qa-apk>
@@ -15,7 +15,6 @@ APK="${1:?usage: e2e-app-lock.sh <qa-apk>}"
 OUT="${E2E_OUT:-e2e-out}"
 BOOT_TRIES="${BOOT_TRIES:-150}"
 PKG=com.raeduslabs.soulsyncapp
-PHONE_PIN=1111   # the phone's own screen lock ("Forgot PIN?")
 APP_PIN=2468
 DISTRESS_PIN=9999
 mkdir -p "$OUT/screens" "$OUT/ui" "$OUT/db"
@@ -73,7 +72,6 @@ node_attr() { # node_attr <id> <attr>
 }
 launch() { adb shell am start -n "$PKG/.MainActivity" >/dev/null 2>&1; }
 home() { adb shell input keyevent KEYCODE_HOME; sleep 2; }
-phone_pin() { adb shell input text "$PHONE_PIN"; adb shell input keyevent 66; }
 # Type a PIN on SoulSync's own pad: one dump for the key positions, then taps.
 type_pin() {
   local d c
@@ -145,9 +143,6 @@ clear_system_dialogs setup
 adb install -r -t -g "$APK" >"$OUT/install.txt" 2>&1 || { cat "$OUT/install.txt"; fail "adb install failed"; }
 log "installed"
 
-# ── 1. the phone needs a screen lock (the way back in: "Forgot PIN?") ────────
-adb shell locksettings set-pin "$PHONE_PIN" >/dev/null 2>&1 || log "warn: set-pin failed"
-
 # ── 2. seed a journal, then add private things the seed has none of ─────────
 adb shell am start -a android.intent.action.VIEW -d "myapp://qa/seed?scenario=week" "$PKG" >/dev/null 2>&1
 wait_for 'QA seed: ok week' 40; seeded=$?
@@ -194,6 +189,7 @@ has 'resource-id="distress-wipe-switch"'; check "distress option hidden while lo
 shot settings-before
 tap_id app-lock-switch
 wait_for 'Choose an app PIN' 6; check "PIN setup opens" "$(( $? == 0 ))"
+has 'no way to reset a forgotten PIN'; check "PIN setup says a forgotten PIN cannot be reset" "$(( $? == 0 ))"
 shot pr-pin-setup
 type_pin "$APP_PIN"; sleep 1
 wait_for 'Enter the PIN again' 4
@@ -327,20 +323,15 @@ adb shell ls "$PHOTO" >/dev/null 2>&1; check "photo file deleted" "$(( $? != 0 )
 adb shell cat "$DBDIR/moodTracker.db" "$DBDIR/moodTracker.db-wal" 2>/dev/null | grep -c 'E2E SECRET NOTE' >"$OUT/db/raw-grep.txt"
 check "secret note not recoverable from the raw DB file" "$(( $(cat "$OUT/db/raw-grep.txt") == 0 ))"
 
-# ── 9. "Forgot PIN?": the phone's screen lock turns the app lock off ──────────
+# ── 9. no way past the PIN; turning the lock off releases it ─────────────────
 home; launch; sleep 2
 wait_for 'resource-id="app-lock-screen"' 8
-tap_id app-lock-forgot; sleep 2
-has 'Forgot your PIN'; check "Forgot PIN explains itself" "$(( $? == 0 ))"
-tap_text 'CONTINUE|Continue'; sleep 3
-shot forgot-device-prompt
-if tap_text 'Use PIN|USE PIN'; then sleep 2; fi
-phone_pin; sleep 4
-tap_text 'OK|Ok'; sleep 1
-has 'resource-id="app-lock-screen"'; check "Forgot PIN: phone screen lock opens the app" "$(( $? != 0 ))"
+has 'forgot'; check "lock screen offers no forgot-PIN bypass" "$(( $? != 0 ))"
+type_pin "$APP_PIN"; sleep 3
 tap_id tab-settings; sleep 2
 scroll_to_id app-lock-switch
-[[ "$(node_attr app-lock-switch checked)" == "false" ]]; check "Forgot PIN turned the app lock off" "$(( $? == 0 ))"
+tap_id app-lock-switch; sleep 2
+[[ "$(node_attr app-lock-switch checked)" == "false" ]]; check "app lock turned off in Settings" "$(( $? == 0 ))"
 home; launch; sleep 3
 has 'resource-id="app-lock-screen"'; check "lock off: reopen goes straight in" "$(( $? != 0 ))"
 shot final

@@ -56,6 +56,7 @@ export function PinSetupDialog({
         headerRow: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' },
         title: { color: colors.text, fontSize: 20, fontWeight: 'bold', flex: 1 },
         error: { color: '#ff6b6b', fontSize: 14, minHeight: 20, textAlign: 'center' },
+        note: { color: colors.textSecondary, fontSize: 13, lineHeight: 18, textAlign: 'center' },
     }), [colors]);
 
     const copy = PIN_SETUP_COPY[mode];
@@ -106,6 +107,7 @@ export function PinSetupDialog({
                 </View>
                 <PinPad value={value} onChange={v => { setValue(v); setError(null); }} onSubmit={submit} busy={busy} />
                 <Text style={styles.error} testID="pin-setup-error">{error ?? ''}</Text>
+                <Text style={styles.note} testID="pin-setup-note">{copy.note}</Text>
             </View>
         </OverlayModal>
     );

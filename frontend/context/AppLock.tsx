@@ -1,21 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, AppState, AppStateStatus, BackHandler, StyleSheet, View } from 'react-native';
+import { AppState, AppStateStatus, BackHandler, StyleSheet, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { useSettings } from '@/context/SettingsContext';
 import { bumpDataVersion } from '@/context/dataRefreshStore';
 import { LockScreen } from '@/components/LockScreen';
-import { APP_LOCK_COPY } from '@/lib/appLock';
 import { MIN_UNLOCK_MS, remainingWaitMs, shouldLockOnAppStateChange, waitMessage } from '@/lib/pinLock';
 import {
     checkPin,
-    clearAllPins,
     clearDistressPin,
     hasAppPin,
     readFailures,
     writeFailures,
 } from '@/lib/pinStore';
-import { confirmDeviceCredential } from '@/lib/deviceCredential';
 import { runDistressWipe } from '@/databases/distressWipe';
 import { parseDistressScope } from '@/lib/distressScope';
 import { now } from '@/lib/clock';
@@ -37,9 +34,9 @@ import { now } from '@/lib/clock';
  * runs after the app is open), deletes itself and turns the option off. Wrong
  * PINs are counted and delayed the same way whatever is set.
  *
- * "Forgot PIN?": the phone's screen lock turns the app lock off. With a
- * distress PIN set it wipes first, since anyone who knows the phone PIN could
- * use this way in; on screen both cases look the same.
+ * There is no "forgot PIN" way in: any recovery path would also be a way past
+ * the distress PIN. A forgotten PIN means clearing the app data and restoring
+ * a backup, and the PIN setup says so.
  */
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -61,8 +58,6 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
 
     const lockEnabledRef = useRef(lockEnabled);
     const settingsRef = useRef(settings);
-    // Our own device-credential prompt pauses the activity: never re-lock on that.
-    const paused = useRef(false);
     lockEnabledRef.current = lockEnabled;
     settingsRef.current = settings;
 
@@ -116,7 +111,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
         return () => clearInterval(t);
     }, [waitUntil]);
 
-    /** The distress wipe, shared by the distress PIN and "Forgot PIN?". */
+    /** The distress wipe, run by the distress PIN before the app opens. */
     const wipe = useCallback(async () => {
         try {
             const summary = await runDistressWipe(
@@ -171,43 +166,11 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
         }
     }, [busy, pin, waitUntil, wipe]);
 
-    const forgot = useCallback(() => {
-        Alert.alert(APP_LOCK_COPY.forgotTitle, APP_LOCK_COPY.forgotMessage, [
-            { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'Continue',
-                onPress: async () => {
-                    paused.current = true;
-                    const ok = await confirmDeviceCredential();
-                    paused.current = false;
-                    if (!ok) return;
-                    setBusy(true);
-                    try {
-                        if (settingsRef.current.distress_wipe_enabled) await wipe();
-                        await clearAllPins();
-                        await updateSetting('distress_wipe_enabled', false).catch(() => {});
-                        await updateSetting('app_lock_enabled', false).catch(() => {});
-                        setPin('');
-                        setWaitUntil(0);
-                        setMessage(null);
-                        setLocked(false);
-                        Alert.alert(APP_LOCK_COPY.lockTurnedOff);
-                    } finally {
-                        setBusy(false);
-                    }
-                },
-            },
-        ]);
-    }, [updateSetting, wipe]);
-
     // AppState: lock on background.
     useEffect(() => {
         const sub = AppState.addEventListener('change', (next: AppStateStatus) => {
             if (
-                shouldLockOnAppStateChange(next, {
-                    lockEnabled: lockEnabledRef.current,
-                    paused: paused.current,
-                })
+                shouldLockOnAppStateChange(next, { lockEnabled: lockEnabledRef.current })
             ) {
                 setLocked(true);
                 setPin('');
@@ -248,7 +211,6 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
                     busy={busy}
                     waiting={waiting}
                     message={message}
-                    onForgot={forgot}
                 />
             ) : null}
         </>

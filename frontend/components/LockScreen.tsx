@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useThemeColors } from '@/styles/global';
@@ -20,7 +20,6 @@ export function LockScreen({
     busy,
     waiting,
     message,
-    onForgot,
 }: {
     pin: string;
     onPinChange: (next: string) => void;
@@ -28,7 +27,6 @@ export function LockScreen({
     busy: boolean;
     waiting: boolean;
     message: string | null;
-    onForgot: () => void;
 }) {
     const colors = useThemeColors();
     const insets = useSafeAreaInsets();
@@ -44,8 +42,6 @@ export function LockScreen({
         title: { color: colors.text, fontSize: 22, fontWeight: '600', marginBottom: 6 },
         subtitle: { color: colors.textSecondary, fontSize: 15, textAlign: 'center', marginBottom: 24 },
         message: { color: colors.textSecondary, fontSize: 14, textAlign: 'center', minHeight: 20, marginTop: 18 },
-        forgot: { marginTop: 10, padding: 8 },
-        forgotText: { color: colors.accent, fontSize: 14, fontWeight: '500' },
     }), [colors]);
 
     return (
@@ -58,15 +54,6 @@ export function LockScreen({
             <Text style={styles.subtitle}>{busy ? 'Unlocking…' : 'Enter your PIN'}</Text>
             <PinPad value={pin} onChange={onPinChange} onSubmit={onSubmit} busy={busy} disabled={waiting} />
             <Text style={styles.message} testID="app-lock-message">{message ?? ''}</Text>
-            <Pressable
-                testID="app-lock-forgot"
-                accessibilityRole="button"
-                onPress={onForgot}
-                disabled={busy}
-                style={styles.forgot}
-            >
-                <Text style={styles.forgotText}>Forgot PIN?</Text>
-            </Pressable>
         </View>
     );
 }

@@ -32,20 +32,25 @@ export const APP_LOCK_COPY = {
         'suspicious, which is why this is off by default. Only a backup kept outside this phone can bring it back.',
     distressActiveHint:
         'Distress PIN is set. Keep a recent backup outside this phone: it is the only way to get your notes back after it is used.',
-    noScreenLockTitle: 'No screen lock',
-    noScreenLock:
-        'Set up a screen lock (PIN, pattern or password) in your phone settings first. It is how you get back in if you forget your SoulSync PIN.',
-    forgotTitle: 'Forgot your PIN?',
-    forgotMessage:
-        "Confirm with your phone's screen lock. The app lock then turns off, and you can set a new PIN in Settings.",
-    lockTurnedOff: 'App lock is off. Set a new PIN in Settings.',
 } as const;
 
 /** Titles for the PIN setup dialog. */
 export const PIN_SETUP_COPY = {
-    app: { title: 'Choose an app PIN', confirm: 'Enter the PIN again' },
-    change: { title: 'Choose a new app PIN', confirm: 'Enter the new PIN again' },
-    distress: { title: 'Choose a distress PIN', confirm: 'Enter the distress PIN again' },
+    app: {
+        title: 'Choose an app PIN',
+        confirm: 'Enter the PIN again',
+        note: 'There is no way to reset a forgotten PIN. You would have to clear SoulSync\'s app data and restore a backup.',
+    },
+    change: {
+        title: 'Choose a new app PIN',
+        confirm: 'Enter the new PIN again',
+        note: 'There is no way to reset a forgotten PIN. You would have to clear SoulSync\'s app data and restore a backup.',
+    },
+    distress: {
+        title: 'Choose a distress PIN',
+        confirm: 'Enter the distress PIN again',
+        note: 'Must be different from your app PIN.',
+    },
 } as const;
 
 /**
@@ -63,9 +68,8 @@ export const DISTRESS_TECH_DETAILS: readonly string[] = [
     'Erased data is overwritten in the database file, not just marked as deleted.',
     "Out of reach for the app: backups you saved elsewhere (Drive, email), Android's own device backup, " +
         'and data stored in Health Connect itself.',
-    "If you forget your PIN, \"Forgot PIN?\" asks for your phone's screen lock and turns the app lock off. " +
-        'With a distress PIN set, it erases the same as the distress PIN first, because anyone who knows your ' +
-        'phone PIN could use this way in.',
+    "There is no \"forgot PIN\": any way back in would also be a way past the distress PIN. A forgotten " +
+        "PIN means clearing SoulSync's app data and restoring a backup.",
 ];
 
 /**
@@ -76,8 +80,7 @@ export const DISTRESS_TECH_DETAILS: readonly string[] = [
 export function distressWarningFor(scope: DistressScope): string {
     const trigger = 'When you unlock SoulSync with the distress PIN, SoulSync silently and permanently ';
     const care =
-        'It cannot be undone. Make a backup first and keep it somewhere other than this phone. ' +
-        'Forgetting your app PIN has the same effect, so pick PINs you will remember.';
+        'It cannot be undone. Make a backup first and keep it somewhere other than this phone.';
     if (isDefaultScope(scope)) {
         return (
             trigger +

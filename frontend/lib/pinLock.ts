@@ -61,14 +61,9 @@ export function waitMessage(ms: number): string {
  * Whether an AppState change should (re)lock the app: on the move to the
  * BACKGROUND only ('inactive' is iOS's app-switcher peek and the moment a
  * system sheet opens over us; Android goes straight to 'background').
- * `paused` covers our own device-credential prompt ("Forgot PIN?"), whose
- * activity pauses ours.
  */
-export function shouldLockOnAppStateChange(
-    next: string,
-    opts: { lockEnabled: boolean; paused: boolean }
-): boolean {
-    return opts.lockEnabled && !opts.paused && next === 'background';
+export function shouldLockOnAppStateChange(next: string, opts: { lockEnabled: boolean }): boolean {
+    return opts.lockEnabled && next === 'background';
 }
 
 /** Shortest time the "Unlocking…" state shows, so a distress unlock (which wipes first) looks the same. */

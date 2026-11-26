@@ -31,7 +31,6 @@ describe('Settings copy', () => {
         expect(w).not.toContain(DISTRESS_CATEGORY_COPY.reminderNames.label);
         expect(w).toMatch(/cannot be undone/);
         expect(w).toMatch(/backup/i);
-        expect(w).toMatch(/Forgetting your app PIN has the same effect/);
         // The confirmation stays about what happens; options are explored later.
         expect(w).not.toMatch(/Technical details|options/i);
     });
@@ -62,14 +61,16 @@ describe('Settings copy', () => {
         expect(d).toMatch(/checked against both PINs, so it takes the same time/);
         expect(d).toMatch(/deleted and this option turns itself off/);
         expect(d).toMatch(/Wrong PINs never erase anything/);
-        expect(d).toMatch(/Forgot PIN\?/);
+        expect(d).toMatch(/no "forgot PIN"/);
         expect(APP_LOCK_COPY.distressActiveHint).toMatch(/backup/i);
     });
 
-    it('every PIN setup step has a title', () => {
+    it('every PIN setup step has a title, and the app PIN warns there is no reset', () => {
         for (const step of Object.values(PIN_SETUP_COPY)) {
             expect(step.title.length).toBeGreaterThan(0);
             expect(step.confirm.length).toBeGreaterThan(0);
         }
+        expect(PIN_SETUP_COPY.app.note).toMatch(/no way to reset a forgotten PIN/);
+        expect(PIN_SETUP_COPY.change.note).toMatch(/no way to reset a forgotten PIN/);
     });
 });

@@ -1,6 +1,6 @@
 /**
  * The app lock gate (context/AppLock.tsx): PIN on cold start and on every
- * return from the background, wrong-PIN waits, the distress PIN, "Forgot PIN?".
+ * return from the background, wrong-PIN waits, the distress PIN.
  *
  * The design rule under test: NOTHING on the lock screen may differ with or
  * without a distress PIN, before or after it is typed.
@@ -10,15 +10,10 @@
  * distressWipe*.integration.test.ts; here only WHEN and with WHAT it runs).
  */
 import React, { useState } from 'react';
-import { Alert, AppState, Text } from 'react-native';
+import { AppState, Text } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
-import * as LocalAuth from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 
-const auth = LocalAuth as unknown as {
-    __reset: () => void;
-    __queueResult: (r: unknown) => void;
-};
 const store = SecureStore as unknown as { __reset: () => void };
 
 type S = {
@@ -51,7 +46,6 @@ jest.mock('expo-sqlite', () => ({ useSQLiteContext: () => ({ mock: 'db' }) }));
 
 import { AppLockProvider } from '@/context/AppLock';
 import { findNodes } from '@/testing/rntl';
-import { APP_LOCK_COPY } from '@/lib/appLock';
 import { FREE_ATTEMPTS, MIN_UNLOCK_MS } from '@/lib/pinLock';
 import {
     checkPin,
@@ -64,24 +58,16 @@ import {
 jest.setTimeout(20_000);
 
 let appStateListener: ((s: string) => void) | null = null;
-type AlertButton = { text: string; onPress?: () => void | Promise<void> };
-let alertSpy: jest.SpyInstance;
-let alertAnswer: string | null = null;
 
 beforeEach(async () => {
-    auth.__reset();
     store.__reset();
     mockUpdateSetting.mockClear();
     mockRunDistressWipe.mockClear();
     appStateListener = null;
-    alertAnswer = null;
     Object.defineProperty(AppState, 'currentState', { value: 'active', configurable: true });
     jest.spyOn(AppState, 'addEventListener').mockImplementation(((_t: string, cb: (s: string) => void) => {
         appStateListener = cb;
         return { remove: () => {} };
-    }) as never);
-    alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(((_t: string, _m: string, buttons?: AlertButton[]) => {
-        if (alertAnswer) void buttons?.find(b => b.text === alertAnswer)?.onPress?.();
     }) as never);
     await setAppPin('2468');
 });
@@ -255,49 +241,13 @@ describe('app lock gate (PIN)', () => {
             expect(mockRunDistressWipe).not.toHaveBeenCalled();
         });
     });
+});
 
-    describe('Forgot PIN?', () => {
-        it('the phone screen lock turns the app lock off and forgets the PIN', async () => {
-            alertAnswer = 'Continue';
-            auth.__queueResult({ success: true });
-            const view = await renderGate();
-            await fireEvent.press(view.getByTestId('app-lock-forgot'));
-            await unlocked(view);
-            expect(mockUpdateSetting).toHaveBeenCalledWith('app_lock_enabled', false);
-            expect(await checkPin('2468')).toBe('wrong');
-            expect(alertSpy).toHaveBeenCalledWith(APP_LOCK_COPY.lockTurnedOff);
-            expect(mockRunDistressWipe).not.toHaveBeenCalled();
-        });
-
-        it('with a distress PIN set it wipes first; on screen it looks the same', async () => {
-            await setDistressPin('9999');
-            alertAnswer = 'Continue';
-            auth.__queueResult({ success: true });
-            const view = await renderGate({ distress_wipe_enabled: true });
-            await fireEvent.press(view.getByTestId('app-lock-forgot'));
-            await unlocked(view);
-            expect(mockRunDistressWipe).toHaveBeenCalledTimes(1);
-            expect(alertSpy).toHaveBeenCalledWith(APP_LOCK_COPY.lockTurnedOff);
-        });
-
-        it('a failed or cancelled screen-lock check changes nothing', async () => {
-            alertAnswer = 'Continue';
-            auth.__queueResult({ success: false, error: 'user_cancel' });
-            const view = await renderGate();
-            await fireEvent.press(view.getByTestId('app-lock-forgot'));
-            await waitFor(() => expect(auth).toBeTruthy());
-            expect(view.getByTestId('app-lock-screen')).toBeTruthy();
-            expect(await checkPin('2468')).toBe('app');
-        });
-
-        it('our own screen-lock prompt does not re-lock the app when it pauses it', async () => {
-            alertAnswer = 'Continue';
-            auth.__queueResult({ success: true });
-            const view = await renderGate();
-            await fireEvent.press(view.getByTestId('app-lock-forgot'));
-            await unlocked(view);
-            await goActive();
-            expect(view.queryByTestId('app-lock-screen')).toBeNull();
-        });
+describe('no way past the PIN', () => {
+    it('the lock screen offers nothing but the number pad (no "forgot PIN" bypass)', async () => {
+        const view = await renderGate();
+        const pressables = findNodes(view.toJSON(), n => typeof n.props?.testID === 'string' && n.props?.accessibilityRole === 'button')
+            .map(n => n.props!.testID as string);
+        expect(pressables.every(id => id.startsWith('pin-key-'))).toBe(true);
     });
 });

@@ -68,12 +68,11 @@ describe('wrong-PIN wait', () => {
 });
 
 describe('shouldLockOnAppStateChange', () => {
-    it('locks on background when enabled, not while our own prompt is open', () => {
-        expect(shouldLockOnAppStateChange('background', { lockEnabled: true, paused: false })).toBe(true);
-        expect(shouldLockOnAppStateChange('background', { lockEnabled: false, paused: false })).toBe(false);
-        expect(shouldLockOnAppStateChange('background', { lockEnabled: true, paused: true })).toBe(false);
+    it('locks on background when enabled', () => {
+        expect(shouldLockOnAppStateChange('background', { lockEnabled: true })).toBe(true);
+        expect(shouldLockOnAppStateChange('background', { lockEnabled: false })).toBe(false);
         for (const s of ['inactive', 'active', 'unknown']) {
-            expect(shouldLockOnAppStateChange(s, { lockEnabled: true, paused: false })).toBe(false);
+            expect(shouldLockOnAppStateChange(s, { lockEnabled: true })).toBe(false);
         }
     });
 });

@@ -4,9 +4,8 @@
  * Settings card "Privacy & security": the app lock (a PIN) and the distress PIN.
  * Both opt-in, default OFF (databases/settings.ts, migration 16).
  *
- *   - App lock ON: choose a PIN (typed twice). Needs a phone screen lock, which
- *     is the way back in if the PIN is forgotten ("Forgot PIN?" on the lock
- *     screen). OFF forgets both PINs. "Change PIN" while on.
+ *   - App lock ON: choose a PIN (typed twice; the setup says a forgotten PIN
+ *     cannot be reset). OFF forgets both PINs. "Change PIN" while on.
  *   - Distress PIN: only while the lock is on. A short confirmation that points
  *     at backups (a custom selection is listed in full), then choose a second
  *     PIN that must differ from the app PIN. "Technical details" (components/
@@ -26,7 +25,6 @@ import { useThemeColors } from '@/styles/global';
 import { useSettings } from '@/context/SettingsContext';
 import { DistressDetailsDialog } from '@/components/DistressDetailsDialog';
 import { PinSetupDialog, PinSetupMode } from '@/components/PinSetupDialog';
-import { hasDeviceCredential } from '@/lib/deviceCredential';
 import { clearAllPins, clearDistressPin, setAppPin, setDistressPin } from '@/lib/pinStore';
 import { APP_LOCK_COPY, distressWarningFor } from '@/lib/appLock';
 import {
@@ -112,10 +110,6 @@ export function AppLockSection() {
             } finally {
                 setBusy(false);
             }
-            return;
-        }
-        if (!(await hasDeviceCredential())) {
-            Alert.alert(APP_LOCK_COPY.noScreenLockTitle, APP_LOCK_COPY.noScreenLock);
             return;
         }
         setSetup('app');
