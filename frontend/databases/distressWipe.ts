@@ -58,7 +58,7 @@ import {
  *     documents folder, and the picker caches,
  *   - the distress flag itself (`distress_wipe_enabled` -> 'false'), in the
  *     same transaction, so the Settings screen no longer advertises it and a
- *     second lockout cannot fire again.
+ *     second use cannot fire again.
  *
  * Forensics: `PRAGMA secure_delete` (on before the wipe) zeroes freed space,
  * then a VACUUM + WAL checkpoint (TRUNCATE) rewrite the file, so the old notes are not

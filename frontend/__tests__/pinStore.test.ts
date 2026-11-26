@@ -1,37 +1,42 @@
 /**
- * The PIN store (lib/pinStore.ts) with REAL Argon2id (the expo-argon2 mock runs
- * @noble/hashes) and the in-memory SecureStore mock.
- *
- * The rule under test: nothing about a check may reveal whether a distress PIN
- * exists. Every check derives exactly two hashes, whatever is stored.
+ * The PIN store (lib/pinStore.ts) against the in-memory SecureStore mock.
+ * The PINs live only in SecureStore (Keystore-encrypted, this device only);
+ * every check compares the typed PIN with BOTH slots.
  */
 import * as SecureStore from 'expo-secure-store';
-import * as Argon2 from 'expo-argon2';
 import {
     checkPin,
     clearAllPins,
     clearDistressPin,
     hasAppPin,
     isAppPin,
-    PIN_KDF,
     readFailures,
+    samePin,
     setAppPin,
     setDistressPin,
     writeFailures,
 } from '@/lib/pinStore';
 
 const store = SecureStore as unknown as { __reset: () => void; __dump: () => Record<string, string> };
-const argon = Argon2 as unknown as { calls: unknown[] };
 
-beforeEach(() => {
-    store.__reset();
-    argon.calls.length = 0;
+beforeEach(() => store.__reset());
+
+describe('samePin', () => {
+    it('is true only for the same PIN', () => {
+        expect(samePin('1234', '1234')).toBe(true);
+        expect(samePin('1234', '1235')).toBe(false);
+        expect(samePin('1234', '12345')).toBe(false);
+        expect(samePin('12345678', '12345678')).toBe(true);
+        expect(samePin('', '')).toBe(true);
+        expect(samePin('1234', '')).toBe(false);
+    });
 });
 
 describe('pin store', () => {
     it('starts with no PIN; nothing opens', async () => {
         expect(await hasAppPin()).toBe(false);
         expect(await checkPin('1234')).toBe('wrong');
+        expect(await checkPin('')).toBe('wrong');
     });
 
     it('the app PIN opens as "app"; other PINs are wrong', async () => {
@@ -51,42 +56,33 @@ describe('pin store', () => {
         expect(await checkPin('5555')).toBe('wrong');
     });
 
+    it('an empty distress slot never matches (not even an empty input)', async () => {
+        await setAppPin('1234');
+        expect(await checkPin('')).toBe('wrong');
+    });
+
     it('a distress PIN needs an app PIN first', async () => {
         await expect(setDistressPin('9999')).rejects.toThrow();
     });
 
-    it('never stores a PIN in the clear', async () => {
+    it('the PINs live only in SecureStore, under one key, this device only', async () => {
+        const setItem = jest.spyOn(SecureStore, 'setItemAsync');
         await setAppPin('1234');
-        await setDistressPin('987654');
-        const raw = JSON.stringify(store.__dump());
-        expect(raw).not.toContain('1234');
-        expect(raw).not.toContain('987654');
-    });
-
-    it('every check costs the same two derivations, with or without a distress PIN', async () => {
-        await setAppPin('1234');
-        argon.calls.length = 0;
-        await checkPin('0000');
-        const without = argon.calls.length;
-
         await setDistressPin('9999');
-        argon.calls.length = 0;
-        await checkPin('0000');
-        const withDistress = argon.calls.length;
-
-        expect(without).toBe(2);
-        expect(withDistress).toBe(2);
-        expect(argon.calls.every(c => (c as { memoryCost: number }).memoryCost === PIN_KDF.memoryKiB)).toBe(true);
+        expect(Object.keys(store.__dump())).toEqual(['app_lock_pins_v2']);
+        for (const call of setItem.mock.calls) {
+            expect(call[2]).toEqual({ keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
+        }
+        setItem.mockRestore();
     });
 
     it('clearing the distress PIN leaves no trace of it; the app PIN keeps working', async () => {
         await setAppPin('1234');
-        const before = JSON.parse(Object.values(store.__dump())[0]);
+        const before = store.__dump().app_lock_pins_v2;
         await setDistressPin('9999');
         await clearDistressPin();
-        const after = JSON.parse(Object.values(store.__dump())[0]);
-        expect(after.distress).toBeNull();
-        expect(Object.keys(after).sort()).toEqual(Object.keys(before).sort());
+        expect(store.__dump().app_lock_pins_v2).toBe(before);
+        expect(store.__dump().app_lock_pins_v2).not.toContain('9999');
         expect(await checkPin('9999')).toBe('wrong');
         expect(await checkPin('1234')).toBe('app');
     });

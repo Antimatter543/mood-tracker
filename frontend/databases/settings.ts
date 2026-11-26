@@ -99,9 +99,9 @@ export const SETTINGS_REGISTRY = {
     app_lock_enabled: {
         key: 'app_lock_enabled',
         // Opt-in (default OFF): ask for the app PIN (lib/pinStore.ts) on every
-        // cold start AND every return from the background. No biometrics. type:'text' so
-        // the generic SettingRow renderer skips it: turning it on needs a
-        // successful authentication first, which only the bespoke card
+        // cold start AND every return from the background. type:'text' so the
+        // generic SettingRow renderer skips it: turning it on needs a PIN to be
+        // chosen first, which only the bespoke card
         // (components/AppLockSection.tsx) does. Gate: context/AppLock.tsx.
         // Seeded by migration 16.
         default: false,
@@ -119,7 +119,7 @@ export const SETTINGS_REGISTRY = {
         // Seeded by migration 16.
         default: false,
         type: 'text',
-        label: 'Distress wipe',
+        label: 'Distress PIN',
         description: 'A second PIN that unlocks normally and quietly clears private journal content',
     },
     distress_wipe_scope: {

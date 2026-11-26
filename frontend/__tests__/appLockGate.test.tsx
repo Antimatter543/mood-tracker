@@ -5,8 +5,7 @@
  * The design rule under test: NOTHING on the lock screen may differ with or
  * without a distress PIN, before or after it is typed.
  *
- * Real: the gate, LockScreen, PinPad, lib/pinStore (Argon2id via the expo-argon2
- * mock, cheap params), lib/pinLock. Fake: AppState (a captured listener),
+ * Real: the gate, LockScreen, PinPad, lib/pinStore (in-memory SecureStore), lib/pinLock. Fake: AppState (a captured listener),
  * settings (a stateful stand-in), the wipe itself (its SQL is proven in
  * distressWipe*.integration.test.ts; here only WHEN and with WHAT it runs).
  */
@@ -18,7 +17,7 @@ import * as SecureStore from 'expo-secure-store';
 
 const auth = LocalAuth as unknown as {
     __reset: () => void;
-    __queueResult: (r: unknown, ms?: number) => void;
+    __queueResult: (r: unknown) => void;
 };
 const store = SecureStore as unknown as { __reset: () => void };
 
@@ -55,20 +54,19 @@ import { findNodes } from '@/testing/rntl';
 import { APP_LOCK_COPY } from '@/lib/appLock';
 import { FREE_ATTEMPTS, MIN_UNLOCK_MS } from '@/lib/pinLock';
 import {
-    __setPinKdfForTests,
     checkPin,
     readFailures,
     setAppPin,
     setDistressPin,
 } from '@/lib/pinStore';
 
+// Each unlock waits out the real minimum "Unlocking…" time (MIN_UNLOCK_MS).
+jest.setTimeout(20_000);
+
 let appStateListener: ((s: string) => void) | null = null;
 type AlertButton = { text: string; onPress?: () => void | Promise<void> };
 let alertSpy: jest.SpyInstance;
 let alertAnswer: string | null = null;
-
-beforeAll(() => __setPinKdfForTests({ name: 'argon2id', memoryKiB: 64, iterations: 1, parallelism: 1 }));
-afterAll(() => __setPinKdfForTests(null));
 
 beforeEach(async () => {
     auth.__reset();
@@ -119,13 +117,24 @@ function Harness({ initial }: { initial: Partial<S> }) {
 }
 
 type View = Awaited<ReturnType<typeof render>>;
-const renderGate = (initial: Partial<S> = {}) => render(<Harness initial={initial} />);
+/** Render, then let the gate's mount checks (stored PIN, running wait) settle. */
+const renderGate = async (initial: Partial<S> = {}) => {
+    const view = await render(<Harness initial={initial} />);
+    await act(async () => {});
+    return view;
+};
 
 const typePin = async (view: View, pin: string) => {
     for (const d of pin) await fireEvent.press(view.getByTestId(`pin-key-${d}`));
     await fireEvent.press(view.getByTestId('pin-key-ok'));
 };
-const unlocked = (view: View) => waitFor(() => expect(view.queryByTestId('app-lock-screen')).toBeNull(), { timeout: 4000 });
+/** Wait out the minimum "Unlocking…" time inside act, then expect the app open. */
+const unlocked = async (view: View) => {
+    await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, MIN_UNLOCK_MS + 150));
+    });
+    await waitFor(() => expect(view.queryByTestId('app-lock-screen')).toBeNull());
+};
 
 describe('app lock gate (PIN)', () => {
     it('lock OFF: no lock screen, ever', async () => {

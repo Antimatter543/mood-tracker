@@ -3,8 +3,7 @@
  * is a PIN (typed twice), the distress PIN is a second PIN behind a short
  * confirmation, and the advanced selection lives behind Technical details.
  *
- * Real: the card, PinSetupDialog, PinPad, lib/pinStore (real Argon2id via the
- * expo-argon2 mock, in-memory SecureStore). Fake: the settings store.
+ * Real: the card, PinSetupDialog, PinPad, lib/pinStore (in-memory SecureStore). Fake: the settings store.
  * RNTL v14: render / fireEvent are awaited (tasks/lessons.md 2026-08-29).
  */
 import React, { useState } from 'react';
@@ -14,7 +13,7 @@ import * as LocalAuth from 'expo-local-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { APP_LOCK_COPY } from '@/lib/appLock';
 import { DEFAULT_DISTRESS_SCOPE, DISTRESS_CATEGORIES, DISTRESS_CATEGORY_COPY, keptSummary } from '@/lib/distressScope';
-import { __setPinKdfForTests, checkPin, setAppPin } from '@/lib/pinStore';
+import { checkPin, setAppPin } from '@/lib/pinStore';
 
 const auth = LocalAuth as unknown as { __reset: () => void; __setCapabilities: (c: object) => void };
 const store = SecureStore as unknown as { __reset: () => void };
@@ -79,9 +78,6 @@ type AlertButton = { text: string; onPress?: () => void };
 let alertSpy: jest.SpyInstance;
 /** The button the NEXT Alert presses as soon as it opens. */
 let alertAnswer: string | null = null;
-
-beforeAll(() => __setPinKdfForTests({ name: 'argon2id', memoryKiB: 64, iterations: 1, parallelism: 1 }));
-afterAll(() => __setPinKdfForTests(null));
 
 beforeEach(() => {
     auth.__reset();

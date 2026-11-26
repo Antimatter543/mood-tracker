@@ -4,14 +4,12 @@
  *
  * The model (lib/pinLock.ts, lib/pinStore.ts, context/AppLock.tsx):
  *   - the app lock is a PIN, asked on every open and every return from the
- *     background; no biometrics,
+ *     background,
  *   - the distress PIN is a second PIN that unlocks exactly like the real one
  *     and quietly runs the distress wipe first (databases/distressWipe.ts).
  * Nothing on the lock screen differs with or without a distress PIN.
  */
 import { DistressScope, erasedCategoryLabels, isDefaultScope, keptSummary } from '@/lib/distressScope';
-
-export { shouldLockOnAppStateChange } from '@/lib/pinLock';
 
 export const APP_LOCK_COPY = {
     lockDescription:

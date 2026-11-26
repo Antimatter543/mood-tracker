@@ -6,7 +6,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
  * Every call is wrapped so a native failure reads as "no", never as a throw.
  */
 
-/** The phone has a screen lock (PIN, pattern, password, or biometrics on top). */
+/** The phone has a screen lock (PIN, pattern or password). */
 export async function hasDeviceCredential(): Promise<boolean> {
     try {
         return Number(await LocalAuthentication.getEnrolledLevelAsync()) > 0;

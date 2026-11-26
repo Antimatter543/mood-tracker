@@ -44,7 +44,7 @@ on:
         type: boolean
         default: false
       applock:
-        description: 'Run ONLY the app lock + distress wipe device check (frontend/scripts/e2e-app-lock.sh)'
+        description: 'Run ONLY the PIN app lock + distress PIN device check (frontend/scripts/e2e-app-lock.sh)'
         required: false
         type: boolean
         default: false
@@ -270,9 +270,9 @@ jobs:
       - name: Mark smoke step start
         run: echo "SMOKE_T0=$(date +%s)" >> "$GITHUB_ENV"
 
-      # Opt-in (dispatch input `applock`): fingerprint enrolment via `adb emu finger`, then the
-      # app lock / distress wipe walk-through. Maestro cannot touch a fingerprint sensor.
-      - name: Emulator app lock + distress wipe check
+      # Opt-in (dispatch input `applock`): the PIN app lock + distress PIN walk-through, driven
+      # with adb (number-pad taps) and checked against the database pulled from the device.
+      - name: Emulator PIN app lock + distress PIN check
         if: github.event.inputs.applock == 'true'
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
