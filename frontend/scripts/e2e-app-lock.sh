@@ -38,9 +38,18 @@ STEP=0
 shot() { STEP=$((STEP + 1)); adb exec-out screencap -p >"$OUT/screens/$(printf %02d $STEP)-$1.png" 2>/dev/null || true; }
 
 UI=""
-dump() { # refresh $UI with the current window's hierarchy
-  adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
-  UI="$(adb shell cat /sdcard/ui.xml 2>/dev/null | tr -d '\r')"
+dump() { # refresh $UI with the current window's hierarchy (never a stale file)
+  local i out
+  for (( i = 0; i < 3; i++ )); do
+    adb shell rm -f /sdcard/ui.xml >/dev/null 2>&1
+    out="$(adb shell uiautomator dump /sdcard/ui.xml 2>&1 | tr -d '\r')"
+    UI="$(adb shell cat /sdcard/ui.xml 2>/dev/null | tr -d '\r')"
+    [[ "$UI" == *"<hierarchy"* ]] && return 0
+    log "uiautomator dump failed (try $((i + 1))): $out"
+    sleep 1
+  done
+  UI=""
+  return 1
 }
 has() { dump; grep -qiE "$1" <<<"$UI"; }
 wait_for() { # wait_for <regex> [tries] (1.5 s apart)
@@ -86,8 +95,20 @@ type_pin() {
   # shellcheck disable=SC2086
   adb shell input tap $c
 }
-# The lock screen as text + ids only (no bounds): what a person can see.
-lock_screen_signature() { dump; grep -oE '(text|resource-id|content-desc)="[^"]*"' <<<"$UI" | grep -v 'resource-id="android' ; }
+# The lock screen as text + ids + labels (no bounds), its own subtree only: the
+# app underneath stays mounted (hidden), and which screen that is must not count.
+lock_screen_signature() {
+  dump
+  python3 -I -c '
+import sys, xml.etree.ElementTree as ET
+root = ET.fromstring(sys.stdin.buffer.read())
+lock = next((n for n in root.iter("node") if n.get("resource-id") == "app-lock-screen"), None)
+if lock is None:
+    print("NO LOCK SCREEN"); sys.exit()
+for n in lock.iter("node"):
+    print("|".join(n.get(a, "") for a in ("resource-id", "text", "content-desc", "enabled", "clickable")))
+' <<<"$UI"
+}
 unlock_with() { # unlock_with <pin>: from the lock screen, wait out "Unlocking…"
   wait_for 'resource-id="app-lock-screen"' 8 || return 1
   type_pin "$1"

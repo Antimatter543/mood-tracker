@@ -51,7 +51,6 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     const [busy, setBusy] = useState(false);
     const [message, setMessage] = useState<string | null>(null);
     const [waitUntil, setWaitUntil] = useState(0);
-    const [nowTick, setNowTick] = useState(() => now().getTime());
     // Bumped after a wipe: remounts the app subtree so no screen or open form
     // keeps wiped notes in memory.
     const [generation, setGeneration] = useState(0);
@@ -99,8 +98,8 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         if (!waitUntil) return;
         const t = setInterval(() => {
+            // Only a changed message re-renders (React skips an identical state).
             const n = now().getTime();
-            setNowTick(n);
             if (n >= waitUntil) {
                 setWaitUntil(0);
                 setMessage(null);
@@ -190,7 +189,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
         return () => sub.remove();
     }, [locked]);
 
-    const waiting = waitUntil > nowTick;
+    const waiting = waitUntil > 0;
 
     return (
         <>

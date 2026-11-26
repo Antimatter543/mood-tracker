@@ -14,6 +14,7 @@ import {
     remainingWaitMs,
     shouldLockOnAppStateChange,
     waitMessage,
+    WAIT_STEP_S,
 } from '@/lib/pinLock';
 
 describe('pinProblem', () => {
@@ -64,6 +65,17 @@ describe('wrong-PIN wait', () => {
         expect(waitMessage(25_000)).toMatch(/25 s/);
         expect(waitMessage(120_000)).toMatch(/2 min/);
         expect(waitMessage(25_000)).not.toMatch(/distress|wipe|eras/i);
+    });
+
+    it('counts seconds down in steps, rounded up, so the text changes only every few seconds', () => {
+        expect(waitMessage(30_000)).toMatch(/30 s/);
+        expect(waitMessage(26_200)).toMatch(/30 s/); // never promises less than the real wait
+        expect(waitMessage(24_100)).toMatch(/25 s/);
+        expect(waitMessage(400)).toMatch(/ 5 s/);
+        // Over a whole 30 s wait, ticked every second, the text changes at most once per step.
+        const texts = Array.from({ length: 30 }, (_, i) => waitMessage(30_000 - i * 1000));
+        const changes = texts.filter((t, i) => i > 0 && t !== texts[i - 1]).length;
+        expect(changes).toBeLessThanOrEqual(30 / WAIT_STEP_S);
     });
 });
 

@@ -50,10 +50,17 @@ export function remainingWaitMs(state: { failures: number; lastFailureAt: number
     return Math.max(0, state.lastFailureAt + wait - nowMs);
 }
 
+/** The countdown on the lock screen moves in steps of this many seconds. */
+export const WAIT_STEP_S = 5;
+
 /** "Try again in 25 s" / "in 2 min". */
 export function waitMessage(ms: number): string {
     const s = Math.ceil(ms / 1000);
-    if (s < 60) return `Too many wrong PINs. Try again in ${s} s.`;
+    // Seconds count down in steps of WAIT_STEP_S (rounded up, so it never
+    // promises less than the real wait): the text changes every few seconds,
+    // not every second, which keeps screen readers (and UI tooling that waits
+    // for an idle screen) from being flooded with updates.
+    if (s < 60) return `Too many wrong PINs. Try again in ${Math.ceil(s / WAIT_STEP_S) * WAIT_STEP_S} s.`;
     return `Too many wrong PINs. Try again in ${Math.ceil(s / 60)} min.`;
 }
 
