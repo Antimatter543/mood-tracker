@@ -141,12 +141,10 @@ describe('lockMessageFor', () => {
 describe('Settings copy', () => {
     const w = distressWarningFor(DEFAULT_DISTRESS_SCOPE);
 
-    it('the distress warning lists what is erased, says it cannot be undone, and asks for a backup', () => {
-        for (const c of DISTRESS_CATEGORIES) {
-            if (DEFAULT_DISTRESS_SCOPE[c]) expect(w).toContain(DISTRESS_CATEGORY_COPY[c].label);
-            else expect(w).not.toContain(DISTRESS_CATEGORY_COPY[c].label);
-        }
-        expect(w).toContain(keptSummary(DEFAULT_DISTRESS_SCOPE));
+    it('the default confirmation is short, says it cannot be undone, and asks for a backup', () => {
+        expect(w).toMatch(/notes, photos and other private details/);
+        expect(w).toMatch(/mood scores stay/);
+        expect(w).not.toContain(DISTRESS_CATEGORY_COPY.reminderNames.label);
         expect(w).toMatch(/cannot be undone/);
         expect(w).toMatch(/backup/i);
         expect(w).toMatch(/by accident/);
@@ -154,10 +152,13 @@ describe('Settings copy', () => {
         expect(APP_LOCK_COPY.distressActiveHint).toMatch(/backup/i);
     });
 
-    it('with every entry selected, the warning says the journal is emptied', () => {
-        const all = { ...DEFAULT_DISTRESS_SCOPE, defaultActivityLinks: true, entries: true };
-        expect(distressWarningFor(all)).toMatch(/fresh install/);
-        expect(distressWarningFor(all)).toContain(DISTRESS_CATEGORY_COPY.entries.label);
+    it('a custom selection is listed in full, with what is kept', () => {
+        const custom = { ...DEFAULT_DISTRESS_SCOPE, health: false };
+        const text = distressWarningFor(custom);
+        for (const c of DISTRESS_CATEGORIES) {
+            if (custom[c]) expect(text).toContain(DISTRESS_CATEGORY_COPY[c].label);
+        }
+        expect(text).toContain(keptSummary(custom));
     });
 
     it('the warning follows the selection: a kept category is not listed', () => {
@@ -167,7 +168,12 @@ describe('Settings copy', () => {
 
     it('the description says what triggers it, not just "fails too many times"', () => {
         expect(APP_LOCK_COPY.distressDescription).toMatch(/usually 5/);
-        expect(APP_LOCK_COPY.distressDescription).toMatch(/SoulSync's own unlock screen/);
+        expect(APP_LOCK_COPY.distressDescription).toMatch(/wrong finger until Android blocks biometrics/);
+    });
+
+    it('the default is explained: an empty mood tracker can look suspicious', () => {
+        expect(APP_LOCK_COPY.distressWhyDefault).toMatch(/empty .*suspicious/);
+        expect(APP_LOCK_COPY.eraseEntriesWarning).toMatch(/suspicious/);
     });
 
     it('technical details state the Android rule and link its source', () => {

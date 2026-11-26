@@ -255,14 +255,20 @@ has 'Make a backup first'; check "warning mentions backup" "$(( $? == 0 ))"
 shot distress-warning
 tap_text 'TURN ON|Turn on'; sleep 2
 [[ "$(node_attr distress-wipe-switch checked)" == "true" ]]; check "distress wipe turned on" "$(( $? == 0 ))"
-has 'resource-id="distress-scope-notes"'; check "erase selection shown" "$(( $? == 0 ))"
+has 'resource-id="distress-scope"'; check "no category switches on the card (advanced only)" "$(( $? != 0 ))"
+scroll_to_id distress-details-toggle && tap_id distress-details-toggle
+wait_for 'resource-id="distress-details"' 6; check "technical details dialog opens" "$(( $? == 0 ))"
+shot details-dialog
+scroll_to_text 'Compatibility Definition'; check "dialog links the Android rule" "$(( $? == 0 ))"
+scroll_to_text 'look suspicious'; check "dialog explains why the default keeps the journal" "$(( $? == 0 ))"
 scroll_to_id distress-scope-health
 [[ "$(node_attr distress-scope-health checked)" == "true" ]]; check "selection defaults to erase" "$(( $? == 0 ))"
 scroll_to_id distress-scope-entries
 [[ "$(node_attr distress-scope-entries checked)" == "false" ]]; check "erasing all entries is off by default" "$(( $? == 0 ))"
 [[ "$(node_attr distress-scope-defaultActivityLinks checked)" == "false" ]]; check "erasing default activities is off by default" "$(( $? == 0 ))"
-scroll_to_id distress-details-toggle && tap_id distress-details-toggle; sleep 1
-scroll_to_text 'Compatibility Definition'; check "technical details open with Android rule link" "$(( $? == 0 ))"
+shot details-advanced
+tap_id distress-details-close; sleep 1
+has 'resource-id="distress-details"'; check "dialog closes" "$(( $? != 0 ))"
 scroll_to_id distress-wipe-hint; check "backup reminder shown" "$(( $? == 0 ))"
 shot distress-on
 

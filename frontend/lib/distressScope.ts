@@ -86,6 +86,11 @@ export function keptSummary(scope: DistressScope): string {
     return 'Kept: every logged day with its date, time, mood score and default activities, your display settings and the app lock.';
 }
 
+/** Whether a selection is exactly the recommended default. */
+export function isDefaultScope(scope: DistressScope): boolean {
+    return DISTRESS_CATEGORIES.every(c => scope[c] === DEFAULT_DISTRESS_SCOPE[c]);
+}
+
 /** Labels of the categories a scope erases, in display order. */
 export function erasedCategoryLabels(scope: DistressScope): string[] {
     return DISTRESS_CATEGORIES.filter(c => scope[c]).map(c => DISTRESS_CATEGORY_COPY[c].label);

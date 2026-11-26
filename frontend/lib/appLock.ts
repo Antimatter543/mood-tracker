@@ -10,7 +10,7 @@
  *                            distress wipe (databases/distressWipe.ts).
  */
 
-import { DistressScope, erasedCategoryLabels, keptSummary } from '@/lib/distressScope';
+import { DistressScope, erasedCategoryLabels, isDefaultScope, keptSummary } from '@/lib/distressScope';
 
 /** The subset of expo-local-authentication's result this module reasons about. */
 export type AuthAttempt =
@@ -158,14 +158,20 @@ export const APP_LOCK_COPY = {
     lockDescription:
         'Ask for your fingerprint, face or device PIN every time SoulSync opens or comes back from the background.',
     distressDescription:
-        'Android blocks fingerprint and face unlock after several wrong attempts in a row (usually 5). ' +
-        "If that happens at SoulSync's own unlock screen, SoulSync quietly erases what you pick below. " +
-        'By default every logged day keeps its date, mood score and default activities.',
+        "If someone makes you unlock SoulSync, use a wrong finger until Android blocks biometrics (usually 5 tries). " +
+        'SoulSync then quietly removes your notes, photos and other private details. Your days and mood scores stay, ' +
+        'so the journal still looks normal.',
     distressWarningTitle: 'Turn on distress wipe?',
+    distressWhyDefault:
+        'An empty or freshly wiped mood tracker can itself look suspicious. So by default SoulSync keeps every ' +
+        'logged day with its date, mood score and default activities, and removes only what could give you away. ' +
+        'The journal then still looks like it has been used normally. Only change this if an empty app is safer for you.',
+    distressCustomScope: 'Custom selection of what gets erased (see Technical details).',
     eraseEntriesTitle: 'Erase all entries too?',
     eraseEntriesWarning:
         'With this on, the distress wipe also deletes every entry and mood score. SoulSync then looks like a ' +
-        'fresh install with an empty journal. Only a backup kept outside this phone can bring it back.',
+        'fresh install with an empty journal. Keep in mind that an empty mood tracker can itself look ' +
+        'suspicious, which is why this is off by default. Only a backup kept outside this phone can bring it back.',
     distressActiveHint:
         'Distress wipe is on. Keep a recent backup outside this phone: it is the only way to get your notes back after a wipe.',
     noScreenLockTitle: 'No screen lock',
@@ -198,18 +204,30 @@ export const DISTRESS_TECH_DETAILS: readonly string[] = [
         'and data stored in Health Connect itself.',
 ];
 
-/** The confirmation shown before turning the distress wipe on, for the current selection. */
+/**
+ * The confirmation shown before turning the distress wipe on. With the
+ * recommended selection it is short (most people never open the details);
+ * a custom selection is listed in full, because that is what will happen.
+ */
 export function distressWarningFor(scope: DistressScope): string {
+    const trigger =
+        "While this is on, SoulSync's unlock prompt accepts only fingerprint or face (no PIN). If Android " +
+        'blocks biometrics after wrong attempts there (usually 5), SoulSync silently and permanently ';
+    const accident =
+        'This also happens if it fails by accident (wet finger, gloves). It cannot be undone. ' +
+        'Make a backup first and keep it somewhere other than this phone.';
+    if (isDefaultScope(scope)) {
+        return (
+            trigger +
+            'removes your notes, photos and other private details. Your days and mood scores stay, so the ' +
+            'journal still looks normal.\n\n' +
+            accident +
+            '\n\nDetails and options: Technical details, under the switch.'
+        );
+    }
     const labels = erasedCategoryLabels(scope);
     const list = labels.length
         ? labels.map(l => `\u2022 ${l}`).join('\n')
         : '\u2022 nothing (every category is switched off)';
-    return (
-        "While this is on, SoulSync's unlock prompt accepts biometrics only (no PIN). If Android blocks " +
-        "biometrics after wrong attempts at that prompt (usually 5), SoulSync silently and permanently erases:\n\n" +
-        list +
-        '\n\n' + keptSummary(scope) + '\n\n' +
-        'This also happens if it fails by accident (wet finger, gloves). It cannot be undone. ' +
-        'Make a backup first and keep it somewhere other than this phone.'
-    );
+    return trigger + 'erases:\n\n' + list + '\n\n' + keptSummary(scope) + '\n\n' + accident;
 }

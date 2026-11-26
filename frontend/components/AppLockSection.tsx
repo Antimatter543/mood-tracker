@@ -9,36 +9,36 @@
  *     distress wipe off.
  *   - Distress wipe is only offered while the lock is on, needs enrolled
  *     biometrics, and is turned on only after an explicit destructive warning
- *     that lists what it erases and points at backups. While on, the card shows
- *     what it erases (one switch per category, lib/distressScope.ts, all on by
- *     default), what is always kept, "Technical details" with the Android rule
- *     behind the lockout, and a backup reminder.
+ *     that points at backups (short with the recommended selection, a full
+ *     list for a custom one). "Technical details" (components/
+ *     DistressDetailsDialog.tsx, like the backup-encryption details) explains
+ *     the trigger, why the default keeps the journal, and holds the advanced
+ *     per-category switches. While on, the card keeps a backup reminder up.
  *
  * Gate + lock screen: context/AppLock.tsx. Decisions + copy: lib/appLock.ts.
  * Wipe: databases/distressWipe.ts.
  */
 import React, { useMemo, useState } from 'react';
-import { Alert, Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useThemeColors } from '@/styles/global';
 import { useSettings } from '@/context/SettingsContext';
 import { useAppLock } from '@/context/AppLock';
 import { getBiometricCapabilities } from '@/lib/biometricAuth';
+import Feather from '@expo/vector-icons/Feather';
+import { DistressDetailsDialog } from '@/components/DistressDetailsDialog';
 import {
-    ANDROID_BIOMETRIC_RULE_URL,
     APP_LOCK_COPY,
-    DISTRESS_TECH_DETAILS,
     appLockBlocker,
     distressWarningFor,
     distressWipeBlocker,
     EnableBlocker,
 } from '@/lib/appLock';
 import {
-    DISTRESS_CATEGORIES,
-    DISTRESS_CATEGORY_COPY,
+    DEFAULT_DISTRESS_SCOPE,
     DistressCategory,
-    keptSummary,
+    isDefaultScope,
     parseDistressScope,
     serializeDistressScope,
 } from '@/lib/distressScope';
@@ -109,21 +109,10 @@ export function AppLockSection() {
             borderColor: 'rgba(255, 152, 0, 0.35)',
         },
         warningText: { flex: 1, color: colors.text, fontSize: 13, lineHeight: 18 },
-        subheading: { color: colors.text, fontSize: 14, fontWeight: '600', marginTop: 12, marginBottom: 4 },
-        scopeRow: {
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            paddingVertical: 6,
-            gap: 12,
-        },
-        scopeLabel: { color: colors.text, fontSize: 14, lineHeight: 18 },
-        scopeDetail: { color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
         kept: { color: colors.textSecondary, fontSize: 12, lineHeight: 16, marginTop: 6 },
-        detailsToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12, paddingVertical: 4 },
-        detailsToggleText: { color: colors.accent, fontSize: 13, fontWeight: '500' },
-        detailsText: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 6 },
-        link: { color: colors.accent, fontSize: 12, marginTop: 8, textDecorationLine: 'underline' },
+        detailsRow: { gap: 4, marginBottom: 4 },
+        detailsToggle: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
+        detailsToggleText: { color: colors.accent, fontSize: 14, fontWeight: '500' },
     }), [colors]);
 
     const toggleCategory = async (category: DistressCategory, value: boolean) => {
@@ -226,53 +215,34 @@ export function AppLockSection() {
                 </View>
             ) : null}
 
-            {distressOn ? (
-                <View testID="distress-scope">
-                    <Text style={styles.subheading}>Erased by the distress wipe</Text>
-                    {DISTRESS_CATEGORIES.map(category => (
-                        <View key={category} style={styles.scopeRow}>
-                            <View style={styles.textContainer}>
-                                <Text style={styles.scopeLabel}>{DISTRESS_CATEGORY_COPY[category].label}</Text>
-                                <Text style={styles.scopeDetail}>{DISTRESS_CATEGORY_COPY[category].detail}</Text>
-                            </View>
-                            <Switch
-                                testID={`distress-scope-${category}`}
-                                accessibilityLabel={`Erase ${DISTRESS_CATEGORY_COPY[category].label}`}
-                                value={scope[category]}
-                                disabled={busy}
-                                onValueChange={v => toggleCategory(category, v)}
-                                trackColor={{ false: '#767577', true: '#ff4444' }}
-                                thumbColor="#f4f3f4"
-                            />
-                        </View>
-                    ))}
-                    <Text style={styles.kept} testID="distress-kept">{keptSummary(scope)}</Text>
-
+            {lockOn ? (
+                <View style={styles.detailsRow}>
+                    {distressOn && !isDefaultScope(scope) ? (
+                        <Text style={styles.kept} testID="distress-custom-scope">{APP_LOCK_COPY.distressCustomScope}</Text>
+                    ) : null}
+                    {/* Same pattern as backup encryption: the card stays short; the
+                        trigger rule, why the default keeps the journal and the
+                        advanced category switches live in the dialog. */}
                     <Pressable
                         testID="distress-details-toggle"
                         accessibilityRole="button"
-                        onPress={() => setDetailsOpen(o => !o)}
+                        onPress={() => setDetailsOpen(true)}
                         style={styles.detailsToggle}
                     >
-                        <Ionicons name={detailsOpen ? 'chevron-up' : 'chevron-down'} size={14} color={colors.accent} />
+                        <Feather name="info" color={colors.accent} size={14} />
                         <Text style={styles.detailsToggleText}>Technical details</Text>
                     </Pressable>
-                    {detailsOpen ? (
-                        <View testID="distress-details">
-                            {DISTRESS_TECH_DETAILS.map(line => (
-                                <Text key={line} style={styles.detailsText}>{'\u2022 '}{line}</Text>
-                            ))}
-                            <Text
-                                style={styles.link}
-                                accessibilityRole="link"
-                                onPress={() => Linking.openURL(ANDROID_BIOMETRIC_RULE_URL)}
-                            >
-                                Android's rule: Compatibility Definition, 7.3.10 Biometric Sensors
-                            </Text>
-                        </View>
-                    ) : null}
                 </View>
             ) : null}
+
+            <DistressDetailsDialog
+                visible={detailsOpen}
+                onClose={() => setDetailsOpen(false)}
+                scope={scope}
+                busy={busy}
+                onToggle={toggleCategory}
+                onReset={() => updateSetting('distress_wipe_scope', serializeDistressScope(DEFAULT_DISTRESS_SCOPE))}
+            />
 
             {distressOn ? (
                 <View style={styles.warning} testID="distress-wipe-hint">

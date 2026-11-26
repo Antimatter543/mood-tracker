@@ -39,6 +39,13 @@ jest.mock('@/context/AppLock', () => ({
 }));
 
 import { AppLockSection } from '@/components/AppLockSection';
+import { OverlayProvider } from '@/context/OverlayHost';
+
+/** Open "Technical details" (the dialog with the advanced switches). */
+const openDetails = async (view: Awaited<ReturnType<typeof render>>) => {
+    await fireEvent.press(view.getByTestId('distress-details-toggle'));
+    await waitFor(() => expect(view.getByTestId('distress-details')).toBeTruthy());
+};
 
 function Harness({ initial }: { initial: Partial<S> }) {
     const [s, setS] = useState<S>({
@@ -51,7 +58,12 @@ function Harness({ initial }: { initial: Partial<S> }) {
     });
     mockSettingsState = s;
     mockSetSettings = setS;
-    return <AppLockSection />;
+    // The details dialog is an in-tree overlay: it needs the host.
+    return (
+        <OverlayProvider>
+            <AppLockSection />
+        </OverlayProvider>
+    );
 }
 
 type AlertButton = { text: string; onPress?: () => void };
@@ -150,6 +162,7 @@ describe('AppLockSection', () => {
 
     it('with distress on: one switch per category, all on by default, and what is always kept', async () => {
         const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await openDetails(view);
         for (const c of DISTRESS_CATEGORIES) {
             expect(view.getByTestId(`distress-scope-${c}`).props.value).toBe(DEFAULT_DISTRESS_SCOPE[c]);
         }
@@ -159,13 +172,45 @@ describe('AppLockSection', () => {
         expect(view.getByTestId('distress-kept').props.children).toBe(keptSummary(DEFAULT_DISTRESS_SCOPE));
     });
 
-    it('the selection is hidden while distress is off', async () => {
-        const view = await render(<Harness initial={{ app_lock_enabled: true }} />);
+    it('normal users see no category switches: they live behind Technical details', async () => {
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
         expect(view.queryByTestId('distress-scope')).toBeNull();
+        expect(view.queryByTestId('distress-custom-scope')).toBeNull();
+        await openDetails(view);
+        expect(view.getByTestId('distress-scope')).toBeTruthy();
+    });
+
+    it('the details explain why the default keeps the journal', async () => {
+        const view = await render(<Harness initial={{ app_lock_enabled: true }} />);
+        await openDetails(view);
+        expect(view.getByTestId('distress-why-default').props.children).toBe(APP_LOCK_COPY.distressWhyDefault);
+        expect(APP_LOCK_COPY.distressWhyDefault).toMatch(/suspicious/);
+    });
+
+    it('a custom selection is flagged on the card and can be reset to the default', async () => {
+        const view = await render(<Harness initial={{
+            app_lock_enabled: true, distress_wipe_enabled: true, distress_wipe_scope: '{"health":false}',
+        }} />);
+        expect(view.getByTestId('distress-custom-scope')).toBeTruthy();
+        await openDetails(view);
+        await fireEvent.press(view.getByTestId('distress-scope-reset'));
+        await waitFor(() => expect(view.queryByTestId('distress-custom-scope')).toBeNull());
+        expect(JSON.parse(mockUpdateSetting.mock.calls.at(-1)![1])).toEqual(DEFAULT_DISTRESS_SCOPE);
+    });
+
+    it('with the default selection, turning it on is one short confirmation (no category list)', async () => {
+        alertAnswer = 'Cancel';
+        const view = await render(<Harness initial={{ app_lock_enabled: true }} />);
+        await fireEvent(view.getByTestId('distress-wipe-switch'), 'valueChange', true);
+        await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+        const message = alertSpy.mock.calls.at(-1)![1] as string;
+        expect(message).toMatch(/notes, photos and other private details/);
+        expect(message).not.toContain(DISTRESS_CATEGORY_COPY.reminderNames.label);
     });
 
     it('switching a category off stores it', async () => {
         const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await openDetails(view);
         await fireEvent(view.getByTestId('distress-scope-health'), 'valueChange', false);
         await waitFor(() => expect(mockUpdateSetting).toHaveBeenCalledWith(
             'distress_wipe_scope', expect.any(String)
@@ -192,15 +237,17 @@ describe('AppLockSection', () => {
         const openURL = jest.spyOn(Linking, 'openURL').mockResolvedValue(true as never);
         const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
         expect(view.queryByTestId('distress-details')).toBeNull();
-        await fireEvent.press(view.getByTestId('distress-details-toggle'));
-        expect(view.getByTestId('distress-details')).toBeTruthy();
+        await openDetails(view);
         await fireEvent.press(view.getByText(/Compatibility Definition, 7\.3\.10/));
         expect(openURL).toHaveBeenCalledWith(ANDROID_BIOMETRIC_RULE_URL);
+        await fireEvent.press(view.getByTestId('distress-details-close'));
+        await waitFor(() => expect(view.queryByTestId('distress-details')).toBeNull());
     });
 
     it('erasing all entries needs its own confirmation; Cancel keeps it off', async () => {
         alertAnswer = 'Cancel';
         const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await openDetails(view);
         await fireEvent(view.getByTestId('distress-scope-entries'), 'valueChange', true);
         await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(
             APP_LOCK_COPY.eraseEntriesTitle, APP_LOCK_COPY.eraseEntriesWarning, expect.anything(), expect.anything()
@@ -212,6 +259,7 @@ describe('AppLockSection', () => {
     it('confirming turns it on, and the kept line says the journal is emptied', async () => {
         alertAnswer = 'Erase entries too';
         const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await openDetails(view);
         await fireEvent(view.getByTestId('distress-scope-entries'), 'valueChange', true);
         await waitFor(() => expect(view.getByTestId('distress-scope-entries').props.value).toBe(true));
         expect(view.getByTestId('distress-kept').props.children).toMatch(/fresh install/);
@@ -219,6 +267,7 @@ describe('AppLockSection', () => {
 
     it('the other off-by-default category needs no extra confirmation', async () => {
         const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await openDetails(view);
         await fireEvent(view.getByTestId('distress-scope-defaultActivityLinks'), 'valueChange', true);
         await waitFor(() => expect(view.getByTestId('distress-scope-defaultActivityLinks').props.value).toBe(true));
         expect(alertSpy).not.toHaveBeenCalled();
