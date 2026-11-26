@@ -5,6 +5,12 @@ import { initialActivities, initialActivityGroups } from '@/components/seedData'
 import { MEDIA_DIR } from '@/databases/mediaHelpers';
 import { withWriteLock, withWriteTransaction } from '@/databases/writeTransaction';
 import { parseReminders, serializeReminders } from '@/lib/reminders';
+import { clearBackupPassword } from '@/lib/backupKeyStore';
+import {
+    HEALTH_DAILY_SYNC_SETTING_KEY,
+    HEALTH_LAST_SYNCED_SETTING_KEY,
+    HEALTH_OPT_IN_SETTING_KEY,
+} from '@/lib/healthConnectConfig';
 
 /**
  * The DISTRESS WIPE: strip the journal down to what is believable and harmless.
@@ -15,26 +21,33 @@ import { parseReminders, serializeReminders } from '@/lib/reminders';
  * wrong finger a few times, and what they later see is a real, plausible mood
  * history with nothing private in it.
  *
- * The rule: strip only what can INCRIMINATE (anything the user typed or
- * photographed, and names they made up); keep everything else, so the journal
- * stays as full and lived-in as it was. 200 logged days stay 200 logged days.
+ * The rule: remove EVERYTHING that could incriminate (anything typed,
+ * photographed or made up by the user, health data, and the key that opens the
+ * user's backups); keep the rest, so the journal stays as full and lived-in as
+ * it was. 200 logged days stay 200 logged days.
  *
  * What SURVIVES:
- *   - EVERY live entry: its date, time, mood score and star,
+ *   - EVERY live entry: its date, time and mood score,
  *   - its links to the DEFAULT activities (the seed catalogue in
  *     components/seedData.ts, matched by activity name AND group name), i.e.
  *     the general mood / sleep / social picture of each day,
- *   - the default groups/activities themselves, health metrics, every
- *     setting, every reminder (time and on/off).
+ *   - the default groups/activities themselves, the display settings, every
+ *     reminder's time and on/off state, the app lock.
  *
- * What is DESTROYED (only free text, photos and made-up names):
- *   - every note (entries.notes -> NULL),
- *   - every reminder's own name (back to the default label),
+ * What is DESTROYED:
+ *   - every note (entries.notes -> NULL) and every star (which days mattered),
  *   - every photo: the entry_media rows AND the files on disk,
  *   - every custom activity and custom group (their NAMES can be the most
- *     revealing thing in the app), and every entry link to them,
- *   - the recycle bin (binned entries are purged outright: they still carry
- *     the notes the user deleted),
+ *     revealing thing in the app), and every entry link to them; a renamed or
+ *     moved default counts as custom,
+ *   - every reminder's own name (back to the default label),
+ *   - ALL health data (health_metrics), with Health Connect sync switched off
+ *     so the next open does not fetch it again,
+ *   - the recycle bin (binned entries still carry the notes the user deleted),
+ *   - the stored backup-encryption key: with it, this phone opens the user's
+ *     encrypted backups WITHOUT the password, so a restored cloud backup would
+ *     bring everything back. Encryption is off afterwards; the password
+ *     itself was never stored,
  *   - leftover plain-text backup files the export wrote into the app's
  *     documents folder, and the picker caches,
  *   - the distress flag itself (`distress_wipe_enabled` -> 'false'), in the
@@ -89,6 +102,7 @@ export type DistressWipeSummary = {
     customActivitiesRemoved: number;
     customGroupsRemoved: number;
     binnedEntriesPurged: number;
+    healthDaysRemoved: number;
     /** The new `reminders` setting value when labels were blanked, else null. */
     reminders: string | null;
 };
@@ -136,7 +150,8 @@ export async function wipeSensitiveData(
         const photosRemoved = await changes('DELETE FROM entry_media');
 
         const notesCleared = await changes(
-            'UPDATE entries SET notes = NULL WHERE notes IS NOT NULL'
+            `UPDATE entries SET notes = NULL, starred_at = NULL
+             WHERE notes IS NOT NULL OR starred_at IS NOT NULL`
         );
 
         // Custom activities: anything whose (group name, activity name) pair is
@@ -186,6 +201,14 @@ export async function wipeSensitiveData(
             }
         }
 
+        // Health data goes completely, and the sync that would refill it is off.
+        const healthDaysRemoved = await changes('DELETE FROM health_metrics');
+        await txn.runAsync(
+            `INSERT OR REPLACE INTO user_settings (key, value) VALUES (?, 'false'), (?, 'false')`,
+            [HEALTH_OPT_IN_SETTING_KEY, HEALTH_DAILY_SYNC_SETTING_KEY]
+        );
+        await txn.runAsync('DELETE FROM user_settings WHERE key = ?', [HEALTH_LAST_SYNCED_SETTING_KEY]);
+
         // The distress option switches itself off in the same transaction.
         await txn.runAsync(
             `INSERT OR REPLACE INTO user_settings (key, value) VALUES ('distress_wipe_enabled', 'false')`
@@ -197,6 +220,7 @@ export async function wipeSensitiveData(
             customActivitiesRemoved,
             customGroupsRemoved,
             binnedEntriesPurged,
+            healthDaysRemoved,
             reminders,
         };
     });
@@ -218,6 +242,15 @@ export async function scrubDatabaseFile(): Promise<void> {
         });
     } catch (e) {
         console.warn('[distress] database scrub failed:', e);
+    }
+}
+
+/** Forget the stored backup key (see the header). Never throws. */
+export async function wipeBackupKey(): Promise<void> {
+    try {
+        await clearBackupPassword();
+    } catch (e) {
+        console.warn('[distress] backup key wipe failed:', e);
     }
 }
 
@@ -262,12 +295,13 @@ export async function wipeSensitiveFiles(mediaFiles: string[]): Promise<void> {
 }
 
 /**
- * The whole wipe, in order: atomic DB wipe -> files -> file scrub. Resolves
+ * The whole wipe, in order: atomic DB wipe -> backup key -> files -> file scrub. Resolves
  * with the summary (for tests/logs only: the UI must not show it, because the
  * point is that nothing visibly happened).
  */
 export async function runDistressWipe(db: SQLiteDatabase): Promise<DistressWipeSummary> {
     const { mediaFiles, ...summary } = await wipeSensitiveData(db);
+    await wipeBackupKey();
     await wipeSensitiveFiles(mediaFiles);
     await scrubDatabaseFile();
     return summary;

@@ -132,7 +132,9 @@ describe('lockMessageFor', () => {
 describe('Settings copy', () => {
     it('the distress warning names what is lost, that it cannot be undone, and asks for a backup', () => {
         const w = APP_LOCK_COPY.distressWarning;
-        expect(w).toMatch(/notes and photos/);
+        expect(w).toMatch(/notes, photos and stars/);
+        expect(w).toMatch(/health data/);
+        expect(w).toMatch(/backup password key/);
         expect(w).toMatch(/custom activities/);
         expect(w).toMatch(/cannot be undone/);
         expect(w).toMatch(/backup/i);

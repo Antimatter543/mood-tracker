@@ -12,6 +12,7 @@
 jest.mock('expo-file-system/legacy', () => require('../__mocks__/expo-file-system'));
 
 import * as FileSystem from 'expo-file-system/legacy';
+import * as SecureStore from 'expo-secure-store';
 import {
     __resetWriteTransactionForTests,
     __setWriteConnectionForTests,
@@ -122,10 +123,10 @@ describeSqlite('distress wipe: real SQLite', () => {
         ]);
     });
 
-    it('clears every note, but keeps stars (not incriminating, and they make it look real)', async () => {
+    it('clears every note and every star (a star marks which days mattered)', async () => {
         await wipeSensitiveData(db as never);
         expect(countRows(db, 'entries', 'notes IS NOT NULL')).toBe(0);
-        expect(countRows(db, 'entries', 'starred_at IS NOT NULL')).toBe(1);
+        expect(countRows(db, 'entries', 'starred_at IS NOT NULL')).toBe(0);
         const dump = JSON.stringify(db.raw.prepare('SELECT * FROM entries').all());
         expect(dump).not.toMatch(/secret|private/);
     });
@@ -212,11 +213,25 @@ describeSqlite('distress wipe: real SQLite', () => {
         expect(JSON.parse(result.reminders!)).toEqual(stored);
     });
 
-    it('keeps health metrics and every other setting', async () => {
-        db.raw.exec(`INSERT INTO health_metrics (date, sleep_total_minutes, synced_at) VALUES ('2026-11-01', 420, 'x')`);
+    it('removes ALL health data and switches the sync off so it does not come back', async () => {
+        db.raw.exec(`INSERT INTO health_metrics (date, sleep_total_minutes, avg_heart_rate, synced_at)
+                     VALUES ('2026-11-01', 420, 61, 'x'), ('2026-11-02', 380, 66, 'x')`);
+        db.raw.exec(`INSERT OR REPLACE INTO user_settings (key, value) VALUES
+                     ('health_connect_opt_in', 'true'), ('health_daily_sync', 'true'),
+                     ('health_last_synced_at', '2026-11-02T08:00:00.000Z')`);
+        const result = await wipeSensitiveData(db as never);
+        expect(result.healthDaysRemoved).toBe(2);
+        expect(countRows(db, 'health_metrics')).toBe(0);
+        const get = (k: string) =>
+            (db.raw.prepare('SELECT value FROM user_settings WHERE key = ?').get(k) as { value: string } | undefined)?.value;
+        expect(get('health_connect_opt_in')).toBe('false');
+        expect(get('health_daily_sync')).toBe('false');
+        expect(get('health_last_synced_at')).toBeUndefined();
+    });
+
+    it('keeps the display settings', async () => {
         db.raw.exec(`INSERT OR REPLACE INTO user_settings (key, value) VALUES ('theme', 'forest')`);
         await wipeSensitiveData(db as never);
-        expect(countRows(db, 'health_metrics')).toBe(1);
         expect((db.raw.prepare(`SELECT value FROM user_settings WHERE key='theme'`).get() as { value: string }).value)
             .toBe('forest');
     });
@@ -245,6 +260,7 @@ describeSqlite('distress wipe: real SQLite', () => {
             customActivitiesRemoved: 0,
             customGroupsRemoved: 0,
             binnedEntriesPurged: 0,
+            healthDaysRemoved: 0,
             reminders: null,
         });
     });
@@ -255,7 +271,11 @@ describeSqlite('distress wipe: real SQLite', () => {
                 ? ['SQLite', 'entry_media', 'mood_tracker_export_2026-10-01.json']
                 : ['ImagePicker']
         );
+        await SecureStore.setItemAsync('backup_encryption_key_v1', '{"stored":"key"}');
+        await SecureStore.setItemAsync('backup_password_confirmed_at_v1', '123');
         const summary = await runDistressWipe(db as never);
+        // The stored key opens encrypted backups without the password: gone.
+        expect((SecureStore as unknown as { __dump: () => object }).__dump()).toEqual({});
         // The binned entry (and, by cascade, its photo row) goes with the bin purge.
         expect(summary).toMatchObject({ notesCleared: 1, photosRemoved: 1, binnedEntriesPurged: 1 });
 

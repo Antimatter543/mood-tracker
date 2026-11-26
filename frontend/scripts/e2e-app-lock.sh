@@ -153,7 +153,8 @@ g = c.execute("SELECT id FROM activity_groups WHERE name='Therapy'").fetchone()[
 c.execute("INSERT INTO activities (name, group_id) VALUES ('Panic attack', ?)", (g,))
 a = c.execute("SELECT id FROM activities WHERE name='Panic attack'").fetchone()[0]
 e = c.execute("SELECT MAX(id) FROM entries").fetchone()[0]
-c.execute("UPDATE entries SET notes='E2E SECRET NOTE' WHERE id=?", (e,))
+c.execute("UPDATE entries SET notes='E2E SECRET NOTE', starred_at='2026-11-01T10:00:00.000Z' WHERE id=?", (e,))
+c.execute("INSERT OR REPLACE INTO health_metrics (date, sleep_total_minutes, avg_heart_rate, synced_at) VALUES ('2026-11-01', 420, 61, 'e2e')")
 c.execute("INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?)", (e, a))
 c.execute("INSERT INTO entry_media (entry_id, file_path) VALUES (?, ?)", (e, sys.argv[2]))
 c.commit()
@@ -290,6 +291,9 @@ check "default activity links kept" "$(( AFTER_LINKS == BEFORE_DEFAULT_LINKS && 
 [[ "$(sql "SELECT COUNT(*) FROM activity_groups WHERE name='Therapy'")" == 0 ]]; check "custom group removed" "$(( $? == 0 ))"
 [[ "$(sql 'SELECT COUNT(*) FROM entry_media')" == 0 ]]; check "photo rows removed" "$(( $? == 0 ))"
 adb shell ls "$PHOTO" >/dev/null 2>&1; check "photo file deleted" "$(( $? != 0 ))"
+[[ "$(sql 'SELECT COUNT(*) FROM entries WHERE starred_at IS NOT NULL')" == 0 ]]; check "stars removed" "$(( $? == 0 ))"
+[[ "$(sql 'SELECT COUNT(*) FROM health_metrics')" == 0 ]]; check "health data removed" "$(( $? == 0 ))"
+[[ "$(sql "SELECT value FROM user_settings WHERE key='health_connect_opt_in'")" == false ]]; check "health sync off" "$(( $? == 0 ))"
 [[ "$(sql "SELECT value FROM user_settings WHERE key='app_lock_enabled'")" == true ]]; check "app lock still on" "$(( $? == 0 ))"
 adb shell cat "$DBDIR/moodTracker.db" "$DBDIR/moodTracker.db-wal" 2>/dev/null | grep -c 'E2E SECRET NOTE' >"$OUT/db/raw-grep.txt"
 check "secret note not recoverable from the raw DB file" "$(( $(cat "$OUT/db/raw-grep.txt") == 0 ))"
