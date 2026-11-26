@@ -11,7 +11,7 @@ import { Alert, Linking } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import * as LocalAuth from 'expo-local-authentication';
 import { ANDROID_BIOMETRIC_RULE_URL, APP_LOCK_COPY } from '@/lib/appLock';
-import { DISTRESS_CATEGORIES, DISTRESS_CATEGORY_COPY } from '@/lib/distressScope';
+import { DEFAULT_DISTRESS_SCOPE, DISTRESS_CATEGORIES, DISTRESS_CATEGORY_COPY, keptSummary } from '@/lib/distressScope';
 
 const auth = LocalAuth as unknown as {
     __reset: () => void;
@@ -151,9 +151,12 @@ describe('AppLockSection', () => {
     it('with distress on: one switch per category, all on by default, and what is always kept', async () => {
         const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
         for (const c of DISTRESS_CATEGORIES) {
-            expect(view.getByTestId(`distress-scope-${c}`).props.value).toBe(true);
+            expect(view.getByTestId(`distress-scope-${c}`).props.value).toBe(DEFAULT_DISTRESS_SCOPE[c]);
         }
-        expect(view.getByText(APP_LOCK_COPY.distressAlwaysKept)).toBeTruthy();
+        // the two that empty the journal are off by default
+        expect(view.getByTestId('distress-scope-entries').props.value).toBe(false);
+        expect(view.getByTestId('distress-scope-defaultActivityLinks').props.value).toBe(false);
+        expect(view.getByTestId('distress-kept').props.children).toBe(keptSummary(DEFAULT_DISTRESS_SCOPE));
     });
 
     it('the selection is hidden while distress is off', async () => {
@@ -193,5 +196,31 @@ describe('AppLockSection', () => {
         expect(view.getByTestId('distress-details')).toBeTruthy();
         await fireEvent.press(view.getByText(/Compatibility Definition, 7\.3\.10/));
         expect(openURL).toHaveBeenCalledWith(ANDROID_BIOMETRIC_RULE_URL);
+    });
+
+    it('erasing all entries needs its own confirmation; Cancel keeps it off', async () => {
+        alertAnswer = 'Cancel';
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await fireEvent(view.getByTestId('distress-scope-entries'), 'valueChange', true);
+        await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(
+            APP_LOCK_COPY.eraseEntriesTitle, APP_LOCK_COPY.eraseEntriesWarning, expect.anything(), expect.anything()
+        ));
+        expect(mockUpdateSetting).not.toHaveBeenCalled();
+        expect(view.getByTestId('distress-scope-entries').props.value).toBe(false);
+    });
+
+    it('confirming turns it on, and the kept line says the journal is emptied', async () => {
+        alertAnswer = 'Erase entries too';
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await fireEvent(view.getByTestId('distress-scope-entries'), 'valueChange', true);
+        await waitFor(() => expect(view.getByTestId('distress-scope-entries').props.value).toBe(true));
+        expect(view.getByTestId('distress-kept').props.children).toMatch(/fresh install/);
+    });
+
+    it('the other off-by-default category needs no extra confirmation', async () => {
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await fireEvent(view.getByTestId('distress-scope-defaultActivityLinks'), 'valueChange', true);
+        await waitFor(() => expect(view.getByTestId('distress-scope-defaultActivityLinks').props.value).toBe(true));
+        expect(alertSpy).not.toHaveBeenCalled();
     });
 });

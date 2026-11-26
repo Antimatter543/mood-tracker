@@ -38,7 +38,7 @@ import {
     DISTRESS_CATEGORIES,
     DISTRESS_CATEGORY_COPY,
     DistressCategory,
-    erasedCategoryLabels,
+    keptSummary,
     parseDistressScope,
     serializeDistressScope,
 } from '@/lib/distressScope';
@@ -126,8 +126,18 @@ export function AppLockSection() {
         link: { color: colors.accent, fontSize: 12, marginTop: 8, textDecorationLine: 'underline' },
     }), [colors]);
 
-    const toggleCategory = (category: DistressCategory, value: boolean) =>
-        updateSetting('distress_wipe_scope', serializeDistressScope({ ...scope, [category]: value }));
+    const toggleCategory = async (category: DistressCategory, value: boolean) => {
+        // Emptying the whole journal gets its own confirmation.
+        if (category === 'entries' && value) {
+            const ok = await confirmDestructive(
+                APP_LOCK_COPY.eraseEntriesTitle,
+                APP_LOCK_COPY.eraseEntriesWarning,
+                'Erase entries too'
+            );
+            if (!ok) return;
+        }
+        await updateSetting('distress_wipe_scope', serializeDistressScope({ ...scope, [category]: value }));
+    };
 
     const onToggleLock = async (next: boolean) => {
         if (busy) return;
@@ -166,7 +176,7 @@ export function AppLockSection() {
             }
             const ok = await confirmDestructive(
                 APP_LOCK_COPY.distressWarningTitle,
-                distressWarningFor(erasedCategoryLabels(scope)),
+                distressWarningFor(scope),
                 'Turn on'
             );
             if (ok) await updateSetting('distress_wipe_enabled', true);
@@ -236,7 +246,7 @@ export function AppLockSection() {
                             />
                         </View>
                     ))}
-                    <Text style={styles.kept}>{APP_LOCK_COPY.distressAlwaysKept}</Text>
+                    <Text style={styles.kept} testID="distress-kept">{keptSummary(scope)}</Text>
 
                     <Pressable
                         testID="distress-details-toggle"

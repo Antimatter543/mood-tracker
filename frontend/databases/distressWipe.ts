@@ -27,7 +27,12 @@ import {
  * user's backups); keep the rest, so the journal stays as full and lived-in as
  * it was. 200 logged days stay 200 logged days.
  *
- * What SURVIVES:
+ * Two more categories, OFF by default, go further: `defaultActivityLinks`
+ * (each day keeps only its score) and `entries` (every entry and score: an
+ * empty journal, like a fresh install; the default activity catalogue stays,
+ * as it does on a fresh install).
+ *
+ * What SURVIVES (with the default selection):
  *   - EVERY live entry: its date, time and mood score,
  *   - its links to the DEFAULT activities (the seed catalogue in
  *     components/seedData.ts, matched by activity name AND group name), i.e.
@@ -106,6 +111,8 @@ export type DistressWipeSummary = {
     customGroupsRemoved: number;
     binnedEntriesPurged: number;
     healthDaysRemoved: number;
+    activityLinksRemoved: number;
+    entriesRemoved: number;
     /** The new `reminders` setting value when labels were blanked, else null. */
     reminders: string | null;
 };
@@ -122,8 +129,9 @@ export async function wipeSensitiveData(
 ): Promise<DistressWipeSummary & { mediaFiles: string[] }> {
     // Pre-read on the read connection (allowed before the callback, per the
     // contract): every photo path, binned or live, is going away.
-    // Photos of binned entries go with the bin even when photos are kept.
-    const mediaRows = scope.photos
+    // Photos of binned entries go with the bin even when photos are kept, and
+    // every photo goes with its entry when all entries go.
+    const mediaRows = scope.photos || scope.entries
         ? await db.getAllAsync<{ file_path: string }>('SELECT file_path FROM entry_media')
         : scope.recycleBin
           ? await db.getAllAsync<{ file_path: string }>(
@@ -235,6 +243,20 @@ export async function wipeSensitiveData(
             await txn.runAsync('DELETE FROM user_settings WHERE key = ?', [HEALTH_LAST_SYNCED_SETTING_KEY]);
         }
 
+        // Off by default: each day keeps only its score.
+        const activityLinksRemoved = scope.defaultActivityLinks
+            ? await changes('DELETE FROM entry_activities')
+            : none;
+
+        // Off by default: the whole journal, like a fresh install. Child rows
+        // first, explicitly (no reliance on FK cascades).
+        let entriesRemoved = none;
+        if (scope.entries) {
+            await txn.runAsync('DELETE FROM entry_activities');
+            await txn.runAsync('DELETE FROM entry_media');
+            entriesRemoved = await changes('DELETE FROM entries');
+        }
+
         // The distress option switches itself off in the same transaction.
         await txn.runAsync(
             `INSERT OR REPLACE INTO user_settings (key, value) VALUES ('distress_wipe_enabled', 'false')`
@@ -248,6 +270,8 @@ export async function wipeSensitiveData(
             customGroupsRemoved,
             binnedEntriesPurged,
             healthDaysRemoved,
+            activityLinksRemoved,
+            entriesRemoved,
             reminders,
         };
     });
@@ -299,7 +323,7 @@ export async function wipeSensitiveFiles(
     scope: DistressScope = DEFAULT_DISTRESS_SCOPE
 ): Promise<void> {
     for (const f of mediaFiles) await deleteQuietly(f);
-    if (scope.photos) await deleteQuietly(MEDIA_DIR);
+    if (scope.photos || scope.entries) await deleteQuietly(MEDIA_DIR);
     if (!scope.leftoverFiles) return;
 
     const docs = FileSystem.documentDirectory;

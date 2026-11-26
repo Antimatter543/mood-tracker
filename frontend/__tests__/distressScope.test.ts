@@ -7,13 +7,24 @@ import {
     DISTRESS_CATEGORIES,
     DISTRESS_CATEGORY_COPY,
     erasedCategoryLabels,
+    keptSummary,
+    OFF_BY_DEFAULT,
     parseDistressScope,
     serializeDistressScope,
 } from '@/lib/distressScope';
 
 describe('distress scope', () => {
-    it('defaults to erasing every category', () => {
-        for (const c of DISTRESS_CATEGORIES) expect(DEFAULT_DISTRESS_SCOPE[c]).toBe(true);
+    it('defaults: everything private is erased, the journal itself is kept', () => {
+        for (const c of DISTRESS_CATEGORIES) {
+            expect(DEFAULT_DISTRESS_SCOPE[c]).toBe(!OFF_BY_DEFAULT.includes(c));
+        }
+        expect(OFF_BY_DEFAULT).toEqual(['defaultActivityLinks', 'entries']);
+    });
+
+    it('the kept line follows the selection', () => {
+        expect(keptSummary(DEFAULT_DISTRESS_SCOPE)).toMatch(/mood score and default activities/);
+        expect(keptSummary({ ...DEFAULT_DISTRESS_SCOPE, defaultActivityLinks: true })).not.toMatch(/default activities,/);
+        expect(keptSummary({ ...DEFAULT_DISTRESS_SCOPE, entries: true })).toMatch(/fresh install/);
     });
 
     it('missing, empty or broken storage reads as the default', () => {
@@ -45,6 +56,6 @@ describe('distress scope', () => {
 
     it('lists the erased categories in display order', () => {
         expect(erasedCategoryLabels({ ...DEFAULT_DISTRESS_SCOPE, notes: false })).not.toContain('Notes');
-        expect(erasedCategoryLabels(DEFAULT_DISTRESS_SCOPE)).toHaveLength(DISTRESS_CATEGORIES.length);
+        expect(erasedCategoryLabels(DEFAULT_DISTRESS_SCOPE)).toHaveLength(DISTRESS_CATEGORIES.length - OFF_BY_DEFAULT.length);
     });
 });

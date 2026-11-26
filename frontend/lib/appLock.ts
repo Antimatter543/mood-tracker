@@ -10,6 +10,8 @@
  *                            distress wipe (databases/distressWipe.ts).
  */
 
+import { DistressScope, erasedCategoryLabels, keptSummary } from '@/lib/distressScope';
+
 /** The subset of expo-local-authentication's result this module reasons about. */
 export type AuthAttempt =
     | { success: true }
@@ -158,10 +160,12 @@ export const APP_LOCK_COPY = {
     distressDescription:
         'Android blocks fingerprint and face unlock after several wrong attempts in a row (usually 5). ' +
         "If that happens at SoulSync's own unlock screen, SoulSync quietly erases what you pick below. " +
-        'Every logged day keeps its date, mood score and default activities.',
+        'By default every logged day keeps its date, mood score and default activities.',
     distressWarningTitle: 'Turn on distress wipe?',
-    distressAlwaysKept:
-        'Always kept: every logged day with its date, time, mood score and default activities, your display settings and the app lock.',
+    eraseEntriesTitle: 'Erase all entries too?',
+    eraseEntriesWarning:
+        'With this on, the distress wipe also deletes every entry and mood score. SoulSync then looks like a ' +
+        'fresh install with an empty journal. Only a backup kept outside this phone can bring it back.',
     distressActiveHint:
         'Distress wipe is on. Keep a recent backup outside this phone: it is the only way to get your notes back after a wipe.',
     noScreenLockTitle: 'No screen lock',
@@ -195,16 +199,16 @@ export const DISTRESS_TECH_DETAILS: readonly string[] = [
 ];
 
 /** The confirmation shown before turning the distress wipe on, for the current selection. */
-export function distressWarningFor(erasedLabels: readonly string[]): string {
-    const list = erasedLabels.length
-        ? erasedLabels.map(l => `\u2022 ${l}`).join('\n')
+export function distressWarningFor(scope: DistressScope): string {
+    const labels = erasedCategoryLabels(scope);
+    const list = labels.length
+        ? labels.map(l => `\u2022 ${l}`).join('\n')
         : '\u2022 nothing (every category is switched off)';
     return (
         "While this is on, SoulSync's unlock prompt accepts biometrics only (no PIN). If Android blocks " +
         "biometrics after wrong attempts at that prompt (usually 5), SoulSync silently and permanently erases:\n\n" +
         list +
-        '\n\nEvery logged day stays, with its date, mood score and default activities, so your journal ' +
-        'still looks complete and real.\n\n' +
+        '\n\n' + keptSummary(scope) + '\n\n' +
         'This also happens if it fails by accident (wet finger, gloves). It cannot be undone. ' +
         'Make a backup first and keep it somewhere other than this phone.'
     );

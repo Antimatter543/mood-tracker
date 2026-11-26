@@ -7,9 +7,9 @@
  * WHEN it fires is not a setting: Android decides how many wrong biometrics
  * lock the sensor (see DISTRESS_TECH_DETAILS in lib/appLock.ts).
  *
- * Every logged day's date, time and mood score, and its links to the default
- * activities, are ALWAYS kept: that is what keeps the journal believable, so it
- * is not a choice here.
+ * By default every logged day keeps its date, time and mood score and its
+ * links to the default activities: that is what keeps the journal believable.
+ * Two categories that are OFF by default (OFF_BY_DEFAULT) remove those too.
  */
 
 export const DISTRESS_CATEGORIES = [
@@ -22,13 +22,24 @@ export const DISTRESS_CATEGORIES = [
     'reminderNames',
     'backupKey',
     'leftoverFiles',
+    // Off by default: together with everything above they empty the journal
+    // completely, like a fresh install.
+    'defaultActivityLinks',
+    'entries',
 ] as const;
 export type DistressCategory = (typeof DISTRESS_CATEGORIES)[number];
 export type DistressScope = Record<DistressCategory, boolean>;
 
-/** The default: erase every category (the approach the feature shipped with). */
+/**
+ * Categories that are OFF by default. They remove what makes the journal look
+ * real (the default activities of each day, or every entry and score), so they
+ * are only for someone who would rather show an empty app.
+ */
+export const OFF_BY_DEFAULT: readonly DistressCategory[] = ['defaultActivityLinks', 'entries'];
+
+/** The default: erase everything private, keep a believable journal. */
 export const DEFAULT_DISTRESS_SCOPE: DistressScope = Object.fromEntries(
-    DISTRESS_CATEGORIES.map(c => [c, true])
+    DISTRESS_CATEGORIES.map(c => [c, !OFF_BY_DEFAULT.includes(c)])
 ) as DistressScope;
 
 /** Settings copy for each category, in display order. */
@@ -51,7 +62,29 @@ export const DISTRESS_CATEGORY_COPY: Record<DistressCategory, { label: string; d
         label: 'Leftover backup files and caches',
         detail: 'Backup copies and picker files the app left in its own storage',
     },
+    defaultActivityLinks: {
+        label: 'Default activities on each day',
+        detail: 'Off by default. Each day keeps only its mood score',
+    },
+    entries: {
+        label: 'All entries and mood scores',
+        detail: 'Off by default. The journal is empty afterwards, like a fresh install',
+    },
 };
+
+/**
+ * The "always kept" line under the switches, for the current selection. Settings
+ * outside the journal (display, app lock, the default activity catalogue) always stay.
+ */
+export function keptSummary(scope: DistressScope): string {
+    if (scope.entries) {
+        return 'Kept: your display settings, the app lock and the default activity list. The journal itself is emptied, like a fresh install.';
+    }
+    if (scope.defaultActivityLinks) {
+        return 'Kept: every logged day with its date, time and mood score, your display settings and the app lock.';
+    }
+    return 'Kept: every logged day with its date, time, mood score and default activities, your display settings and the app lock.';
+}
 
 /** Labels of the categories a scope erases, in display order. */
 export function erasedCategoryLabels(scope: DistressScope): string[] {

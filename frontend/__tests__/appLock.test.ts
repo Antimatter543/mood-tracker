@@ -20,7 +20,7 @@ import {
     DEFAULT_DISTRESS_SCOPE,
     DISTRESS_CATEGORIES,
     DISTRESS_CATEGORY_COPY,
-    erasedCategoryLabels,
+    keptSummary,
 } from '@/lib/distressScope';
 
 const SLOW = MIN_PROMPT_MS_FOR_DISTRESS + 1500;
@@ -139,10 +139,14 @@ describe('lockMessageFor', () => {
 });
 
 describe('Settings copy', () => {
-    const w = distressWarningFor(erasedCategoryLabels(DEFAULT_DISTRESS_SCOPE));
+    const w = distressWarningFor(DEFAULT_DISTRESS_SCOPE);
 
     it('the distress warning lists what is erased, says it cannot be undone, and asks for a backup', () => {
-        for (const c of DISTRESS_CATEGORIES) expect(w).toContain(DISTRESS_CATEGORY_COPY[c].label);
+        for (const c of DISTRESS_CATEGORIES) {
+            if (DEFAULT_DISTRESS_SCOPE[c]) expect(w).toContain(DISTRESS_CATEGORY_COPY[c].label);
+            else expect(w).not.toContain(DISTRESS_CATEGORY_COPY[c].label);
+        }
+        expect(w).toContain(keptSummary(DEFAULT_DISTRESS_SCOPE));
         expect(w).toMatch(/cannot be undone/);
         expect(w).toMatch(/backup/i);
         expect(w).toMatch(/by accident/);
@@ -150,9 +154,15 @@ describe('Settings copy', () => {
         expect(APP_LOCK_COPY.distressActiveHint).toMatch(/backup/i);
     });
 
+    it('with every entry selected, the warning says the journal is emptied', () => {
+        const all = { ...DEFAULT_DISTRESS_SCOPE, defaultActivityLinks: true, entries: true };
+        expect(distressWarningFor(all)).toMatch(/fresh install/);
+        expect(distressWarningFor(all)).toContain(DISTRESS_CATEGORY_COPY.entries.label);
+    });
+
     it('the warning follows the selection: a kept category is not listed', () => {
         const scope = { ...DEFAULT_DISTRESS_SCOPE, health: false };
-        expect(distressWarningFor(erasedCategoryLabels(scope))).not.toContain(DISTRESS_CATEGORY_COPY.health.label);
+        expect(distressWarningFor(scope)).not.toContain(DISTRESS_CATEGORY_COPY.health.label);
     });
 
     it('the description says what triggers it, not just "fails too many times"', () => {
