@@ -57,20 +57,22 @@ describe('Settings copy', () => {
         expect(APP_LOCK_COPY.eraseEntriesWarning).toMatch(/suspicious/);
     });
 
-    it('technical details promise what the code does', () => {
+    it('technical details promise what the code does, briefly', () => {
         const d = DISTRESS_TECH_DETAILS.join(' ');
-        expect(d).toMatch(/exactly like your app PIN/);
-        expect(d).toMatch(/checked against both PINs, so it takes the same time/);
-        expect(d).toMatch(/deleted, this option turns itself off and the selection below goes back to the default/);
+        expect(d).toMatch(/exactly like your app PIN/); // the same unlock (appLockGate)
+        expect(d).toMatch(/checked against both, in the same time/); // pinStore.checkPin
+        expect(d).toMatch(/deletes itself and this setting resets/); // wipe() + scope reset
         expect(d).toMatch(/Wrong PINs never erase anything/);
+        expect(d).toMatch(/overwritten/); // secure_delete + VACUUM
         expect(d).toMatch(/no "forgot PIN"/);
         // what the app cannot reach is said plainly
         expect(d).toMatch(/notification history/);
-        expect(d).toMatch(/keyboard may have learned/);
-        expect(d).toMatch(/record of SoulSync's past reads/);
-        // the background half (runDistressCleanup) is disclosed, with its resume
-        expect(d).toMatch(/finish in the background right after the app opens \(on the next start/);
+        expect(d).toMatch(/keyboard has learned/);
+        expect(d).toMatch(/access log/);
         expect(APP_LOCK_COPY.distressActiveHint).toMatch(/backup/i);
+        // concise: one short sentence or two per point
+        for (const line of DISTRESS_TECH_DETAILS) expect(line.length).toBeLessThanOrEqual(160);
+        expect(APP_LOCK_COPY.distressWhyDefault.length).toBeLessThanOrEqual(220);
     });
 
     it('every PIN setup step has a title, and the app PIN warns there is no reset', () => {
