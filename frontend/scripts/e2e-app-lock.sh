@@ -355,6 +355,10 @@ shot pr-advanced
 scroll_to_id distress-scope-entries
 [[ "$(node_attr distress-scope-entries checked)" == "false" ]]; check "erasing all entries is off by default" "$(( $? == 0 ))"
 [[ "$(node_attr distress-scope-defaultActivityLinks checked)" == "false" ]]; check "erasing default activities is off by default" "$(( $? == 0 ))"
+# A custom selection (leftover backup files kept; nothing else here checks them).
+# After the wipe it must be back to the default: a custom one would show the option was used.
+scroll_to_id distress-scope-leftoverFiles && tap_id distress-scope-leftoverFiles; sleep 1
+[[ "$(node_attr distress-scope-leftoverFiles checked)" == "false" ]]; check "a category can be switched off (custom selection)" "$(( $? == 0 ))"
 scroll_to_text 'fresh install'; shot pr-advanced-end
 tap_id distress-details-close; sleep 1
 has 'resource-id="distress-details"'; check "dialog closes" "$(( $? != 0 ))"
@@ -409,6 +413,12 @@ has 'E2E SECRET NOTE'; check "secret note not on the Timeline" "$(( $? != 0 ))"
 tap_id tab-settings; sleep 2
 scroll_to_id distress-wipe-switch
 [[ "$(node_attr distress-wipe-switch checked)" == "false" ]]; check "distress option switched itself off" "$(( $? == 0 ))"
+has 'resource-id="distress-custom-scope"'; check "no custom-selection note after the wipe" "$(( $? != 0 ))"
+scroll_to_id distress-details-toggle && tap_id distress-details-toggle
+wait_for 'resource-id="distress-details"' 6
+scroll_to_id distress-scope-leftoverFiles
+[[ "$(node_attr distress-scope-leftoverFiles checked)" == "true" ]]; check "Technical details back to the default selection after the wipe" "$(( $? == 0 ))"
+tap_id distress-details-close; sleep 1
 shot settings-after-wipe
 home; launch; sleep 2
 wait_for 'resource-id="app-lock-screen"' 8

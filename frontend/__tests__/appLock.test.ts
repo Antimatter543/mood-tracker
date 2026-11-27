@@ -59,7 +59,7 @@ describe('Settings copy', () => {
         const d = DISTRESS_TECH_DETAILS.join(' ');
         expect(d).toMatch(/exactly like your app PIN/);
         expect(d).toMatch(/checked against both PINs, so it takes the same time/);
-        expect(d).toMatch(/deleted and this option turns itself off/);
+        expect(d).toMatch(/deleted, this option turns itself off and the selection below goes back to the default/);
         expect(d).toMatch(/Wrong PINs never erase anything/);
         expect(d).toMatch(/no "forgot PIN"/);
         // the background half (runDistressCleanup) is disclosed, with its resume

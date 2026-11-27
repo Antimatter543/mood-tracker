@@ -6,6 +6,8 @@ import { MEDIA_DIR } from '@/databases/mediaHelpers';
 import { withWriteLock, withWriteTransaction } from '@/databases/writeTransaction';
 import { parseReminders, serializeReminders } from '@/lib/reminders';
 import { clearBackupPassword } from '@/lib/backupKeyStore';
+import { disconnect as revokeHealthConnect } from '@/lib/healthConnect';
+import { dismissPresentedNotifications } from '@/lib/notifications';
 import { DEFAULT_DISTRESS_SCOPE, DistressScope } from '@/lib/distressScope';
 import {
     HEALTH_DAILY_SYNC_SETTING_KEY,
@@ -56,9 +58,15 @@ import {
  *     itself was never stored,
  *   - leftover plain-text backup files the export wrote into the app's
  *     documents folder, and the picker caches,
- *   - the distress flag itself (`distress_wipe_enabled` -> 'false'), in the
- *     same transaction, so the Settings screen no longer advertises it and a
- *     second use cannot fire again.
+ *   - the distress flag itself (`distress_wipe_enabled` -> 'false') and its
+ *     selection (`distress_wipe_scope` -> the default), in the same
+ *     transaction, so Settings look like an app lock that never had a
+ *     distress PIN and a second use cannot fire again.
+ *
+ * Outside the app's own data (after the app opens, runDistressCleanup): the
+ * Health Connect grant is revoked like Settings > Turn off does, and reminders
+ * already shown in the notification shade are dismissed (they carry the old
+ * reminder name). Log lines never name the distress PIN.
  *
  * Forensics: `PRAGMA secure_delete` (on before the wipe) zeroes freed space,
  * then a VACUUM + WAL checkpoint (TRUNCATE) rewrite the file, so the old notes are not
@@ -239,7 +247,11 @@ export async function wipeSensitiveData(
                 `INSERT OR REPLACE INTO user_settings (key, value) VALUES (?, 'false'), (?, 'false')`,
                 [HEALTH_OPT_IN_SETTING_KEY, HEALTH_DAILY_SYNC_SETTING_KEY]
             );
-            await txn.runAsync('DELETE FROM user_settings WHERE key = ?', [HEALTH_LAST_SYNCED_SETTING_KEY]);
+            // The same end state as Settings > Health Connect > Turn off ('' = never synced).
+            await txn.runAsync(
+                'INSERT OR REPLACE INTO user_settings (key, value) VALUES (?, ?)',
+                [HEALTH_LAST_SYNCED_SETTING_KEY, '']
+            );
         }
 
         // Off by default: each day keeps only its score.
@@ -256,9 +268,11 @@ export async function wipeSensitiveData(
             entriesRemoved = await changes('DELETE FROM entries');
         }
 
-        // The distress option switches itself off in the same transaction.
+        // The distress option switches itself off in the same transaction, and
+        // its selection goes back to the default: a custom selection left
+        // behind in Technical details would show the option was set up.
         await txn.runAsync(
-            `INSERT OR REPLACE INTO user_settings (key, value) VALUES ('distress_wipe_enabled', 'false')`
+            `INSERT OR REPLACE INTO user_settings (key, value) VALUES ('distress_wipe_enabled', 'false'), ('distress_wipe_scope', '{}')`
         );
         // And the file cleanup is owed from this commit on: if the app dies
         // before runDistressCleanup finishes, the next start finishes it.
@@ -297,7 +311,7 @@ export async function scrubDatabaseFile(): Promise<void> {
             await conn.execAsync('PRAGMA wal_checkpoint(TRUNCATE);');
         });
     } catch (e) {
-        console.warn('[distress] database scrub failed:', e);
+        console.warn('[db] scrub failed:', e);
     }
 }
 
@@ -306,7 +320,7 @@ export async function wipeBackupKey(): Promise<void> {
     try {
         await clearBackupPassword();
     } catch (e) {
-        console.warn('[distress] backup key wipe failed:', e);
+        console.warn('[backup] key removal failed:', e);
     }
 }
 
@@ -418,13 +432,22 @@ export function runDistressCleanup(db: SQLiteDatabase, mediaFiles: string[] = []
             } catch {
                 pending = { scope: DEFAULT_DISTRESS_SCOPE, at: Date.now() };
             }
-            await wipeSensitiveFiles(db, mediaFiles, { ...DEFAULT_DISTRESS_SCOPE, ...pending.scope }, pending.at);
+            const scope = { ...DEFAULT_DISTRESS_SCOPE, ...pending.scope };
+            await wipeSensitiveFiles(db, mediaFiles, scope, pending.at);
+            // Outside the app's own data, so that nothing elsewhere on the phone
+            // contradicts what the app now shows:
+            // Health Connect: the grant is revoked like a normal "Turn off" does,
+            // so the system's app list does not show SoulSync as still allowed.
+            if (scope.health) await revokeHealthConnect();
+            // Reminders: a reminder already shown in the notification shade
+            // still carries its old name.
+            if (scope.reminderNames) await dismissPresentedNotifications();
             await withWriteTransaction(txn =>
                 txn.runAsync('DELETE FROM user_settings WHERE key = ?', [DISTRESS_CLEANUP_KEY])
             );
             await scrubDatabaseFile();
         } catch (e) {
-            console.warn('[distress] cleanup failed:', e);
+            console.warn('[cleanup] failed:', e);
         } finally {
             cleanupRunning = null;
         }

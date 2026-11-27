@@ -228,6 +228,8 @@ describe('app lock gate (PIN)', () => {
             // Only the fast SQL half is awaited; files and VACUUM run after the app opens.
             expect(opts.background).toBe(true);
             expect(mockUpdateSetting).toHaveBeenCalledWith('distress_wipe_enabled', false);
+            // the selection in Technical details is back to the default too
+            expect(mockUpdateSetting).toHaveBeenCalledWith('distress_wipe_scope', '{}');
             expect(await checkPin('9999')).toBe('wrong'); // deleted
             expect(await checkPin('2468')).toBe('app'); // the app PIN still works
             expect(mountCount).toBe(2); // the subtree was remounted

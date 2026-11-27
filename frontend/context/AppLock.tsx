@@ -150,10 +150,12 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
                 await updateSetting('reminders', summary.reminders).catch(() => {});
             }
         } catch (e) {
-            console.warn('[distress] wipe failed:', e);
+            console.warn('[unlock] cleanup failed:', e);
         }
         await clearDistressPin().catch(() => {});
         await updateSetting('distress_wipe_enabled', false).catch(() => {});
+        // The selection is reset in the wipe transaction; keep the in-memory settings in step.
+        await updateSetting('distress_wipe_scope', '{}').catch(() => {});
         returnTo.current = pathnameRef.current;
         setGeneration(g => g + 1);
         bumpDataVersion();

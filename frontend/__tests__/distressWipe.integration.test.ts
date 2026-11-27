@@ -230,7 +230,8 @@ describeSqlite('distress wipe: real SQLite', () => {
             (db.raw.prepare('SELECT value FROM user_settings WHERE key = ?').get(k) as { value: string } | undefined)?.value;
         expect(get('health_connect_opt_in')).toBe('false');
         expect(get('health_daily_sync')).toBe('false');
-        expect(get('health_last_synced_at')).toBeUndefined();
+        // the same end state as Settings > Health Connect > Turn off ('' = never synced)
+        expect(get('health_last_synced_at')).toBe('');
     });
 
     it('keeps the display settings', async () => {

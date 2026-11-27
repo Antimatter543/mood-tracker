@@ -68,8 +68,8 @@ export const DISTRESS_TECH_DETAILS: readonly string[] = [
         'Before it shows anything, it erases what is selected below.',
     'Nothing on the lock screen shows whether a distress PIN is set. Every PIN you type is checked against ' +
         'both PINs, so it takes the same time either way.',
-    'After it is used, the distress PIN is deleted and this option turns itself off. Settings then look like ' +
-        'an app lock without a distress PIN.',
+    'After it is used, the distress PIN is deleted, this option turns itself off and the selection below goes ' +
+        'back to the default. Settings then look like an app lock without a distress PIN.',
     'Wrong PINs never erase anything. After 5 in a row SoulSync makes you wait, the same with or without a distress PIN.',
     'Erased data is overwritten in the database file, not just marked as deleted. Photo files and that ' +
         'overwrite finish in the background right after the app opens (on the next start if SoulSync is ' +

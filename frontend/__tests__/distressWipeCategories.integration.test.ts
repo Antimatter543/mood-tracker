@@ -17,6 +17,11 @@
  * the point: a category must not silently stop working in a later update.
  */
 jest.mock('expo-file-system/legacy', () => require('../__mocks__/expo-file-system'));
+// Outside the app's own data: the Health Connect grant and the notification shade.
+const mockRevokeHealthConnect = jest.fn(async () => true);
+jest.mock('@/lib/healthConnect', () => ({ disconnect: () => mockRevokeHealthConnect() }));
+const mockDismissNotifications = jest.fn(async () => {});
+jest.mock('@/lib/notifications', () => ({ dismissPresentedNotifications: () => mockDismissNotifications() }));
 
 import * as FileSystem from 'expo-file-system/legacy';
 import * as SecureStore from 'expo-secure-store';
@@ -67,8 +72,15 @@ const ERASED: Record<DistressCategory, (c: Ctx) => boolean> = {
         countRows(db, 'activities', `name = 'Panic attack'`) === 0 &&
         countRows(db, 'activity_groups', `name = 'Therapy'`) === 0,
     recycleBin: ({ db }) => countRows(db, 'entries', 'deleted_at IS NOT NULL') === 0,
-    health: ({ db }) => countRows(db, 'health_metrics') === 0 && setting(db, 'health_connect_opt_in') === 'false',
-    reminderNames: ({ db }) => JSON.parse(setting(db, 'reminders') ?? '[]')[0]?.label === '',
+    // ...and the system grant revoked, like Settings > Health Connect > Turn off.
+    health: ({ db }) =>
+        countRows(db, 'health_metrics') === 0 &&
+        setting(db, 'health_connect_opt_in') === 'false' &&
+        mockRevokeHealthConnect.mock.calls.length === 1,
+    // ...and no reminder with its old name left in the notification shade.
+    reminderNames: ({ db }) =>
+        JSON.parse(setting(db, 'reminders') ?? '[]')[0]?.label === '' &&
+        mockDismissNotifications.mock.calls.length === 1,
     backupKey: () => !(BACKUP_KEY in store.__dump()),
     leftoverFiles: ({ deleted }) =>
         deleted.includes(`${fs.documentDirectory}${LEFTOVER_BACKUP}`) &&
@@ -142,7 +154,8 @@ describeSqlite('distress wipe, per category (real SQLite, full wipe path)', () =
             ('health_connect_opt_in', 'true'),
             ('theme', 'forest'),
             ('app_lock_enabled', 'true'),
-            ('distress_wipe_enabled', 'true')`);
+            ('distress_wipe_enabled', 'true'),
+            ('distress_wipe_scope', '{"leftoverFiles":false}')`);
         await SecureStore.setItemAsync(BACKUP_KEY, '{"k":1}');
         fs.readDirectoryAsync.mockImplementation(async (dir: string) =>
             dir === fs.documentDirectory ? ['SQLite', 'entry_media', LEFTOVER_BACKUP]
@@ -167,6 +180,9 @@ describeSqlite('distress wipe, per category (real SQLite, full wipe path)', () =
         expect(setting(c.db, 'theme')).toBe('forest');
         expect(setting(c.db, 'app_lock_enabled')).toBe('true');
         expect(setting(c.db, 'distress_wipe_enabled')).toBe('false'); // it fired
+        // ...and its selection is back to the default: a custom one left in
+        // Technical details would show the option had been set up.
+        expect(setting(c.db, 'distress_wipe_scope')).toBe('{}');
         expect(countRows(c.db, 'activities', `name <> 'Panic attack'`)).toBe(defaultCatalogue);
         expect(c.deleted.some(p => /SQLite|\.db$/.test(p))).toBe(false);
     };
