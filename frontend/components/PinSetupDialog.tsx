@@ -4,7 +4,7 @@
  * PIN"). The two PINs must always differ.
  * In-tree overlay (OverlayModal), never a native <Modal> (CLAUDE.md).
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -29,7 +29,14 @@ export function PinSetupDialog({
     onDone: (pin: string) => void;
 }) {
     const colors = useThemeColors();
-    const [first, setFirst] = useState<string | null>(null);
+    // The first entry, for the title; firstRef for the logic, which can run
+    // before the render that shows "again" (a fast confirm on a real phone).
+    const [first, setFirstState] = useState<string | null>(null);
+    const firstRef = useRef<string | null>(null);
+    const setFirst = (pin: string | null) => {
+        firstRef.current = pin;
+        setFirstState(pin);
+    };
     const [value, setValue] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [busy, setBusy] = useState(false);
@@ -62,8 +69,22 @@ export function PinSetupDialog({
 
     const copy = PIN_SETUP_COPY[mode];
 
-    const submit = async () => {
+    // One step at a time: a second OK while the first is still being checked is ignored.
+    const checking = useRef(false);
+    // `typed` comes from the pad (the PIN as typed, ahead of any render).
+    const submit = async (typed: string) => {
+        if (checking.current) return;
+        checking.current = true;
+        try {
+            await step(typed);
+        } finally {
+            checking.current = false;
+        }
+    };
+    const step = async (typed: string) => {
+        const first = firstRef.current;
         if (first === null) {
+            const value = typed;
             const problem = pinProblem(value);
             if (problem) {
                 setError(PIN_PROBLEM_COPY[problem]);
@@ -85,7 +106,7 @@ export function PinSetupDialog({
             setError(null);
             return;
         }
-        const problem = pinProblem(first, { confirm: value });
+        const problem = pinProblem(first, { confirm: typed });
         if (problem) {
             setError(PIN_PROBLEM_COPY[problem]);
             setFirst(null);

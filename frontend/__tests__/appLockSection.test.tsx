@@ -253,6 +253,19 @@ describe('AppLockSection', () => {
         expect(view.getByTestId('distress-why-default').props.children).toBe(APP_LOCK_COPY.distressWhyDefault);
     });
 
+    it('Technical details scrolls under a real finger: its body takes the touch (#43 pattern)', async () => {
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await openDetails(view);
+        const body = view.getByTestId('distress-details-body');
+        // Without this, a drag starting on text went to the overlay card's Pressable, not the list.
+        expect(body.props.onStartShouldSetResponder?.()).toBe(true);
+        const scroll = view.getByTestId('distress-details-scroll');
+        expect(scroll.props.persistentScrollbar).toBe(true);
+        // the switches stay at the bottom, after the explanations
+        const ids = findNodes(view.toJSON(), n => typeof n.props?.testID === 'string').map(n => n.props!.testID as string);
+        expect(ids.indexOf('distress-why-default')).toBeLessThan(ids.indexOf('distress-scope-notes'));
+    });
+
     it('switching a category off stores it, flags a custom selection, and can be reset', async () => {
         const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
         await openDetails(view);

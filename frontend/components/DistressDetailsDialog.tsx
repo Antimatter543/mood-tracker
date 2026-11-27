@@ -86,41 +86,54 @@ export function DistressDetailsDialog({
                     </Pressable>
                 </View>
 
-                <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-                    <Text style={styles.sectionLabel}>How it works</Text>
-                    {DISTRESS_TECH_DETAILS.map(line => (
-                        <Text key={line} style={styles.body}>{'• '}{line}</Text>
-                    ))}
-
-                    <Text style={styles.sectionLabel}>Why the default keeps your journal</Text>
-                    <Text style={styles.body} testID="distress-why-default">{APP_LOCK_COPY.distressWhyDefault}</Text>
-
-                    <Text style={styles.sectionLabel}>Advanced: what gets erased</Text>
-                    <View testID="distress-scope" style={{ gap: 10 }}>
-                        {DISTRESS_CATEGORIES.map(category => (
-                            <View key={category} style={styles.scopeRow}>
-                                <View style={styles.scopeText}>
-                                    <Text style={styles.scopeLabel}>{DISTRESS_CATEGORY_COPY[category].label}</Text>
-                                    <Text style={styles.scopeDetail}>{DISTRESS_CATEGORY_COPY[category].detail}</Text>
-                                </View>
-                                <Switch
-                                    testID={`distress-scope-${category}`}
-                                    accessibilityLabel={`Erase ${DISTRESS_CATEGORY_COPY[category].label}`}
-                                    value={scope[category]}
-                                    disabled={busy}
-                                    onValueChange={v => onToggle(category, v)}
-                                    trackColor={{ false: '#767577', true: '#ff4444' }}
-                                    thumbColor="#f4f3f4"
-                                />
-                            </View>
+                <ScrollView
+                    style={styles.scroll}
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator
+                    persistentScrollbar
+                    testID="distress-details-scroll"
+                >
+                    {/* The content takes the touch, so a drag that starts on text
+                        reaches the list instead of the overlay's card Pressable
+                        (a real finger could not scroll this dialog; same cause and
+                        fix as the calendar day card, #43). The switches inside
+                        still take their own taps (the deepest responder wins). */}
+                    <View style={styles.scrollContent} onStartShouldSetResponder={() => true} testID="distress-details-body">
+                        <Text style={styles.sectionLabel}>How it works</Text>
+                        {DISTRESS_TECH_DETAILS.map(line => (
+                            <Text key={line} style={styles.body}>{'• '}{line}</Text>
                         ))}
+
+                        <Text style={styles.sectionLabel}>Why the default keeps your journal</Text>
+                        <Text style={styles.body} testID="distress-why-default">{APP_LOCK_COPY.distressWhyDefault}</Text>
+
+                        <Text style={styles.sectionLabel}>Advanced: what gets erased</Text>
+                        <View testID="distress-scope" style={{ gap: 10 }}>
+                            {DISTRESS_CATEGORIES.map(category => (
+                                <View key={category} style={styles.scopeRow}>
+                                    <View style={styles.scopeText}>
+                                        <Text style={styles.scopeLabel}>{DISTRESS_CATEGORY_COPY[category].label}</Text>
+                                        <Text style={styles.scopeDetail}>{DISTRESS_CATEGORY_COPY[category].detail}</Text>
+                                    </View>
+                                    <Switch
+                                        testID={`distress-scope-${category}`}
+                                        accessibilityLabel={`Erase ${DISTRESS_CATEGORY_COPY[category].label}`}
+                                        value={scope[category]}
+                                        disabled={busy}
+                                        onValueChange={v => onToggle(category, v)}
+                                        trackColor={{ false: '#767577', true: '#ff4444' }}
+                                        thumbColor="#f4f3f4"
+                                    />
+                                </View>
+                            ))}
+                        </View>
+                        <Text style={styles.kept} testID="distress-kept">{keptSummary(scope)}</Text>
+                        {!isDefaultScope(scope) ? (
+                            <Pressable testID="distress-scope-reset" onPress={onReset} accessibilityRole="button">
+                                <Text style={styles.resetText}>Reset to the recommended default</Text>
+                            </Pressable>
+                        ) : null}
                     </View>
-                    <Text style={styles.kept} testID="distress-kept">{keptSummary(scope)}</Text>
-                    {!isDefaultScope(scope) ? (
-                        <Pressable testID="distress-scope-reset" onPress={onReset} accessibilityRole="button">
-                            <Text style={styles.resetText}>Reset to the recommended default</Text>
-                        </Pressable>
-                    ) : null}
                 </ScrollView>
             </View>
         </OverlayModal>

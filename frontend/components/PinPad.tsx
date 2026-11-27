@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useThemeColors } from '@/styles/global';
@@ -30,6 +30,12 @@ function Key({ id, children, onPress, style, pressedStyle, label }: {
  * the system keyboard: no suggestions, no learned input, no keyboard history,
  * and it looks the same on every phone. Dots show only the LENGTH typed.
  *
+ * Fast typing: every key builds on the LAST value typed, not on the last value
+ * rendered. On a real phone taps can arrive faster than a render (above all in
+ * an overlay, where each key costs two commits), and `value + digit` from props
+ * then drops or overwrites digits, so a PIN other than the one typed got stored.
+ * OK hands the typed PIN to onSubmit for the same reason.
+ *
  * testIDs: pin-key-0..9, pin-key-back, pin-key-ok, pin-dots.
  */
 export function PinPad({
@@ -41,7 +47,7 @@ export function PinPad({
 }: {
     value: string;
     onChange: (next: string) => void;
-    onSubmit: () => void;
+    onSubmit: (pin: string) => void;
     disabled?: boolean;
     busy?: boolean;
 }) {
@@ -65,9 +71,26 @@ export function PinPad({
         disabledKey: { opacity: 0.4 },
     }), [colors]);
 
+    // The value typed so far, ahead of the render. Follows the prop whenever the
+    // parent changes it (a clear after OK, a reset), never a stale re-render.
+    const typed = useRef(value);
+    useLayoutEffect(() => {
+        typed.current = value;
+    }, [value]);
+    const set = (next: string) => {
+        typed.current = next;
+        onChange(next);
+    };
     const press = (digit: string) => {
-        if (disabled || busy || value.length >= PIN_MAX_LENGTH) return;
-        onChange(value + digit);
+        if (disabled || busy || typed.current.length >= PIN_MAX_LENGTH) return;
+        set(typed.current + digit);
+    };
+    const submit = () => {
+        const pin = typed.current;
+        if (disabled || busy || pin.length < PIN_MIN_LENGTH) return;
+        // Keys typed after OK start a new PIN, even before the parent clears.
+        typed.current = '';
+        onSubmit(pin);
     };
     const canSubmit = !disabled && !busy && value.length >= PIN_MIN_LENGTH;
     const dotCount = Math.max(PIN_MIN_LENGTH, value.length);
@@ -85,7 +108,7 @@ export function PinPad({
                         <Text style={styles.keyText}>{d}</Text>
                     </Key>
                 ))}
-                <Key id="back" label="Delete" onPress={() => !busy && onChange(value.slice(0, -1))} style={styles.key} pressedStyle={styles.keyPressed}>
+                <Key id="back" label="Delete" onPress={() => !busy && set(typed.current.slice(0, -1))} style={styles.key} pressedStyle={styles.keyPressed}>
                     <Ionicons name="backspace-outline" size={26} color={colors.text} />
                 </Key>
                 <Key id="0" label="0" onPress={() => press('0')} style={styles.key} pressedStyle={styles.keyPressed}>
@@ -94,7 +117,7 @@ export function PinPad({
                 <Key
                     id="ok"
                     label="Done"
-                    onPress={() => canSubmit && onSubmit()}
+                    onPress={submit}
                     style={[styles.key, styles.okKey, !canSubmit && styles.disabledKey]}
                     pressedStyle={styles.keyPressed}
                 >

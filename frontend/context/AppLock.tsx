@@ -65,7 +65,9 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     const router = useRouter();
     const pathnameRef = useRef(pathname);
     const returnTo = useRef<string | null>(null);
-    if (locked) pathnameRef.current = pathname;
+    useEffect(() => {
+        if (locked) pathnameRef.current = pathname;
+    }, [locked, pathname]);
 
     const lockEnabledRef = useRef(lockEnabled);
     const settingsRef = useRef(settings);
@@ -157,10 +159,15 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
         bumpDataVersion();
     }, [db, updateSetting]);
 
-    const submit = useCallback(async () => {
-        if (busy || pin.length === 0) return;
+    // One check at a time: a double tap on OK (faster than the render that
+    // shows "Unlocking…") must not count a wrong PIN twice or run a wipe twice.
+    const submitting = useRef(false);
+    // `typedPin` comes from the pad (the PIN as typed, ahead of any render).
+    const submit = useCallback(async (typedPin?: string) => {
+        const typed = typedPin ?? pin;
+        if (submitting.current || busy || typed.length === 0) return;
         if (waitUntil && now().getTime() < waitUntil) return;
-        const typed = pin;
+        submitting.current = true;
         setBusy(true);
         setMessage(null);
         const started = now().getTime();
@@ -188,6 +195,7 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
             setPin('');
             setLocked(false);
         } finally {
+            submitting.current = false;
             setBusy(false);
         }
     }, [busy, pin, waitUntil, wipe]);

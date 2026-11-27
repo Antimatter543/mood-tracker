@@ -23,7 +23,7 @@ export function LockScreen({
 }: {
     pin: string;
     onPinChange: (next: string) => void;
-    onSubmit: () => void;
+    onSubmit: (pin: string) => void;
     busy: boolean;
     waiting: boolean;
     message: string | null;
