@@ -55,9 +55,14 @@ shot() {
   rm -rf "$d"
 }
 # Whether SoulSync's window carries FLAG_SECURE (no screenshots, no app-switcher preview).
+# 0 = secure, 1 = SoulSync's window found WITHOUT the flag, 2 = window not found
+# (so "not secure" checks demand exactly 1 and cannot pass on a parse miss).
 window_secure() {
-  adb shell dumpsys window windows 2>/dev/null | tr -d '\r' \
-    | awk -v pkg="$PKG" '/Window #/ {inwin = index($0, pkg) > 0} inwin && /fl=/ {print}' | grep -q SECURE
+  local flags
+  flags="$(adb shell dumpsys window windows 2>/dev/null | tr -d '\r' \
+    | awk -v pkg="$PKG" '/Window #/ {inwin = index($0, pkg) > 0} inwin && /fl=/ {print}')"
+  [[ -n "$flags" ]] || { log "window_secure: no SoulSync window in dumpsys"; return 2; }
+  grep -q SECURE <<<"$flags"
 }
 
 UI=""
@@ -267,6 +272,7 @@ check "journal has private notes before" "$(( BEFORE_NOTES > 0 ))" "notes=$BEFOR
 launch; sleep 4
 tap_id tab-timeline; sleep 3; shot pr-timeline-before; tap_id tab-home; sleep 1
 has 'resource-id="app-lock-screen"'; check "lock OFF by default: no lock screen" "$(( $? != 0 ))"
+window_secure; check "flag: screenshots allowed before any PIN is set" "$(( $? == 1 ))"
 shot default-open
 
 # ── 4. turn the lock on: choose a PIN, twice ─────────────────────────────────
@@ -297,6 +303,7 @@ tap_text 'CHOOSE PIN|Choose PIN'
 wait_for 'Choose a distress PIN' 6
 type_pin 5555; sleep 1; type_pin 5555; sleep 2
 [[ "$(node_attr distress-wipe-switch checked)" == "true" ]]; check "flow: distress PIN set right after the app PIN" "$(( $? == 0 ))"
+window_secure; check "flag: still blocked with a distress PIN set" "$(( $? == 0 ))"
 home; launch; sleep 2
 wait_for 'resource-id="app-lock-screen"' 8; check "flow: minimise + reopen shows the lock" "$(( $? == 0 ))"
 type_pin "$APP_PIN"; sleep 3
@@ -304,6 +311,7 @@ has 'resource-id="app-lock-screen"'; check "flow: the APP PIN still opens after 
 shot flow-after-app-pin
 scroll_to_id distress-wipe-switch && tap_id distress-wipe-switch; sleep 2
 [[ "$(node_attr distress-wipe-switch checked)" == "false" ]]; check "flow: distress PIN switched off again" "$(( $? == 0 ))"
+window_secure; check "flag: still blocked after switching the distress PIN off (app PIN remains)" "$(( $? == 0 ))"
 
 # ── 5. minimise -> reopen, three times; app switch; cold start ───────────────
 for n in 1 2 3; do
@@ -323,6 +331,7 @@ launch
 # A cold start can take a while on the emulator; ask again once if the launcher is still up.
 wait_for 'resource-id="app-lock-screen"' 10 || { launch; wait_for 'resource-id="app-lock-screen"' 10; }
 check "cold start shows the lock" "$(( $? == 0 ))"
+window_secure; check "flag: blocked again after a cold start (new window)" "$(( $? == 0 ))"
 type_pin "$APP_PIN"; sleep 3
 has 'resource-id="app-lock-screen"'; COLD_LOCKED=$?
 has "package=\"$PKG\""; check "cold start: app PIN unlocks" "$(( COLD_LOCKED != 0 && $? == 0 ))"
@@ -357,6 +366,7 @@ type_pin "$APP_PIN"; sleep 2
 has 'must be different'; check "the app PIN is refused as distress PIN" "$(( $? == 0 ))"
 type_pin "$DISTRESS_PIN"; sleep 1; type_pin "$DISTRESS_PIN"; sleep 2
 [[ "$(node_attr distress-wipe-switch checked)" == "true" ]]; check "distress PIN set" "$(( $? == 0 ))"
+window_secure; check "flag: blocked with the distress PIN set" "$(( $? == 0 ))"
 has 'resource-id="distress-scope"'; check "no category switches on the card (advanced only)" "$(( $? != 0 ))"
 # Each PIN has its own change link; change the distress PIN and use the new one from here on.
 has 'resource-id="app-lock-change-pin"'; check "Change app PIN offered" "$(( $? == 0 ))"
@@ -449,6 +459,7 @@ type_pin "$DISTRESS_PIN"; sleep 4
 has 'resource-id="app-lock-screen"'; check "the used distress PIN no longer opens anything" "$(( $? == 0 ))"
 type_pin "$APP_PIN"; sleep 3
 has 'resource-id="app-lock-screen"'; check "the app PIN still works after the wipe" "$(( $? != 0 ))"
+window_secure; check "flag: still blocked after the distress PIN was used (the app lock stays on)" "$(( $? == 0 ))"
 
 # ── 8. the database after the wipe ───────────────────────────────────────────
 adb shell am force-stop "$PKG"; sleep 1
@@ -485,7 +496,7 @@ tap_id app-lock-switch; sleep 2
 [[ "$(node_attr app-lock-switch checked)" == "false" ]]; check "app lock turned off in Settings" "$(( $? == 0 ))"
 home; launch; sleep 3
 has 'resource-id="app-lock-screen"'; check "lock off: reopen goes straight in" "$(( $? != 0 ))"
-window_secure; check "screenshots allowed again with the lock off" "$(( $? != 0 ))"
+window_secure; check "screenshots allowed again with the lock off" "$(( $? == 1 ))"
 shot final
 
 grep -E '\[distress\]|FATAL EXCEPTION|ReactNativeJS.*Error' "$OUT/logcat.txt" >"$OUT/logcat-errors.txt" 2>/dev/null || true
