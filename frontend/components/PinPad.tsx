@@ -4,18 +4,18 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useThemeColors } from '@/styles/global';
 import { PIN_MAX_LENGTH, PIN_MIN_LENGTH } from '@/lib/pinLock';
 
-function Key({ id, children, onPress, style, pressedStyle, label, ripple }: {
+function Key({ id, children, onPress, style, label, ripple }: {
     id: string;
     children: React.ReactNode;
     onPress: () => void;
     style: object | object[];
-    pressedStyle: object;
     label: string;
     ripple: string;
 }) {
-    // Feedback like any number pad: a native ripple from the touch point
-    // (visible even for a quick tap, which the pressed style alone is not)
-    // and a highlight while the finger is down.
+    // Feedback like any number pad: ONE native ripple from the touch point,
+    // visible even for a quick tap. No pressed style on top: restyling the key
+    // mid-press (highlight + shrink) re-laid it out and played the ripple
+    // twice, which flickered.
     return (
         <Pressable
             testID={`pin-key-${id}`}
@@ -23,7 +23,7 @@ function Key({ id, children, onPress, style, pressedStyle, label, ripple }: {
             accessibilityLabel={label}
             onPress={onPress}
             android_ripple={{ color: ripple, radius: 38, foreground: true }}
-            style={({ pressed }) => [style, pressed && pressedStyle]}
+            style={style}
         >
             {children}
         </Pressable>
@@ -70,7 +70,6 @@ export function PinPad({
             justifyContent: 'center',
             backgroundColor: colors.cardBackground,
         },
-        keyPressed: { backgroundColor: `${colors.accent}55`, transform: [{ scale: 0.94 }] },
         keyText: { color: colors.text, fontSize: 28, fontWeight: '500' },
         okKey: { backgroundColor: colors.accent },
         disabledKey: { opacity: 0.4 },
@@ -109,14 +108,14 @@ export function PinPad({
             </View>
             <View style={styles.grid}>
                 {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map(d => (
-                    <Key key={d} id={d} label={d} onPress={() => press(d)} style={styles.key} pressedStyle={styles.keyPressed} ripple={`${colors.accent}88`}>
+                    <Key key={d} id={d} label={d} onPress={() => press(d)} style={styles.key} ripple={`${colors.accent}88`}>
                         <Text style={styles.keyText}>{d}</Text>
                     </Key>
                 ))}
-                <Key id="back" label="Delete" onPress={() => !busy && set(typed.current.slice(0, -1))} style={styles.key} pressedStyle={styles.keyPressed} ripple={`${colors.accent}88`}>
+                <Key id="back" label="Delete" onPress={() => !busy && set(typed.current.slice(0, -1))} style={styles.key} ripple={`${colors.accent}88`}>
                     <Ionicons name="backspace-outline" size={26} color={colors.text} />
                 </Key>
-                <Key id="0" label="0" onPress={() => press('0')} style={styles.key} pressedStyle={styles.keyPressed} ripple={`${colors.accent}88`}>
+                <Key id="0" label="0" onPress={() => press('0')} style={styles.key} ripple={`${colors.accent}88`}>
                     <Text style={styles.keyText}>0</Text>
                 </Key>
                 <Key
@@ -124,7 +123,7 @@ export function PinPad({
                     label="Done"
                     onPress={submit}
                     style={[styles.key, styles.okKey, !canSubmit && styles.disabledKey]}
-                    pressedStyle={styles.keyPressed}
+                   
                     ripple="#ffffff66"
                 >
                     {busy ? (
