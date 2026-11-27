@@ -22,6 +22,12 @@ FAIL_TITLE="App lock e2e"
 # shellcheck source=e2e-lib.sh
 source "$(cd "$(dirname "$0")" && pwd)/e2e-lib.sh"
 
+# ffmpeg reads the unlock screen recordings (frame-accurate timing). CI runners
+# do not ship it; install it there (a local run without it reports "n/a").
+if ! command -v ffmpeg >/dev/null && [[ -n "${CI:-}" ]]; then
+  { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; } >/dev/null 2>&1 || log "ffmpeg install failed: unlock timing will be n/a"
+fi
+
 CHECKS=()
 NFAIL=0
 check() { # check <name> <0|1 ok> [detail]
@@ -119,7 +125,8 @@ current_tab() {
 # Prints milliseconds, or "n/a" when recording/ffmpeg is unavailable.
 video_unlock_ms() { # video_unlock_ms <pin> <name>
   local v="$OUT/video-$2.mp4" pid
-  command -v ffmpeg >/dev/null || { echo n/a; return; }
+  # The PIN is typed whatever happens below: the flow must not depend on the measurement.
+  command -v ffmpeg >/dev/null || { type_pin "$1" >&2; echo n/a; return; }
   adb shell rm -f /sdcard/unlock.mp4 >/dev/null 2>&1
   adb shell screenrecord --time-limit 7 /sdcard/unlock.mp4 >/dev/null 2>&1 & pid=$!
   sleep 1.5
