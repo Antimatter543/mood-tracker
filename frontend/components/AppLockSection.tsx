@@ -5,7 +5,8 @@
  * Both opt-in, default OFF (databases/settings.ts, migration 16).
  *
  *   - App lock ON: choose a PIN (typed twice; the setup says a forgotten PIN
- *     cannot be reset). OFF forgets both PINs. "Change PIN" while on.
+ *     cannot be reset). OFF forgets both PINs. "Change app PIN" under the lock,
+ *     "Change distress PIN" under the distress PIN, each while on.
  *   - Distress PIN: only while the lock is on. A short confirmation that points
  *     at backups (a custom selection is listed in full), then choose a second
  *     PIN that must differ from the app PIN. "Technical details" (components/
@@ -140,9 +141,9 @@ export function AppLockSection() {
         setSetup(null);
         setBusy(true);
         try {
-            if (mode === 'distress') {
+            if (mode === 'distress' || mode === 'changeDistress') {
                 await setDistressPin(pin);
-                await updateSetting('distress_wipe_enabled', true);
+                if (mode === 'distress') await updateSetting('distress_wipe_enabled', true);
             } else {
                 await setAppPin(pin);
                 if (mode === 'app') await updateSetting('app_lock_enabled', true);
@@ -187,6 +188,20 @@ export function AppLockSection() {
                     thumbColor="#f4f3f4"
                 />
             </View>
+            {lockOn ? (
+                <View style={styles.links}>
+                    <Pressable
+                        testID="app-lock-change-pin"
+                        accessibilityRole="button"
+                        onPress={() => setSetup('change')}
+                        style={styles.link}
+                        disabled={busy}
+                    >
+                        <Feather name="key" color={colors.accent} size={14} />
+                        <Text style={styles.linkText}>{APP_LOCK_COPY.changePin}</Text>
+                    </Pressable>
+                </View>
+            ) : null}
 
             {lockOn ? (
                 <View style={styles.row}>
@@ -211,16 +226,18 @@ export function AppLockSection() {
                     {distressOn && !isDefaultScope(scope) ? (
                         <Text style={styles.kept} testID="distress-custom-scope">{APP_LOCK_COPY.distressCustomScope}</Text>
                     ) : null}
-                    <Pressable
-                        testID="app-lock-change-pin"
-                        accessibilityRole="button"
-                        onPress={() => setSetup('change')}
-                        style={styles.link}
-                        disabled={busy}
-                    >
-                        <Feather name="key" color={colors.accent} size={14} />
-                        <Text style={styles.linkText}>{APP_LOCK_COPY.changePin}</Text>
-                    </Pressable>
+                    {distressOn ? (
+                        <Pressable
+                            testID="distress-change-pin"
+                            accessibilityRole="button"
+                            onPress={() => setSetup('changeDistress')}
+                            style={styles.link}
+                            disabled={busy}
+                        >
+                            <Feather name="key" color={colors.accent} size={14} />
+                            <Text style={styles.linkText}>{APP_LOCK_COPY.changeDistressPin}</Text>
+                        </Pressable>
+                    ) : null}
                     {/* Same pattern as backup encryption: the card stays short. */}
                     <Pressable
                         testID="distress-details-toggle"

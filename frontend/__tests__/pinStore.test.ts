@@ -9,7 +9,7 @@ import {
     clearAllPins,
     clearDistressPin,
     hasAppPin,
-    isAppPin,
+    isOtherPin,
     readFailures,
     samePin,
     setAppPin,
@@ -44,8 +44,22 @@ describe('pin store', () => {
         expect(await hasAppPin()).toBe(true);
         expect(await checkPin('1234')).toBe('app');
         expect(await checkPin('4321')).toBe('wrong');
-        expect(await isAppPin('1234')).toBe(true);
-        expect(await isAppPin('9999')).toBe(false);
+    });
+
+    it('the two PINs can never be the same, whichever one is set or changed', async () => {
+        await setAppPin('1234');
+        await expect(setDistressPin('1234')).rejects.toThrow();
+        await setDistressPin('9999');
+        await expect(setAppPin('9999')).rejects.toThrow(); // changing the app PIN onto the distress PIN
+        await setDistressPin('7777'); // changing the distress PIN keeps the app PIN
+        expect(await checkPin('1234')).toBe('app');
+        expect(await checkPin('7777')).toBe('distress');
+        expect(await checkPin('9999')).toBe('wrong');
+        // what Settings asks before accepting a new PIN
+        expect(await isOtherPin('1234', 'distress')).toBe(true);
+        expect(await isOtherPin('7777', 'app')).toBe(true);
+        expect(await isOtherPin('5555', 'app')).toBe(false);
+        expect(await isOtherPin('1234', 'app')).toBe(false); // its own slot is not a clash
     });
 
     it('the distress PIN opens as "distress"; the app PIN still opens as "app"', async () => {

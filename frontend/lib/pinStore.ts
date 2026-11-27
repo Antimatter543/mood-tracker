@@ -55,16 +55,18 @@ export async function hasAppPin(): Promise<boolean> {
     return (await readStored()) !== null;
 }
 
-/** Set (or replace) the app PIN. Keeps an existing distress PIN. */
+/** Set (or replace) the app PIN. Keeps an existing distress PIN, which it must not equal. */
 export async function setAppPin(pin: string): Promise<void> {
     const stored = await readStored();
+    if (stored?.distress && samePin(pin, stored.distress)) throw new Error('Same as the distress PIN.');
     await writeStored({ v: 2, app: pin, distress: stored?.distress ?? null });
 }
 
-/** Set the distress PIN. Needs an app PIN first. */
+/** Set (or replace) the distress PIN. Needs an app PIN first, which it must not equal. */
 export async function setDistressPin(pin: string): Promise<void> {
     const stored = await readStored();
     if (!stored) throw new Error('Set an app PIN first.');
+    if (samePin(pin, stored.app)) throw new Error('Same as the app PIN.');
     await writeStored({ ...stored, distress: pin });
 }
 
@@ -90,10 +92,15 @@ export async function checkPin(pin: string): Promise<PinCheck> {
     return 'wrong';
 }
 
-/** Whether `pin` is the current app PIN (Settings: the distress PIN must differ). */
-export async function isAppPin(pin: string): Promise<boolean> {
+/**
+ * Whether `pin` is already taken by the OTHER slot (Settings: the two PINs
+ * must always differ, whichever one is being chosen or changed).
+ */
+export async function isOtherPin(pin: string, slot: 'app' | 'distress'): Promise<boolean> {
     const stored = await readStored();
-    return !!stored && samePin(pin, stored.app);
+    if (!stored) return false;
+    const other = slot === 'app' ? stored.distress : stored.app;
+    return !!other && samePin(pin, other);
 }
 
 /** Wrong PINs in a row, persisted so a restart cannot skip the wait. */

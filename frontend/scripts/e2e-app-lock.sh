@@ -294,6 +294,15 @@ has 'must be different'; check "the app PIN is refused as distress PIN" "$(( $? 
 type_pin "$DISTRESS_PIN"; sleep 1; type_pin "$DISTRESS_PIN"; sleep 2
 [[ "$(node_attr distress-wipe-switch checked)" == "true" ]]; check "distress PIN set" "$(( $? == 0 ))"
 has 'resource-id="distress-scope"'; check "no category switches on the card (advanced only)" "$(( $? != 0 ))"
+# Each PIN has its own change link; change the distress PIN and use the new one from here on.
+has 'resource-id="app-lock-change-pin"'; check "Change app PIN offered" "$(( $? == 0 ))"
+scroll_to_id distress-change-pin && tap_id distress-change-pin
+wait_for 'Choose a new distress PIN' 6; check "Change distress PIN opens" "$(( $? == 0 ))"
+type_pin "$APP_PIN"; sleep 2
+has 'different from your app PIN'; check "the app PIN is refused as the new distress PIN" "$(( $? == 0 ))"
+DISTRESS_PIN=8642
+type_pin "$DISTRESS_PIN"; sleep 1; type_pin "$DISTRESS_PIN"; sleep 2
+has 'resource-id="pin-setup"'; check "distress PIN changed" "$(( $? != 0 ))"
 scroll_to_id distress-details-toggle && tap_id distress-details-toggle
 wait_for 'resource-id="distress-details"' 6; check "technical details dialog opens" "$(( $? == 0 ))"
 shot pr-technical-details

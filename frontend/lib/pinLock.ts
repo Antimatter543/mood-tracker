@@ -16,7 +16,7 @@ export const FREE_ATTEMPTS = 5;
 export const BASE_COOLDOWN_MS = 30_000;
 export const MAX_COOLDOWN_MS = 15 * 60_000;
 
-export type PinProblem = 'too_short' | 'too_long' | 'not_digits' | 'same_as_app_pin' | 'mismatch';
+export type PinProblem = 'too_short' | 'too_long' | 'not_digits' | 'same_as_app_pin' | 'same_as_distress_pin' | 'mismatch';
 
 /** Why a new PIN cannot be used (null = fine). */
 export function pinProblem(pin: string, opts: { confirm?: string; mustDifferFrom?: string } = {}): PinProblem | null {
@@ -33,6 +33,7 @@ export const PIN_PROBLEM_COPY: Record<PinProblem, string> = {
     too_long: `Use at most ${PIN_MAX_LENGTH} digits.`,
     not_digits: 'Use digits only.',
     same_as_app_pin: 'The distress PIN must be different from your app PIN.',
+    same_as_distress_pin: 'The app PIN must be different from your distress PIN.',
     mismatch: "The PINs don't match. Try again.",
 };
 

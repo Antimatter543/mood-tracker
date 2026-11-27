@@ -13,6 +13,7 @@ import * as SecureStore from 'expo-secure-store';
 import { APP_LOCK_COPY } from '@/lib/appLock';
 import { DEFAULT_DISTRESS_SCOPE, DISTRESS_CATEGORIES, DISTRESS_CATEGORY_COPY, keptSummary } from '@/lib/distressScope';
 import { checkPin, setAppPin } from '@/lib/pinStore';
+import { findNodes } from '@/testing/rntl';
 
 const store = SecureStore as unknown as { __reset: () => void };
 
@@ -185,6 +186,60 @@ describe('AppLockSection', () => {
         await choosePin(view, '1357');
         await waitFor(async () => expect(await checkPin('1357')).toBe('app'));
         expect(await checkPin('2468')).toBe('wrong');
+    });
+
+    it('each PIN has its own change link, under its own row', async () => {
+        await setAppPin('2468');
+        const { setDistressPin } = jest.requireActual('@/lib/pinStore');
+        await setDistressPin('9999');
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        expect(view.getByTestId('app-lock-change-pin')).toBeTruthy();
+        expect(view.getByText(APP_LOCK_COPY.changePin)).toBeTruthy();
+        expect(view.getByText(APP_LOCK_COPY.changeDistressPin)).toBeTruthy();
+        // render order: app lock switch < Change app PIN < distress switch < Change distress PIN
+        const ids = findNodes(view.toJSON(), n => typeof n.props?.testID === 'string').map(n => n.props!.testID as string);
+        const at = (id: string) => ids.indexOf(id);
+        expect(at('app-lock-switch')).toBeLessThan(at('app-lock-change-pin'));
+        expect(at('app-lock-change-pin')).toBeLessThan(at('distress-wipe-switch'));
+        expect(at('distress-wipe-switch')).toBeLessThan(at('distress-change-pin'));
+    });
+
+    it('without a distress PIN there is nothing to change but the app PIN', async () => {
+        await setAppPin('2468');
+        const view = await render(<Harness initial={{ app_lock_enabled: true }} />);
+        expect(view.getByTestId('app-lock-change-pin')).toBeTruthy();
+        expect(view.queryByTestId('distress-change-pin')).toBeNull();
+    });
+
+    it('Change distress PIN replaces only the distress PIN and must differ from the app PIN', async () => {
+        await setAppPin('2468');
+        const { setDistressPin } = jest.requireActual('@/lib/pinStore');
+        await setDistressPin('9999');
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await fireEvent.press(view.getByTestId('distress-change-pin'));
+        await waitFor(() => expect(view.getByTestId('pin-setup')).toBeTruthy());
+        await typePin(view, '2468'); // the app PIN: refused
+        await waitFor(() => expect(view.getByTestId('pin-setup-error').props.children).toMatch(/different from your app PIN/));
+        await choosePin(view, '7777');
+        await waitFor(async () => expect(await checkPin('7777')).toBe('distress'));
+        expect(await checkPin('9999')).toBe('wrong');
+        expect(await checkPin('2468')).toBe('app');
+        // no confirmation, no setting change: the distress PIN just moved
+        expect(alertSpy).not.toHaveBeenCalled();
+        expect(mockUpdateSetting).not.toHaveBeenCalled();
+    });
+
+    it('Change app PIN refuses the distress PIN', async () => {
+        await setAppPin('2468');
+        const { setDistressPin } = jest.requireActual('@/lib/pinStore');
+        await setDistressPin('9999');
+        const view = await render(<Harness initial={{ app_lock_enabled: true, distress_wipe_enabled: true }} />);
+        await fireEvent.press(view.getByTestId('app-lock-change-pin'));
+        await waitFor(() => expect(view.getByTestId('pin-setup')).toBeTruthy());
+        await typePin(view, '9999');
+        await waitFor(() => expect(view.getByTestId('pin-setup-error').props.children).toMatch(/different from your distress PIN/));
+        expect(await checkPin('2468')).toBe('app');
+        expect(await checkPin('9999')).toBe('distress');
     });
 
     it('normal users see no category switches: they live behind Technical details', async () => {

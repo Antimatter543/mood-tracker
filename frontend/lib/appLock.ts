@@ -14,7 +14,8 @@ import { DistressScope, erasedCategoryLabels, isDefaultScope, keptSummary } from
 export const APP_LOCK_COPY = {
     lockDescription:
         'Ask for a PIN every time SoulSync opens or comes back from the background.',
-    changePin: 'Change PIN',
+    changePin: 'Change app PIN',
+    changeDistressPin: 'Change distress PIN',
     distressDescription:
         'A second PIN for when someone makes you unlock SoulSync. It opens the app like your normal PIN, ' +
         'but first quietly removes your notes, photos and other private details. Your days and mood scores ' +
@@ -49,6 +50,11 @@ export const PIN_SETUP_COPY = {
     distress: {
         title: 'Choose a distress PIN',
         confirm: 'Enter the distress PIN again',
+        note: 'Must be different from your app PIN.',
+    },
+    changeDistress: {
+        title: 'Choose a new distress PIN',
+        confirm: 'Enter the new distress PIN again',
         note: 'Must be different from your app PIN.',
     },
 } as const;
