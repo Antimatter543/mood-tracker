@@ -3,6 +3,8 @@
 # dependencies
 node_modules/
 android/
+# ...but not the native code of our local Expo modules (modules/*/android)
+!/modules/*/android/
 # Expo
 .expo/
 dist/
