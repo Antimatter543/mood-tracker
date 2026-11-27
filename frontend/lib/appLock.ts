@@ -23,8 +23,9 @@ export const APP_LOCK_COPY = {
         'stay, so the journal still looks normal.',
     distressWarningTitle: 'Turn on the distress PIN?',
     distressWhyDefault:
-        'An empty journal can look suspicious. So by default every day keeps its date, mood and default ' +
-        'activities, and only what could give you away is erased. Change this only if an empty app is safer for you.',
+        'An empty or freshly wiped mood tracker can itself look suspicious. So by default SoulSync keeps every ' +
+        'logged day with its date, mood score and default activities, and removes only what could give you away. ' +
+        'The journal then still looks like it has been used normally. Only change this if an empty app is safer for you.',
     distressCustomScope: 'Custom selection of what gets erased (see Technical details).',
     eraseEntriesTitle: 'Erase all entries too?',
     eraseEntriesWarning:
@@ -64,14 +65,21 @@ export const PIN_SETUP_COPY = {
  * tests can pin every promise it makes against what the code does.
  */
 export const DISTRESS_TECH_DETAILS: readonly string[] = [
-    'It opens SoulSync exactly like your app PIN, after erasing what is selected below.',
-    'Every PIN is checked against both, in the same time, so the lock screen never shows a distress PIN is set.',
-    'Once used, it deletes itself and this setting resets, as if it had never been set.',
-    'Wrong PINs never erase anything. After 5 in a row you have to wait.',
-    'Erased data is overwritten, not just marked deleted. Photos are removed in the background after unlocking.',
-    "Out of reach: backups kept elsewhere, Android's backup and notification history, Health Connect's " +
-        'own data and access log, and what your keyboard has learned.',
-    'There is no "forgot PIN": a forgotten PIN means clearing app data and restoring a backup.',
+    'The distress PIN unlocks SoulSync exactly like your app PIN: same screen, same wait, the app opens. ' +
+        'Before it shows anything, it erases what is selected below.',
+    'Nothing on the lock screen shows whether a distress PIN is set. Every PIN you type is checked against ' +
+        'both PINs, so it takes the same time either way.',
+    'After it is used, the distress PIN is deleted, this option turns itself off and the selection below goes ' +
+        'back to the default. Settings then look like an app lock without a distress PIN.',
+    'Wrong PINs never erase anything. After 5 in a row SoulSync makes you wait, the same with or without a distress PIN.',
+    'Erased data is overwritten in the database file, not just marked as deleted. Photo files and that ' +
+        'overwrite finish in the background right after the app opens (on the next start if SoulSync is ' +
+        'closed first); nothing they belong to can be seen in the app by then.',
+    "Out of reach for the app: backups you saved elsewhere (Drive, email), Android's own device backup, " +
+        "data stored in Health Connect itself (including its record of SoulSync's past reads), Android's " +
+        'notification history if you turned it on, and words your keyboard may have learned from your notes.',
+    "There is no \"forgot PIN\": any way back in would also be a way past the distress PIN. A forgotten " +
+        "PIN means clearing SoulSync's app data and restoring a backup.",
 ];
 
 /**
