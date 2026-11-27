@@ -265,6 +265,23 @@ type_pin "$APP_PIN"; sleep 1; type_pin "$APP_PIN"; sleep 2
 [[ "$(node_attr app-lock-switch checked)" == "true" ]]; check "App lock on after choosing a PIN" "$(( $? == 0 ))"
 shot settings-lock-on
 
+# ── 4b. the reported flow, no restart in between: app PIN, then the distress
+#        PIN straight away, minimise, reopen, the APP PIN (a real-phone report:
+#        "only the distress PIN opens"). Undone afterwards; §6 sets it up again.
+scroll_to_id distress-wipe-switch && tap_id distress-wipe-switch
+wait_for 'Turn on the distress PIN' 8
+tap_text 'CHOOSE PIN|Choose PIN'
+wait_for 'Choose a distress PIN' 6
+type_pin 5555; sleep 1; type_pin 5555; sleep 2
+[[ "$(node_attr distress-wipe-switch checked)" == "true" ]]; check "flow: distress PIN set right after the app PIN" "$(( $? == 0 ))"
+home; launch; sleep 2
+wait_for 'resource-id="app-lock-screen"' 8; check "flow: minimise + reopen shows the lock" "$(( $? == 0 ))"
+type_pin "$APP_PIN"; sleep 3
+has 'resource-id="app-lock-screen"'; check "flow: the APP PIN still opens after setting a distress PIN" "$(( $? != 0 ))"
+shot flow-after-app-pin
+scroll_to_id distress-wipe-switch && tap_id distress-wipe-switch; sleep 2
+[[ "$(node_attr distress-wipe-switch checked)" == "false" ]]; check "flow: distress PIN switched off again" "$(( $? == 0 ))"
+
 # ── 5. minimise -> reopen, three times; app switch; cold start ───────────────
 for n in 1 2 3; do
   home; launch; sleep 2
