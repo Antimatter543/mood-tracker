@@ -136,17 +136,28 @@ export function AppLockSection() {
         if (ok) setSetup('distress');
     };
 
-    const onPinChosen = async (pin: string) => {
-        const mode = setup;
+    // `mode` comes from the dialog that took the PIN (it showed that title), not
+    // from this card's state: a stale `setup` here once could not be ruled out,
+    // and anything but an explicit mode must never land in the app slot.
+    const onPinChosen = async (pin: string, mode: PinSetupMode) => {
         setSetup(null);
         setBusy(true);
         try {
-            if (mode === 'distress' || mode === 'changeDistress') {
-                await setDistressPin(pin);
-                if (mode === 'distress') await updateSetting('distress_wipe_enabled', true);
-            } else {
-                await setAppPin(pin);
-                if (mode === 'app') await updateSetting('app_lock_enabled', true);
+            switch (mode) {
+                case 'app':
+                    await setAppPin(pin);
+                    await updateSetting('app_lock_enabled', true);
+                    break;
+                case 'change':
+                    await setAppPin(pin);
+                    break;
+                case 'distress':
+                    await setDistressPin(pin);
+                    await updateSetting('distress_wipe_enabled', true);
+                    break;
+                case 'changeDistress':
+                    await setDistressPin(pin);
+                    break;
             }
         } finally {
             setBusy(false);

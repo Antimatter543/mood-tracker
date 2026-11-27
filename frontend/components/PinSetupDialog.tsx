@@ -26,7 +26,7 @@ export function PinSetupDialog({
     visible: boolean;
     mode: PinSetupMode;
     onCancel: () => void;
-    onDone: (pin: string) => void;
+    onDone: (pin: string, mode: PinSetupMode) => void;
 }) {
     const colors = useThemeColors();
     // The first entry, for the title; firstRef for the logic, which can run
@@ -113,7 +113,7 @@ export function PinSetupDialog({
             setValue('');
             return;
         }
-        onDone(first);
+        onDone(first, mode);
     };
 
     return (
