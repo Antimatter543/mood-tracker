@@ -46,6 +46,9 @@ jest.mock('@/databases/distressWipe', () => ({
 
 jest.mock('expo-sqlite', () => ({ useSQLiteContext: () => ({ mock: 'db' }) }));
 
+const mockSetSecureWindow = jest.fn(async (_secure: boolean) => {});
+jest.mock('@/modules/secure-window', () => ({ setSecureWindow: (s: boolean) => mockSetSecureWindow(s) }));
+
 const mockNavigate = jest.fn();
 let mockPathname = '/timeline';
 jest.mock('expo-router', () => ({
@@ -53,7 +56,7 @@ jest.mock('expo-router', () => ({
     useRouter: () => ({ navigate: mockNavigate }),
 }));
 
-import { AppLockProvider, SCREEN_CAPTURE_KEY } from '@/context/AppLock';
+import { AppLockProvider } from '@/context/AppLock';
 import { findNodes } from '@/testing/rntl';
 import { FREE_ATTEMPTS, MIN_UNLOCK_MS } from '@/lib/pinLock';
 import {
@@ -275,31 +278,22 @@ describe('app lock gate (PIN)', () => {
 });
 
 describe('screenshots and the app-switcher preview (FLAG_SECURE)', () => {
-    // The instance the app imports (__mocks__/expo-screen-capture.ts); jest.requireMock hands out another one.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const capture = require('expo-screen-capture') as {
-        preventScreenCaptureAsync: jest.Mock;
-        allowScreenCaptureAsync: jest.Mock;
-    };
-    beforeEach(() => {
-        capture.preventScreenCaptureAsync.mockClear();
-        capture.allowScreenCaptureAsync.mockClear();
-    });
+    beforeEach(() => mockSetSecureWindow.mockClear());
 
     it('blocked while a PIN is set, with or without a distress PIN', async () => {
         await renderGate({ distress_wipe_enabled: false });
-        expect(capture.preventScreenCaptureAsync).toHaveBeenCalledWith(SCREEN_CAPTURE_KEY);
-        capture.preventScreenCaptureAsync.mockClear();
+        expect(mockSetSecureWindow).toHaveBeenCalledWith(true);
+        mockSetSecureWindow.mockClear();
         await setDistressPin('9999');
         await renderGate({ distress_wipe_enabled: true });
-        expect(capture.preventScreenCaptureAsync).toHaveBeenCalledWith(SCREEN_CAPTURE_KEY);
-        expect(capture.allowScreenCaptureAsync).not.toHaveBeenCalled();
+        expect(mockSetSecureWindow).toHaveBeenCalledWith(true);
+        expect(mockSetSecureWindow).not.toHaveBeenCalledWith(false);
     });
 
     it('allowed while the lock is off', async () => {
         await renderGate({ app_lock_enabled: false });
-        expect(capture.allowScreenCaptureAsync).toHaveBeenCalledWith(SCREEN_CAPTURE_KEY);
-        expect(capture.preventScreenCaptureAsync).not.toHaveBeenCalled();
+        expect(mockSetSecureWindow).toHaveBeenCalledWith(false);
+        expect(mockSetSecureWindow).not.toHaveBeenCalledWith(true);
     });
 });
 

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, AppStateStatus, BackHandler, StyleSheet, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
-import * as ScreenCapture from 'expo-screen-capture';
+import { setSecureWindow } from '@/modules/secure-window';
 import { usePathname, useRouter } from 'expo-router';
 
 import { useSettings } from '@/context/SettingsContext';
@@ -44,9 +44,6 @@ import { now } from '@/lib/clock';
  * the distress PIN. A forgotten PIN means clearing the app data and restoring
  * a backup, and the PIN setup says so.
  */
-
-/** expo-screen-capture key: this provider's own hold on FLAG_SECURE. */
-export const SCREEN_CAPTURE_KEY = 'app-lock';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -106,12 +103,10 @@ export function AppLockProvider({ children }: { children: React.ReactNode }) {
     // BEFORE the lock screen can render, so without this the last screen (a
     // note, say) stayed visible in the app switcher to whoever holds the phone,
     // and after a distress unlock an old preview could still show what was
-    // wiped. Off again when the lock is turned off.
+    // wiped. Off again when the lock is turned off. Our own module
+    // (modules/secure-window, README there says why not a package).
     useEffect(() => {
-        const apply = lockEnabled
-            ? ScreenCapture.preventScreenCaptureAsync(SCREEN_CAPTURE_KEY)
-            : ScreenCapture.allowScreenCaptureAsync(SCREEN_CAPTURE_KEY);
-        apply.catch(() => {});
+        void setSecureWindow(lockEnabled);
     }, [lockEnabled]);
 
     // A wipe whose file cleanup the app did not live to finish: finish it now.

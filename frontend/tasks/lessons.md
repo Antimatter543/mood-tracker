@@ -1,5 +1,28 @@
 # SoulSync — Project Lessons
 
+## 2026-11-27: expo-screen-capture crashed the app on start; FLAG_SECURE is our own module now
+
+**Context**: The app lock needs Android's FLAG_SECURE (no screenshots, no app-switcher
+preview) while a PIN is set. `expo-screen-capture` was added for it, and its unused
+screenshot-detection permissions (`DETECT_SCREEN_CAPTURE`, `READ_MEDIA_IMAGES`) were
+blocked in app.json.
+
+**What happened**: The emulator e2e failed at the very first step (QA seed): the app
+aborted on launch with `Permission Denial: registerScreenCaptureObserver ... requires
+android.permission.DETECT_SCREEN_CAPTURE`. The package registers screenshot DETECTION in
+its module `OnCreate` on every start (Android 14+: `registerScreenCaptureCallback`; older:
+a MediaStore observer), whether or not the app listens. jest and tsc were green: only a
+device run shows a native module's start-up behaviour.
+
+**Fix**: `frontend/modules/secure-window/` (local Expo module, autolinked from
+`./modules`): `setSecure(boolean)` adds/clears FLAG_SECURE and re-applies it on
+foreground. No callbacks, no permissions. Reasoning in its README;
+`__tests__/secureWindow.test.ts` keeps it minimal and keeps expo-screen-capture out.
+
+**Lessons**: (1) Blocking a library's permission is only safe when the library never uses
+it unprompted: read its `OnCreate`/lifecycle code first. (2) A new native dependency is not
+verified until an emulator/device has launched the app with it.
+
 ## 2026-11-06: What made golden screenshots differ between two CI recordings of one build
 
 Measured by diffing record runs per image with `scripts/golden-diff.mjs --no-fail`. The first pair differed on 5
