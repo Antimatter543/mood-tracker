@@ -114,20 +114,37 @@ current_tab() {
   grep -oE '<node [^>]*>' <<<"$UI" | grep -E 'resource-id="tab-[a-z]+"' | grep 'selected="true"' \
     | grep -oE 'resource-id="tab-[a-z]+"' | head -1 | cut -d'"' -f2
 }
-# Type <pin> on the lock screen, then poll until it is gone: prints the seconds
-# (dump-paced, so ~1 s resolution) or "never" after 15 s. [shot] is taken
-# 0.4 s after the PIN (the "Unlocking…" moment).
-time_unlock() {
-  local t0 t
-  t0="$(date +%s.%N)"
+# Frame-accurate unlock time from a screen recording: from the frame where the
+# subtitle turns into "Unlocking…" to the frame where the PIN pad is gone.
+# Prints milliseconds, or "n/a" when recording/ffmpeg is unavailable.
+video_unlock_ms() { # video_unlock_ms <pin> <name>
+  local v="$OUT/video-$2.mp4" pid
+  command -v ffmpeg >/dev/null || { echo n/a; return; }
+  adb shell rm -f /sdcard/unlock.mp4 >/dev/null 2>&1
+  adb shell screenrecord --time-limit 7 /sdcard/unlock.mp4 >/dev/null 2>&1 & pid=$!
+  sleep 1.5
   type_pin "$1" >&2
-  [[ -n "${2:-}" ]] && { sleep 0.4; shot "$2"; }
-  while :; do
-    t="$(awk -v a="$t0" -v b="$(date +%s.%N)" 'BEGIN{printf "%.1f", b-a}')"
-    dump >&2
-    grep -q 'resource-id="app-lock-screen"' <<<"$UI" || { echo "$t"; return 0; }
-    awk -v t="$t" 'BEGIN{exit !(t > 15)}' && { echo never; return 1; }
-  done
+  wait "$pid"
+  adb pull /sdcard/unlock.mp4 "$v" >/dev/null 2>&1 || { echo n/a; return; }
+  # Two 8x2 grey thumbnails per 10 ms tick: the subtitle line and the "5" key.
+  ffmpeg -loglevel error -i "$v" -vf "fps=100,crop=300:60:390:545,scale=8:2,format=gray" -f rawvideo "$v.sub" &&
+  ffmpeg -loglevel error -i "$v" -vf "fps=100,crop=150:150:465:1073,scale=8:2,format=gray" -f rawvideo "$v.pad" || { echo n/a; return; }
+  python3 -I - "$v.sub" "$v.pad" <<'PY'
+import sys
+def frames(p):
+    b = open(p, 'rb').read()
+    return [b[i:i + 16] for i in range(0, len(b) - 15, 16)]
+def first_change(fs, start=0):
+    ref = fs[start]
+    for i in range(start, len(fs)):
+        if sum(abs(a - b) for a, b in zip(fs[i], ref)) / 16 > 8:
+            return i
+    return None
+sub, pad = frames(sys.argv[1]), frames(sys.argv[2])
+s = first_change(sub)
+e = first_change(pad, s) if s is not None else None
+print("n/a" if s is None or e is None else (e - s) * 10)
+PY
 }
 unlock_with() { # unlock_with <pin>: from the lock screen, wait out "Unlocking…"
   wait_for 'resource-id="app-lock-screen"' 8 || return 1
@@ -327,9 +344,10 @@ SIG_DISTRESS="$(lock_screen_signature | sort)"
 [[ "$SIG_DISTRESS" == "$SIG_NO_DISTRESS" ]]; check "lock screen identical with and without a distress PIN" "$(( $? == 0 ))"
 [[ "$SIG_DISTRESS" == "$SIG_NO_DISTRESS" ]] || { diff <(echo "$SIG_NO_DISTRESS") <(echo "$SIG_DISTRESS") | head -20; }
 dump; TAB_LOCKED="$(current_tab)"
-T_APP="$(time_unlock "$APP_PIN")"
-check "app PIN unlocks with a distress PIN set" "$(( $? == 0 ))" "${T_APP} s"
-dump # (time_unlock ran in a subshell: refresh $UI here)
+MS_APP="$(video_unlock_ms "$APP_PIN" app-pin)"
+dump
+has 'resource-id="app-lock-screen"'; check "app PIN unlocks with a distress PIN set" "$(( $? != 0 ))" "${MS_APP} ms"
+dump
 [[ -n "$TAB_LOCKED" && "$(current_tab)" == "$TAB_LOCKED" ]]
 check "the app PIN comes back to the same screen" "$(( $? == 0 ))" "$TAB_LOCKED -> $(current_tab)"
 adb shell am force-stop "$PKG"; sleep 1
@@ -347,13 +365,15 @@ shot pr-timeline-before-distress
 home; launch; sleep 2
 wait_for 'resource-id="app-lock-screen"' 8
 dump; TAB_LOCKED="$(current_tab)"
-T_DISTRESS="$(time_unlock "$DISTRESS_PIN" pr-unlocking)"
+MS_DISTRESS="$(video_unlock_ms "$DISTRESS_PIN" distress-pin)"
 # The very first frame after the lock: already clean, no loading state.
 shot pr-first-frame-after-distress
-dump # (time_unlock ran in a subshell: refresh $UI here)
-check "the distress PIN opens the app like the app PIN" "$([[ "$T_DISTRESS" != never ]] && echo 1 || echo 0)" "${T_DISTRESS} s (app PIN: ${T_APP} s)"
-awk -v a="$T_APP" -v b="$T_DISTRESS" 'BEGIN{d=a-b; if (d<0) d=-d; exit !(b != "never" && d <= 2.0)}'
-check "both PINs take the same time to open (within the 1-2 s poll)" "$(( $? == 0 ))" "${T_APP} s vs ${T_DISTRESS} s"
+dump
+has 'resource-id="app-lock-screen"'; check "the distress PIN opens the app like the app PIN" "$(( $? != 0 ))" "${MS_DISTRESS} ms (app PIN: ${MS_APP} ms)"
+# Frame-accurate (screen recording): the same "Unlocking…" time within 150 ms.
+awk -v a="$MS_APP" -v b="$MS_DISTRESS" 'BEGIN{ if (a == "n/a" || b == "n/a") exit 1; d = a - b; if (d < 0) d = -d; exit !(d <= 150) }'
+check "both PINs show Unlocking… for the same time (screen recording, ±150 ms)" "$(( $? == 0 ))" "app ${MS_APP} ms, distress ${MS_DISTRESS} ms"
+kv UNLOCK_MS_APP "$MS_APP"; kv UNLOCK_MS_DISTRESS "$MS_DISTRESS"
 [[ -n "$TAB_LOCKED" && "$(current_tab)" == "$TAB_LOCKED" ]]
 check "the distress PIN comes back to the same screen" "$(( $? == 0 ))" "$TAB_LOCKED -> $(current_tab)"
 grep -q 'E2E SECRET NOTE' <<<"$UI"; check "the private note is gone at the first look" "$(( $? != 0 ))"
