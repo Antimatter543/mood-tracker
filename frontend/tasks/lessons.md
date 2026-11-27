@@ -23,6 +23,12 @@ foreground. No callbacks, no permissions. Reasoning in its README;
 it unprompted: read its `OnCreate`/lifecycle code first. (2) A new native dependency is not
 verified until an emulator/device has launched the app with it.
 
+**And then**: the first version of our own module crashed on launch too: "Only the original
+thread that created a view hierarchy can touch its views ... Calling: mqt_v_js". The
+`AsyncFunction(...).runOnQueue(Queues.MAIN)` body still ran on the JS thread; window flags
+are now set inside `activity.runOnUiThread { }`. Same lesson as (2): jest, tsc and a green
+gradle build said nothing about it.
+
 ## 2026-11-06: What made golden screenshots differ between two CI recordings of one build
 
 Measured by diffing record runs per image with `scripts/golden-diff.mjs --no-fail`. The first pair differed on 5

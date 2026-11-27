@@ -1,7 +1,6 @@
 package expo.modules.securewindow
 
 import android.view.WindowManager
-import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -21,20 +20,26 @@ class SecureWindowModule : Module() {
 
     AsyncFunction("setSecure") { value: Boolean ->
       secure = value
-      apply()
-    }.runOnQueue(Queues.MAIN)
+      applyFlag()
+    }
 
     OnActivityEntersForeground {
-      apply()
+      applyFlag()
     }
   }
 
-  private fun apply() {
-    val window = appContext.currentActivity?.window ?: return
-    if (secure) {
-      window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-    } else {
-      window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+  // Window flags may only be changed on the UI thread. The call arrives on the
+  // JS thread (`runOnQueue(Queues.MAIN)` did not move it there: the app aborted
+  // on launch with "Only the original thread that created a view hierarchy can
+  // touch its views ... Calling: mqt_v_js"), so hop explicitly.
+  private fun applyFlag() {
+    val activity = appContext.currentActivity ?: return
+    activity.runOnUiThread {
+      if (secure) {
+        activity.window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+      } else {
+        activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+      }
     }
   }
 }

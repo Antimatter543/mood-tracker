@@ -50,6 +50,9 @@ The two other options:
   module is absent (Expo Go, iOS, jest) and never throws.
 - The module remembers the last state and re-applies it whenever the activity
   comes to the foreground, so a recreated activity is covered too.
+- The flag is changed on the UI thread (`Activity.runOnUiThread`). Calls arrive
+  on the JS thread, and Android aborts the app when a window is touched from
+  there; this happened on the first emulator run, on launch.
 
 ## Tests
 

@@ -22,6 +22,8 @@ describe('secure-window module', () => {
     it('only adds or clears FLAG_SECURE', () => {
         expect(code).toMatch(/addFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
         expect(code).toMatch(/clearFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
+        // ...on the UI thread: from the JS thread Android aborts the app on launch
+        expect(code).toMatch(/runOnUiThread\s*\{[\s\S]*addFlags[\s\S]*clearFlags[\s\S]*\}/);
         // no screenshot detection, observers, listeners or permissions of any kind
         expect(code).not.toMatch(/register|Observer|Callback|Listener|permission|Permission|MediaStore|Events\(/);
     });
