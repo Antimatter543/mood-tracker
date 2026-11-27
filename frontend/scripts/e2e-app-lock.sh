@@ -41,7 +41,24 @@ check() { # check <name> <0|1 ok> [detail]
   fi
 }
 STEP=0
-shot() { STEP=$((STEP + 1)); adb exec-out screencap -p >"$OUT/screens/$(printf %02d $STEP)-$1.png" 2>/dev/null || true; }
+# Screenshots come from the EMULATOR's display (host side): while the app lock
+# is on, SoulSync sets FLAG_SECURE, and Android's own screencap/screenrecord
+# then capture black. Falls back to screencap where `adb emu` is unavailable.
+shot() {
+  STEP=$((STEP + 1))
+  local dst d f
+  dst="$OUT/screens/$(printf %02d $STEP)-$1.png"
+  d="$(mktemp -d)"
+  adb emu screenrecord screenshot "$d" >/dev/null 2>&1
+  f="$(ls "$d"/*.png 2>/dev/null | head -1)"
+  if [[ -n "$f" ]]; then mv "$f" "$dst"; else adb exec-out screencap -p >"$dst" 2>/dev/null || true; fi
+  rm -rf "$d"
+}
+# Whether SoulSync's window carries FLAG_SECURE (no screenshots, no app-switcher preview).
+window_secure() {
+  adb shell dumpsys window windows 2>/dev/null | tr -d '\r' \
+    | awk -v pkg="$PKG" '/Window #/ {inwin = index($0, pkg) > 0} inwin && /fl=/ {print}' | grep -q SECURE
+}
 
 UI=""
 dump() { # refresh $UI with the current window's hierarchy (never a stale file)
@@ -124,18 +141,23 @@ current_tab() {
 # subtitle turns into "Unlocking…" to the frame where the PIN pad is gone.
 # Prints milliseconds, or "n/a" when recording/ffmpeg is unavailable.
 video_unlock_ms() { # video_unlock_ms <pin> <name>
-  local v="$OUT/video-$2.mp4" pid
+  local v
   # The PIN is typed whatever happens below: the flow must not depend on the measurement.
   command -v ffmpeg >/dev/null || { type_pin "$1" >&2; echo n/a; return; }
-  adb shell rm -f /sdcard/unlock.mp4 >/dev/null 2>&1
-  adb shell screenrecord --time-limit 7 /sdcard/unlock.mp4 >/dev/null 2>&1 & pid=$!
+  # The emulator records its own display (FLAG_SECURE blanks Android's screenrecord).
+  v="$(cd "$OUT" && pwd)/video-$2.webm"
+  rm -f "$v"
+  adb emu screenrecord start --time-limit 8 "$v" >/dev/null 2>&1
   sleep 1.5
   type_pin "$1" >&2
-  wait "$pid"
-  adb pull /sdcard/unlock.mp4 "$v" >/dev/null 2>&1 || { echo n/a; return; }
-  # Two 8x2 grey thumbnails per 10 ms tick: the subtitle line and the "5" key.
-  ffmpeg -loglevel error -i "$v" -vf "fps=100,crop=300:60:390:545,scale=8:2,format=gray" -f rawvideo "$v.sub" &&
-  ffmpeg -loglevel error -i "$v" -vf "fps=100,crop=150:150:465:1073,scale=8:2,format=gray" -f rawvideo "$v.pad" || { echo n/a; return; }
+  sleep 5.5
+  adb emu screenrecord stop >/dev/null 2>&1
+  sleep 1
+  [[ -s "$v" ]] || { echo n/a; return; }
+  # Two 8x2 grey thumbnails per 10 ms tick: the subtitle line and the "5" key
+  # (scaled to the device's 1080x2160 first, whatever size the recording has).
+  ffmpeg -loglevel error -i "$v" -vf "fps=100,scale=1080:2160,crop=300:60:390:545,scale=8:2,format=gray" -f rawvideo "$v.sub" &&
+  ffmpeg -loglevel error -i "$v" -vf "fps=100,scale=1080:2160,crop=150:150:465:1073,scale=8:2,format=gray" -f rawvideo "$v.pad" || { echo n/a; return; }
   python3 -I - "$v.sub" "$v.pad" <<'PY'
 import sys
 def frames(p):
@@ -263,6 +285,7 @@ type_pin 1357; sleep 1
 has "don't match"; check "mismatched confirmation is refused" "$(( $? == 0 ))"
 type_pin "$APP_PIN"; sleep 1; type_pin "$APP_PIN"; sleep 2
 [[ "$(node_attr app-lock-switch checked)" == "true" ]]; check "App lock on after choosing a PIN" "$(( $? == 0 ))"
+window_secure; check "screenshots + app-switcher preview blocked while a PIN is set" "$(( $? == 0 ))"
 shot settings-lock-on
 
 # ── 4b. the reported flow, no restart in between: app PIN, then the distress
@@ -462,6 +485,7 @@ tap_id app-lock-switch; sleep 2
 [[ "$(node_attr app-lock-switch checked)" == "false" ]]; check "app lock turned off in Settings" "$(( $? == 0 ))"
 home; launch; sleep 3
 has 'resource-id="app-lock-screen"'; check "lock off: reopen goes straight in" "$(( $? != 0 ))"
+window_secure; check "screenshots allowed again with the lock off" "$(( $? != 0 ))"
 shot final
 
 grep -E '\[distress\]|FATAL EXCEPTION|ReactNativeJS.*Error' "$OUT/logcat.txt" >"$OUT/logcat-errors.txt" 2>/dev/null || true

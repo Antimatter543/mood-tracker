@@ -20,6 +20,8 @@ describe('Settings copy', () => {
 
     it('the app lock is a PIN, no biometrics anywhere', () => {
         expect(APP_LOCK_COPY.lockDescription).toMatch(/PIN/);
+        // the screenshot block is announced where the lock is turned on
+        expect(APP_LOCK_COPY.lockDescription).toMatch(/screenshots of SoulSync are blocked/);
         const all = JSON.stringify(APP_LOCK_COPY) + DISTRESS_TECH_DETAILS.join(' ') + w;
         expect(all).not.toMatch(/fingerprint|biometric|face/i);
     });
@@ -62,6 +64,10 @@ describe('Settings copy', () => {
         expect(d).toMatch(/deleted, this option turns itself off and the selection below goes back to the default/);
         expect(d).toMatch(/Wrong PINs never erase anything/);
         expect(d).toMatch(/no "forgot PIN"/);
+        // what the app cannot reach is said plainly
+        expect(d).toMatch(/notification history/);
+        expect(d).toMatch(/keyboard may have learned/);
+        expect(d).toMatch(/record of SoulSync's past reads/);
         // the background half (runDistressCleanup) is disclosed, with its resume
         expect(d).toMatch(/finish in the background right after the app opens \(on the next start/);
         expect(APP_LOCK_COPY.distressActiveHint).toMatch(/backup/i);

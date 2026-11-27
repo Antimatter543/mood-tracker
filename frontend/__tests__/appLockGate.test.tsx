@@ -53,7 +53,7 @@ jest.mock('expo-router', () => ({
     useRouter: () => ({ navigate: mockNavigate }),
 }));
 
-import { AppLockProvider } from '@/context/AppLock';
+import { AppLockProvider, SCREEN_CAPTURE_KEY } from '@/context/AppLock';
 import { findNodes } from '@/testing/rntl';
 import { FREE_ATTEMPTS, MIN_UNLOCK_MS } from '@/lib/pinLock';
 import {
@@ -271,6 +271,35 @@ describe('app lock gate (PIN)', () => {
             for (let i = 0; i < FREE_ATTEMPTS; i++) await typePin(view, '1111');
             expect(mockRunDistressWipe).not.toHaveBeenCalled();
         });
+    });
+});
+
+describe('screenshots and the app-switcher preview (FLAG_SECURE)', () => {
+    // The instance the app imports (__mocks__/expo-screen-capture.ts); jest.requireMock hands out another one.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const capture = require('expo-screen-capture') as {
+        preventScreenCaptureAsync: jest.Mock;
+        allowScreenCaptureAsync: jest.Mock;
+    };
+    beforeEach(() => {
+        capture.preventScreenCaptureAsync.mockClear();
+        capture.allowScreenCaptureAsync.mockClear();
+    });
+
+    it('blocked while a PIN is set, with or without a distress PIN', async () => {
+        await renderGate({ distress_wipe_enabled: false });
+        expect(capture.preventScreenCaptureAsync).toHaveBeenCalledWith(SCREEN_CAPTURE_KEY);
+        capture.preventScreenCaptureAsync.mockClear();
+        await setDistressPin('9999');
+        await renderGate({ distress_wipe_enabled: true });
+        expect(capture.preventScreenCaptureAsync).toHaveBeenCalledWith(SCREEN_CAPTURE_KEY);
+        expect(capture.allowScreenCaptureAsync).not.toHaveBeenCalled();
+    });
+
+    it('allowed while the lock is off', async () => {
+        await renderGate({ app_lock_enabled: false });
+        expect(capture.allowScreenCaptureAsync).toHaveBeenCalledWith(SCREEN_CAPTURE_KEY);
+        expect(capture.preventScreenCaptureAsync).not.toHaveBeenCalled();
     });
 });
 

@@ -13,7 +13,8 @@ import { DistressScope, erasedCategoryLabels, isDefaultScope, keptSummary } from
 
 export const APP_LOCK_COPY = {
     lockDescription:
-        'Ask for a PIN every time SoulSync opens or comes back from the background.',
+        'Ask for a PIN every time SoulSync opens or comes back from the background. While it is on, ' +
+        'screenshots of SoulSync are blocked and the app switcher shows no preview.',
     changePin: 'Change app PIN',
     changeDistressPin: 'Change distress PIN',
     distressDescription:
@@ -75,7 +76,8 @@ export const DISTRESS_TECH_DETAILS: readonly string[] = [
         'overwrite finish in the background right after the app opens (on the next start if SoulSync is ' +
         'closed first); nothing they belong to can be seen in the app by then.',
     "Out of reach for the app: backups you saved elsewhere (Drive, email), Android's own device backup, " +
-        'and data stored in Health Connect itself.',
+        "data stored in Health Connect itself (including its record of SoulSync's past reads), Android's " +
+        'notification history if you turned it on, and words your keyboard may have learned from your notes.',
     "There is no \"forgot PIN\": any way back in would also be a way past the distress PIN. A forgotten " +
         "PIN means clearing SoulSync's app data and restoring a backup.",
 ];
