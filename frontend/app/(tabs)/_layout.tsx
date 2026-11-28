@@ -19,6 +19,7 @@ import { loadStreakStats } from "@/components/visualisations/loadStreakStats";
 import { reconcileReminders } from "@/lib/notifications";
 import { enabledReminders, parseReminders } from "@/lib/reminders";
 import { OverlayProvider } from "@/context/OverlayHost";
+import { AppLockProvider } from "@/context/AppLock";
 import { buildTabBarStyle } from "@/lib/tabBarStyle";
 import { TAB_BUTTON_TEST_IDS } from "@/lib/tabTestIds";
 import { now } from "@/lib/clock";
@@ -45,11 +46,17 @@ export default function RootLayout() {
                         mounts (entry form, settings dropdown) can read those
                         contexts, and its overlay slots render after <Tabs> so they
                         paint above the floating tab bar. See context/OverlayHost.tsx. */}
-                    <OverlayProvider>
-                        <NotificationReArm />
-                        <HealthDailySync />
-                        <TabNavigator />
-                    </OverlayProvider>
+                    {/* AppLockProvider: the opt-in PIN lock. It wraps the
+                        OverlayProvider so its lock screen paints above every
+                        overlay, and stays inside SQLite/Settings (it reads both).
+                        See context/AppLock.tsx. */}
+                    <AppLockProvider>
+                        <OverlayProvider>
+                            <NotificationReArm />
+                            <HealthDailySync />
+                            <TabNavigator />
+                        </OverlayProvider>
+                    </AppLockProvider>
                 </SettingsProvider>
             </DataProvider>
         </SQLiteProvider>

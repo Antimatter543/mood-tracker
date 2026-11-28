@@ -21,6 +21,7 @@ import { SettingsSection } from "@/components/SettingRow";
 import { RemindersSection } from "@/components/RemindersSection";
 import { runMigrations } from "@/databases/migrations";
 import { DataManagementSection } from "@/components/DataManagementSection";
+import { AppLockSection } from "@/components/AppLockSection";
 import { HealthConnectSection } from "@/components/HealthConnectSection";
 import { versionLine, copyrightLine } from "@/lib/versionInfo";
 import { HEALTH_CONNECT_BUILD_VARIANT } from "@/lib/healthConnectConfig";
@@ -207,6 +208,10 @@ function Setting() {
             <RemindersSection />
 
             <DataManagementSection />
+
+            {/* Opt-in app lock + distress wipe. Right under Data Management on
+                purpose: its warning tells people to make a backup first. */}
+            <AppLockSection />
 
             {/* Android-only, opt-in Health Connect integration (renders nothing on
                 iOS / when the feature flag is off). Sits by Data Management since

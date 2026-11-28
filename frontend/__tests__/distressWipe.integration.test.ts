@@ -1,0 +1,418 @@
+/**
+ * INTEGRATION: the distress wipe (databases/distressWipe.ts) against REAL SQLite
+ * at the shipped schema (every migration, default activities seeded).
+ *
+ * The promise under test, from the user's point of view: after the wipe the
+ * journal still looks real (same days, same moods, default activities), and
+ * nothing private is left: no note, photo, custom activity or group, binned
+ * entry or leftover backup file.
+ */
+// The hand-written FileSystem mock (documentDirectory, cacheDirectory,
+// readDirectoryAsync); the auto-mock omits the folder constants.
+jest.mock('expo-file-system/legacy', () => require('../__mocks__/expo-file-system'));
+
+import * as FileSystem from 'expo-file-system/legacy';
+import * as SecureStore from 'expo-secure-store';
+import {
+    __resetWriteTransactionForTests,
+    __setWriteConnectionForTests,
+} from '@/databases/writeTransaction';
+import {
+    defaultActivityKeys,
+    isLeftoverBackupFile,
+    DISTRESS_CLEANUP_KEY,
+    runDistressCleanup,
+    runDistressWipe,
+    wipeSensitiveData,
+} from '@/databases/distressWipe';
+import { initialActivities } from '@/components/seedData';
+import { DEFAULT_DISTRESS_SCOPE, DISTRESS_CATEGORIES, DistressScope } from '@/lib/distressScope';
+import { countRows, describeSqlite, openMigratedSqlite, SqliteAdapter } from '@/testing/realSqlite';
+
+const fs = FileSystem as unknown as {
+    deleteAsync: jest.Mock;
+    readDirectoryAsync: jest.Mock;
+    getInfoAsync: jest.Mock;
+    documentDirectory: string;
+    cacheDirectory: string;
+};
+
+describe('distress wipe helpers (pure)', () => {
+    it('every seeded default activity is in the keep-list (class-level, the whole catalogue)', () => {
+        const keys = defaultActivityKeys();
+        expect(keys.length).toBeGreaterThanOrEqual(initialActivities.length);
+        for (const a of initialActivities) {
+            expect(keys.some(k => k.endsWith(`\u001f${a.name}`))).toBe(true);
+        }
+        // migration 6's rename keeps its default status
+        expect(keys).toContain('Social\u001fSocial event');
+    });
+
+    it('recognises only the files the export writes', () => {
+        expect(isLeftoverBackupFile('mood_tracker_export_2026-11-01.json')).toBe(true);
+        expect(isLeftoverBackupFile('mood_tracker_export_2026-11-01_encrypted.json')).toBe(true);
+        expect(isLeftoverBackupFile('moodTracker.db')).toBe(false);
+        expect(isLeftoverBackupFile('SQLite')).toBe(false);
+        expect(isLeftoverBackupFile('entry_media')).toBe(false);
+    });
+});
+
+describeSqlite('distress wipe: real SQLite', () => {
+    let db: SqliteAdapter;
+
+    const idOf = (sql: string, ...p: unknown[]) =>
+        Number((db.raw.prepare(sql).get(...(p as never[])) as { id: number }).id);
+
+    let defaultHappy: number;
+    let defaultWork: number;
+    let customInDefaultGroup: number;
+    let customGroupActivity: number;
+    let shadowDefault: number; // a custom activity NAMED like a default, in a custom group
+    let customGroup: number;
+
+    beforeEach(async () => {
+        db = await openMigratedSqlite();
+        __resetWriteTransactionForTests();
+        __setWriteConnectionForTests(db as never);
+        jest.clearAllMocks();
+
+        defaultHappy = idOf(`SELECT a.id FROM activities a JOIN activity_groups g ON g.id=a.group_id
+                             WHERE g.name='Emotions' AND a.name='Happy'`);
+        defaultWork = idOf(`SELECT a.id FROM activities a JOIN activity_groups g ON g.id=a.group_id
+                            WHERE g.name='Activities' AND a.name='Work'`);
+
+        db.raw.exec(`INSERT INTO activity_groups (name, sort_order) VALUES ('Therapy', 99)`);
+        customGroup = idOf(`SELECT id FROM activity_groups WHERE name='Therapy'`);
+        db.raw.prepare(`INSERT INTO activities (name, group_id) VALUES ('Panic attack', ?)`).run(customGroup);
+        customGroupActivity = idOf(`SELECT id FROM activities WHERE name='Panic attack'`);
+        db.raw.prepare(`INSERT INTO activities (name, group_id) VALUES ('Happy', ?)`).run(customGroup);
+        shadowDefault = idOf(`SELECT id FROM activities WHERE name='Happy' AND group_id=?`, customGroup);
+        db.raw.exec(`INSERT INTO activities (name, group_id) VALUES ('Medication', 5)`);
+        customInDefaultGroup = idOf(`SELECT id FROM activities WHERE name='Medication'`);
+
+        // Entry 1: live, note, star, photo, default + custom activities.
+        db.raw.exec(`INSERT INTO entries (id, mood, notes, date, starred_at)
+                     VALUES (1, 3.5, 'secret diary text', '2026-11-01T10:00:00.000Z', '2026-11-01T11:00:00.000Z')`);
+        // Entry 2: live, no note, only default activities.
+        db.raw.exec(`INSERT INTO entries (id, mood, notes, date) VALUES (2, 8, NULL, '2026-11-02T10:00:00.000Z')`);
+        // Entry 3: in the recycle bin, with a note and a photo.
+        db.raw.exec(`INSERT INTO entries (id, mood, notes, date, deleted_at)
+                     VALUES (3, 2, 'deleted but private', '2026-11-03T10:00:00.000Z', '2026-11-04T10:00:00.000Z')`);
+
+        const link = db.raw.prepare('INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?)');
+        link.run(1, defaultHappy);
+        link.run(1, customGroupActivity);
+        link.run(1, customInDefaultGroup);
+        link.run(1, shadowDefault);
+        link.run(2, defaultWork);
+        link.run(3, defaultHappy);
+
+        db.raw.exec(`INSERT INTO entry_media (entry_id, file_path) VALUES (1, 'file:///docs/entry_media/a.jpg')`);
+        db.raw.exec(`INSERT INTO entry_media (entry_id, file_path) VALUES (3, 'file:///docs/entry_media/b.jpg')`);
+        db.raw.exec(`INSERT OR REPLACE INTO user_settings (key, value) VALUES ('distress_wipe_enabled', 'true')`);
+        db.raw.exec(`INSERT OR REPLACE INTO user_settings (key, value) VALUES ('app_lock_enabled', 'true')`);
+    });
+
+    afterEach(() => {
+        __resetWriteTransactionForTests();
+        db.raw.close();
+    });
+
+    it('keeps every live entry with its date and mood', async () => {
+        await wipeSensitiveData(db as never);
+        const rows = db.raw.prepare('SELECT id, mood, date FROM entries ORDER BY id').all();
+        expect(rows).toEqual([
+            { id: 1, mood: 3.5, date: '2026-11-01T10:00:00.000Z' },
+            { id: 2, mood: 8, date: '2026-11-02T10:00:00.000Z' },
+        ]);
+    });
+
+    it('clears every note and every star (a star marks which days mattered)', async () => {
+        await wipeSensitiveData(db as never);
+        expect(countRows(db, 'entries', 'notes IS NOT NULL')).toBe(0);
+        expect(countRows(db, 'entries', 'starred_at IS NOT NULL')).toBe(0);
+        const dump = JSON.stringify(db.raw.prepare('SELECT * FROM entries').all());
+        expect(dump).not.toMatch(/secret|private/);
+    });
+
+    it('keeps links to default activities only', async () => {
+        await wipeSensitiveData(db as never);
+        const links = db.raw
+            .prepare('SELECT entry_id, activity_id FROM entry_activities ORDER BY entry_id, activity_id')
+            .all();
+        expect(links).toEqual([
+            { entry_id: 1, activity_id: defaultHappy },
+            { entry_id: 2, activity_id: defaultWork },
+        ]);
+    });
+
+    it('removes custom activities and groups, keeps the whole default catalogue', async () => {
+        const defaultsBefore = countRows(db, 'activities') - 3;
+        await wipeSensitiveData(db as never);
+        expect(countRows(db, 'activities')).toBe(defaultsBefore);
+        expect(countRows(db, 'activities', `name IN ('Panic attack', 'Medication')`)).toBe(0);
+        expect(countRows(db, 'activities', `id = ${shadowDefault}`)).toBe(0);
+        expect(countRows(db, 'activity_groups', `name = 'Therapy'`)).toBe(0);
+        expect(countRows(db, 'activity_groups')).toBe(5);
+    });
+
+    it('purges the recycle bin and every photo row', async () => {
+        await wipeSensitiveData(db as never);
+        expect(countRows(db, 'entries', 'deleted_at IS NOT NULL')).toBe(0);
+        expect(countRows(db, 'entry_media')).toBe(0);
+        expect(countRows(db, 'entry_activities', 'entry_id = 3')).toBe(0);
+    });
+
+    it('turns the distress option off and leaves the app lock on', async () => {
+        await wipeSensitiveData(db as never);
+        const get = (k: string) =>
+            (db.raw.prepare('SELECT value FROM user_settings WHERE key = ?').get(k) as { value: string }).value;
+        expect(get('distress_wipe_enabled')).toBe('false');
+        expect(get('app_lock_enabled')).toBe('true');
+    });
+
+    it('switches secure_delete on for the write connection before deleting', async () => {
+        await wipeSensitiveData(db as never);
+        const row = db.raw.prepare('PRAGMA secure_delete').get() as { secure_delete: number };
+        expect(row.secure_delete).toBe(1);
+    });
+
+    it('200 logged days stay 200 days, each with its mood and default activities', async () => {
+        db.raw.exec('DELETE FROM entry_activities; DELETE FROM entry_media; DELETE FROM entries;');
+        const ins = db.raw.prepare('INSERT INTO entries (id, mood, notes, date) VALUES (?, ?, ?, ?)');
+        const link = db.raw.prepare('INSERT INTO entry_activities (entry_id, activity_id) VALUES (?, ?)');
+        for (let i = 1; i <= 200; i++) {
+            const day = new Date(Date.UTC(2026, 0, 1) + i * 86_400_000).toISOString();
+            ins.run(i, (i % 10) + 1, `private note ${i}`, day);
+            link.run(i, defaultHappy);
+            link.run(i, customGroupActivity);
+        }
+        const before = db.raw.prepare('SELECT id, mood, date FROM entries ORDER BY id').all();
+
+        await wipeSensitiveData(db as never);
+
+        expect(db.raw.prepare('SELECT id, mood, date FROM entries ORDER BY id').all()).toEqual(before);
+        expect(countRows(db, 'entry_activities', `activity_id = ${defaultHappy}`)).toBe(200);
+        expect(countRows(db, 'entry_activities')).toBe(200);
+        expect(countRows(db, 'entries', 'notes IS NOT NULL')).toBe(0);
+    });
+
+    it('blanks reminder NAMES but keeps each reminder, its time and on/off state', async () => {
+        const list = [
+            { id: 'a', label: 'Take meds', time: '08:00', enabled: true },
+            { id: 'b', label: '', time: '20:00', enabled: false },
+        ];
+        db.raw.prepare(`INSERT OR REPLACE INTO user_settings (key, value) VALUES ('reminders', ?)`)
+            .run(JSON.stringify(list));
+
+        const result = await wipeSensitiveData(db as never);
+
+        const stored = JSON.parse(
+            (db.raw.prepare(`SELECT value FROM user_settings WHERE key='reminders'`).get() as { value: string }).value
+        );
+        expect(stored).toEqual([
+            { id: 'a', label: '', time: '08:00', enabled: true },
+            { id: 'b', label: '', time: '20:00', enabled: false },
+        ]);
+        expect(JSON.parse(result.reminders!)).toEqual(stored);
+    });
+
+    it('removes ALL health data and switches the sync off so it does not come back', async () => {
+        db.raw.exec(`INSERT INTO health_metrics (date, sleep_total_minutes, avg_heart_rate, synced_at)
+                     VALUES ('2026-11-01', 420, 61, 'x'), ('2026-11-02', 380, 66, 'x')`);
+        db.raw.exec(`INSERT OR REPLACE INTO user_settings (key, value) VALUES
+                     ('health_connect_opt_in', 'true'), ('health_daily_sync', 'true'),
+                     ('health_last_synced_at', '2026-11-02T08:00:00.000Z')`);
+        const result = await wipeSensitiveData(db as never);
+        expect(result.healthDaysRemoved).toBe(2);
+        expect(countRows(db, 'health_metrics')).toBe(0);
+        const get = (k: string) =>
+            (db.raw.prepare('SELECT value FROM user_settings WHERE key = ?').get(k) as { value: string } | undefined)?.value;
+        expect(get('health_connect_opt_in')).toBe('false');
+        expect(get('health_daily_sync')).toBe('false');
+        // the same end state as Settings > Health Connect > Turn off ('' = never synced)
+        expect(get('health_last_synced_at')).toBe('');
+    });
+
+    it('keeps the display settings', async () => {
+        db.raw.exec(`INSERT OR REPLACE INTO user_settings (key, value) VALUES ('theme', 'forest')`);
+        await wipeSensitiveData(db as never);
+        expect((db.raw.prepare(`SELECT value FROM user_settings WHERE key='theme'`).get() as { value: string }).value)
+            .toBe('forest');
+    });
+
+    it('erases nothing the user switched off (each category on its own)', async () => {
+        db.raw.exec(`INSERT INTO health_metrics (date, sleep_total_minutes, synced_at) VALUES ('2026-11-01', 420, 'x')`);
+        const keepAll = Object.fromEntries(DISTRESS_CATEGORIES.map(c => [c, false])) as DistressScope;
+        const result = await wipeSensitiveData(db as never, keepAll);
+        expect(result).toMatchObject({
+            notesCleared: 0, starsCleared: 0, photosRemoved: 0, customActivitiesRemoved: 0,
+            customGroupsRemoved: 0, binnedEntriesPurged: 0, healthDaysRemoved: 0, reminders: null,
+        });
+        expect(result.mediaFiles).toEqual([]);
+        expect(countRows(db, 'entries', 'notes IS NOT NULL')).toBe(2);
+        expect(countRows(db, 'entries', 'starred_at IS NOT NULL')).toBe(1);
+        expect(countRows(db, 'entry_media')).toBe(2);
+        expect(countRows(db, 'activity_groups', `name = 'Therapy'`)).toBe(1);
+        expect(countRows(db, 'health_metrics')).toBe(1);
+        // the switch itself still turns off: it fired
+        expect((db.raw.prepare(`SELECT value FROM user_settings WHERE key='distress_wipe_enabled'`).get() as { value: string }).value)
+            .toBe('false');
+    });
+
+    it('keeping notes but erasing stars touches only the stars', async () => {
+        await wipeSensitiveData(db as never, { ...DEFAULT_DISTRESS_SCOPE, notes: false });
+        expect(countRows(db, 'entries', 'notes IS NOT NULL')).toBe(1); // the binned one is purged
+        expect(countRows(db, 'entries', 'starred_at IS NOT NULL')).toBe(0);
+    });
+
+    it('keeping photos still purges the photos of binned entries with the bin', async () => {
+        const result = await wipeSensitiveData(db as never, { ...DEFAULT_DISTRESS_SCOPE, photos: false });
+        expect(result.mediaFiles).toEqual(['file:///docs/entry_media/b.jpg']);
+        expect(db.raw.prepare('SELECT file_path FROM entry_media').all()).toEqual([
+            { file_path: 'file:///docs/entry_media/a.jpg' },
+        ]);
+    });
+
+    it('keeping the backup key leaves it stored', async () => {
+        await SecureStore.setItemAsync('backup_encryption_key_v1', '{"stored":"key"}');
+        await runDistressWipe(db as never, { ...DEFAULT_DISTRESS_SCOPE, backupKey: false });
+        expect((SecureStore as unknown as { __dump: () => Record<string, string> }).__dump())
+            .toHaveProperty('backup_encryption_key_v1');
+        (SecureStore as unknown as { __reset: () => void }).__reset();
+    });
+
+    it('is atomic: a failing statement rolls everything back', async () => {
+        db.raw.exec('DROP TABLE user_settings');
+        await expect(wipeSensitiveData(db as never)).rejects.toThrow();
+        expect(countRows(db, 'entries', 'notes IS NOT NULL')).toBe(2);
+        expect(countRows(db, 'entry_media')).toBe(2);
+        expect(countRows(db, 'activity_groups', `name = 'Therapy'`)).toBe(1);
+    });
+
+    it('also works where foreign keys are OFF (no reliance on cascades)', async () => {
+        db.raw.exec('PRAGMA foreign_keys = OFF');
+        await wipeSensitiveData(db as never);
+        expect(countRows(db, 'entry_activities', 'activity_id NOT IN (SELECT id FROM activities)')).toBe(0);
+        expect(countRows(db, 'entry_activities', 'entry_id NOT IN (SELECT id FROM entries)')).toBe(0);
+    });
+
+    it('is idempotent: a second run changes nothing', async () => {
+        await wipeSensitiveData(db as never);
+        const second = await wipeSensitiveData(db as never);
+        expect(second).toMatchObject({
+            notesCleared: 0,
+            photosRemoved: 0,
+            customActivitiesRemoved: 0,
+            customGroupsRemoved: 0,
+            binnedEntriesPurged: 0,
+            healthDaysRemoved: 0,
+            reminders: null,
+        });
+    });
+
+    const MEDIA = () => `${fs.documentDirectory}entry_media/`;
+    const pending = () => countRows(db, 'user_settings', `key = '${DISTRESS_CLEANUP_KEY}'`);
+    const folders = (media: string[]) =>
+        fs.readDirectoryAsync.mockImplementation(async (dir: string) =>
+            dir === fs.documentDirectory ? ['SQLite', 'entry_media', 'mood_tracker_export_2026-10-01.json']
+                : dir === MEDIA() ? media
+                : ['ImagePicker']
+        );
+
+    it('runDistressWipe unlinks the photos, stray media files and leftover backups', async () => {
+        folders(['a.jpg', 'b.jpg', 'draft-never-saved.jpg']);
+        await SecureStore.setItemAsync('backup_encryption_key_v1', '{"stored":"key"}');
+        await SecureStore.setItemAsync('backup_password_confirmed_at_v1', '123');
+        const summary = await runDistressWipe(db as never);
+        // The stored key opens encrypted backups without the password: gone.
+        expect((SecureStore as unknown as { __dump: () => object }).__dump()).toEqual({});
+        // The binned entry (and, by cascade, its photo row) goes with the bin purge.
+        expect(summary).toMatchObject({ notesCleared: 1, photosRemoved: 1, binnedEntriesPurged: 1 });
+
+        const deleted = fs.deleteAsync.mock.calls.map(c => c[0]);
+        expect(deleted).toEqual(expect.arrayContaining([
+            'file:///docs/entry_media/a.jpg',
+            'file:///docs/entry_media/b.jpg',
+            `${fs.documentDirectory}mood_tracker_export_2026-10-01.json`,
+            `${fs.cacheDirectory}ImagePicker`,
+            // a photo file no row points at (an unsaved draft) goes too
+            `${MEDIA()}draft-never-saved.jpg`,
+        ]));
+        // never the database itself, never the media folder (a new photo may be landing in it)
+        expect(deleted.some((p: string) => /SQLite|\.db$/.test(p))).toBe(false);
+        expect(deleted).not.toContain(MEDIA());
+        // the cleanup finished: nothing is owed
+        expect(pending()).toBe(0);
+    });
+
+    it('the fast half commits a cleanup marker in the SAME transaction as the wipe', async () => {
+        await wipeSensitiveData(db as never);
+        expect(pending()).toBe(1);
+        const marker = JSON.parse((db.raw.prepare('SELECT value FROM user_settings WHERE key = ?')
+            .get(DISTRESS_CLEANUP_KEY) as { value: string }).value);
+        expect(marker.scope).toEqual(DEFAULT_DISTRESS_SCOPE);
+        expect(typeof marker.at).toBe('number');
+        // a failed wipe owes nothing
+        db.raw.exec(`DELETE FROM user_settings WHERE key = '${DISTRESS_CLEANUP_KEY}'`);
+        db.raw.exec('DROP TABLE health_metrics');
+        await expect(wipeSensitiveData(db as never)).rejects.toThrow();
+        expect(pending()).toBe(0);
+    });
+
+    it('background: resolves once the SQL is done, before any file is touched', async () => {
+        folders(['a.jpg', 'b.jpg']);
+        let release!: () => void;
+        const gate = new Promise<void>(r => { release = r; });
+        fs.deleteAsync.mockImplementation(() => gate);
+        await runDistressWipe(db as never, DEFAULT_DISTRESS_SCOPE, { background: true });
+        // the journal is already clean ...
+        expect(countRows(db, 'entries', 'notes IS NOT NULL')).toBe(0);
+        expect(countRows(db, 'entry_media')).toBe(0);
+        // ... while the files are still being deleted, and the cleanup is still owed
+        expect(pending()).toBe(1);
+        release();
+        await runDistressCleanup(db as never); // joins the running cleanup
+        expect(fs.deleteAsync.mock.calls.map(c => c[0])).toEqual(
+            expect.arrayContaining(['file:///docs/entry_media/a.jpg', 'file:///docs/entry_media/b.jpg'])
+        );
+        expect(pending()).toBe(0);
+        fs.deleteAsync.mockReset();
+        fs.deleteAsync.mockResolvedValue(undefined);
+    });
+
+    it('a cleanup the app did not live to finish is finished on the next start', async () => {
+        await wipeSensitiveData(db as never); // the app dies right after the commit
+        expect(pending()).toBe(1);
+        folders(['a.jpg', 'b.jpg']);
+        fs.deleteAsync.mockClear();
+        await runDistressCleanup(db as never); // next start, no file list in memory
+        const deleted = fs.deleteAsync.mock.calls.map(c => c[0]);
+        expect(deleted).toEqual(expect.arrayContaining([
+            `${MEDIA()}a.jpg`,
+            `${MEDIA()}b.jpg`,
+            `${fs.documentDirectory}mood_tracker_export_2026-10-01.json`,
+            `${fs.cacheDirectory}ImagePicker`,
+        ]));
+        expect(pending()).toBe(0);
+        // and without a marker a start touches nothing
+        fs.deleteAsync.mockClear();
+        await runDistressCleanup(db as never);
+        expect(fs.deleteAsync).not.toHaveBeenCalled();
+    });
+
+    it('the sweep spares a photo added after the wipe (its row may not exist yet)', async () => {
+        await wipeSensitiveData(db as never);
+        folders(['a.jpg', 'just-attached.jpg']);
+        const later = Date.now() / 1000 + 60;
+        fs.getInfoAsync.mockImplementation(async (p: string) =>
+            p.endsWith('just-attached.jpg') ? { exists: true, modificationTime: later } : { exists: true, modificationTime: 1 }
+        );
+        await runDistressCleanup(db as never);
+        const deleted = fs.deleteAsync.mock.calls.map(c => c[0]);
+        expect(deleted).toContain(`${MEDIA()}a.jpg`);
+        expect(deleted).not.toContain(`${MEDIA()}just-attached.jpg`);
+        fs.getInfoAsync.mockReset();
+        fs.getInfoAsync.mockResolvedValue({ exists: false });
+    });
+});

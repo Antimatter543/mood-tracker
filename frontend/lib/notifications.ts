@@ -544,3 +544,19 @@ export async function reconcileReminders(opts: RearmOptions): Promise<void> {
 
   await applyReminderSchedulePlan(plan);
 }
+
+/**
+ * Remove this app's notifications that are already SHOWN in the notification
+ * shade (scheduled ones are replaced by a re-arm). Used by the distress wipe:
+ * a delivered reminder still carries the old, private reminder name. Never
+ * throws; no-op without the native module.
+ */
+export async function dismissPresentedNotifications(): Promise<void> {
+  const Notifications = getNotifications();
+  if (!Notifications) return;
+  try {
+    await Notifications.dismissAllNotificationsAsync();
+  } catch {
+    // nothing shown, or not supported here
+  }
+}

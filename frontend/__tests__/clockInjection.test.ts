@@ -38,6 +38,8 @@ const SCAN_ROOTS = ['app', 'components', 'context', 'databases', 'hooks', 'lib',
 /** Files allowed a wall-clock read, and why. Each must still have one (staleness check). */
 const WALL_CLOCK_ALLOWED: Record<string, string> = {
     'lib/clock.ts': 'the clock itself',
+    'databases/distressWipe.ts':
+        'the cleanup marker\'s time is compared with photo files\' modification times, which the file system stamps with the real clock',
     'databases/mediaHelpers.ts':
         'buildMediaFilename uses Date.now() as a uniqueness stamp, not as "the time": a frozen QA clock would collide filenames',
 };

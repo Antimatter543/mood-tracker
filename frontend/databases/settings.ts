@@ -95,8 +95,59 @@ export const SETTINGS_REGISTRY = {
         type: 'text',
         label: 'Reminders',
         description: 'Times you want to be nudged to log your mood',
+    },
+    app_lock_enabled: {
+        key: 'app_lock_enabled',
+        // Opt-in (default OFF): ask for the app PIN (lib/pinStore.ts) on every
+        // cold start AND every return from the background. type:'text' so the
+        // generic SettingRow renderer skips it: turning it on needs a PIN to be
+        // chosen first, which only the bespoke card
+        // (components/AppLockSection.tsx) does. Gate: context/AppLock.tsx.
+        // Seeded by migration 16.
+        default: false,
+        type: 'text',
+        label: 'App lock',
+        description: 'Require a PIN to open SoulSync',
+    },
+    distress_wipe_enabled: {
+        key: 'distress_wipe_enabled',
+        // Opt-in (default OFF), only meaningful while app_lock_enabled is on.
+        // On while a DISTRESS PIN is set (lib/pinStore.ts): a second PIN that
+        // unlocks like the app PIN and silently runs the distress wipe first
+        // (databases/distressWipe.ts). Switches itself off once used.
+        // Bespoke card only (type:'text').
+        // Seeded by migration 16.
+        default: false,
+        type: 'text',
+        label: 'Distress PIN',
+        description: 'A second PIN that unlocks normally and quietly clears private journal content',
+    },
+    distress_wipe_scope: {
+        key: 'distress_wipe_scope',
+        // What the distress wipe erases: a JSON {category: bool}, model + copy in
+        // lib/distressScope.ts. Default: every category on. Bespoke card only.
+        // Seeded by migration 17.
+        default: '{}',
+        type: 'text',
+        label: 'Distress wipe scope',
+        description: 'What the distress wipe erases',
     }
 } as const;
+
+/**
+ * Settings that belong to THIS phone, not to the journal: a backup restore never
+ * applies them (databases/data-export.ts). Restoring a backup made before a
+ * distress wipe must not quietly re-arm the wipe, and a lock copied from
+ * another phone would ask for a PIN this phone does not store. They are not
+ * written into backups either: a backup file shows nothing about the lock.
+ */
+export const DEVICE_ONLY_SETTING_KEYS: readonly string[] = [
+    'app_lock_enabled',
+    'distress_wipe_enabled',
+    'distress_wipe_scope',
+    // databases/distressWipe.ts DISTRESS_CLEANUP_KEY: a wipe's unfinished file cleanup.
+    'distress_cleanup_pending',
+];
 
 // Define possible values for each setting
 export type SettingValues = {
@@ -108,6 +159,9 @@ export type SettingValues = {
     activity_carryover: boolean;
     date_format: DateFormatPref;  // 'system' | 'mdy' | 'dmy' | 'ymd', see lib/dateFormat.ts
     reminders: string;  // JSON-encoded Reminder[] — parse with lib/reminders.parseReminders
+    app_lock_enabled: boolean;
+    distress_wipe_enabled: boolean;
+    distress_wipe_scope: string;  // JSON {category: bool}, parse with lib/distressScope.parseDistressScope
 };
 
 export type SettingKey = keyof typeof SETTINGS_REGISTRY;

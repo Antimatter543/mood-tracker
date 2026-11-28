@@ -239,6 +239,39 @@ describe('importDatabaseData', () => {
     expect(settingInserts).toHaveLength(1);
   });
 
+  it('a restore never applies the device-only app lock / distress settings', async () => {
+    // Restoring a backup made before a distress wipe must not quietly re-arm the
+    // wipe, and a lock copied from another phone stays that phone's business.
+    const db = makeDb();
+    const payload = {
+      version: 3,
+      exportDate: '2026-11-20',
+      data: {
+        activityGroups: [],
+        activities: [],
+        entries: [],
+        settings: [
+          { key: 'theme', value: 'forest' },
+          { key: 'app_lock_enabled', value: 'true' },
+          { key: 'distress_wipe_enabled', value: 'true' },
+        ],
+      },
+    };
+    (DocumentPicker.getDocumentAsync as jest.Mock).mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: 'file:///mock/v3.json' }],
+    });
+    queuePickedFile(JSON.stringify(payload));
+    db.getAllAsync.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    db.runAsync.mockResolvedValue({ lastInsertRowId: 1, changes: 1 });
+
+    const result = await importDatabaseData(db as any);
+
+    expect(result.success).toBe(true);
+    const keys = sqlCalls(db, /INSERT OR REPLACE INTO user_settings/i).map((c: any[]) => c[1][0]);
+    expect(keys).toEqual(['theme']);
+  });
+
   it('imports an entry with starred_at, passing it as the 5th INSERT param', async () => {
     const db = makeDb();
     const payload = {
@@ -369,6 +402,26 @@ describe('exportDatabaseData', () => {
     const json = getExportedJson();
     expect(json).toHaveProperty('version', 3);
     expect(json).toHaveProperty('exportDate');
+  });
+
+  it('a backup never contains the device-only app lock / distress settings', async () => {
+    const { DEVICE_ONLY_SETTING_KEYS } = jest.requireActual('@/databases/settings');
+    const db = makeDb();
+    db.getAllAsync
+      .mockResolvedValueOnce([]) // entries
+      .mockResolvedValueOnce([]) // entry_media (photos)
+      .mockResolvedValueOnce([]) // activities
+      .mockResolvedValueOnce([]) // activity groups
+      .mockResolvedValueOnce([
+        { key: 'theme', value: 'forest' },
+        ...DEVICE_ONLY_SETTING_KEYS.map((key: string) => ({ key, value: 'true' })),
+      ]); // settings
+
+    const result = await exportDatabaseData(db as any);
+    expect(result.success).toBe(true);
+    const keys = getExportedJson().data.settings.map((s: { key: string }) => s.key);
+    expect(keys).toEqual(['theme']);
+    expect(DEVICE_ONLY_SETTING_KEYS).toContain('distress_cleanup_pending');
   });
 
   it('carries starred_at through to the exported entry', async () => {

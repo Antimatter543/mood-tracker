@@ -50,6 +50,9 @@ const mockSettings: Settings = {
     activity_carryover: false,
     date_format: 'dmy',
     reminders: '[]',
+    app_lock_enabled: false,
+    distress_wipe_enabled: false,
+    distress_wipe_scope: '{}',
 };
 jest.mock('@/context/SettingsContext', () => ({
     useSettings: () => ({ settings: mockSettings, updateSetting: jest.fn() }),

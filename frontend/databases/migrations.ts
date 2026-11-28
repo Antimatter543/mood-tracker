@@ -373,6 +373,36 @@ export const migrations: Migration[] = [
                 VALUES ('date_format', 'system');
             `);
         }
+    },
+    {
+        // App lock (PIN on open / return from background) and its
+        // optional distress wipe. Both opt-in, default OFF, so an upgrading user
+        // sees no change. Key-value rows only, no schema change; seeded for
+        // explicitness like migrations 4, 7, 10 and 15. Registry entries:
+        // databases/settings.ts. Gate: context/AppLock.tsx. Wipe:
+        // databases/distressWipe.ts.
+        version: 16,
+        up: async (db: SQLiteDatabase) => {
+            await db.runAsync(`
+                INSERT OR IGNORE INTO user_settings (key, value)
+                VALUES ('app_lock_enabled', 'false')
+            `);
+            await db.runAsync(`
+                INSERT OR IGNORE INTO user_settings (key, value)
+                VALUES ('distress_wipe_enabled', 'false')
+            `);
+        }
+    },
+    {
+        // What the distress wipe erases (lib/distressScope.ts). '{}' reads as the
+        // default: every category on. Key-value row only.
+        version: 17,
+        up: async (db: SQLiteDatabase) => {
+            await db.runAsync(`
+                INSERT OR IGNORE INTO user_settings (key, value)
+                VALUES ('distress_wipe_scope', '{}')
+            `);
+        }
     }
 
     // To add a new migration: create a new entry with the next version number.
