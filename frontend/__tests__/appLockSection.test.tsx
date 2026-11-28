@@ -7,7 +7,7 @@
  * RNTL v14: render / fireEvent are awaited (tasks/lessons.md 2026-08-29).
  */
 import React, { useState } from 'react';
-import { Alert } from 'react-native';
+import { Alert, StyleSheet } from 'react-native';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import * as SecureStore from 'expo-secure-store';
 import { APP_LOCK_COPY } from '@/lib/appLock';
@@ -261,6 +261,12 @@ describe('AppLockSection', () => {
         expect(body.props.onStartShouldSetResponder?.()).toBe(true);
         const scroll = view.getByTestId('distress-details-scroll');
         expect(scroll.props.persistentScrollbar).toBe(true);
+        // The card shrinks to the window, the list inside it. A percentage maxHeight
+        // resolved against the overlay wrapper that hugs the card and cut off its end (#56).
+        const card = StyleSheet.flatten(view.getByTestId('distress-details').props.style);
+        expect(card.maxHeight).toBeUndefined();
+        expect(card.flexShrink).toBe(1);
+        expect(StyleSheet.flatten(scroll.props.style)).toMatchObject({ flexGrow: 0, flexShrink: 1 });
         // the switches stay at the bottom, after the explanations
         const ids = findNodes(view.toJSON(), n => typeof n.props?.testID === 'string').map(n => n.props!.testID as string);
         expect(ids.indexOf('distress-why-default')).toBeLessThan(ids.indexOf('distress-scope-notes'));

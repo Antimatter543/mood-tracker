@@ -15,6 +15,7 @@
 import React, { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { OverlayModal } from '@/components/OverlayModal';
 import { useThemeColors } from '@/styles/global';
@@ -44,12 +45,16 @@ export function DistressDetailsDialog({
     onReset: () => void;
 }) {
     const colors = useThemeColors();
+    const insets = useSafeAreaInsets();
     const styles = useMemo(() => StyleSheet.create({
         card: {
             backgroundColor: colors.cardBackground,
             width: '92%',
             maxWidth: 520,
-            maxHeight: '85%',
+            // Shrinks to the window (OverlayModal's cardPress), the scroll area
+            // inside it. No percentage maxHeight: the overlay's wrapper hugs the
+            // card, so '85%' meant 85% of the card's own height (#56).
+            flexShrink: 1,
             borderRadius: 16,
             padding: 20,
             gap: 12,
@@ -57,7 +62,7 @@ export function DistressDetailsDialog({
         headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
         title: { color: colors.text, fontSize: 20, fontWeight: 'bold', flex: 1 },
         closeButton: { padding: 4 },
-        scroll: { flexGrow: 0 },
+        scroll: { flexGrow: 0, flexShrink: 1 },
         scrollContent: { gap: 10, paddingBottom: 4 },
         sectionLabel: { color: colors.text, fontSize: 16, fontWeight: '600', marginTop: 6 },
         body: { color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
@@ -71,7 +76,10 @@ export function DistressDetailsDialog({
 
     return (
         <OverlayModal visible={visible} onClose={onClose}>
-            <View style={styles.card} testID="distress-details">
+            <View
+                style={[styles.card, { marginTop: insets.top + 16, marginBottom: insets.bottom + 16 }]}
+                testID="distress-details"
+            >
                 <View style={styles.headerRow}>
                     <Ionicons name="shield-checkmark" color={colors.text} size={20} />
                     <Text style={styles.title}>Technical details</Text>
