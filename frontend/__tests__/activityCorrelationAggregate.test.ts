@@ -43,7 +43,7 @@ describe('aggregateActivityCorrelation', () => {
     nextId = 1;
   });
 
-  it('splits days into with/without and averages the per-day means', () => {
+  it('splits days into with/without and averages the per-day means when perEntry is false or missing', () => {
     // "Yoga" on the 11th (mood 9) and 12th (mood 7); a no-activity entry on the
     // 13th (mood 3). Yoga: with = days {11,12} avg (9,7)=8; without = {13} = 3.
     const rows = [
@@ -51,14 +51,39 @@ describe('aggregateActivityCorrelation', () => {
       row(localIso('2026-06-12', 0), 7, 'Yoga'),
       row(localIso('2026-06-13', 0), 3, null),
     ];
-    const out = aggregateActivityCorrelation(rows);
-    const yoga = out.find((r) => r.activity_name === 'Yoga')!;
+    let out = aggregateActivityCorrelation(rows);
+    let yoga = out.find((r) => r.activity_name === 'Yoga')!;
+    expect(yoga.avg_with).toBe(8); // (9 + 7) / 2 per-day means
+    expect(yoga.avg_without).toBe(3);
+    expect(yoga.count_with).toBe(2);
+    expect(yoga.count_without).toBe(1);
+
+    out = aggregateActivityCorrelation(rows, {perEntry: false});
+    yoga = out.find((r) => r.activity_name === 'Yoga')!;
     expect(yoga.avg_with).toBe(8); // (9 + 7) / 2 per-day means
     expect(yoga.avg_without).toBe(3);
     expect(yoga.count_with).toBe(2);
     expect(yoga.count_without).toBe(1);
   });
 
+  it('splits entries into with/without and averages those values perEntry is true', () => {
+    // "Yoga" on the 11th (mood 9) and 12th (mood 7); a no-activity entry on the
+    // 13th (mood 3). Yoga: with = days {11,12} avg (9,7)=8; without = {13} = 3.
+    const rows = [
+      row(localIso('2026-06-11', 6), 8, 'Yoga'),
+      row(localIso('2026-06-11', 9), 9, 'Yoga'),
+      row(localIso('2026-06-11', 12), 10, 'Yoga'),
+      row(localIso('2026-06-12', 0), 5, 'Yoga'),
+      row(localIso('2026-06-13', 0), 3, null),
+    ];
+    const out = aggregateActivityCorrelation(rows, {perEntry: true});
+    const yoga = out.find((r) => r.activity_name === 'Yoga')!;
+    expect(yoga.avg_with).toBe(8); // (9 + 7) / 2 per-day means
+    expect(yoga.avg_without).toBe(3);
+    expect(yoga.count_with).toBe(4);
+    expect(yoga.count_without).toBe(1);
+  });
+  
   it('keys days LOCALLY so a backdated entry counts on its local day', () => {
     // Backdated Thursday-local-midnight entry (Wed in UTC) with an activity.
     // The activity-day set must contain 2026-06-11 (Thu), not 2026-06-10 (Wed).
@@ -75,7 +100,7 @@ describe('aggregateActivityCorrelation', () => {
     expect(run.count_without).toBe(1);
   });
 
-  it('de-dupes an entry that carries multiple activities (day_avg counts it once)', () => {
+  it('de-dupes an entry that carries multiple activities (avg_with counts it once) when perEntry is false or missing', () => {
     // One entry on the 11th (mood 8) with BOTH Yoga and Run; one no-activity
     // entry on the 12th (mood 2). day_avg for the 11th must be 8 (not 16/2).
     const rows = [
@@ -83,9 +108,46 @@ describe('aggregateActivityCorrelation', () => {
       rowMulti(100, localIso('2026-06-11', 0), 8, 2, 'Run'),
       row(localIso('2026-06-12', 0), 2, null),
     ];
-    const out = aggregateActivityCorrelation(rows);
-    const yoga = out.find((r) => r.activity_name === 'Yoga')!;
-    const run = out.find((r) => r.activity_name === 'Run')!;
+    let out = aggregateActivityCorrelation(rows);
+    let yoga = out.find((r) => r.activity_name === 'Yoga')!;
+    let run = out.find((r) => r.activity_name === 'Run')!;
+    // Both have the 11th as their only "with" day (avg 8) and the 12th as
+    // "without" (avg 2).
+    expect(yoga.avg_with).toBe(8);
+    expect(yoga.avg_without).toBe(2);
+    expect(run.avg_with).toBe(8);
+    expect(run.avg_without).toBe(2);
+
+    out = aggregateActivityCorrelation(rows, {perEntry: false});
+    yoga = out.find((r) => r.activity_name === 'Yoga')!;
+    run = out.find((r) => r.activity_name === 'Run')!;
+    // Both have the 11th as their only "with" day (avg 8) and the 12th as
+    // "without" (avg 2).
+    expect(yoga.avg_with).toBe(8);
+    expect(yoga.avg_without).toBe(2);
+    expect(run.avg_with).toBe(8);
+    expect(run.avg_without).toBe(2);
+  });
+
+  it('de-duplicates an entry that carries multiple activities (avg_with counts it always) when perEntry is true', () => {
+    // One entry on the 11th (mood 8) with BOTH Yoga and Run; one no-activity
+    // entry on the 12th (mood 2). day_avg for the 11th must be 8 (not 16/2).
+    const rows = [
+      rowMulti(100, localIso('2026-06-11', 0), 8, 1, 'Yoga'),
+      rowMulti(100, localIso('2026-06-11', 0), 8, 2, 'Run'),
+      row(localIso('2026-06-12', 0), 2, null),
+    ];
+    let out = aggregateActivityCorrelation(rows, {perEntry: true});
+    let yoga = out.find((r) => r.activity_name === 'Yoga')!;
+    let run = out.find((r) => r.activity_name === 'Run')!;
+    expect(yoga.avg_with).toBe(8);
+    expect(yoga.avg_without).toBe(2);
+    expect(run.avg_with).toBe(8);
+    expect(run.avg_without).toBe(2);
+
+    out = aggregateActivityCorrelation(rows, {perEntry: false});
+    yoga = out.find((r) => r.activity_name === 'Yoga')!;
+    run = out.find((r) => r.activity_name === 'Run')!;
     // Both have the 11th as their only "with" day (avg 8) and the 12th as
     // "without" (avg 2).
     expect(yoga.avg_with).toBe(8);

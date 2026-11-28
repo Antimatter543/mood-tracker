@@ -33,6 +33,7 @@
 // -----------------------------------------------------------------------------
 export const WEEKLY_MOOD_AVERAGES = `
   SELECT
+    id,
     date,
     mood
   FROM entries
@@ -227,9 +228,15 @@ export const ACTIVITY_CORRELATION = `
 // Caller supplies `?activityId`.
 // -----------------------------------------------------------------------------
 export const ENTRIES_FOR_ACTIVITY = `
-  SELECT e.id, e.date, e.mood
+  SELECT
+    e.id AS entry_id,
+    e.date AS date,
+    e.mood AS mood,
+    ea.activity_id AS activity_id,
+    a.name AS activity_name
   FROM entries e
   JOIN entry_activities ea ON ea.entry_id = e.id
+  JOIN activities a ON a.id = ea.activity_id
   WHERE e.deleted_at IS NULL AND ea.activity_id = ?
   ORDER BY e.date
 `;
@@ -239,9 +246,15 @@ export const ENTRIES_FOR_ACTIVITY = `
 // from startOfLocalDay / endOfLocalDay / computeWindow). Caller supplies
 // `?activityId, ?start, ?end`.
 export const ENTRIES_FOR_ACTIVITY_IN_RANGE = `
-  SELECT e.id, e.date, e.mood
+  SELECT
+    e.id AS entry_id,
+    e.date AS date,
+    e.mood AS mood,
+    ea.activity_id AS activity_id,
+    a.name AS activity_name
   FROM entries e
   JOIN entry_activities ea ON ea.entry_id = e.id
+  JOIN activities a ON a.id = ea.activity_id
   WHERE e.deleted_at IS NULL AND ea.activity_id = ? AND e.date BETWEEN ? AND ?
   ORDER BY e.date
 `;
