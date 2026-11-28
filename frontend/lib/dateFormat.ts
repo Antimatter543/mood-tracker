@@ -27,9 +27,9 @@
 //     is REQUIRED, so a new call site cannot silently forget to pass it.
 
 /** The user's numeric-date ordering preference (setting key `date_format`). */
-export type DateFormatPref = 'system' | 'mdy' | 'dmy' | 'ymd';
+export type DateFormatPref = 'system' | 'mdy' | 'dmy' | 'dmy-dot' | 'ymd';
 
-export const DATE_FORMAT_PREFS = ['system', 'mdy', 'dmy', 'ymd'] as const;
+export const DATE_FORMAT_PREFS = ['system', 'mdy', 'dmy', 'dmy-dot', 'ymd'] as const;
 
 export const DEFAULT_DATE_FORMAT: DateFormatPref = 'system';
 
@@ -234,7 +234,7 @@ export function formatMonth(
         : `${name}${opts.yearJoiner}${String(p.year).slice(-2)}`;
 }
 
-/** `18/09/2026` · `09/18/2026` · `2026-09-18` (or without the year). */
+/** `18/09/2026` · `09/18/2026` · `18.09.2026` · `2026-09-18` (or without the year). */
 function numericDate(p: Parts, pref: Exclude<DateFormatPref, 'system'>, withYear: boolean): string {
     const mm = pad2(p.month);
     const dd = pad2(p.day);
@@ -243,6 +243,8 @@ function numericDate(p: Parts, pref: Exclude<DateFormatPref, 'system'>, withYear
             return withYear ? `${mm}/${dd}/${p.year}` : `${mm}/${dd}`;
         case 'dmy':
             return withYear ? `${dd}/${mm}/${p.year}` : `${dd}/${mm}`;
+        case 'dmy-dot':
+            return withYear ? `${dd}.${mm}.${p.year}` : `${dd}.${mm}.`;
         case 'ymd':
             return withYear ? `${p.year}-${mm}-${dd}` : `${mm}-${dd}`;
     }
@@ -259,6 +261,7 @@ function longDate(p: Parts, pref: Exclude<DateFormatPref, 'system'>, withYear: b
         case 'mdy':
             return withYear ? `${month} ${p.day}, ${p.year}` : `${month} ${p.day}`;
         case 'dmy':
+        case 'dmy-dot':
             return withYear ? `${p.day} ${month} ${p.year}` : `${p.day} ${month}`;
         case 'ymd':
             return numericDate(p, 'ymd', withYear);
@@ -272,6 +275,7 @@ function mediumDate(p: Parts, pref: Exclude<DateFormatPref, 'system'>, withYear:
         case 'mdy':
             return withYear ? `${month} ${p.day}, ${p.year}` : `${month} ${p.day}`;
         case 'dmy':
+        case 'dmy-dot':
             return withYear ? `${p.day} ${month} ${p.year}` : `${p.day} ${month}`;
         case 'ymd':
             return numericDate(p, 'ymd', withYear);
@@ -297,6 +301,7 @@ const PREF_LABELS: Record<DateFormatPref, string> = {
     system: 'System default',
     mdy: 'MM/DD/YYYY',
     dmy: 'DD/MM/YYYY',
+    'dmy-dot': 'DD.MM.YYYY',
     ymd: 'YYYY-MM-DD',
 };
 

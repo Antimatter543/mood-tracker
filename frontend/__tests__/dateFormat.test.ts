@@ -82,6 +82,16 @@ describe('formatDate — explicit preferences, every style', () => {
         expect(formatDate(SEP_18, 'dmy', 'mediumWeekday')).toBe('Fri, 18 Sep');
     });
 
+    it('formats dmy-dot', () => {
+        expect(formatDate(SEP_18, 'dmy-dot', 'numeric')).toBe('18.09.2026');
+        expect(formatDate(SEP_18, 'dmy-dot', 'numericShort')).toBe('18.09.');
+        expect(formatDate(SEP_18, 'dmy-dot', 'long')).toBe('Friday, 18 September 2026');
+        expect(formatDate(SEP_18, 'dmy-dot', 'longNoYear')).toBe('Friday, 18 September');
+        expect(formatDate(SEP_18, 'dmy-dot', 'medium')).toBe('18 Sep 2026');
+        expect(formatDate(SEP_18, 'dmy-dot', 'mediumNoYear')).toBe('18 Sep');
+        expect(formatDate(SEP_18, 'dmy-dot', 'mediumWeekday')).toBe('Fri, 18 Sep');
+    });
+
     it('formats ymd (ISO numeric everywhere, since it has no month-name order)', () => {
         expect(formatDate(SEP_18, 'ymd', 'numeric')).toBe('2026-09-18');
         expect(formatDate(SEP_18, 'ymd', 'numericShort')).toBe('09-18');
@@ -97,9 +107,11 @@ describe('formatDate — explicit preferences, every style', () => {
         // told apart by the SETTING, not guessed from the digit count.
         expect(formatDate(JAN_5, 'mdy', 'numeric')).toBe('01/05/2026');
         expect(formatDate(JAN_5, 'dmy', 'numeric')).toBe('05/01/2026');
+        expect(formatDate(JAN_5, 'dmy-dot', 'numeric')).toBe('05.01.2026');
         expect(formatDate(JAN_5, 'ymd', 'numeric')).toBe('2026-01-05');
         expect(formatDate(JAN_5, 'mdy', 'numericShort')).toBe('01/05');
         expect(formatDate(JAN_5, 'dmy', 'numericShort')).toBe('05/01');
+        expect(formatDate(JAN_5, 'dmy-dot', 'numericShort')).toBe('05.01.');
     });
 
     it('does NOT pad the day in the month-name styles', () => {
@@ -117,9 +129,11 @@ describe('formatDate — year boundary', () => {
 
     it('keeps Dec 31 and Jan 1 on their own calendar years', () => {
         expect(formatDate(dec31, 'dmy', 'numeric')).toBe('31/12/2025');
+        expect(formatDate(dec31, 'dmy-dot', 'numeric')).toBe('31.12.2025');
         expect(formatDate(dec31, 'mdy', 'numeric')).toBe('12/31/2025');
         expect(formatDate(dec31, 'ymd', 'numeric')).toBe('2025-12-31');
         expect(formatDate(jan1, 'dmy', 'numeric')).toBe('01/01/2026');
+        expect(formatDate(jan1, 'dmy-dot', 'numeric')).toBe('01.01.2026');
         expect(formatDate(jan1, 'mdy', 'medium')).toBe('Jan 1, 2026');
         expect(formatDate(jan1, 'ymd', 'numeric')).toBe('2026-01-01');
     });
@@ -180,7 +194,7 @@ describe('formatDate — weekdayShort (the week chart axis)', () => {
     it('is the English short weekday under every explicit preference', () => {
         // A weekday on its own has no day/month order and no numeric form, so the
         // three explicit prefs agree — and ymd does NOT turn it into digits.
-        for (const pref of ['mdy', 'dmy', 'ymd'] as DateFormatPref[]) {
+        for (const pref of ['mdy', 'dmy', 'dmy-dot', 'ymd'] as DateFormatPref[]) {
             expect(formatDate(SEP_18, pref, 'weekdayShort')).toBe('Fri');
             expect(formatDate(JAN_5, pref, 'weekdayShort')).toBe('Mon');
         }
@@ -299,7 +313,7 @@ describe('pinSystemTo', () => {
     });
 
     it('lets every explicit preference through untouched', () => {
-        for (const pref of ['mdy', 'dmy', 'ymd'] as const) {
+        for (const pref of ['mdy', 'dmy', 'dmy-dot', 'ymd'] as const) {
             expect(pinSystemTo(pref, 'dmy')).toBe(pref);
             expect(pinSystemTo(pref, 'mdy')).toBe(pref);
         }
@@ -325,20 +339,21 @@ describe('every preference x style pair is defined', () => {
         }
     });
 
-    it('gives the three explicit preferences three DIFFERENT numeric dates', () => {
-        const rendered = (['mdy', 'dmy', 'ymd'] as DateFormatPref[]).map((p) =>
+    it('gives the three explicit preferences three FOUR numeric dates', () => {
+        const rendered = (['mdy', 'dmy', 'dmy-dot', 'ymd'] as DateFormatPref[]).map((p) =>
             formatDate(SEP_18, p, 'numeric'),
         );
-        expect(new Set(rendered).size).toBe(3);
+        expect(new Set(rendered).size).toBe(4);
     });
 });
 
 describe('dateFormatOptions', () => {
-    it('offers exactly the four preferences, in registry order', () => {
+    it('offers exactly the five preferences, in registry order', () => {
         expect(dateFormatOptions(SEP_18).map((o) => o.value)).toEqual([
             'system',
             'mdy',
             'dmy',
+            'dmy-dot',
             'ymd',
         ]);
     });
@@ -347,6 +362,7 @@ describe('dateFormatOptions', () => {
         const options = dateFormatOptions(SEP_18);
         const byValue = Object.fromEntries(options.map((o) => [o.value, o.label]));
         expect(byValue.dmy).toBe('DD/MM/YYYY (18/09/2026)');
+        expect(byValue['dmy-dot']).toBe('DD.MM.YYYY (18.09.2026)');
         expect(byValue.mdy).toBe('MM/DD/YYYY (09/18/2026)');
         expect(byValue.ymd).toBe('YYYY-MM-DD (2026-09-18)');
         expect(byValue.system).toContain('System default (');
